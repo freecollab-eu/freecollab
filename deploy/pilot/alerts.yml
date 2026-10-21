@@ -1,0 +1,63 @@
+groups:
+  - name: freecollab-release
+    rules:
+      - alert: FreeCollabReadinessFailed
+        expr: probe_success{job="freecollab-https"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations: {summary: "FreeCollab HTTPS/database readiness failed"}
+      - alert: FreeCollabCertificateExpiring
+        expr: probe_ssl_earliest_cert_expiry{job="freecollab-https"} - time() < 1209600
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "FreeCollab HTTPS certificate expires within 14 days"}
+      - alert: FreeCollabMetricsUnavailable
+        expr: up{job="freecollab"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Private FreeCollab metrics scrape failed"}
+      - alert: FreeCollabIntegrationWorkerStale
+        expr: freecollab_integrations_enabled == 1 and on(instance, job) freecollab_integrations_worker_healthy == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "Enabled FreeCollab integration worker has no recent heartbeat"}
+      - alert: FreeCollabMailWorkerStale
+        expr: freecollab_mail_configured == 1 and on(instance, job) freecollab_mail_worker_healthy == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations: {summary: "Configured FreeCollab mail worker has no recent heartbeat"}
+      - alert: FreeCollabQueueFailures
+        expr: sum by(instance, job, queue) (freecollab_integration_queue_records{status="failed"}) > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "FreeCollab has retained failed integration work"}
+      - alert: FreeCollabMailFailures
+        expr: freecollab_mail_outbox_messages{status="failed"} > 0
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "FreeCollab has retained failed mail"}
+      - alert: FreeCollabQueueOverdue
+        expr: freecollab_integration_oldest_pending_seconds > 900
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "FreeCollab integration work is more than 15 minutes overdue"}
+      - alert: FreeCollabBackupFailed
+        expr: freecollab_pilot_backup_last_attempt_success == 0 and on(instance, job) freecollab_pilot_backup_in_progress == 0
+        for: 5m
+        labels: {severity: critical}
+        annotations: {summary: "FreeCollab scheduled off-host backup failed"}
+      - alert: FreeCollabBackupTooOld
+        expr: time() - freecollab_pilot_backup_last_success_timestamp_seconds > 93600
+        for: 15m
+        labels: {severity: critical}
+        annotations: {summary: "No verified FreeCollab off-host backup in 26 hours"}
+      - alert: FreeCollabBackupHung
+        expr: freecollab_pilot_backup_in_progress == 1 and on(instance, job) time() - freecollab_pilot_backup_last_attempt_timestamp_seconds > 7200
+        for: 10m
+        labels: {severity: critical}
+        annotations: {summary: "FreeCollab cold backup has exceeded two hours; inspect before stopping writers"}
+      - alert: FreeCollabStorageLow
+        expr: node_filesystem_avail_bytes{job="freecollab-pilot-host",fstype!~"tmpfs|devtmpfs|squashfs"} / node_filesystem_size_bytes{job="freecollab-pilot-host",fstype!~"tmpfs|devtmpfs|squashfs"} < 0.15
+        for: 10m
+        labels: {severity: warning}
+        annotations: {summary: "FreeCollab host filesystem has less than 15 percent available"}

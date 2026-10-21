@@ -1,0 +1,22 @@
+# FreeCollab 0.9 — collaboration components and personal language
+
+The eight prioritized gaps in the Weavy comparison now have implementations in this workspace. The reference app retains its personal appearance controls and adds the following:
+
+**Integrations → Connection setup** adds fifteen provider recipes with exact callbacks/scopes, required-field metadata, a credential-free preparation download and direct configuration through the real connection forms. SSO presets cover Entra, Google, Okta, Auth0, Keycloak and generic OIDC. Current saved status and an explicit provider test are distinct. [Guided customer connections](CONNECTION_SETUP.md) describes the one-time customer app registration.
+
+| Feature | Entry point and behavior | Scope |
+| --- | --- | --- |
+| Personal language | Sign-in page and Account → Language; Swedish, English or browser preference. | Stored per account, including customer SSO. User content is unchanged. [Languages](LANGUAGES.md). |
+| Files | Channel files: list/gallery, image thumbnails, code/text/CSV, audio/video, passive DOCX/XLSX/PPTX and document comments. | Authenticated downloads and inert rendering; bounded previews. Encrypted Office files download locally. [Files](FILE_EXPERIENCE.md). |
+| Desktop Office | File details → Set up Office editing; recent password/MFA grants a private, expiring one-document WebDAV session. | Native files, immutable versions, locks and conditional save conflicts. Actual DAV tested; a vendor desktop Office binary has not been exercised here. |
+| Activity feed | Work → Activity feed: posts/news, comments, reactions, polls, following, read state, history and archive. | Native encrypted payloads or verified Matrix events. Shared metadata and current membership remain visible to the server. [Feeds](ACTIVITY_FEEDS.md). |
+| Modular SDK | `packages/components`, with Chat/Files/Feed/Notifications imports, Web Components and optional React wrappers. | Typed, locally packable 0.9 package with async user-token factory and customer SSO. Native channels; encrypted channels fail closed. Not published to npm. [SDK](COMPONENT_SDK.md). |
+| Cloud files | Work → Cloud files; Google Drive, OneDrive, Dropbox and Box browse/select/import to immutable native files, or share a provider link. | Customer-owned OAuth apps/grants. Secure channels support client-encrypted provider links; they reject server-side file picking/import. [Cloud files](CLOUD_FILES.md). |
+| Copilot and agents | Work → Copilot; owner configuration, personal opt-in, explicit source selection, citations, private history and approved task proposals. | Real OpenAI-compatible HTTPS/SSE adapter. Secure content is disclosed only by an explicit per-turn trusted-client choice and is not stored as server AI history. Provider costs and provider retention apply after consent. [Copilot](COPILOT.md). |
+| Meeting services | Work → Meeting services: Google Meet, Teams and Zoom creation, conditional cancellation/recovery and channel calendar links. | Customer-owned grants and explicit external disclosure, with opaque secure calendar references. Providers run the external media session. [Meetings](EXTERNAL_MEETINGS.md). |
+
+Enable `CLOUD_FILES_ENABLED`, `EXTERNAL_MEETINGS_ENABLED` and `COPILOT_ENABLED` only when the operator intends to offer those provider connections. All default to `false`. `ACTIVITY_FEEDS_ENABLED` defaults to `true`. Per-workspace/channel configuration and individual consent still apply after an installation flag is enabled. Provider credentials are encrypted with the retained account key, remain server-side and are excluded from content exports. No customer is required to adopt a central FreeCollab identity provider.
+
+Exports and preview-bound retention include the new native shared content. Private AI history is exported only for the requesting user, with fresh source checks; provider secrets, Office capabilities and OAuth verifiers are excluded. Erasure preserves import retry tombstones, removes file discussions/desktop capabilities with erased files and does not delete provider copies. Identity closure removes personal language/private AI state and invalidates the former user's provider authority.
+
+All external-service evidence uses private protocol fixtures. This work does not establish a public deployment, npm publication, independent security certification or a live Google/Microsoft/Dropbox/Box/Zoom/AI customer integration. [Validation](VALIDATION.md) records actual checks and remaining limits.

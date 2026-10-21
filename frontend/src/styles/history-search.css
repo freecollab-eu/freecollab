@@ -1,0 +1,24 @@
+.fc-history-search { width:min(860px,calc(100vw - 32px)); max-height:calc(100dvh - 40px); display:flex; flex-direction:column; gap:18px; padding:30px; }
+.fc-history-search header { display:flex; align-items:center; justify-content:space-between; gap:16px; }
+.fc-history-search h2 { margin:6px 0 0; font-size:clamp(24px,4vw,34px); letter-spacing:-.04em; }
+.fc-history-query { display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--fc-border); padding:10px 0; }
+.fc-history-query input { min-width:0; width:100%; border:0; outline:0; background:transparent; color:var(--fc-text); font:inherit; font-size:18px; }
+.fc-history-filters { display:grid; grid-template-columns:1.2fr 1.2fr 1fr 1fr; gap:10px; }
+.fc-history-filters label { display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--fc-muted); }
+.fc-history-filters .fc-input { width:100%; min-width:0; padding:8px; }
+.fc-history-progress { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--fc-muted); }
+.fc-history-results { overflow:auto; min-height:130px; }
+.fc-history-result { display:block; position:relative; width:100%; text-align:left; border:0; border-top:1px solid var(--fc-border); background:transparent; color:var(--fc-text); padding:16px 26px 16px 0; }
+.fc-history-result:hover { background:var(--fc-accent-soft); }
+.fc-history-result strong { display:inline-block; margin-right:10px; font-size:13px; }
+.fc-history-result small { color:var(--fc-muted); font-size:11px; }
+.fc-history-result p { white-space:pre-wrap; overflow-wrap:anywhere; margin:8px 0 0; line-height:1.65; font-size:14px; }
+.fc-history-result>svg { position:absolute; right:2px; top:18px; color:var(--fc-muted); }
+.fc-history-search footer { font-size:11px; color:var(--fc-muted); line-height:1.6; }
+@media(max-width:600px){.fc-history-search{padding:20px;gap:14px}.fc-history-filters{grid-template-columns:1fr 1fr}.fc-history-result small{display:block;margin-top:5px}.fc-history-query input{font-size:16px}}
+
+.fc-history-content-filters { grid-template-columns: 1fr 1fr; }
+.fc-history-file > span > strong { display: inline-flex; align-items: center; gap: .35rem; }
+.fc-history-file > div { display: flex; flex-wrap: wrap; gap: .5rem; margin-top: .75rem; }
+.fc-history-file > div > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; font-size: .7rem; }
+.fc-history-decision h3 { margin-top: .6rem; font-size: .9rem; font-weight: 550; overflow-wrap: anywhere; }

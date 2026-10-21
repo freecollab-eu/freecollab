@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest==9.1.1
+pytest-cov==7.1.0
+requests==2.34.2
+aiohttp==3.14.5
+websocket-client==1.9.2
+playwright==1.62.0

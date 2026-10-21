@@ -1,0 +1,165 @@
+services:
+  frontend:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-frontend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    build:
+      context: ./frontend
+      secrets: [proxy_ca]
+    ports:
+      - "127.0.0.1:${PILOT_PORT:-8080}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-Y", "off", "-q", "-O", "/dev/null", "http://127.0.0.1/api/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  backend:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    build:
+      context: ./backend
+      secrets: [proxy_ca]
+    environment: &backend_environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-freecollab}:${POSTGRES_PASSWORD:?Run scripts/pilot-init.py first}@db:5432/${POSTGRES_DB:-freecollab}
+      JWT_SECRET: ${JWT_SECRET:?Run scripts/pilot-init.py first}
+      ACCOUNT_SECURITY_KEY: ${ACCOUNT_SECURITY_KEY:?Run scripts/pilot-init.py first; upgrade instructions are in docs/AUTH_SESSIONS.md}
+      ACCOUNT_SECURITY_KEY_FILE: /data/security/account-security.key
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://127.0.0.1:8080}
+      MAIL_DELIVERY_MODE: ${MAIL_DELIVERY_MODE:-disabled}
+      MAIL_FILE_PATH: /data/mail
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-FreeCollab <no-reply@localhost>}
+      SMTP_STARTTLS: ${SMTP_STARTTLS:-true}
+      SMTP_IMPLICIT_TLS: ${SMTP_IMPLICIT_TLS:-false}
+      SMTP_TIMEOUT: ${SMTP_TIMEOUT:-15}
+      OIDC_ENABLED: ${OIDC_ENABLED:-false}
+      OIDC_PROVIDER_NAME: ${OIDC_PROVIDER_NAME:-Organization SSO}
+      OIDC_ISSUER_URL: ${OIDC_ISSUER_URL:-}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-}
+      OIDC_REDIRECT_URI: ${OIDC_REDIRECT_URI:-}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid profile email}
+      OIDC_TRUST_EMAIL_CLAIM: ${OIDC_TRUST_EMAIL_CLAIM:-false}
+      WEBHOOKS_ENABLED: ${WEBHOOKS_ENABLED:-false}
+      SYNC_ENABLED: ${SYNC_ENABLED:-false}
+      WORKFLOWS_ENABLED: ${WORKFLOWS_ENABLED:-true}
+      DATA_CONTROLS_ENABLED: ${DATA_CONTROLS_ENABLED:-true}
+      ACTIVITY_FEEDS_ENABLED: ${ACTIVITY_FEEDS_ENABLED:-true}
+      CLOUD_FILES_ENABLED: ${CLOUD_FILES_ENABLED:-false}
+      EXTERNAL_MEETINGS_ENABLED: ${EXTERNAL_MEETINGS_ENABLED:-false}
+      COPILOT_ENABLED: ${COPILOT_ENABLED:-false}
+      PUSH_ENABLED: ${PUSH_ENABLED:-false}
+      PUSH_VAPID_PRIVATE_KEY: ${PUSH_VAPID_PRIVATE_KEY:-}
+      PUSH_VAPID_SUBJECT: ${PUSH_VAPID_SUBJECT:-}
+      MEETINGS_ICE_SERVERS: ${MEETINGS_ICE_SERVERS:-[]}
+      MEETINGS_TURN_URLS: ${MEETINGS_TURN_URLS:-[]}
+      MEETINGS_TURN_SECRET: ${MEETINGS_TURN_SECRET:-}
+      OTRUST_ENABLED: ${OTRUST_ENABLED:-false}
+      OTRUST_BASE_URL: ${OTRUST_BASE_URL:-https://www.otrust.eu}
+      OTRUST_TIMEOUT_SECONDS: ${OTRUST_TIMEOUT_SECONDS:-10}
+      OPERATIONS_METRICS_TOKEN: ${OPERATIONS_METRICS_TOKEN:-}
+      SECURITY_AUDIT_RETENTION_DAYS: ${SECURITY_AUDIT_RETENTION_DAYS:-90}
+      SECURITY_AUDIT_MAX_RECORDS: ${SECURITY_AUDIT_MAX_RECORDS:-100000}
+      MATRIX_ENABLED: ${MATRIX_ENABLED:-false}
+      MATRIX_INTERNAL_URL: http://matrix:8008
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:-freecollab.local}
+      MATRIX_REGISTRATION_SHARED_SECRET: ${MATRIX_REGISTRATION_SHARED_SECRET:-}
+      MESSAGE_ENCRYPTION_KEYS: ${MESSAGE_ENCRYPTION_KEYS:?Run scripts/pilot-init.py first}
+      MESSAGE_ENCRYPTION_ACTIVE_KEY_ID: ${MESSAGE_ENCRYPTION_ACTIVE_KEY_ID:-pilot-1}
+      LEGACY_MESSAGE_ENCRYPTION_KEY: ${LEGACY_MESSAGE_ENCRYPTION_KEY:-}
+      STORAGE_PATH: /data/files
+      CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080","http://127.0.0.1:8080"]}
+      # Backend has no host port; only the private network proxy can reach it.
+      FORWARDED_ALLOW_IPS: "*"
+    volumes:
+      - files:/data/files
+      - mail:/data/mail
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+  mail-worker:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    profiles: [mail]
+    command: ["python", "-m", "app.services.mail"]
+    environment: *backend_environment
+    volumes:
+      - mail:/data/mail
+    depends_on:
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  matrix:
+    image: ghcr.io/element-hq/synapse@sha256:97665cd4539dcf107c69fb6afdb720e1d1c9c09fb2b5701fb13d6c33b22cd8f0
+    profiles: [secure]
+    entrypoint: ["/bin/sh", "-c"]
+    command: ["python /opt/freecollab/secure-matrix-config.py && exec /start.py"]
+    environment:
+      SYNAPSE_CONFIG_PATH: /data/homeserver.yaml
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:-freecollab.local}
+      MATRIX_REGISTRATION_SHARED_SECRET: ${MATRIX_REGISTRATION_SHARED_SECRET:-}
+    volumes:
+      - matrix:/data
+      - ./scripts/secure-matrix-config.py:/opt/freecollab/secure-matrix-config.py:ro
+    # No host listener: the authenticated API gateway is the only client entry.
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8008/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  integration-worker:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    profiles: [integrations]
+    command: ["python", "-m", "app.services.integration_worker"]
+    environment: *backend_environment
+    volumes:
+      - files:/data/files
+    depends_on:
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-freecollab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Run scripts/pilot-init.py first}
+      POSTGRES_DB: ${POSTGRES_DB:-freecollab}
+    volumes:
+      - postgres:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  postgres:
+  files:
+  mail:
+  matrix:
+
+secrets:
+  # Public trust bundle only. BuildKit mounts it without retaining it in images.
+  proxy_ca:
+    file: ${PILOT_BUILD_CA:-/etc/ssl/certs/ca-certificates.crt}

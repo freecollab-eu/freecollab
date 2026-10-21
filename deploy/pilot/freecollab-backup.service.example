@@ -1,0 +1,21 @@
+[Unit]
+Description=FreeCollab Compose cold backup, seal and verified off-host copy
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+WorkingDirectory=/opt/freecollab
+ExecStart=/usr/bin/python3 /opt/freecollab/deploy/pilot/backup.py /etc/freecollab-backup/plan.json
+# Finish the existing helper's restart-writers finally block on service stop.
+KillMode=process
+TimeoutStartSec=infinity
+TimeoutStopSec=infinity
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+[Install]
+WantedBy=multi-user.target

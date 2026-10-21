@@ -1,0 +1,15 @@
+.fc-mobile-settings { min-width:0; }
+.fc-mobile-state { display:flex;flex-wrap:wrap;gap:12px;margin:20px 0;color:var(--fc-muted);font-size:.83rem; }
+.fc-mobile-state span { display:flex;align-items:center;gap:7px; }
+.fc-mobile-queue,.fc-mobile-devices { list-style:none;padding:0;margin:20px 0;display:grid;gap:12px; }
+.fc-mobile-queue li,.fc-mobile-devices li { padding:16px;border:1px solid var(--fc-border);border-radius:var(--fc-radius-md,12px);min-width:0; }
+.fc-mobile-queue li>div { min-width:0; }
+.fc-mobile-queue strong,.fc-mobile-devices strong { display:block;font-size:.88rem; }
+.fc-mobile-queue small,.fc-mobile-devices small { display:block;color:var(--fc-muted);font-size:.72rem;overflow-wrap:anywhere;margin-top:5px; }
+.fc-mobile-queue p { font-size:.85rem;line-height:1.55;overflow-wrap:anywhere;white-space:pre-wrap; }
+.fc-mobile-devices li { display:flex;align-items:center;gap:12px; }
+.fc-mobile-devices li>div { flex:1;min-width:0; }
+.fc-mobile-notice { display:flex;align-items:center;gap:9px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid var(--fc-border);font-size:.76rem;color:var(--fc-muted);background:var(--fc-surface); }
+.fc-mobile-notice>span { flex:1; }
+.fc-mobile-notice>button { border:0;background:none;color:var(--fc-accent);text-decoration:underline;text-underline-offset:3px;cursor:pointer;font:inherit; }
+@media(max-width:480px) { .fc-mobile-devices li { flex-wrap:wrap; }.fc-mobile-queue .fc-account-actions { gap:8px; }.fc-mobile-settings .fc-button { max-width:100%;white-space:normal; } }

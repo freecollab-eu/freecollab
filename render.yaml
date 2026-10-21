@@ -1,0 +1,56 @@
+services:
+  - type: web
+    name: freecollab-api
+    runtime: docker
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: freecollab-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      # Supply a JSON map of independent random base64 32-byte content keys.
+      # Keep this secret stable across deployments and backups.
+      - key: MESSAGE_ENCRYPTION_KEYS
+        sync: false
+      - key: MESSAGE_ENCRYPTION_ACTIVE_KEY_ID
+        value: pilot-1
+      - key: ENVIRONMENT
+        value: production
+      - key: ENABLE_EXPERIMENTAL_FEATURES
+        value: "false"
+      - key: ENABLE_DEMO_AI
+        value: "false"
+      # Configure a durable disk mounted at /data before accepting uploads.
+      - key: STORAGE_PATH
+        value: /data/files
+      - key: CORS_ORIGINS
+        # Replace with the actual frontend origin if Render assigns a different hostname.
+        value: '["https://freecollab-web.onrender.com"]'
+    healthCheckPath: /ready
+    autoDeploy: true
+
+  - type: web
+    name: freecollab-web
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: ./frontend/dist
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      # Supply the complete https:// API URL at build time, not a bare hostname.
+      - key: VITE_API_URL
+        sync: false
+
+databases:
+  - name: freecollab-db
+    databaseName: freecollab
+    plan: free

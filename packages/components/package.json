@@ -1,0 +1,125 @@
+{
+  "name": "@freecollab/components",
+  "version": "0.10.0",
+  "description": "Modular collaboration components and a trusted-origin encrypted workspace for your product, identity provider and infrastructure.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE",
+    "COMPATIBILITY.md"
+  ],
+  "sideEffects": [
+    "./dist/styles.css"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./chat": {
+      "types": "./dist/types/chat.d.ts",
+      "import": "./dist/chat.js"
+    },
+    "./files": {
+      "types": "./dist/types/files.d.ts",
+      "import": "./dist/files.js"
+    },
+    "./feed": {
+      "types": "./dist/types/feed.d.ts",
+      "import": "./dist/feed.js"
+    },
+    "./notifications": {
+      "types": "./dist/types/notifications.d.ts",
+      "import": "./dist/notifications.js"
+    },
+    "./elements": {
+      "types": "./dist/types/elements.d.ts",
+      "import": "./dist/elements.js"
+    },
+    "./react": {
+      "types": "./dist/types/react.d.ts",
+      "import": "./dist/react.js"
+    },
+    "./styles.css": "./dist/styles.css",
+    "./package.json": "./package.json",
+    "./tasks": {
+      "types": "./dist/types/tasks.d.ts",
+      "import": "./dist/tasks.js"
+    },
+    "./documents": {
+      "types": "./dist/types/documents.d.ts",
+      "import": "./dist/documents.js"
+    },
+    "./meetings": {
+      "types": "./dist/types/meetings.d.ts",
+      "import": "./dist/meetings.js"
+    },
+    "./calendar": {
+      "types": "./dist/types/calendar.d.ts",
+      "import": "./dist/calendar.js"
+    },
+    "./workflows": {
+      "types": "./dist/types/workflows.d.ts",
+      "import": "./dist/workflows.js"
+    },
+    "./decisions": {
+      "types": "./dist/types/decisions.d.ts",
+      "import": "./dist/decisions.js"
+    },
+    "./search": {
+      "types": "./dist/types/search.d.ts",
+      "import": "./dist/search.js"
+    },
+    "./auth": {
+      "types": "./dist/types/auth.d.ts",
+      "import": "./dist/auth.js"
+    },
+    "./embed": {
+      "types": "./dist/types/embed.d.ts",
+      "import": "./dist/embed.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "prepack": "npm run build",
+    "release:artifact": "node scripts/release.mjs",
+    "release:check": "npm test && npm run release:artifact"
+  },
+  "peerDependencies": {
+    "react": ">=18.2.0 <20"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/react": "18.3.31",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/freecollab-eu/freecollab.git",
+    "directory": "packages/components"
+  },
+  "dependencies": {
+    "yjs": "13.6.27"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/",
+    "tag": "next",
+    "provenance": true
+  },
+  "homepage": "https://github.com/freecollab-eu/freecollab/tree/main/packages/components",
+  "bugs": {
+    "url": "https://github.com/freecollab-eu/freecollab/issues"
+  }
+}

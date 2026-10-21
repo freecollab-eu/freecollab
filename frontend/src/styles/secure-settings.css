@@ -1,0 +1,15 @@
+.fc-secure-generated-key { margin-top: 20px; padding: 22px; border: 1px solid var(--fc-border); border-radius: 12px; background: var(--fc-bg); }
+.fc-secure-generated-key > p { color: var(--fc-muted); font-size: 12px; line-height: 1.7; }
+.fc-secure-generated-key > code { display: block; padding: 15px; border: 1px solid var(--fc-border); border-radius: 8px; background: var(--fc-surface); font-size: 13px; font-weight: 550; line-height: 1.9; overflow-wrap: anywhere; }
+.fc-secure-fingerprint { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--fc-border); border-radius: 9px; background: var(--fc-bg); }
+.fc-secure-fingerprint > code { flex: 1; min-width: 0; font-size: 12px; line-height: 1.8; overflow-wrap: anywhere; }
+.fc-secure-fingerprint > button { flex-shrink: 0; }
+.fc-secure-device-id { margin-top: 12px !important; color: var(--fc-muted); font-size: 10px !important; line-height: 1.7; overflow-wrap: anywhere; }
+.fc-secure-device-list { list-style: none; margin: 20px 0 0; padding: 0; }
+.fc-secure-device-list > li { display: flex; gap: 12px; padding: 18px 0; border-bottom: 1px solid var(--fc-border); }
+.fc-secure-device-list > li > svg { flex-shrink: 0; margin-top: 3px; color: var(--fc-muted); }
+.fc-secure-device-list > li > div { display: grid; gap: 6px; min-width: 0; }
+.fc-secure-device-list strong { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
+.fc-secure-device-list div > span { font-size: 11px; color: var(--fc-muted); overflow-wrap: anywhere; }
+.fc-secure-device-list small { font-size: 10px; color: var(--fc-muted); overflow-wrap: anywhere; }
+@media (max-width: 600px) { .fc-secure-generated-key { padding: 16px; } .fc-secure-generated-key > code { padding: 12px; font-size: 12px; } }

@@ -1,0 +1,50 @@
+# Fly.io configuration for FreeCollab backend
+app = "freecollab-api"
+primary_region = "arn"  # Stockholm
+
+[build]
+  dockerfile = "backend/Dockerfile"
+
+[env]
+  PORT = "8080"
+  ENVIRONMENT = "production"
+  # Replace the origin. Supply DATABASE_URL, JWT_SECRET and the independent
+  # MESSAGE_ENCRYPTION_KEYS JSON ring via secrets; retain keys across deploys.
+  CORS_ORIGINS = '["https://freecollab.fly.dev"]'
+  MESSAGE_ENCRYPTION_ACTIVE_KEY_ID = "pilot-1"
+  STORAGE_PATH = "/data/files"
+  ENABLE_EXPERIMENTAL_FEATURES = "false"
+  ENABLE_DEMO_AI = "false"
+
+# Create this durable volume explicitly before deploying. See OPERATIONS.md.
+[mounts]
+  source = "freecollab_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "connections"
+    hard_limit = 250
+    soft_limit = 200
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 512
+
+[checks]
+  [checks.health]
+    port = 8080
+    type = "http"
+    interval = "15s"
+    timeout = "2s"
+    grace_period = "5s"
+    method = "GET"
+    path = "/ready"

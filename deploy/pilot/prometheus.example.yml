@@ -1,0 +1,26 @@
+# Merge into your existing private monitoring installation; do not publish it.
+rule_files: [/etc/prometheus/freecollab-alerts.yml]
+scrape_configs:
+  - job_name: freecollab
+    scheme: https
+    metrics_path: /api/operations/metrics
+    scrape_interval: 30s
+    scrape_timeout: 10s
+    static_configs:
+      - targets: [REPLACE_PUBLIC_HOST]
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/freecollab_metrics_token
+    tls_config: {min_version: TLS12}
+  - job_name: freecollab-https
+    metrics_path: /probe
+    params: {module: [freecollab_ready]}
+    static_configs:
+      - targets: [https://REPLACE_PUBLIC_HOST/api/ready]
+    relabel_configs:
+      - {source_labels: [__address__], target_label: __param_target}
+      - {source_labels: [__param_target], target_label: instance}
+      - {target_label: __address__, replacement: REPLACE_PRIVATE_BLACKBOX_EXPORTER:9115}
+# Linux Compose only: additionally scrape your node exporter with job_name
+# freecollab-pilot-host and enable its private textfile collector. Railway's
+# native volume/backup alerts are configured in Railway, not this Linux timer.

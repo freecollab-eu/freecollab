@@ -1,0 +1,12 @@
+.venv
+venv
+__pycache__
+.pytest_cache
+.env*
+*.db
+*.sqlite3
+data
+tests
+scripts
+coverage.xml
+.coverage

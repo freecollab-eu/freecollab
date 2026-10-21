@@ -1,0 +1,14 @@
+/* Optional token preset. Shadow DOM components inherit these values from their host. */
+.freecollab-theme {
+  --fc-sdk-background: #ffffff;
+  --fc-sdk-surface: #f6f7f4;
+  --fc-sdk-text: #263a32;
+  --fc-sdk-muted: #69766d;
+  --fc-sdk-border: #d8dfda;
+  --fc-sdk-accent: #355d48;
+  --fc-sdk-accent-text: #ffffff;
+  --fc-sdk-danger: #9e413a;
+  --fc-sdk-radius: 16px;
+  --fc-sdk-font: Inter, system-ui, sans-serif;
+  --fc-sdk-heading-font: Inter, system-ui, sans-serif;
+}

@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "repo": "/opt/freecollab",
+  "python": "/opt/freecollab/backend/.venv/bin/python",
+  "env_file": "/etc/freecollab/pilot.env",
+  "project": "freecollab-pilot",
+  "backup_root": "/var/lib/freecollab-backup",
+  "key_file": "/etc/freecollab-backup/keys/offhost.key",
+  "metrics_file": "/var/lib/node_exporter/textfile_collector/freecollab_backup.prom",
+  "max_backup_bytes": 10737418240,
+  "reserve_bytes": 2147483648,
+  "command_timeout_seconds": 3600,
+  "upload_argv": ["/usr/bin/rclone", "copyto", "--immutable", "--config", "/etc/freecollab-backup/rclone.conf", "{bundle}", "REPLACE_CONFIGURED_REMOTE:freecollab/{bundle_name}"],
+  "verify_argv": ["/usr/bin/rclone", "check", "--download", "--one-way", "--config", "/etc/freecollab-backup/rclone.conf", "--files-from-raw", "{file_list}", "{sealed_dir}", "REPLACE_CONFIGURED_REMOTE:freecollab"]
+}

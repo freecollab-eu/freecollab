@@ -1,0 +1,19 @@
+const catalog: Record<string, string> = {
+  "Configure customer file provider": "Konfigurera kundens filleverantör",
+  "Test selected collection": "Testa vald samling",
+  "The selected provider collection was read successfully. No files were imported.": "Den valda samlingen kunde läsas hos leverantören. Inga filer importerades.",
+  "Prepare in your provider console": "Förbered i leverantörens administrationsportal",
+  "Register an OAuth application owned by your organisation, add the exact callback below, and allow access only to the selected collection. Saving here does not authorize the provider.": "Registrera en OAuth-app som ägs av er organisation, lägg till den exakta returadressen nedan och tillåt bara åtkomst till den valda samlingen. Att spara här ger inte leverantören behörighet.",
+  "Open provider developer console": "Öppna leverantörens utvecklarportal",
+  "Box requires a client ID and client secret. Folder 0 is the account root; choose a narrower folder ID when possible. The selected account must be allowed to read it.": "Box kräver klient-ID och klienthemlighet. Mapp 0 är kontots rot; välj en mer avgränsad mapp när det är möjligt. Det valda kontot måste ha läsbehörighet till mappen.",
+  "Dropbox uses an OAuth client ID. A client secret is optional with PKCE. Leave the root path empty for the app folder, or enter a selected folder path such as /Team.": "Dropbox använder ett OAuth-klient-ID. Klienthemlighet är valfritt med PKCE. Lämna rotsökvägen tom för appmappen eller ange en vald mappsökväg, till exempel /Team.",
+  "Use a customer OAuth client ID and the selected folder ID. Microsoft also requires your tenant ID and drive ID. Provider consent is a separate explicit step.": "Använd kundens OAuth-klient-ID och den valda mappens ID. Microsoft kräver även organisationens klient-ID (tenant) och enhetens ID (drive). Godkännande hos leverantören sker i ett separat steg.",
+  "Copy exact callback": "Kopiera exakt returadress",
+  "Exact callback copied.": "Den exakta returadressen har kopierats.",
+  "The callback is unavailable. Ask the operator to configure the public API URL before authorizing this app.": "Returadressen är inte tillgänglig. Be driftansvarig att konfigurera API:ets publika adress innan appen auktoriseras.",
+  "Register an OAuth application owned by your organisation and add the exact callback below. Saving here does not authorize the provider.": "Registrera en OAuth-app som ägs av er organisation och lägg till den exakta returadressen nedan. Att spara här ger inte leverantören behörighet.",
+  "Google Meet requires a client ID and a writable calendar ID. The primary calendar is prefilled. A client secret is optional with PKCE; Google Workspace and Meet availability depend on your account.": "Google Meet kräver klient-ID och ID för en kalender med skrivbehörighet. Primärkalendern är förifylld. Klienthemlighet är valfritt med PKCE; tillgång till Google Workspace och Meet beror på ert konto.",
+  "Teams requires a client ID, your organisation tenant ID and a writable calendar ID. Allow delegated calendar event write access. A client secret is optional with PKCE; the account must support Teams meetings.": "Teams kräver klient-ID, er organisations klient-ID (tenant) och ID för en kalender med skrivbehörighet. Tillåt delegerad skrivåtkomst till kalenderhändelser. Klienthemlighet är valfritt med PKCE; kontot måste ha stöd för Teams-möten.",
+  "Zoom requires a client ID and client secret for a customer OAuth app, plus meeting create, read, list and delete scopes. A Zoom account, licence or administrator approval may be required.": "Zoom kräver klient-ID och klienthemlighet för kundens OAuth-app samt behörighet att skapa, läsa, lista och ta bort möten. Zoom-konto, licens eller administratörsgodkännande kan krävas."
+};
+export default catalog;

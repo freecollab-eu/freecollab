@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FreeCollab Compose off-host backup plan (not a Railway volume exporter)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "repo", "python", "env_file", "project", "backup_root", "key_file", "metrics_file", "max_backup_bytes", "reserve_bytes", "command_timeout_seconds", "upload_argv", "verify_argv"],
+  "properties": {
+    "version": {"const": 1},
+    "repo": {"type": "string", "pattern": "^/"},
+    "python": {"type": "string", "pattern": "^/"},
+    "env_file": {"type": "string", "pattern": "^/"},
+    "project": {"type": "string", "pattern": "^[a-z0-9][a-z0-9_-]{0,40}$"},
+    "backup_root": {"type": "string", "pattern": "^/"},
+    "key_file": {"type": "string", "pattern": "^/"},
+    "metrics_file": {"type": "string", "pattern": "^/"},
+    "max_backup_bytes": {"type": "integer", "minimum": 1048576, "maximum": 1152921504606846976},
+    "reserve_bytes": {"type": "integer", "minimum": 1073741824, "maximum": 1152921504606846976},
+    "command_timeout_seconds": {"type": "integer", "minimum": 60, "maximum": 86400},
+    "upload_argv": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1, "pattern": "^(?:[^{}]|\\{(?:bundle|bundle_name|file_list|sealed_dir)\\})+$"}},
+    "verify_argv": {"type": "array", "minItems": 2, "items": {"type": "string", "minLength": 1, "pattern": "^(?:[^{}]|\\{(?:bundle|bundle_name|file_list|sealed_dir)\\})+$"}}
+  }
+}

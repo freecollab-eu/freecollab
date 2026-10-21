@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>FreeCollab widget integration</title>
+  <style>
+    :root { color-scheme: light dark; font: 16px/1.5 system-ui, sans-serif; }
+    body { max-width: 42rem; margin: 3rem auto; padding: 0 1rem; }
+    label { display: block; margin-top: 1rem; font-weight: 600; }
+    input { box-sizing: border-box; width: 100%; padding: .65rem; font: inherit; }
+    button { margin: 1.25rem .5rem 0 0; padding: .65rem 1rem; font: inherit; cursor: pointer; }
+    #status { padding: .8rem; border: 1px solid; border-radius: .4rem; min-height: 1.5rem; }
+    small { display: block; margin-top: .25rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Connect a FreeCollab channel</h1>
+    <p>This example connects a personal member account to the chat widget. Use a test channel and a trusted FreeCollab installation. Credentials stay in this page's memory and are never placed in the URL or browser storage.</p>
+    <form id="connect" autocomplete="off">
+      <label for="api">API base URL</label>
+      <input id="api" type="url" value="http://127.0.0.1:8000" required spellcheck="false">
+      <small>Use the backend origin, or its complete <code>/api</code> proxy URL. HTTPS is required outside localhost. Allow this page's exact origin in backend CORS settings.</small>
+      <label for="channel">Channel ID</label>
+      <input id="channel" required maxlength="128" spellcheck="false" autocomplete="off">
+      <label for="token">Personal member token</label>
+      <input id="token" type="password" required autocomplete="off" spellcheck="false">
+      <small>Obtain a short-lived user credential from your integration's login flow. Never use an operator key or put a permanent credential in this HTML file.</small>
+      <label for="bundle">Widget bundle path</label>
+      <input id="bundle" value="./widget.iife.js" required spellcheck="false">
+      <small>Serve the built bundle on this page's own trusted origin. The example does not load scripts from a third-party origin.</small>
+      <button type="submit">Connect chat</button>
+      <button id="disconnect" type="button" disabled>Disconnect</button>
+    </form>
+    <p id="status" role="status" aria-live="polite">Not connected.</p>
+    <p>The server processes message plaintext. This widget polls the latest 50 messages and does not synchronize edits or deletions.</p>
+  </main>
+  <script type="module">
+    const form = document.querySelector('#connect');
+    const status = document.querySelector('#status');
+    const disconnect = document.querySelector('#disconnect');
+    const tokenInput = document.querySelector('#token');
+    let widget;
+    let loadedBundle;
+    let starting = false;
+
+    function message(text) { status.textContent = text; }
+    function stop() {
+      widget?.destroy();
+      widget = undefined;
+      disconnect.disabled = true;
+      tokenInput.value = '';
+      message('Disconnected. The widget is destroyed; no polling remains.');
+    }
+    disconnect.addEventListener('click', stop);
+    window.addEventListener('pagehide', () => widget?.destroy());
+
+    async function loadBundle(url) {
+      if (loadedBundle === url.href && typeof window.FreeCollab?.init === 'function') return;
+      if (loadedBundle && loadedBundle !== url.href) throw new Error('Reload the page before changing the widget bundle.');
+      await new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = url.href;
+        script.addEventListener('load', resolve, { once: true });
+        script.addEventListener('error', () => { script.remove(); reject(new Error('Widget bundle could not be loaded. Build and copy widget.iife.js into this directory.')); }, { once: true });
+        document.head.appendChild(script);
+      });
+      if (typeof window.FreeCollab?.init !== 'function') throw new Error('The loaded bundle does not expose FreeCollab.init.');
+      loadedBundle = url.href;
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      if (starting) return;
+      const token = tokenInput.value.trim();
+      try {
+        const api = new URL(document.querySelector('#api').value);
+        const local = ['localhost', '127.0.0.1', '[::1]'].includes(api.hostname);
+        if (api.protocol !== 'https:' && !(api.protocol === 'http:' && local)) throw new Error('Use HTTPS for the API, or HTTP only on localhost.');
+        if (api.username || api.password || api.search || api.hash) throw new Error('The API base URL must not contain credentials, query parameters or fragments.');
+        const bundle = new URL(document.querySelector('#bundle').value, location.href);
+        if (bundle.origin !== location.origin || !['http:', 'https:'].includes(bundle.protocol) || bundle.search || bundle.hash || bundle.username || bundle.password) throw new Error('Serve the widget bundle from a clean URL on this page\'s own origin.');
+        const channel = document.querySelector('#channel').value.trim();
+        if (!token || !channel) throw new Error('A personal member token and channel are required.');
+        starting = true;
+        widget?.destroy();
+        widget = undefined;
+        disconnect.disabled = true;
+        message('Loading the widget. Authentication is checked by the backend.');
+        await loadBundle(bundle);
+        tokenInput.value = '';
+        widget = window.FreeCollab.init({
+          apiUrl: api.href.replace(/\/$/, ''), channelId: channel, userToken: token,
+          title: 'Team chat', subtitle: 'Connected through your FreeCollab installation',
+          onReady: () => message('Widget loaded. Waiting for channel history; connection errors will appear here.'),
+          onError: (error) => message(String(error?.message || 'The chat request failed.').slice(0, 500)),
+        });
+        disconnect.disabled = false;
+        widget.open();
+      } catch (error) {
+        message(String(error?.message || 'Could not start the widget.').slice(0, 500));
+      } finally {
+        starting = false;
+      }
+    });
+  </script>
+</body>
+</html>

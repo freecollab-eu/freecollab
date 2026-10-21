@@ -1,0 +1,19 @@
+fastapi==0.152.0
+uvicorn[standard]==0.54.0
+# 0.0.45 changes datetime storage semantics; retain the existing naive UTC schema.
+sqlmodel==0.0.44
+SQLAlchemy==2.0.55
+psycopg2-binary==2.9.13
+python-socketio==5.17.0
+PyJWT[crypto]==2.15.1
+bcrypt==5.0.0
+pynacl==1.6.2
+python-multipart==0.0.32
+pydantic-settings==2.16.1
+aiofiles==25.1.0
+groq==1.7.0
+email-validator==2.3.0
+httpx==0.28.1
+httpcore==1.0.9
+opentimestamps==0.4.5
+pywebpush==2.5.0

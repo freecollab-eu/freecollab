@@ -1,0 +1,11 @@
+modules:
+  freecollab_ready:
+    prober: http
+    timeout: 10s
+    http:
+      method: GET
+      valid_status_codes: [200]
+      follow_redirects: false
+      fail_if_not_ssl: true
+      fail_if_body_not_matches_regexp: ['"status"\s*:\s*"ready"']
+      tls_config: {min_version: TLS12}

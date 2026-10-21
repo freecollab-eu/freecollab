@@ -1,0 +1,11 @@
+[Unit]
+Description=Nightly FreeCollab Compose backup window (UTC)
+
+[Timer]
+OnCalendar=*-*-* 02:30:00 UTC
+RandomizedDelaySec=10m
+Persistent=true
+Unit=freecollab-backup.service
+
+[Install]
+WantedBy=timers.target

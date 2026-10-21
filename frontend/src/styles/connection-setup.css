@@ -1,0 +1,82 @@
+.fc-connection-setup { min-width: 0; color: var(--fc-text); }
+.fc-connection-intro { margin-bottom: 1.75rem; }
+.fc-connection-intro h3 { margin: .5rem 0 .7rem; font-family: var(--fc-heading-font); font-size: clamp(1.65rem, 4vw, 2.2rem); font-weight: 400; letter-spacing: -.035em; }
+.fc-connection-intro p, .fc-connection-title p { max-width: 42rem; margin: 0; color: var(--fc-muted); font-size: .85rem; line-height: 1.7; }
+.fc-connection-filter, .fc-connection-channel { display: grid; gap: .55rem; margin-bottom: 1.5rem; font-size: .8rem; }
+.fc-connection-filter { max-width: 20rem; }
+.fc-connection-channel { padding: 1rem; background: var(--fc-sidebar); border: 1px solid var(--fc-border); border-radius: var(--fc-radius); }
+.fc-connection-channel small { color: var(--fc-muted); font-size: .72rem; line-height: 1.6; }
+.fc-connection-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .85rem; }
+.fc-connection-card { display: flex; flex-direction: column; gap: .85rem; min-width: 0; padding: 1.35rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); font: inherit; text-align: left; cursor: pointer; transition: border-color .15s, background .15s; }
+.fc-connection-card:hover { border-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-connection-card > div { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; color: var(--fc-accent); }
+.fc-connection-card strong { font-size: .95rem; font-weight: 600; }
+.fc-connection-card p { flex: 1; margin: 0; font-size: .77rem; line-height: 1.75; color: var(--fc-muted); }
+.fc-connection-card-action { display: inline-flex; align-items: center; gap: .5rem; margin-top: .3rem; color: var(--fc-accent); font-size: .75rem; }
+.fc-connection-status { display: inline-flex; align-items: center; width: fit-content; max-width: 100%; border: 1px solid var(--fc-border); border-radius: 1rem; padding: .3rem .55rem; color: var(--fc-muted); background: var(--fc-surface); font-size: .66rem; line-height: 1.4; overflow-wrap: anywhere; }
+.fc-connection-status[data-status="ready"] { color: var(--fc-accent); background: var(--fc-accent-soft); border-color: color-mix(in srgb, var(--fc-accent) 25%, transparent); }
+.fc-connection-status[data-status="attention"] { color: var(--fc-danger); }
+.fc-connection-choice { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .85rem; padding-bottom: 1.5rem; }
+.fc-connection-choice label { flex: 0 1 20rem; min-width: 0; }
+.fc-connection-recipe-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.fc-connection-choice select, .fc-connection-setup .fc-input { width: 100%; min-width: 0; max-width: 100%; }
+.fc-connection-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1.5rem; }
+.fc-connection-title > div { min-width: 0; }
+.fc-connection-title h3 { margin: .45rem 0 .65rem; font-family: var(--fc-heading-font); font-weight: 400; font-size: 1.8rem; letter-spacing: -.025em; }
+.fc-connection-title h3:focus { outline: none; }
+.fc-connection-steps { display: flex; margin: 0 0 1.5rem; border-bottom: 1px solid var(--fc-border); }
+.fc-connection-steps button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; padding: .7rem .5rem; border: 0; border-bottom: 2px solid transparent; color: var(--fc-muted); background: transparent; font: inherit; font-size: .8rem; cursor: pointer; }
+.fc-connection-steps button > span { display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border: 1px solid currentColor; border-radius: 50%; font-size: .65rem; }
+.fc-connection-steps button[aria-current="step"] { color: var(--fc-accent); border-bottom-color: currentColor; }
+.fc-connection-steps button:disabled { opacity: .5; cursor: default; }
+.fc-connection-steps button:focus-visible, .fc-connection-card:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -3px; }
+.fc-connection-section { padding: 1.5rem 0; border-bottom: 1px solid var(--fc-border); }
+.fc-connection-section:first-child { padding-top: 0; }
+.fc-connection-section h4 { margin: 0 0 1rem; font-size: .9rem; font-weight: 600; }
+.fc-connection-section h5 { margin: 1.5rem 0 .7rem; font-size: .8rem; font-weight: 500; }
+.fc-connection-checklist { display: grid; gap: .85rem; margin: 0 0 1rem; padding: 0; list-style: none; }
+.fc-connection-checklist li { display: flex; align-items: flex-start; gap: .65rem; font-size: .8rem; line-height: 1.7; }
+.fc-connection-checklist svg { flex-shrink: 0; margin-top: .2rem; color: var(--fc-accent); }
+.fc-connection-fields { list-style: none; padding: 0; margin: 0 0 1.25rem; border-top: 1px solid var(--fc-border); }
+.fc-connection-fields li { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem 1rem; padding: .7rem 0; border-bottom: 1px solid var(--fc-border); font-size: .8rem; }
+.fc-connection-fields small { color: var(--fc-muted); font-size: .7rem; }
+.fc-connection-callback { display: grid; gap: .55rem; margin-bottom: .75rem; font-size: .78rem; }
+.fc-connection-callback input { font-family: ui-monospace, monospace; font-size: .75rem; }
+.fc-connection-scopes { display: flex; flex-wrap: wrap; gap: .5rem; padding: 0; list-style: none; }
+.fc-connection-scopes li { min-width: 0; max-width: 100%; }
+.fc-connection-scopes code { display: block; padding: .4rem .5rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .5); background: var(--fc-sidebar); font-size: .7rem; overflow-wrap: anywhere; }
+.fc-connection-instructions { display: grid; gap: .85rem; padding-left: 1.3rem; margin: 0 0 1.5rem; font-size: .8rem; line-height: 1.7; }
+.fc-connection-instructions li { padding-left: .35rem; }
+.fc-connection-export-note { margin: .8rem 0 0; color: var(--fc-muted); font-size: .72rem; line-height: 1.7; }
+.fc-connection-next { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; padding: 1.5rem 0; font-size: .8rem; color: var(--fc-muted); }
+.fc-connection-blockers { padding: 1rem; margin-bottom: 1.5rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-sidebar); font-size: .78rem; line-height: 1.7; }
+.fc-connection-blockers ul { padding-left: 1.2rem; margin: .6rem 0 0; }
+.fc-connection-context, .fc-connection-privacy { display: flex; align-items: flex-start; gap: .65rem; color: var(--fc-muted); font-size: .75rem; line-height: 1.7; }
+.fc-connection-context { margin: 0 0 1.5rem; }
+.fc-connection-context svg, .fc-connection-privacy svg { margin-top: .2rem; flex-shrink: 0; color: var(--fc-accent); }
+.fc-connection-privacy { border-top: 1px solid var(--fc-border); margin-top: 1.75rem; padding-top: 1.2rem; }
+.fc-connection-privacy p { margin: 0; }
+.fc-connection-status-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem; }
+.fc-connection-status-heading h4 { margin: 0; }
+.fc-connection-records { margin: 1rem 0 0; padding: 0; list-style: none; }
+.fc-connection-records li { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; padding: 1rem 0; border-bottom: 1px solid var(--fc-border); font-size: .8rem; }
+.fc-connection-records li > div { flex: 1; min-width: 0; }
+.fc-connection-records strong, .fc-connection-records small, .fc-connection-records li > div > span { display: block; }
+.fc-connection-records li > div > span { margin-top: .3rem; color: var(--fc-muted); font-size: .7rem; }
+.fc-connection-records small { flex-basis: 100%; color: var(--fc-muted); font-size: .7rem; }
+.fc-connection-setup p, .fc-connection-setup li, .fc-connection-setup strong { overflow-wrap: anywhere; }
+.fc-connection-alert p { margin-top: 0; }
+@media (max-width: 600px) {
+  .fc-connection-cards { grid-template-columns: minmax(0, 1fr); }
+  .fc-connection-card { padding: 1.1rem; }
+  .fc-connection-choice { align-items: stretch; }
+  .fc-connection-choice label { flex-basis: 100%; }
+  .fc-connection-title { flex-wrap: wrap; }
+  .fc-connection-title h3 { font-size: 1.65rem; }
+  .fc-connection-steps button { gap: .3rem; padding-inline: .2rem; font-size: .74rem; }
+  .fc-connection-steps button > span { width: 1.15rem; height: 1.15rem; font-size: .6rem; }
+  .fc-connection-next > button { width: 100%; justify-content: center; }
+  .fc-connection-channel { padding: .8rem; }
+  .fc-connection-status-heading { align-items: stretch; }
+}
+@media (prefers-reduced-motion: reduce) { .fc-connection-card { transition: none; } }

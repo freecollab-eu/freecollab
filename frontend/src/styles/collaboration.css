@@ -1,0 +1,81 @@
+.fc-collaboration-layer { position: fixed; z-index: 48; inset: 0; background: rgb(16 20 17 / .16); backdrop-filter: blur(3px); }
+.fc-collaboration-panel { position: absolute; inset: 0 0 0 auto; display: flex; flex-direction: column; width: min(100vw, 35rem); color: var(--fc-text); background: var(--fc-surface); border-left: 1px solid var(--fc-border); box-shadow: -1rem 0 5rem rgb(0 0 0 / .07); outline: none; }
+.fc-collaboration-header { display: flex; justify-content: space-between; gap: 1rem; padding: 2rem 2rem 1.75rem; border-bottom: 1px solid var(--fc-border); }
+.fc-collaboration-header h2 { margin: .55rem 0 .45rem; font-family: var(--fc-heading-font); font-size: clamp(1.7rem, 5vw, 2rem); letter-spacing: -.045em; font-weight: 500; line-height: 1.15; }
+.fc-collaboration-header p { color: var(--fc-muted); font-size: .79rem; line-height: 1.6; }
+.fc-collaboration-header > button { align-self: flex-start; flex-shrink: 0; }
+.fc-collaboration-tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); padding: .5rem 1rem 0; border-bottom: 1px solid var(--fc-border); }
+.fc-collaboration-tabs button { position: relative; display: flex; align-items: center; justify-content: center; gap: .4rem; min-height: 3.2rem; padding: .65rem .35rem; color: var(--fc-muted); font-size: .7rem; }
+.fc-collaboration-tabs button[aria-current] { color: var(--fc-text); font-weight: 600; }
+.fc-collaboration-tabs button[aria-current]::after { position: absolute; height: 2px; inset: auto .4rem -1px; content: ''; background: var(--fc-accent); }
+.fc-collaboration-tabs button:hover { color: var(--fc-accent); }
+.fc-collaboration-body { overflow-y: auto; min-height: 0; padding: 1.4rem 2rem 2rem; overscroll-behavior: contain; }
+.fc-collaboration-toolbar { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-height: 2.25rem; margin-bottom: 1.25rem; }
+.fc-collaboration-toolbar .fc-kicker { font-size: .56rem; letter-spacing: .12em; }
+.fc-collaboration-toolbar .fc-text-button { font-size: .65rem; flex-shrink: 0; }
+.fc-collaboration-error { margin-bottom: 1rem; font-size: .77rem; line-height: 1.65; color: var(--fc-danger); overflow-wrap: anywhere; }
+.fc-collaboration-error button { display: flex; margin-top: .5rem; }
+.fc-collaboration-notice { display: flex; align-items: flex-start; gap: .55rem; margin-bottom: 1.25rem; color: var(--fc-success); font-size: .75rem; line-height: 1.65; }
+.fc-collaboration-notice svg { flex-shrink: 0; margin-top: .13rem; }
+.fc-collaboration-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 3.5rem .75rem; color: var(--fc-muted); text-align: center; }
+.fc-collaboration-empty h3 { color: var(--fc-text); font-family: var(--fc-heading-font); font-size: 1.35rem; letter-spacing: -.025em; font-weight: 500; }
+.fc-collaboration-empty p { max-width: 20rem; font-size: .77rem; line-height: 1.85; }
+.fc-saved-list, .fc-decision-list { display: flex; flex-direction: column; gap: 1rem; list-style: none; padding: 0; }
+.fc-saved-card, .fc-decision-card { min-width: 0; padding: 1.25rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); }
+.fc-saved-meta { display: flex; align-items: center; justify-content: space-between; gap: .75rem; color: var(--fc-muted); font-size: .62rem; }
+.fc-saved-meta > span { display: inline-flex; align-items: center; gap: .45rem; overflow-wrap: anywhere; }
+.fc-saved-meta time { flex-shrink: 0; }
+.fc-saved-content { margin: 1.25rem 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: .84rem; line-height: 1.85; max-height: 17rem; overflow-y: auto; }
+.fc-saved-unavailable { margin: 1rem 0; color: var(--fc-muted); font-size: .75rem; line-height: 1.7; }
+.fc-saved-actions, .fc-decision-actions { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.fc-saved-actions button, .fc-decision-actions button { font-size: .68rem; }
+.fc-saved-remove { margin-left: auto; }
+.fc-collaboration-new { width: 100%; justify-content: center; margin-bottom: 1.35rem; border-style: dashed; background: transparent; }
+.fc-decision-editor { display: flex; flex-direction: column; gap: .65rem; padding: 1.25rem; margin-bottom: 1.4rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-bg); }
+.fc-decision-editor-heading { display: flex; align-items: center; justify-content: space-between; gap: .6rem; margin-bottom: .4rem; }
+.fc-decision-editor-heading h3 { font-family: var(--fc-heading-font); font-size: 1.15rem; font-weight: 500; letter-spacing: -.025em; }
+.fc-decision-editor label, .fc-channel-digest > label { display: block; font-size: .72rem; font-weight: 600; margin-top: .4rem; }
+.fc-decision-editor .fc-input, .fc-channel-digest .fc-input { width: 100%; font-size: .79rem; min-height: 2.75rem; }
+.fc-decision-editor textarea { resize: vertical; line-height: 1.75; }
+.fc-decision-fields { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.fc-decision-fields label { margin-bottom: .6rem; }
+.fc-decision-source { display: flex; gap: .45rem; align-items: center; margin-top: .4rem; color: var(--fc-accent); font-size: .7rem; }
+.fc-collaboration-caption { color: var(--fc-muted); font-size: .65rem; line-height: 1.8; }
+.fc-decision-editor > .fc-button { margin-top: .35rem; align-self: flex-start; }
+.fc-decision-meta { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: .9rem; color: var(--fc-muted); font-size: .62rem; }
+.fc-decision-status { display: inline-flex; align-items: center; gap: .35rem; text-transform: capitalize; }
+.fc-decision-status::before { content: ''; width: .35rem; height: .35rem; border-radius: 50%; background: var(--fc-muted); }
+.fc-decision-status.is-accepted { color: var(--fc-success); }.fc-decision-status.is-accepted::before { background: var(--fc-success); }
+.fc-decision-status.is-proposed::before { background: var(--fc-accent); }
+.fc-decision-card > h3 { font-family: var(--fc-heading-font); font-size: 1.2rem; font-weight: 500; letter-spacing: -.025em; line-height: 1.45; overflow-wrap: anywhere; }
+.fc-decision-card:focus { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-decision-content { margin: .75rem 0 1.2rem; white-space: pre-wrap; font-size: .79rem; line-height: 1.85; overflow-wrap: anywhere; }
+.fc-decision-details { display: flex; justify-content: space-between; gap: .75rem; color: var(--fc-muted); font-size: .65rem; margin-bottom: .75rem; }
+.fc-decision-history { display: flex; flex-direction: column; gap: 1.25rem; list-style: none; margin-top: 1rem; padding: 1.25rem 0 0 1rem; border-top: 1px solid var(--fc-border); border-left: 1px solid var(--fc-border); }
+.fc-decision-history li { display: flex; flex-direction: column; gap: .4rem; }
+.fc-decision-history li > span { font-size: .6rem; color: var(--fc-muted); }
+.fc-decision-history strong { font-size: .77rem; font-weight: 500; overflow-wrap: anywhere; }
+.fc-decision-history p { font-size: .72rem; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fc-channel-notification-form fieldset { border: 0; padding: 0; margin: 0; }
+.fc-channel-notification-form legend { font-family: var(--fc-heading-font); font-size: 1.25rem; letter-spacing: -.03em; font-weight: 500; }
+.fc-channel-notification-form fieldset > p, .fc-channel-digest > p { margin: .6rem 0 1.2rem; font-size: .75rem; color: var(--fc-muted); line-height: 1.8; }
+.fc-notification-choice { display: flex; align-items: center; gap: .8rem; padding: 1.1rem; margin-bottom: .65rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); cursor: pointer; }
+.fc-notification-choice.is-selected { border-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-notification-choice > svg { flex-shrink: 0; color: var(--fc-muted); }
+.fc-notification-choice span { flex: 1; display: flex; flex-direction: column; gap: .35rem; }
+.fc-notification-choice strong { font-weight: 500; font-size: .78rem; }
+.fc-notification-choice small { color: var(--fc-muted); font-size: .65rem; line-height: 1.6; }
+.fc-notification-choice input { flex-shrink: 0; width: 1rem; height: 1rem; accent-color: var(--fc-accent); }
+.fc-channel-digest { padding-top: 1.1rem; margin-top: 1.5rem; margin-bottom: 1.4rem; border-top: 1px solid var(--fc-border); }
+.fc-channel-digest > p.fc-collaboration-caption { font-size: .65rem; margin-bottom: 0; }
+.fc-message-save-actions { position: relative; display: inline-flex; gap: .1rem; align-items: center; }
+.fc-message-save-button { display: inline-flex; align-items: center; justify-content: center; min-width: 1.7rem; min-height: 1.7rem; padding: .25rem; border-radius: calc(var(--fc-radius) * .6); color: var(--fc-muted); }
+.fc-message-save-button:hover, .fc-message-save-button[aria-pressed=true] { color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-message-save-button:disabled { opacity: .5; cursor: wait; }
+.fc-message-save-error { position: absolute; z-index: 4; right: 0; top: 100%; min-width: 12rem; max-width: 18rem; padding: .7rem; background: var(--fc-surface); border: 1px solid var(--fc-border); border-radius: var(--fc-radius); color: var(--fc-danger); font-size: .7rem; line-height: 1.6; box-shadow: 0 .3rem 1rem rgb(0 0 0 / .06); }
+.fc-thread-watch { display: inline-flex; align-items: flex-start; flex-direction: column; gap: .25rem; }
+.fc-thread-watch button { font-size: .68rem; }.fc-thread-watch small { color: var(--fc-danger); font-size: .65rem; }
+.fc-collaboration-spinner { animation: fc-collaboration-spin 1s linear infinite; }
+@keyframes fc-collaboration-spin { to { transform: rotate(360deg); } }
+@media (max-width: 480px) { .fc-collaboration-header { padding: 1.5rem 1.25rem; }.fc-collaboration-body { padding: 1.1rem 1.25rem 2rem; }.fc-collaboration-tabs { padding-inline: .5rem; }.fc-collaboration-tabs button { gap: .3rem; font-size: .63rem; }.fc-collaboration-tabs button svg { width: 13px; }.fc-saved-card, .fc-decision-card, .fc-decision-editor { padding: 1rem; }.fc-message-save-button { min-width: 2rem; min-height: 2rem; } }
+@media (prefers-reduced-motion: reduce) { .fc-collaboration-spinner { animation: none; } }

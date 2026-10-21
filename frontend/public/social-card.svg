@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
+ <rect width="1200" height="630" fill="#f6f5f1"/>
+ <g transform="translate(64 48) scale(1.35)" fill="#36594c">
+  <path d="M3 3h7a5 5 0 0 1 5 5v7H8a5 5 0 0 1-5-5V3Z"/>
+  <path transform="rotate(90 16 16)" d="M3 3h7a5 5 0 0 1 5 5v7H8a5 5 0 0 1-5-5V3Z"/>
+  <path transform="rotate(180 16 16)" d="M3 3h7a5 5 0 0 1 5 5v7H8a5 5 0 0 1-5-5V3Z"/>
+  <path transform="rotate(270 16 16)" d="M3 3h7a5 5 0 0 1 5 5v7H8a5 5 0 0 1-5-5V3Z"/>
+ </g>
+ <text x="122" y="80" fill="#25372e" font-family="Arial,sans-serif" font-size="30" font-weight="600" letter-spacing="-1">FreeCollab.</text>
+ <text x="1136" y="76" fill="#626c65" font-family="Arial,sans-serif" font-size="15" text-anchor="end">freecollab.eu</text>
+ <path d="M64 118H1136" stroke="#d9ddda"/>
+ <text x="64" y="267" fill="#25372e" font-family="Georgia,serif" font-size="108" letter-spacing="-5">Good work.</text>
+ <text x="64" y="378" fill="#36594c" font-family="Georgia,serif" font-size="108" letter-spacing="-5" font-style="italic">Your terms.</text>
+ <text x="68" y="443" fill="#626c65" font-family="Arial,sans-serif" font-size="22">Conversations. Documents. Projects. Your shared place.</text>
+ <rect x="68" y="503" width="189" height="46" rx="10" fill="#36594c"/>
+ <text x="162" y="532" fill="#ffffff" font-family="Arial,sans-serif" font-size="15" text-anchor="middle">Explore the demo ↗</text>
+ <text x="286" y="533" fill="#626c65" font-family="Arial,sans-serif" font-size="12" letter-spacing="1.8">OPEN SOURCE · SELF-HOSTED · MIT LICENSED</text>
+</svg>

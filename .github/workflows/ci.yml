@@ -1,0 +1,307 @@
+name: FreeCollab CI/CD
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.11"
+  NODE_VERSION: "24"
+
+jobs:
+  # Backend tests
+  backend-test:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: freecollab
+          POSTGRES_PASSWORD: freecollab
+          POSTGRES_DB: freecollab_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: "pip"
+          cache-dependency-path: |
+            backend/requirements.lock
+            backend/requirements-dev.lock
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --require-hashes -r requirements-dev.lock
+
+      - name: Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://freecollab:freecollab@localhost:5432/freecollab_test
+          JWT_SECRET: test-secret-key-for-ci
+        run: |
+          python -m pytest tests/ -v --cov=app --cov-report=xml
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          files: backend/coverage.xml
+          flags: backend
+
+  # Frontend tests
+  frontend-test:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Type check
+        working-directory: frontend
+        run: npm run build
+
+      - name: Client regressions and widget bundle
+        working-directory: frontend
+        run: |
+          node --test tests/*.test.mjs
+          npm run build:widget
+          npm ci --prefix ../packages/components
+          npm test --prefix ../packages/components
+          npm pack ../packages/components --dry-run
+
+  product-e2e:
+    name: Product browser and PostgreSQL workflow
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: freecollab
+          POSTGRES_PASSWORD: freecollab-ci-only
+          POSTGRES_DB: freecollab_browser
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://freecollab:freecollab-ci-only@127.0.0.1:5432/freecollab_browser
+      JWT_SECRET: isolated-ci-signing-key-do-not-use-for-deployment
+      ENVIRONMENT: test
+      PUBLIC_APP_URL: http://127.0.0.1:3000
+      MAIL_DELIVERY_MODE: file
+      MAIL_FILE_PATH: /tmp/freecollab-ci-mail
+      ACCOUNT_MAIL_PATH: /tmp/freecollab-ci-mail
+      CHAT_BASE_URL: http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies and browser
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y ffmpeg
+          npm ci --prefix frontend
+          npm ci --prefix packages/components --ignore-scripts
+          npm run build --prefix frontend
+          npm run build:widget --prefix frontend
+      - name: Start API and reference client
+        run: |
+          (cd backend && python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --no-proxy-headers) > /tmp/freecollab-api.log 2>&1 &
+          (cd backend && python -m app.services.mail) > /tmp/freecollab-mail.log 2>&1 &
+          (cd frontend && npm run dev -- --host 127.0.0.1 --strictPort) > /tmp/freecollab-web.log 2>&1 &
+          python - <<'PY'
+          import json, time
+          from urllib.request import urlopen
+          deadline = time.monotonic() + 60
+          while True:
+              try:
+                  with urlopen('http://127.0.0.1:3000/api/ready', timeout=2) as response:
+                      if json.load(response)['status'] == 'ready':
+                          break
+              except Exception:
+                  if time.monotonic() >= deadline:
+                      raise
+                  time.sleep(1)
+          PY
+      - name: Verify collaboration and personalized client workflows
+        run: |
+          python backend/scripts/smoke_core.py
+          python frontend/tests/pilot-browser.py
+          python frontend/tests/chat-browser.py
+          python frontend/tests/widget-browser.py
+          python frontend/tests/appearance-browser.py
+          python frontend/tests/elite-browser.py
+          python frontend/tests/notification-browser.py
+          python frontend/tests/account-browser.py
+          python frontend/tests/account-race-browser.py
+          python frontend/tests/history-browser.py
+          python frontend/tests/files-browser.py
+          python frontend/tests/office-files-browser.py
+          python frontend/tests/security-operations-browser.py
+          python frontend/tests/collaboration-browser.py
+          python frontend/tests/integrations-browser.py
+          python frontend/tests/oidc-browser.py
+          python frontend/tests/customer-sso-browser.py
+          python frontend/tests/embed-admin-browser.py
+          python frontend/tests/enterprise-onboarding-browser.py
+          python frontend/tests/remote-sync-browser.py
+          python frontend/tests/proofs-browser.py
+          python frontend/tests/project-tasks-browser.py
+          python frontend/tests/meetings-browser.py
+          python frontend/tests/mobile-offline-browser.py
+          python frontend/tests/shared-documents-browser.py
+          python frontend/tests/workflows-browser.py
+          python frontend/tests/data-controls-browser.py
+          python frontend/tests/file-experience-browser.py
+          python frontend/tests/activity-feed-browser.py
+          python frontend/tests/cloud-files-browser.py
+          python frontend/tests/external-meetings-browser.py
+          python frontend/tests/copilot-browser.py
+          python frontend/tests/language-browser.py
+          python frontend/tests/connection-setup-browser.py
+          python frontend/tests/workspace-launch-browser.py
+          python frontend/tests/workspace-feedback-browser.py
+          python frontend/tests/connection-health-browser.py
+          python frontend/tests/demo-showroom-browser.py
+          python frontend/tests/public-launch-browser.py
+          python packages/components/tests/browser-proof.py
+      - name: Upload service diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-e2e-service-logs
+          path: /tmp/freecollab-*.log
+          retention-days: 7
+
+  secure-e2e:
+    name: Real client encryption and recovery
+    runs-on: ubuntu-latest
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: sqlite:////tmp/freecollab-secure-ci.db
+      STORAGE_PATH: /tmp/freecollab-secure-files
+      JWT_SECRET: isolated-secure-ci-signing-key-never-use-in-deployment
+      MAIL_DELIVERY_MODE: disabled
+      MATRIX_ENABLED: "true"
+      MATRIX_SERVER_NAME: freecollab.local
+      MATRIX_INTERNAL_URL: http://127.0.0.1:18008
+      MATRIX_REGISTRATION_SHARED_SECRET: isolated-secure-ci-registration-secret-not-for-deployment
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked client and browser dependencies
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          npm ci --prefix frontend
+          npm ci --prefix packages/components --ignore-scripts
+      - name: Start isolated private homeserver
+        run: |
+          docker --host=unix:///var/run/docker.sock run -d --name freecollab-secure-ci --mount type=volume,src=freecollab-secure-ci-data,dst=/data --mount type=bind,src="$GITHUB_WORKSPACE/scripts/secure-matrix-config.py",dst=/opt/freecollab-init.py,readonly -p 127.0.0.1:18008:8008 --env MATRIX_SERVER_NAME --env MATRIX_REGISTRATION_SHARED_SECRET --entrypoint /bin/sh ghcr.io/element-hq/synapse@sha256:97665cd4539dcf107c69fb6afdb720e1d1c9c09fb2b5701fb13d6c33b22cd8f0 -c 'python /opt/freecollab-init.py && exec /start.py'
+          curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:18008/health
+      - name: Start authenticated gateway and client
+        run: |
+          (cd backend && python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --no-proxy-headers) > /tmp/freecollab-secure-api.log 2>&1 &
+          (cd frontend && npm run dev -- --host 127.0.0.1 --strictPort) > /tmp/freecollab-secure-web.log 2>&1 &
+          curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:8000/ready
+          curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/
+      - name: Verify two browsers, attachments, recovery and member removal
+        run: python scripts/secure-browser-test.py
+      - name: Verify lost-device revocation with stale recipient keys
+        run: python scripts/secure-device-browser-test.py
+      - name: Verify encryption account controls in the real client
+        run: python frontend/tests/secure-account-browser.py
+      - name: Verify customer SSO scope and native encryption unlock
+        run: python scripts/workspace-sso-secure-browser-test.py
+      - name: Verify isolated managed identity, recovery and device revocation
+        run: python scripts/managed-sso-secure-browser-test.py
+      - name: Verify encrypted document links and calendar content
+        run: python frontend/tests/document-calendar-browser.py
+      - name: Verify encrypted projects and concurrent shared documents
+        run: python frontend/tests/shared-documents-browser.py --secure
+      - name: Verify packed SDK and isolated embedded customer SSO with real encryption
+        run: python packages/components/tests/embed-browser-proof.py --matrix
+      - name: Remove only isolated test resources
+        if: always()
+        run: |
+          docker --host=unix:///var/run/docker.sock rm -f freecollab-secure-ci
+          docker --host=unix:///var/run/docker.sock volume rm freecollab-secure-ci-data
+      - name: Upload service diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-e2e-service-logs
+          path: /tmp/freecollab-secure-*.log
+          retention-days: 7
+
+  # Build Docker image
+  docker-build:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [backend-test, frontend-test, product-e2e, secure-e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: false
+          tags: freecollab-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

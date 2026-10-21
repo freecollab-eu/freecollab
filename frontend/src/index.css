@@ -1,0 +1,75 @@
+@import "tailwindcss";
+@config "../tailwind.config.js";
+
+:root {
+  --fc-bg: #f6f5f1; --fc-surface: #fdfdfc; --fc-sidebar: #f7f6f3;
+  --fc-text: #25372e; --fc-muted: #626c65; --fc-border: #d9ddda;
+  --fc-accent: #36594c; --fc-accent-soft: #edf0eb; --fc-on-accent: #ffffff;
+  --fc-danger: #a53c32; --fc-success: #36594c;
+  --fc-font: 'Inter Variable', Inter, sans-serif;
+  --fc-heading-font: 'Source Serif 4 Variable', Georgia, serif;
+  --fc-message-size: .9375rem; --fc-body-size: .875rem;
+  --fc-radius: 12px; --fc-space: 1;
+  --fc-ease: cubic-bezier(.2,.65,.3,1);
+  --fc-shadow: 0 16px 60px color-mix(in srgb, var(--fc-text) 8%, transparent);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--fc-bg); color: var(--fc-text); font-family: var(--fc-font); font-size: var(--fc-body-size); line-height: 1.6; }
+button, input, textarea, select { font: inherit; }
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+button, a { touch-action: manipulation; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; opacity: .55; }
+button, input, textarea, select { accent-color: var(--fc-accent); }
+::selection { background: var(--fc-accent-soft); color: var(--fc-text); }
+:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+button:focus:not(:focus-visible) { outline: none; }
+.fc-button, .fc-icon-button {
+  min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .55rem;
+  border: 1px solid var(--fc-border); border-radius: var(--fc-radius); color: var(--fc-text);
+  background: var(--fc-surface); padding: .65rem 1rem; font-size: .8125rem; font-weight: 550;
+  text-decoration: none; transition: background .15s, border-color .15s;
+}
+.fc-button:hover, .fc-icon-button:hover { background: var(--fc-accent-soft); border-color: var(--fc-accent); }
+.fc-button-primary { color: var(--fc-on-accent); background: var(--fc-accent); border-color: var(--fc-accent); }
+.fc-button-primary:hover { color: var(--fc-on-accent); background: var(--fc-accent); box-shadow: inset 0 0 0 1px var(--fc-on-accent); }
+.fc-icon-button { width: 44px; flex-shrink: 0; padding: .6rem; }
+.fc-input {
+  width: 100%; min-height: 46px; padding: .75rem .85rem; border: 1px solid var(--fc-border);
+  border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); outline: none;
+}
+.fc-input:focus { border-color: var(--fc-accent); box-shadow: 0 0 0 2px var(--fc-accent-soft); }
+.fc-input::placeholder { color: var(--fc-muted); opacity: 1; }
+.fc-kicker { color: var(--fc-muted); font-size: .65rem; font-weight: 650; letter-spacing: .15em; text-transform: uppercase; }
+.fc-brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--fc-text); font-size: 1.1rem; font-weight: 650; letter-spacing: -.055em; }
+.fc-brand-mark { width: 32px; height: 32px; flex-shrink: 0; color: var(--fc-accent); }
+.fc-brand-name { white-space: nowrap; font-family: 'Inter Variable', Inter, sans-serif; line-height: 1; }
+.fc-brand-period { color: var(--fc-accent); }
+.fc-brand--small { gap: .5rem; font-size: .95rem; }
+.fc-brand--small .fc-brand-mark { width: 26px; height: 26px; }
+.fc-brand--large { gap: .75rem; font-size: 1.35rem; }
+.fc-brand--large .fc-brand-mark { width: 38px; height: 38px; }
+.fc-shortcut { display: inline-flex; align-items: center; justify-content: center; gap: .15rem; min-width: 1.6rem; padding: .1rem .35rem; font-family: var(--fc-font); font-size: .65rem; line-height: 1.6; border: 1px solid var(--fc-border); border-radius: 5px; color: var(--fc-muted); background: var(--fc-surface); }
+.fc-visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.fc-button:active:not(:disabled), .fc-icon-button:active:not(:disabled) { transform: translateY(1px); }
+@media (forced-colors: active) {
+  :focus-visible { outline: 2px solid Highlight; }
+  .fc-button, .fc-icon-button, .fc-input { border-color: ButtonText; }
+}
+.fc-badge { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--fc-border); border-radius: 999px; padding: .2rem .55rem; font-size: .65rem; color: var(--fc-muted); }
+.fc-alert { border: 1px solid var(--fc-border); border-radius: var(--fc-radius); padding: .8rem 1rem; color: var(--fc-text); background: var(--fc-accent-soft); font-size: .8125rem; }
+.fc-overlay { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center; align-items: center; background: #08130e66; padding: 1rem; backdrop-filter: blur(4px); }
+.fc-dialog { width: min(100%, 36rem); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) + 4px); background: var(--fc-surface); color: var(--fc-text); box-shadow: 0 24px 90px #0002; padding: 1.6rem; }
+.fc-toast { position: fixed; bottom: 1rem; left: 1rem; right: 1rem; margin: auto; max-width: 34rem; z-index: 100; }
+@media (max-width: 767px) {
+  /* Keep editable fields readable without mobile Safari's focus zoom. */
+  .appearance-color-input input[type="text"], .fc-input { font-size: 16px; }
+  .fc-chat-composer > textarea, .fc-chat-edit > textarea, .fc-chat-thread-composer > input { font-size: max(16px, var(--fc-message-size)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}

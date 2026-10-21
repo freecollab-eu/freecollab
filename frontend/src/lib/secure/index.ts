@@ -5,7 +5,7 @@ import { storageKeyFor, loadPendingNotices, savePendingNotices } from './device-
 import { APIError, type Message, type Reaction, type ReadReceipt } from '../api';
 const quietLogger = { trace() {}, debug() {}, info() {}, warn() {}, error() {}, getChild() { return this; } };
 interface Configuration { baseUrl: string; getAccessToken: () => string | null; getUserId: () => string | null }
-export interface SecureBinding { channel_id: string; room_id: string | null; status: string }
+export interface SecureBinding { channel_id: string; room_id: string | null; status: string; federated_peer_server?: string }
 export interface SecureDevice { user_id: string; matrix_user_id: string; device_id: string; fingerprint: string; verified: boolean; name?: string }
 type Listener = (event: string, payload: Record<string, unknown>) => void;
 const METADATA = 'eu.freecollab.channel.metadata', REACTION = 'eu.freecollab.reaction', RECEIPT = 'eu.freecollab.receipt';
@@ -55,7 +55,13 @@ async function queueNotice(notice: Notice) {
   notices.set(notice.eventId, notice); await savePendingNotices(owner, [...notices.values()]); void flushNotices();
 }
 let secretStorageKey: Uint8Array<ArrayBuffer> | null = null;
-const accountId = (id: string) => /^@fc_([^:]+):/.exec(id)?.[1] || id;
+const accountId = (id: string) => {
+  const localDomain = client?.getUserId()?.split(':').slice(1).join(':');
+  const domain = id.split(':').slice(1).join(':');
+  // Remote identities retain their homeserver to avoid cross-installation ID
+  // collisions and never masquerade as a local account.
+  return localDomain && domain !== localDomain ? id : /^@fc_([^:]+):/.exec(id)?.[1] || id;
+};
 const emit = (event: string, payload: Record<string, unknown>) => listeners.forEach(fn => fn(event, payload));
 export function configureSecureMessaging(next: Configuration) { configuration = next; }
 async function request<T>(path: string, body?: unknown): Promise<T> {
@@ -126,7 +132,7 @@ async function roomFor(channelId: string, writing = false) {
   const joining = !room || room.getMyMembership() !== 'join';
   // A newly granted Connect member has a product seat before Matrix invites
   // exist. Synchronize that current authorized seat before the first read/join.
-  const snapshot = writing || joining ? await request<{ membership_epoch: string; revoked_devices: RevokedDevice[] }>('/secure/channels/' + encodeURIComponent(channelId) + '/sync', {}) : undefined;
+  const snapshot = writing || joining ? await request<{ membership_epoch: string; revoked_devices: RevokedDevice[]; federated_operators?: string[] }>('/secure/channels/' + encodeURIComponent(channelId) + '/sync', {}) : undefined;
   if (joining) { await c.joinRoom(binding.room_id); room = c.getRoom(binding.room_id); }
   if (!room || !c.isRoomEncrypted(binding.room_id)) throw new Error('Encrypted room state is unavailable. Sending is blocked.');
   if (writing) {
@@ -143,14 +149,20 @@ async function roomFor(channelId: string, writing = false) {
     if (removed.some(row => keys.get(row.matrix_user_id)?.has(row.device_id))) throw new Error('Device keys are refreshing after removal. Retry when encrypted sync finishes.');
     await c.getCrypto()!.forceDiscardSession(binding.room_id);
   }
-  return { c, room, roomId: binding.room_id, membershipEpoch: snapshot?.membership_epoch };
+  return { c, room, roomId: binding.room_id, membershipEpoch: snapshot?.membership_epoch, federatedOperators: snapshot?.federated_operators,
+    federatedPeerServer: binding.federated_peer_server };
 }
 async function events(channelId: string, paginate = false) {
   const { c, room } = await roomFor(channelId); if (paginate && room.oldState.paginationToken) await c.scrollback(room, 100);
   const rows = room.getLiveTimeline().getEvents(); await Promise.all(rows.filter(e => e.isEncrypted()).map(e => c.decryptEventIfNeeded(e).catch(() => undefined))); return rows.filter(e => e.isEncrypted());
 }
-async function requireVerifiedRecipients(channelId: string, room: ReturnType<MatrixClient['getRoom']>) {
-  const members = await request<{ user_id: string; name: string }[]>('/channels/' + encodeURIComponent(channelId) + '/members');
+async function requireVerifiedRecipients(channelId: string, room: ReturnType<MatrixClient['getRoom']>, operators?: string[]) {
+  const members = await request<{ user_id: string; name: string; matrix_user_id?: string }[]>('/channels/' + encodeURIComponent(channelId) + '/members');
+  if (operators?.length) {
+    const domain = client?.getUserId()?.split(':').slice(1).join(':');
+    const approved = new Set([...operators, ...members.map(member => member.matrix_user_id || '@fc_' + member.user_id + ':' + domain)]);
+    if (room?.getJoinedMembers().some(member => !approved.has(member.userId))) throw new Error('Unexpected encrypted room occupants. Refresh the approved participants before sending.');
+  }
   const devices = await getDevices(channelId);
   for (const member of members) {
     if (member.user_id === configuration?.getUserId()) continue;
@@ -160,8 +172,8 @@ async function requireVerifiedRecipients(channelId: string, room: ReturnType<Mat
   }
 }
 async function sendEvent(channelId: string, type: string, content: Record<string, unknown>, transactionId?: string) {
-  const { c, room, roomId, membershipEpoch } = await roomFor(channelId, true);
-  if (type !== METADATA) await requireVerifiedRecipients(channelId, room);
+  const { c, room, roomId, membershipEpoch, federatedOperators } = await roomFor(channelId, true);
+  if (type !== METADATA || federatedOperators?.length) await requireVerifiedRecipients(channelId, room, federatedOperators);
   const transaction = transactionId || c.makeTxnId();
   if (!membershipEpoch) throw new Error('Encrypted membership snapshot is unavailable.');
   transactionEpochs.set(transaction, membershipEpoch);

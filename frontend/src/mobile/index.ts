@@ -1,4 +1,5 @@
 import { api, APIError, type Message } from '../lib/api';
+import { attachmentOutbox, offlineLibrary } from './library';
 import { assertOwner, fingerprint, listPrivate, owner, purgeOtherAccounts, removePrivate, savePrivate, type Owner } from './storage';
 
 export interface QueuedMessage { id: string; channelId: string; content: string; mentions: string[]; secure: boolean; createdAt: string; tokenFingerprint: string; state: 'queued' | 'review'; sendAt?: string; error?: string }
@@ -129,11 +130,12 @@ export async function initializeMobile() {
   const sync = () => {
     api.syncStoredSession();
     void purgeOtherAccounts(api.getCurrentUserId()).catch(() => {}); changed();
-    if (navigator.onLine && api.getCurrentUserId()) void mobileOutbox.flush().catch(() => {});
+    if (navigator.onLine && api.getCurrentUserId()) { void mobileOutbox.flush().catch(() => {}); void attachmentOutbox.flush().catch(() => {}); }
   };
   window.addEventListener('freecollab:auth-changed', sync); window.addEventListener('storage', sync);
   window.addEventListener('online', sync); window.addEventListener('offline', changed);
-  window.setInterval(() => { if (navigator.onLine && api.getCurrentUserId()) void mobileOutbox.flush().catch(() => {}); }, 15000);
+  window.addEventListener('online', () => { if (api.getCurrentUserId() && !api.isMemorySession()) void offlineLibrary.list().catch(() => {}); });
+  window.setInterval(() => { if (navigator.onLine && api.getCurrentUserId()) { void mobileOutbox.flush().catch(() => {}); void attachmentOutbox.flush().catch(() => {}); } }, 15000);
   window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event as typeof installPrompt; changed(); });
   window.addEventListener('appinstalled', () => { installPrompt = null; changed(); });
   navigator.serviceWorker?.addEventListener('message', event => {

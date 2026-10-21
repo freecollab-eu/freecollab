@@ -98,7 +98,8 @@ def require_connection_admin(session, workspace_id, connection_id, actor_id, *, 
 
 
 def reject_shared_membership_changes(session, channel_id):
-    if connection_for_channel(session, channel_id):
+    from .connect_federation import connection_for_channel as federated_channel
+    if connection_for_channel(session, channel_id) or federated_channel(session, channel_id):
         raise HTTPException(409, "Each organization manages its own shared-channel members in Connect")
 
 
@@ -116,7 +117,12 @@ def _workspace_grants(session, workspace_id, user_id):
 
 def workspace_grant_channel_ids(session, workspace_id, user_id):
     """Own-tenant shared seats for authorized remote-first offboarding."""
-    return sorted({channel_id for _, channel_id in _workspace_grants(session, workspace_id, user_id)})
+    channels = {channel_id for _, channel_id in _workspace_grants(session, workspace_id, user_id)}
+    from ..models.connect_federation import FederatedConnection, FederatedGrant
+    channels.update(session.exec(select(FederatedConnection.channel_id).join(FederatedGrant,
+        FederatedGrant.connection_id == FederatedConnection.id).where(
+        FederatedConnection.workspace_id == workspace_id, FederatedGrant.user_id == user_id)).all())
+    return sorted(channels)
 
 
 def revoke_workspace_grants(session, workspace_id, user_id):
@@ -129,7 +135,19 @@ def revoke_workspace_grants(session, workspace_id, user_id):
         member = session.get(ChannelMember, (channel_id, user_id))
         if member is not None:
             session.delete(member)
-    return sorted({channel_id for _, channel_id in rows})
+    channels = {channel_id for _, channel_id in rows}
+    from ..models.connect_federation import FederatedConnection, FederatedGrant
+    federated = session.exec(select(FederatedGrant, FederatedConnection.channel_id).join(
+        FederatedConnection, FederatedConnection.id == FederatedGrant.connection_id).where(
+        FederatedConnection.workspace_id == workspace_id, FederatedGrant.user_id == user_id)).all()
+    for grant, channel_id in federated:
+        grant.revoked_at = grant.revoked_at or now
+        session.add(grant)
+        member = session.get(ChannelMember, (channel_id, user_id))
+        if member is not None:
+            session.delete(member)
+        channels.add(channel_id)
+    return sorted(channels)
 
 
 def channel_view_workspace_id(session, channel_id, user_id, preferred=None):

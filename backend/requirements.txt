@@ -17,6 +17,8 @@ groq==1.7.0
 email-validator==2.3.0
 httpx==0.28.1
 httpcore==1.0.9
+# APNs requires HTTP/2; native push retains the pinned public-HTTPS transport.
+h2==4.4.1
 opentimestamps==0.4.5
 pywebpush==2.5.0
 # Passive PDF text and interoperable Yjs document search extraction.

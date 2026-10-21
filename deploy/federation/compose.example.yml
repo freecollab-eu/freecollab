@@ -1,0 +1,22 @@
+# Explicit opt-in override. All paths resolve from the root docker-compose.yml.
+# Use only after DNS/certificates/peer pins are prepared; defaults remain private.
+services:
+  federation-edge:
+    image: nginx:1.28-alpine
+    profiles: [secure]
+    environment:
+      FREECOLLAB_PUBLIC_HOST: ${FREECOLLAB_PUBLIC_HOST:?Set the app DNS hostname}
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:?Set the stable Matrix DNS hostname}
+      NGINX_ENVSUBST_FILTER: ^(FREECOLLAB_PUBLIC_HOST|MATRIX_SERVER_NAME)$$
+    ports:
+      - "443:443"
+      - "8448:8448"
+    volumes:
+      - ./deploy/federation/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${FEDERATION_TLS_DIRECTORY:?Mount operator-managed certificate/key directory}:/etc/freecollab/tls:ro
+    depends_on:
+      frontend:
+        condition: service_healthy
+      matrix:
+        condition: service_healthy
+    restart: unless-stopped

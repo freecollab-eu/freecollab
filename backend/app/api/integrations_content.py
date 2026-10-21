@@ -10,6 +10,7 @@ from sqlmodel import select
 
 from ..database import get_session
 from ..models.integration_content import IntegrationContent, IntegrationContentRevision
+from ..models.calendar_planning import CalendarAttendee  # Register additive invitation tables with content.
 from ..services.access import lock_channel_writes, require_channel_member
 from ..services.auth import get_current_user
 from ..services.chat_notifications import require_native_channel
@@ -139,6 +140,9 @@ def write_content(channel_id: str, kind: Kind, data: ContentWrite, user=Depends(
               encrypted_payload=None if secure else encrypt_message(json.dumps(payload, ensure_ascii=False), channel_id),
               deleted=data.deleted)
     session.add(revision)
+    if kind == "calendar":
+        from .calendar_planning import calendar_revision_changed
+        calendar_revision_changed(session, item, revision)
     enqueue_channel_event(session, channel_id, "channel.activity", revision.id)
     try:
         session.commit()

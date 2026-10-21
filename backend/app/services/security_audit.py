@@ -35,6 +35,10 @@ def authenticated_actor(request, identifier: str, *, kind="account", workspace_i
 
 def action_for(method, route):
     fixed = {
+        ("PUT", "/workspaces/{workspace_id}/personal-oauth/clients/{provider}/{purpose}"): "provider.application_configure",
+        ("POST", "/workspaces/{workspace_id}/personal-oauth/clients/{provider}/{purpose}/disable"): "provider.application_disable",
+        ("POST", "/workspaces/{workspace_id}/personal-oauth/{provider}/start"): "provider.consent_start",
+        ("DELETE", "/workspaces/{workspace_id}/personal-oauth/grants/{grant_id}"): "provider.consent_revoke",
         ("POST", "/connect/workspaces/{workspace_id}/connections"): "connect.invite_create",
         ("POST", "/connect/workspaces/{workspace_id}/accept"): "connect.accept",
         ("POST", "/connect/workspaces/{workspace_id}/connections/{connection_id}/members"): "connect.member_grant",
@@ -165,7 +169,7 @@ class SecurityAuditMiddleware:
                 parameters = scope.get("path_params", {})
                 target = next((_identifier(parameters[key]) for key in (
                     "user_id", "member_user_id", "session_id", "device_id", "channel_id", "connection_id",
-                    "resource_id", "invitation_id", "identifier", "application_id") if key in parameters), None)
+                    "resource_id", "invitation_id", "identifier", "application_id", "grant_id") if key in parameters), None)
                 event = {**actor, "action": action, "status_code": status,
                          "outcome": "success" if status < 400 else "denied" if status < 500 else "error",
                          "workspace_id": actor["workspace_id"] or _identifier(parameters.get("workspace_id")),

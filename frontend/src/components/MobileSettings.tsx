@@ -1,14 +1,16 @@
 import { t, useI18n } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { Bell, Download, Loader2, RefreshCw, ShieldCheck, Smartphone, Trash2, Wifi, WifiOff } from 'lucide-react';
-import { api } from '../lib/api';
+import { api, type Channel } from '../lib/api';
+import { OfflineLibrary } from './OfflineLibrary';
+import { NativePushSettings } from './NativePushSettings';
 import { disablePush, installApplication, mobileCapabilities, mobileDrafts, mobileOutbox, subscribePush, type QueuedMessage, type PrivateDraft } from '../mobile';
 import '../styles/mobile.css';
 
 interface Device { id: string; created_at: string; confirmed: boolean; active: boolean; current_session: boolean }
 const describe = (error: unknown) => error instanceof Error ? error.message : 'The mobile action could not be completed.';
 
-export function MobileSettings() {
+export function MobileSettings({ channel }: { channel?: Channel }) {
   useI18n();
   const [capabilities, setCapabilities] = useState(mobileCapabilities), [queue, setQueue] = useState<QueuedMessage[]>([]);
   const [devices, setDevices] = useState<Device[]>([]), [configured, setConfigured] = useState(false);
@@ -54,7 +56,7 @@ export function MobileSettings() {
       <button className="fc-button" type="button" disabled={!!busy || capabilities.installed} onClick={() => void run('install', async () => { await installApplication(); })}><Download size={16} />{capabilities.installed ? t("Installed") : t("Install FreeCollab")}</button>
       {!capabilities.installPrompt && !capabilities.installed && <p className="fc-account-muted">{t("On iPhone or iPad, use Share → Add to Home Screen. Other browsers provide an Install app action when supported. Open the app online once before using its offline shell.")}</p>}
     </section>
-    <section className="fc-account-section"><h3>{t("Private drafts")}</h3><p className="fc-account-muted">{t("Drafts are available after an offline reload without caching your channel directory or conversation history. Channel identifiers are shown here until you reopen a channel online.")}</p>
+    <section className="fc-account-section"><h3>{t("Private drafts")}</h3><p className="fc-account-muted">{t("Drafts work after an offline reload independently of your optional Offline library. Channel identifiers are shown here until you reopen a channel online.")}</p>
       {!drafts.length && <p className="fc-account-muted">{t("No private drafts are saved on this device.")}</p>}
       <ul className="fc-mobile-queue" aria-label={t("Private drafts")}>{drafts.map(draft => <li key={draft.channelId}><div><strong>{t("Draft")}</strong><small>{t("Channel ")}{draft.channelId}</small><p>{draft.content.slice(0, 180)}{draft.content.length > 180 ? '…' : ''}</p></div><div className="fc-account-actions"><button className="fc-button" type="button" disabled={!!busy} onClick={() => setEditing({ ...draft })}>{t("Edit draft")}</button><button className="fc-icon-button" type="button" disabled={!!busy} aria-label={t("Discard private draft")} onClick={() => void run('discard-draft', () => mobileDrafts.clear(draft.channelId))}><Trash2 size={16} /></button></div></li>)}</ul>
       {editing && <form onSubmit={event => { event.preventDefault(); const draft = editing; void run('save-draft', async () => { await mobileDrafts.save(draft.channelId, draft.content, draft.secure); setEditing(null); setNotice(t("Private draft saved on this device.")); }); }}><label htmlFor="mobile-private-draft">{t("Private draft text")}</label><textarea id="mobile-private-draft" className="fc-input" value={editing.content} maxLength={20000} rows={6} onChange={event => setEditing({ ...editing, content: event.target.value })} /><div className="fc-account-actions"><button className="fc-button" type="button" disabled={!!busy} onClick={() => setEditing(null)}>{t("Cancel")}</button><button className="fc-button fc-button-primary" type="submit" disabled={!!busy || !editing.content.trim()}>{t("Save private draft")}</button></div></form>}
@@ -64,6 +66,8 @@ export function MobileSettings() {
       {queue.length === 0 ? <p className="fc-account-muted">{t("No messages are waiting on this device.")}</p> : <ul className="fc-mobile-queue" aria-label={t("Queued messages")}>{queue.map(row => <li key={row.id}><div><strong>{row.state === 'review' ? t("Needs review") : t("Waiting to send")}</strong><small>{t("Channel ")}{row.channelId} · {row.secure ? t("End-to-end encrypted channel") : t("Server-encrypted channel")}</small><p>{row.content.slice(0, 220)}{row.content.length > 220 ? '…' : ''}</p>{row.error && <p className="fc-account-muted">{row.error}</p>}</div><div className="fc-account-actions"><button className="fc-button" type="button" disabled={!!busy} onClick={() => void run(row.id, async () => { await mobileDrafts.save(row.channelId, row.content); await mobileOutbox.remove(row.id); window.dispatchEvent(new CustomEvent('freecollab:offline-draft-restored', { detail: { channelId: row.channelId } })); setNotice(t("Saved as a private draft. Open that channel to edit and send it.")); })}>{t("Move to draft")}</button><button className="fc-icon-button" type="button" aria-label={t("Remove queued message")} disabled={!!busy} onClick={() => void run(row.id, () => mobileOutbox.remove(row.id))}><Trash2 size={16} /></button></div></li>)}</ul>}
       <button className="fc-button" type="button" disabled={!!busy || !capabilities.online || !queue.some(row => row.state === 'queued')} onClick={() => void run('send', () => mobileOutbox.flush())}>{busy === 'send' ? <Loader2 size={16} className="fc-account-spinner" /> : <RefreshCw size={16} />}{t("Send eligible queued messages")}</button>
     </section>
+    <OfflineLibrary channel={channel} />
+    <NativePushSettings />
     <section className="fc-account-section"><div className="fc-account-section-heading"><h3>{t("Private activity notifications")}</h3><Bell size={20} /></div>
       <p className="fc-account-muted">{t("Device notifications say only that new FreeCollab activity is available. Message text, names, channel titles and recovery keys never enter push payloads. Access is checked again before delivery.")}</p>
       {!configured && <p className="fc-account-muted">{t("The installation operator needs to configure Web Push before this browser can enable it.")}</p>}

@@ -9,6 +9,7 @@ from ..models.direct_message import DirectMessage, UserBlock
 from ..models.user import User
 from ..models.secure_channel import SecureChannel
 from ..models.workspace import PersonalWorkspace, Workspace, WorkspaceChannel, WorkspaceMember
+from ..models.connect_federation import FederatedConnection  # Register additive tables for isolated API apps.
 
 from .sso_scope import current_workspace_scope, require_workspace_scope
 from .workforce_access import principal_snapshot, require_principal_workspace
@@ -76,7 +77,10 @@ def workspace_allows_channel(session, channel_id: str, user_id: str) -> bool:
                                                   current_scope_actor_id(session) or user_id):
         return False
     member = session.get(WorkspaceMember, (mapping.workspace_id, user_id))
-    return bool(session.get(Workspace, mapping.workspace_id) and member and member.role in WORKSPACE_ROLES)
+    allowed = bool(session.get(Workspace, mapping.workspace_id) and member and member.role in WORKSPACE_ROLES)
+    from .connect_federation import connection_for_channel as federated_channel, grant_valid
+    federated = federated_channel(session, channel_id)
+    return allowed and (federated is None or grant_valid(session, federated, user_id))
 
 
 def channel_workspace_id(session, channel_id: str) -> str | None:

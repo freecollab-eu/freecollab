@@ -341,8 +341,8 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
         add("remotesyncitem", _records(session, mapping.name, and_(mapping.c.connection_id.in_(_ids(connections)), mapping.c.local_id.in_(local_ids))))
     # Delete only known dependents; unknown future FK models fail closed below.
     allowed_dependents = {"reaction", "readreceipt", "messagechange", "threadsubscription", "fileversion", "fileuploadreceipt",
-        "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "shareddocumentupdate", "shareddocumentsnapshot",
-        "shareddocumentcomment", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "remotesyncconflict"}
+        "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
+        "shareddocumentcomment", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage"}
     expanded = True
     while expanded:
         before = sum(map(len, plan.values()))
@@ -364,7 +364,7 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
             add(name, _records(session, name, and_(table.c.channel_id.in_(channel_ids), table.c.item_id.in_(removed_ids))))
     table = _table("notification")
     if table is not None and removed_ids:
-        add("notification", _records(session, "notification", and_(table.c.entity_id.in_(removed_ids), table.c.entity_type.in_(["message", "file", "decision", "task", "shared_document", "workflow_run", "activity_feed_post"]))))
+        add("notification", _records(session, "notification", and_(table.c.entity_id.in_(removed_ids), table.c.entity_type.in_(["message", "file", "decision", "task", "shared_document", "workflow_run", "activity_feed_post", "calendar_invitation"]))))
     table = _table("notificationdelivery")
     if table is not None and plan.get("notification"):
         add("notificationdelivery", _records(session, table.name, table.c.notification_id.in_(_ids(plan["notification"]))))
@@ -502,6 +502,7 @@ EXPORT_FIELDS = {
     "externalmeeting": "id channel_id created_by state revision secure calendar_item_id created_at updated_at",
     "channel": "id name type created_at",
     "message": "id channel_id author_id content encrypted parent_id thread_count mentions edited_at deleted created_at",
+    "slackimportmessage": "message_id import_id source_channel source_timestamp",
     "file": "id channel_id uploader_id filename content_type size created_at",
     "filedocument": "id channel_id owner_id current_file_id version_count created_at",
     "fileversion": "file_id document_id number",
@@ -509,6 +510,7 @@ EXPORT_FIELDS = {
     "decisionrevision": "id decision_id revision created_by created_at content_mode matrix_event_id encrypted_payload",
     "integrationcontent": "id channel_id kind created_by created_at",
     "integrationcontentrevision": "id item_id revision created_by created_at content_mode matrix_event_id encrypted_payload deleted",
+    "calendarattendee": "item_id user_id invited_by invited_at response responded_at revision",
     "projectboard": "id channel_id created_by created_at updated_at revision archived",
     "taskcard": "id project_id channel_id created_by created_at updated_at revision archived",
     "projecttaskrevision": "id kind item_id revision created_by created_at content_mode matrix_event_id encrypted_payload archived",
@@ -562,7 +564,7 @@ def export_data(session, job, request):
         records[name] = rows
         parents[name] = {row["id"]: row["channel_id"] for row in rows if "id" in row}
     for name, parent, field in (("fileversion", "filedocument", "document_id"), ("decisionrevision", "decision", "decision_id"),
-        ("integrationcontentrevision", "integrationcontent", "item_id"), ("shareddocumentupdate", "shareddocument", "document_id"),
+        ("integrationcontentrevision", "integrationcontent", "item_id"), ("calendarattendee", "integrationcontent", "item_id"), ("shareddocumentupdate", "shareddocument", "document_id"),
         ("shareddocumentsnapshot", "shareddocument", "document_id"), ("shareddocumentcomment", "shareddocument", "document_id"),
         ("workflowrevision", "workflowdefinition", "workflow_id"), ("workflowvote", "workflowrun", "run_id"), ("workflowactivity", "workflowrun", "run_id"),
         ("activityfeedrevision", "activityfeedpost", "post_id"), ("activityfeedcomment", "activityfeedpost", "post_id"),

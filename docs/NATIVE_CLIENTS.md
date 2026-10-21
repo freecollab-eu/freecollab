@@ -74,11 +74,15 @@ through the platform only when used. iOS declares their purpose and limits nativ
 bridge navigation to its configured app-bound domain. Both projects register the
 same custom native sign-in callback and keep the PKCE verifier in native memory.
 
-Mobile background push through FCM/APNs, background call delivery and background
-recording are not implemented by this shell. Web/PWA push support does not imply
-that a mobile WebView has native push. Calls and recordings follow the foreground
-browser implementation and platform media limitations. Verify camera, microphone,
-file downloads and Matrix recovery on target physical devices before rollout.
+The mobile shell includes opt-in native FCM HTTP v1 (Android) and APNs HTTP/2
+(iOS) alerts, separate from Web/PWA push. Customers configure and sign their own
+builds. Generic activity and incoming channel-call notifications can display in
+the background; tapping reopens the app and current authorized call controls.
+Joining and camera/microphone access still require a foreground user action.
+There is no PushKit/CallKit integration, automatic answering, guaranteed ringing,
+background call audio service or background recording. See [NATIVE_PUSH.md](NATIVE_PUSH.md).
+Verify camera, microphone, notification delivery, file downloads and Matrix
+recovery on target physical devices before rollout.
 
 ## Browser sign-in and encryption
 

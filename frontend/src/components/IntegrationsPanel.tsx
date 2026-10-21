@@ -20,11 +20,14 @@ import { EmbedApplicationsSettings } from './EmbedApplicationsSettings';
 import { ConnectPanel } from './ConnectPanel';
 import { AppsPanel } from './AppsPanel';
 import { EnterpriseGovernancePanel } from './EnterpriseGovernancePanel';
+import { SlackImportPanel } from './SlackImportPanel';
+import { IntegrationLibraryPanel } from './IntegrationLibraryPanel';
+import { PersonalOAuthPanel } from './PersonalOAuthPanel';
 import '../styles/account.css';
 import '../styles/integrations.css';
 
-type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding' | 'connect' | 'apps' | 'governance';
-interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations'; initialConnectionId?: string | null }
+type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding' | 'connect' | 'apps' | 'governance' | 'slack-import' | 'library' | 'provider-accounts';
+interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations' | 'calendar' | 'provider-accounts'; initialConnectionId?: string | null }
 interface Capabilities { integrations?: { oidc?: boolean; webhooks?: boolean; document_links?: boolean; calendar_ics?: boolean; otrust?: boolean; workforce?: boolean; scim?: boolean; sync?: boolean } }
 export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId }: Props) {
   useI18n();
@@ -59,7 +62,7 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
     ? t("Return to connection setup and finish or discard pending changes before leaving.")
     : guardOwner.current === 'connect'
       ? t('Store the shared-channel invitation and confirm it is saved before leaving.')
-    : guardOwner.current === 'apps'
+    : guardOwner.current === 'apps' || guardOwner.current === 'library'
       ? t('Store the app signing secret and confirm it is saved before leaving.')
     : guardOwner.current === 'webhooks'
       ? leaving ? t("Save your webhook signing secret and confirm it is stored before leaving.") : t("Save your webhook signing secret and confirm it is stored before changing sections.")
@@ -106,6 +109,8 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
     ...(manages && !scopedSession ? [{ id: 'embedding' as const, label: t('Embedding'), Icon: Blocks }] : []),
     ...(manages ? [{ id: 'connect' as const, label: t('Shared channels'), Icon: Users }] : []),
     ...(manages && !scopedSession ? [{ id: 'apps' as const, label: t('Apps'), Icon: Blocks }] : []),
+    { id: 'provider-accounts' as const, label: t('Provider accounts'), Icon: Plug },
+    ...(manages && !scopedSession ? [{ id: 'library' as const, label: t('Integration library'), Icon: Blocks }, { id: 'slack-import' as const, label: t('Import from Slack'), Icon: FolderSync }] : []),
     ...(workspace?.role === 'owner' && !scopedSession ? [{ id: 'governance' as const, label: t('Organization & policies'), Icon: ShieldCheck }] : []),
     { id: 'documents' as const, label: t("Documents"), Icon: FolderOpen },
     { id: 'calendar' as const, label: t("Calendar"), Icon: CalendarDays },
@@ -142,6 +147,9 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
           {tab === 'embedding' && manages && !scopedSession && <EmbedApplicationsSettings key={workspaceId} workspaceId={workspaceId} channels={channels} security={security} onGuardChange={onGuardChange} />}
           {tab === 'connect' && manages && <ConnectPanel workspaceId={workspaceId} onGuardChange={onGuardChange} />}
           {tab === 'apps' && manages && !scopedSession && <AppsPanel workspaceId={workspaceId} channels={channels} onGuardChange={onGuardChange} />}
+          {tab === 'provider-accounts' && <PersonalOAuthPanel key={workspaceId} workspaceId={workspaceId} />}
+          {tab === 'library' && manages && !scopedSession && <IntegrationLibraryPanel key={workspaceId} workspaceId={workspaceId} channels={channels} onGuardChange={onGuardChange} />}
+          {tab === 'slack-import' && manages && !scopedSession && <SlackImportPanel key={workspaceId} workspaceId={workspaceId} onGuardChange={onGuardChange} />}
           {tab === 'governance' && workspace?.role === 'owner' && !scopedSession && <EnterpriseGovernancePanel workspaceId={workspaceId} mfaEnabled={security?.mfa_enabled} onGuardChange={onGuardChange} />}
           {tab === 'webhooks' && manages && <WebhookConnections workspaceId={workspaceId} channels={channels} onGuardChange={onGuardChange} />}
           {tab === 'account' && <>{manages && !scopedSession && <WorkspaceSSOSettings workspaceId={workspaceId} security={security} onGuardChange={onGuardChange} onChanged={() => setSSOVersion(value => value + 1)} />}<SSOConnections key={`${workspaceId}:${ssoVersion}`} workspaceId={workspaceId} scopedSession={scopedSession} managedAccount={managedAccount} security={security || undefined} /></>}

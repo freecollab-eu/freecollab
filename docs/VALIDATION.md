@@ -1,5 +1,48 @@
 # FreeCollab validation record
 
+## 0.12 personal work, portable history and installation boundaries — 2026-10-21
+
+[PRODUCT_012.md](PRODUCT_012.md) describes the eight implemented areas and their limits.
+All API, browser, transport and native fixtures used disposable data and independently
+generated keys. The original pilot database, retained keys and four services were
+preserved. Railway and the public website were not deployed.
+
+| Area | Executed evidence |
+| --- | --- |
+| Complete backend baseline | **1,880 passed; 3 stale worker-expectation failures** in the 1,883-case complete run. Those tests were collected before the OAuth-cleanup batch expectation was updated during parallel development. The final on-disk worker suite then passed **all 13 cases**. Later focused feature/regression runs below cover the final changes; this is not a second complete run of the final 1,912-case collection. |
+| Client and SDK | **221 frontend Node cases**, full TypeScript, main/trusted-embed and widget production builds passed. **26 SDK cases** passed, including a standalone packed consumer resolving every entry/declaration and typed recurrence fields. |
+| Personal working day | **8 API cases and 7 actual full-App browser groups** passed: current cross-workspace aggregation, exact project/task navigation, revision-based completion, reminder snooze/completion, private saved completion, source refresh, Swedish and actual fonts at 320 px. |
+| Calendar | **37 focused native/legacy/CalDAV API cases**, **15 Node cases** and **5 actual browser groups** passed, including two-browser invitations/RSVP, recurrence exceptions, shared-time bounds and narrow layout. New unused fields are omitted from standalone payloads to preserve previous sync fingerprints. |
+| Slack import and library | **37 final API cases** passed, including unsafe ZIPs, mapping authority, SQL/blob rollback, immediate private-preview erasure under enforced foreign keys, retained shared provenance, immutable versions, exact package grants and publisher lock ordering. **10 actual UI groups** passed: multipart preview/import, historical labels/threads/files, deliberately held old catalog reads, public review/install, handled review-queue failure, secret leave guard, customer palettes/fonts in both new and existing Apps, Swedish at 320 px. |
+| Personal OAuth and apps | **88 combined OAuth/search/apps/audit cases plus 2 additional real HTTPS calendar-write cases** passed. Google and Microsoft code exchange, refresh, revocation and Calendar create used independently verified TLS/SNI through a synthetic CONNECT proxy. Immutable reviewed consent IDs prevent an old queued action executing under a replacement provider account. **9 actual App browser groups** passed; browser consent responses are explicitly synthetic, with separate backend wire-protocol evidence. Native/embedded consent is directed to the normal browser without weakening cookie or origin boundaries. |
+| Native push | **99 combined native/Web Push/native-client/worker cases**, **7 actual App browser groups**, frontend/i18n/type checks and an actual application WebView-guard JVM test passed. Actual APNs HTTP/2/TLS/CONNECT and independently verified provider signatures are covered. Scoped device management, deletion during provider exchange, expired-source reenrollment, enforced-FK account erasure and concurrent closure/registration are exercised. The browser OS bridge/provider are synthetic; live Apple/Firebase delivery and physical devices are separate acceptance checks. |
+| Encrypted offline library | **10 new actual production-browser groups**, **11 existing mobile/offline groups**, and **23 focused Node cases** passed. Real service worker, IndexedDB, Web Crypto, binary download, offline reload, encrypted attachment persistence, lost-acknowledgement upload retry, known membership revocation, public-only CacheStorage, logout erasure and 320 px are covered. Revocation cannot be discovered while disconnected; explicitly exported OS copies remain outside local app erasure. |
+| Separate installations | **46 backend cases**, **26 focused client cases**, TypeScript and **8 actual two-homeserver browser groups** passed. Two independent pinned Synapse homeservers used verified TLS federation; actual Rust devices verified fingerprints and exchanged/decrypted Megolm messages and encrypted attachments. Current remote removal and either-side revoke passed. Ten critical runtime files were hashed before startup and unchanged after completion. This is Matrix chat/media federation, not replication of native task/calendar/document index tables or a live customer SSO rollout. |
+| Trusted embedding and local Connect | The 0.12 SDK payload passed **21 actual trusted Embed/OIDC/Matrix groups** and **13 same-installation two-organization Connect groups**. The current **468 runtime source files** still match the final Connect proof. The later canonical package changed only file modes: all 59 member payloads remain identical; normal public 0644 permissions and byte-identical archives under umask 077/022 are verified. |
+| Previous CI browser failures | Updated stale delivery-endpoint and narrow-screen tool-menu expectations; the actual Elite flow passed **6 groups**, retaining durable-queue and exactly-once delivery assertions. Shared-document proofs passed **12 groups**, including two real Rust devices, encrypted chunks/snapshots, project/task/workflow history and opaque API/database/wire checks. A fixture-only bounded retry handles declared Matrix 429 responses with the exact same transaction and ciphertext; an injected 429 and three observed retries passed. This does not change production-client throttling behavior. Explicit disposable-homeserver settings replace retained-secret discovery. Both harness patches received independent review; the new GitHub run remains separate. |
+| Native artifacts and edge routing | Android 0.12/build 1200 debug APK compiled and was inspected for the guarded application WebView, Firebase service and disabled pre-consent auto initialization. Actual Nginx 1.28 loaded both frontend and federation-edge configurations; verified HTTPS callback/Office requests passed, no-referrer was present and synthetic capability/query markers were absent from proxy logs. No iOS compilation, platform signing, stores, CallKit or background media service is claimed. |
+| Independent review and dependencies | Independent review reproduced and verified fixes for Android cross-frame fallback, scoped device controls, reviewed OAuth-consent binding, account-erasure races and private credential cleanup. Its final **14 targeted backend checks and one JVM check** passed; these overlap the feature suites. PyPI-backed pip-audit 2.10.1 reported **zero known vulnerabilities across 76 locked Python runtime packages**, after upgrading h2 to 4.4.1. Production npm audits for frontend, SDK, desktop and mobile reported zero advisories. These exclude container OS packages and are not certification or load evidence. |
+
+The canonical SDK artifact is `freecollab-components-0.12.0.tgz`, SHA-256
+`2aaf40a5bcfb4b0a184ec88f92c1a1711f5a6792daf3d343b0203ad10380b91d`.
+It targets matching 0.12.x servers/trusted clients. npm publication was not performed.
+The original browser-tested archive had SHA-256
+`d74d7978c20681e51c0e2bfa811c648fd9127702787a542a5d83b31d8e2df4af`;
+the canonicalization proof compares all 59 uncompressed member payloads exactly.
+
+The Android debug artifact SHA-256 is
+`afd59c571809725aee558d540dcf070361211ebfc1b0750ff5a48923771498f4`.
+It contains no customer's Firebase configuration or release-signing identity.
+
+Reproduce API checks with the locked backend environment and `python -m pytest tests/`.
+The new browser harnesses are `my-day-browser.py`, `calendar-planning-browser.py`,
+`import-library-browser.py`, `personal-oauth-browser.py`, `native-push-browser.py`,
+`offline-library-browser.py` and `connect-federation-browser.py` under `frontend/tests/`.
+They own and remove their services; the final federation and SDK proofs require the
+pinned cached Synapse image/Docker and installed Chromium. See each feature guide
+for targeted commands and operator prerequisites. Reports under the environment's
+private `.freecollab/proof-results/` are deliberately excluded from source publication.
+
 ## 0.11 daily collaboration, integrations and infrastructure — 2026-10-21
 
 [PRODUCT_011.md](PRODUCT_011.md) records the implemented entry points and supported

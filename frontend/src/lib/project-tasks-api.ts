@@ -66,6 +66,9 @@ async function resolve<T>(record: ProjectTaskRecord<T>): Promise<ProjectTaskReco
     return { ...record, fields: validate(record.kind, content.fields) as T };
   } catch (failure) { return { ...record, fields: undefined, resolution_error: failure instanceof Error ? failure.message : 'Unlock recovery to read this revision.' }; }
 }
+// Personal views reuse the exact room/sender/revision verification performed by
+// channel boards, without making a second content or assignment index.
+export { resolve as resolveProjectTaskRecord };
 
 async function validateLinks(channelId: string, fields: TaskFields) {
   const [members, files, decisions] = await Promise.all([

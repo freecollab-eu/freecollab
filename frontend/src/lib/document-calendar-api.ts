@@ -31,6 +31,7 @@ async function resolve<T>(record: ContentRecord<T>): Promise<ContentRecord<T>> {
     return { ...record, fields: record.deleted ? undefined : validator(record.kind)(content.fields) as T };
   } catch (error) { return { ...record, fields: undefined, resolution_error: error instanceof Error ? error.message : 'This encrypted item is unavailable.' }; }
 }
+export { resolve as resolveCalendarRecord };
 async function list<T>(channelId: string, kind: ContentKind): Promise<ContentRecord<T>[]> {
   const token = api.getAccessToken();
   const records = await api.request<ContentRecord<T>[]>(path(channelId, kind));

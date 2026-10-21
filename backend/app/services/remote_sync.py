@@ -264,6 +264,8 @@ def _import_remote(session, connection, item, remote, value):
             created_by=connection.grant_user_id, content_mode="server", deleted=deleted,
             encrypted_payload=encrypt_message(json.dumps(payload, ensure_ascii=False), connection.channel_id))
         session.add(revision)
+        from ..api.calendar_planning import calendar_revision_changed
+        calendar_revision_changed(session, existing, revision)
         session.flush()
         enqueue_channel_event(session, connection.channel_id, "channel.activity", revision.id)
         return None

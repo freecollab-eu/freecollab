@@ -244,11 +244,15 @@ def get_channel_members(
         .all()
     )
     
-    return [
+    local_members = [
         {"user_id": u.id, "name": u.name, "public_key": u.public_key, "role": role}
         for u, role in members
         if workspace_allows_channel(session, channel_id, u.id)
     ]
+    from ..services.connect_federation import cached_peer_members
+    return local_members + [{"user_id": peer.matrix_user_id, "name": peer.name,
+        "public_key": None, "role": "member", "remote": True,
+        "matrix_user_id": peer.matrix_user_id} for peer in cached_peer_members(session, channel_id)]
 
 
 @router.post("/{channel_id}/invites", status_code=201)

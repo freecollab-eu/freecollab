@@ -35,8 +35,8 @@ import socketio
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / 'packages/components'
 PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
-REPORT = Path(os.getenv('CONNECT_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/connect-browser-0.11.0.json')))
-EXPECTED_PACKAGE = '133b74ec3bc7fccf5e6c01eff931ce4e3dbb22046283f543e22be402bd477e5c'
+REPORT = Path(os.getenv('CONNECT_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/connect-browser-0.12.0.json')))
+EXPECTED_PACKAGE = '2aaf40a5bcfb4b0a184ec88f92c1a1711f5a6792daf3d343b0203ad10380b91d'
 SPEC = importlib.util.spec_from_file_location('owned_embed_proof_helpers', Path(__file__).with_name('embed-browser-proof.py'))
 helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helpers)
@@ -186,7 +186,7 @@ def main():
     browser = None
     container = 'freecollab-connect-proof-' + secrets.token_hex(6)
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    archive = PACKAGE / 'artifacts/freecollab-components-0.11.0.tgz'
+    archive = PACKAGE / 'artifacts/freecollab-components-0.12.0.tgz'
     assert hashlib.sha256(archive.read_bytes()).hexdigest() == EXPECTED_PACKAGE
     frontend_dist = ROOT / 'frontend/dist'
     frontend_manifest = {str(path.relative_to(frontend_dist)): hashlib.sha256(path.read_bytes()).hexdigest()
@@ -204,8 +204,8 @@ def main():
                 assert all(member.name.startswith('package/') and '..' not in Path(member.name).parts for member in tar.getmembers())
                 tar.extractall(private / 'packed', filter='data')
             release = json.loads((private / 'packed/package/dist/release.json').read_text())
-            assert release['version'] == '0.11.0' and release['apiLine'] == '0.11'
-            checks['exact_packed_0_11_sdk_and_frozen_trusted_frontend'] = True
+            assert release['version'] == '0.12.0' and release['apiLine'] == '0.12'
+            checks['exact_packed_0_12_sdk_and_frozen_trusted_frontend'] = True
             api_port, app_port, host_a_port, host_b_port = (helpers.port() for _ in range(4))
             api_base, app_base, host_a, host_b = ('http://127.0.0.1:' + str(port) for port in (api_port, app_port, host_a_port, host_b_port))
             environment = dict(os.environ)

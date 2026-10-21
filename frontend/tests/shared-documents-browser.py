@@ -7,6 +7,7 @@ It never modifies the retained preview or Matrix homeserver.
 """
 import argparse
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -48,21 +49,12 @@ def browser_json(page, expression, arguments):
     return result.get('value')
 
 
-def retained_matrix_environment():
-    """Read the authorized retained container's secret only into process memory."""
+def fixture_matrix_environment():
+    """Use an explicitly configured disposable fixture; never inspect a service."""
     names = ['MATRIX_INTERNAL_URL', 'MATRIX_SERVER_NAME', 'MATRIX_REGISTRATION_SHARED_SECRET']
     if all(os.environ.get(name) for name in names):
         return {'MATRIX_ENABLED': 'true', **{name: os.environ[name] for name in names}}
-    location = Path(os.getenv('SHARED_DOCUMENTS_MATRIX_RUNTIME', str(ROOT.parent / '.freecollab/matrix-poc/runtime.json')))
-    info = json.loads(location.read_text()); environment = os.environ.copy()
-    for name in ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_TLS', 'DOCKER_TLS_VERIFY', 'DOCKER_CERT_PATH']: environment.pop(name, None)
-    def docker(*arguments):
-        return subprocess.run(['docker', '--host=unix:///var/run/docker.sock', *arguments], env=environment, check=True, capture_output=True, text=True).stdout.strip()
-    docker('info', '--format', '{{.ServerVersion}}')
-    secret = docker('exec', info['container'], 'python', '-c', 'import yaml; print(yaml.safe_load(open("/data/homeserver.yaml"))["registration_shared_secret"])')
-    assert len(secret) >= 32
-    return {'MATRIX_ENABLED': 'true', 'MATRIX_INTERNAL_URL': 'http://127.0.0.1:' + str(info['port']),
-            'MATRIX_SERVER_NAME': info['server_name'], 'MATRIX_REGISTRATION_SHARED_SECRET': secret}
+    raise SystemExit('Secure proof requires explicit MATRIX_INTERNAL_URL, MATRIX_SERVER_NAME and MATRIX_REGISTRATION_SHARED_SECRET for an owned disposable fixture.')
 
 
 def secure_proof(base, private, workspace, users, pages, results, environment, python):
@@ -77,6 +69,33 @@ def secure_proof(base, private, workspace, users, pages, results, environment, p
             window.projectProofApi=(await import('/src/lib/project-tasks-api.ts')).projectTasksApi;
             window.workflowProofApi=(await import('/src/lib/workflows-api.ts')).workflowsApi;
             window.documentProofSecure=await(await import('/src/lib/secure-client.ts')).getSecureMessaging();
+            // Retry only an explicitly rejected Matrix transaction. Reuse the
+            // exact URL, transaction ID and ciphertext; never replay a product
+            // mutator or infer success after a network/authorization failure.
+            const originalFetch=window.fetch.bind(window);
+            window.matrixFixtureRetries=[];
+            window.fetch=async(input,init)=>{
+                const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href);
+                const method=init?.method||(input instanceof Request?input.method:'GET');
+                const match=/\\/send\\/m\\.room\\.encrypted\\/([^/]+)$/.exec(url.pathname);
+                if(method!=='PUT'||!match)return originalFetch(input,init);
+                if(typeof init?.body!=='string')throw Error('Fixture Matrix retries require a replayable ciphertext body.');
+                const transaction=decodeURIComponent(match[1]);
+                if(!transaction)throw Error('Fixture Matrix retries require an explicit transaction ID.');
+                let waited=0;
+                for(let attempt=0;;attempt++){
+                    const response=await originalFetch(input,init);
+                    if(response.status!==429)return response;
+                    const failure=await response.clone().json();
+                    const delay=failure.retry_after_ms;
+                    if(failure.errcode!=='M_LIMIT_EXCEEDED'||!Number.isInteger(delay)||delay<1||delay>30000||attempt>=12||waited+delay>90000)return response;
+                    window.matrixFixtureRetries.push({transaction,attempt,delay});
+                    waited+=delay;
+                    await new Promise(resolve=>setTimeout(resolve,delay));
+                }
+            };
+            const send=window.documentProofSecure.sendEvent;
+            window.documentProofSecure.sendEvent=(channel,type,content,transaction)=>send(channel,type,content,transaction||'document-fixture-'+crypto.randomUUID());
         }""")
     left.evaluate('channel=>documentProofSecure.enableChannel(channel,"Private shared work")', channel)
     right.evaluate('channel=>documentProofSecure.getMessages(channel)', channel)
@@ -86,6 +105,20 @@ def secure_proof(base, private, workspace, users, pages, results, environment, p
         for device in devices:
             if device['user_id'] == other['user_id']: page.evaluate('device=>documentProofSecure.verifyDevice(device,device.fingerprint)', device)
     print('Matrix proof: both real cryptographic devices trusted.', flush=True)
+    transaction_requests = {}
+    synthetic_limit = {"sent": False}
+    def limit_one_transaction(route):
+        if route.request.method == 'PUT' and not synthetic_limit['sent']:
+            synthetic_limit['sent'] = True
+            route.fulfill(status=429, content_type='application/json', body=json.dumps({"errcode": "M_LIMIT_EXCEEDED", "error": "Owned fixture rate limit", "retry_after_ms": 20}))
+        else:
+            route.continue_()
+    left.route('**/api/_matrix/client/v3/rooms/**/send/m.room.encrypted/*', limit_one_transaction)
+    def record_transaction(request):
+        if request.method == 'PUT' and '/send/m.room.encrypted/' in request.url:
+            transaction_requests.setdefault(request.url, []).append(hashlib.sha256((request.post_data or '').encode()).hexdigest())
+    for page in pages:
+        page.on('request', record_transaction)
     requests = []
     for page in pages:
         page.on('request', lambda request: requests.append(request.post_data or '') if request.method == 'POST' and '/api/channels/' + channel + '/' in request.url else None)
@@ -189,6 +222,12 @@ def secure_proof(base, private, workspace, users, pages, results, environment, p
         vote = connection.execute('SELECT encrypted_note,matrix_event_id FROM workflowvote WHERE run_id=?', (run['id'],)).fetchone()
         assert vote[0] is None and vote[1] == native_run['votes'][0]['matrix_event_id']
     for page in pages: page.evaluate('()=>documentProofSession.stop()')
+    retries = [retry for page in pages for retry in page.evaluate('matrixFixtureRetries')]
+    repeated = [hashes for hashes in transaction_requests.values() if len(hashes) > 1]
+    assert synthetic_limit['sent'] and retries and repeated, 'The transport must exercise an explicitly rejected transaction'
+    assert all(len(set(hashes)) == 1 for hashes in repeated), 'A retry changed its encrypted transaction body'
+    results['matrix_429_retries_preserve_exact_transaction_and_ciphertext'] = True
+    print('PASS Matrix rate limits: ' + str(len(retries)) + ' bounded declared-delay retries retain the exact transaction URL and ciphertext; no product mutator replay', flush=True)
     results['matrix_all_native_api_db_opaque_and_actual_encrypted_wire_including_parts'] = True
     print('PASS real Matrix: two trusted Rust devices, concurrent large documents, encrypted chunks/comments/snapshot, rebuilt history, private project/task assignment/checklist/peer edit/history, workflow approval note/worker completion, opaque API/DB and m.room.encrypted wire', flush=True)
 
@@ -219,7 +258,7 @@ def select_document(panel):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--secure', action='store_true', help='Also prove actual Matrix documents/projects/tasks using the retained homeserver and own API/database identities.')
+    parser.add_argument('--secure', action='store_true', help='Also prove actual Matrix documents/projects/tasks using an explicitly configured disposable homeserver.')
     options = parser.parse_args()
     stage, results, processes, streams = 'private services startup', {}, [], []
     with tempfile.TemporaryDirectory(prefix='freecollab-shared-documents-') as directory:
@@ -235,7 +274,7 @@ def main():
                 MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', PUBLIC_APP_URL=app, CORS_ORIGINS=json.dumps([app]),
                 OIDC_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', PYTHONPATH=str(ROOT / 'backend'))
             environment['NO_PROXY'] = ','.join(filter(None, [environment.get('NO_PROXY', ''), 'localhost', '127.0.0.1', '::1']))
-            if options.secure: environment.update(retained_matrix_environment())
+            if options.secure: environment.update(fixture_matrix_environment())
             python = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
             server = private / 'api.py'
             server.write_text('import uvicorn\nfrom app.main import socket_app\nuvicorn.run(socket_app,host="127.0.0.1",port=' + str(api_port) + ',proxy_headers=False,access_log=False)\n')
@@ -376,7 +415,7 @@ def main():
             helpers.stop(processes)
             for stream in streams: stream.close()
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps({'scope': 'Actual private API/Vite/Chromium with two users and real network disconnection' + ('; existing retained Matrix with new isolated identities and real trusted devices' if options.secure else '; native only') + '; no external provider', 'results': results,
+    REPORT.write_text(json.dumps({'scope': 'Actual private API/Vite/Chromium with two users and real network disconnection' + ('; explicitly configured disposable Matrix with isolated identities and real trusted devices' if options.secure else '; native only') + '; no external provider', 'results': results,
         'cleanup': 'Own API/Vite processes, SQLite, cryptographic keys, files, browser contexts and temporary exports removed in finally'}, indent=2) + '\n')
 
 

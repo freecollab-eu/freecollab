@@ -3,6 +3,7 @@ import logging
 import re
 
 _CAPABILITY = re.compile(r"(/(?:api/)?office-edit/)[^\s\"']*")
+_OAUTH_CALLBACK = re.compile(r"(/(?:api/)?personal-oauth/callback)\?[^\s\"']*")
 
 
 class CapabilityLogFilter(logging.Filter):
@@ -10,7 +11,7 @@ class CapabilityLogFilter(logging.Filter):
         # Preserve Uvicorn's five structured args: AccessFormatter unpacks them.
         # The ASGI scope and routing path are never changed.
         def redact(value):
-            return _CAPABILITY.sub(r"\1[redacted]", value) if isinstance(value, str) else value
+            return _OAUTH_CALLBACK.sub(r"\1?[redacted]", _CAPABILITY.sub(r"\1[redacted]", value)) if isinstance(value, str) else value
         record.msg = redact(record.msg)
         if isinstance(record.args, tuple):
             record.args = tuple(redact(value) for value in record.args)

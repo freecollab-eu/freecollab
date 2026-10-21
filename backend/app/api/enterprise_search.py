@@ -79,19 +79,33 @@ def connection(session, workspace_id, actor_id, identifier, revision=None):
     return row
 
 
-def public(row):
+def public(row, *, oauth=False):
     return {"id": row.id, "name": row.name, "provider": row.provider, "revision": row.revision,
-        "config": json.loads(row.config_json), "scope": "personal-delegation", "connected": True}
+        "config": json.loads(row.config_json), "scope": "personal-delegation", "connected": True,
+        "authentication": "customer-oauth" if oauth else "manual-token"}
 
 
 def provider_call(session, workspace_id, actor_id, identifier, revision, operation):
     row = connection(session, workspace_id, actor_id, identifier, revision)
     provider, config = row.provider, json.loads(row.config_json)
-    token = unseal_private(row.encrypted_credentials, "enterprise-search-credentials", row.id)
+    from ..services import personal_oauth
+    grant = personal_oauth.grant_for_target(session, "search", row.id, actor_id)
+    grant_id = grant.id if grant else None
+    token = (personal_oauth.access_token(session, grant_id, user_id=actor_id) if grant_id else
+        unseal_private(row.encrypted_credentials, "enterprise-search-credentials", row.id))
     session.commit()
     budget = providers.transport.begin_budget(25)
     try:
-        try: result = operation(provider, config, token)
+        try:
+            try:
+                result = operation(provider, config, token)
+            except providers.ProviderError as error:
+                if not grant_id or error.status != 401:
+                    raise
+                connection(session, workspace_id, actor_id, identifier, revision)
+                token = personal_oauth.access_token(session, grant_id, user_id=actor_id, force_refresh=True)
+                session.commit()
+                result = operation(provider, config, token)
         except providers.ProviderError as error:
             session.expire_all(); connection(session, workspace_id, actor_id, identifier, revision)
             status = 403 if error.status in {401, 403} else 404 if error.status == 404 else 422
@@ -99,6 +113,8 @@ def provider_call(session, workspace_id, actor_id, identifier, revision, operati
     finally: providers.transport.end_budget(budget)
     session.expire_all()
     connection(session, workspace_id, actor_id, identifier, revision)
+    if grant_id:
+        personal_oauth.current_grant(session, grant_id, user_id=actor_id)
     return result
 
 
@@ -123,8 +139,20 @@ def resolve(data: ReferenceInput, user=Depends(get_current_user), session=Depend
 @router.get("/workspaces/{workspace_id}/enterprise-search/connections")
 def connections(workspace_id: str, user=Depends(get_current_user), session=Depends(get_session)):
     authorize(session, workspace_id, user.id)
-    return [public(row) for row in session.exec(select(EnterpriseSearchConnection).where(
-        EnterpriseSearchConnection.workspace_id == workspace_id, EnterpriseSearchConnection.user_id == user.id)).all()]
+    from ..services import personal_oauth
+    result = []
+    for row in session.exec(select(EnterpriseSearchConnection).where(
+            EnterpriseSearchConnection.workspace_id == workspace_id, EnterpriseSearchConnection.user_id == user.id)).all():
+        grant = personal_oauth.grant_for_target(session, "search", row.id, user.id)
+        if grant:
+            try:
+                personal_oauth.current_grant(session, grant.id, user_id=user.id)
+            except HTTPException:
+                continue
+            result.append(public(row, oauth=True))
+        elif row.encrypted_credentials:
+            result.append(public(row))
+    return result
 
 
 @router.post("/workspaces/{workspace_id}/enterprise-search/connections")
@@ -137,7 +165,8 @@ def connect(workspace_id: str, data: ConnectionInput, user=Depends(get_current_u
     session.expire_all(); authorize(session, workspace_id, user.id)
     if not data.delegated_access_acknowledged:
         raise HTTPException(422, "Use your own delegated token; application-wide administrator tokens are unsupported")
-    existing = session.exec(select(EnterpriseSearchConnection.id).where(EnterpriseSearchConnection.user_id == user.id).limit(21)).all()
+    existing = session.exec(select(EnterpriseSearchConnection.id).where(EnterpriseSearchConnection.user_id == user.id,
+        EnterpriseSearchConnection.encrypted_credentials != "").limit(21)).all()
     if len(existing) >= 20: raise HTTPException(409, "Personal search connection limit reached")
     try:
         config = providers.config(data.provider, data.config)
@@ -153,8 +182,13 @@ def connect(workspace_id: str, data: ConnectionInput, user=Depends(get_current_u
 @router.delete("/workspaces/{workspace_id}/enterprise-search/connections/{connection_id}")
 def disconnect(workspace_id: str, connection_id: str, user=Depends(get_current_user), session=Depends(get_session)):
     row = connection(session, workspace_id, user.id, connection_id)
+    from ..services import personal_oauth
+    grant = personal_oauth.grant_for_target(session, "search", row.id, user.id)
+    remote_token = personal_oauth.revocation_token(grant) if grant else None
+    if grant:
+        personal_oauth.invalidate(session, grant)
     session.delete(row); session.commit()
-    return {"disconnected": True}
+    return {"disconnected": True, **({"provider_revocation": personal_oauth.revoke_at_provider(grant.provider, remote_token)} if grant else {})}
 
 
 @router.post("/workspaces/{workspace_id}/enterprise-search/connections/{connection_id}/query")

@@ -205,6 +205,12 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/app-platform-browser.py
           BACKEND_PYTHON=python python frontend/tests/media-browser.py
           BACKEND_PYTHON=python python frontend/tests/native-client-browser.py
+          BACKEND_PYTHON=python python frontend/tests/my-day-browser.py
+          BACKEND_PYTHON=python python frontend/tests/calendar-planning-browser.py
+          BACKEND_PYTHON=python python frontend/tests/import-library-browser.py
+          BACKEND_PYTHON=python python frontend/tests/personal-oauth-browser.py
+          BACKEND_PYTHON=python python frontend/tests/native-push-browser.py
+          BACKEND_PYTHON=python python frontend/tests/offline-library-browser.py
           python frontend/tests/enterprise-onboarding-browser.py
           python frontend/tests/remote-sync-browser.py
           python frontend/tests/proofs-browser.py
@@ -303,7 +309,13 @@ jobs:
       - name: Verify packed SDK and isolated embedded customer SSO with real encryption
         run: python packages/components/tests/embed-browser-proof.py --matrix
       - name: Verify encrypted shared channels across managed organizations
-        run: python packages/components/tests/connect-browser-proof.py --skip-build
+        # The preceding embed proof packs into its private fixture directory.
+        # Connect deliberately checks the separate reviewed release artifact.
+        run: |
+          npm run release:artifact --prefix packages/components
+          python packages/components/tests/connect-browser-proof.py --skip-build
+      - name: Verify encrypted messages and files across independent installations
+        run: BACKEND_PYTHON=python python frontend/tests/connect-federation-browser.py
       - name: Retain isolated homeserver diagnostics
         if: always()
         run: docker --host=unix:///var/run/docker.sock logs --timestamps freecollab-secure-ci > /tmp/freecollab-secure-synapse.log 2>&1 || true

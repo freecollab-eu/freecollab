@@ -37,7 +37,10 @@ def notification_channel(session, notification, _seen=None):
     kind, identifier = key
     if kind == "channel":
         return identifier
-    if kind == "message_reminder":
+    if kind == "calendar_invitation":
+        from ..models.integration_content import IntegrationContent
+        record = session.get(IntegrationContent, identifier)
+    elif kind == "message_reminder":
         from ..models.chat_productivity import MessageReminder
         record = session.get(MessageReminder, identifier)
     elif kind == "encrypted_message":
@@ -78,8 +81,18 @@ def notification_visible(session, notification, user_id: str, _seen=None) -> boo
     seen.add(key)
     channel_id = None
     encrypted = notification.entity_type == "encrypted_message"
-    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post", "message_reminder"}
-    if notification.entity_type == "message_reminder":
+    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post", "message_reminder", "calendar_invitation"}
+    if notification.entity_type == "calendar_invitation":
+        from ..models.calendar_planning import CalendarAttendee
+        from ..models.integration_content import IntegrationContent
+        from .integrations_content import latest_revision
+        item = session.get(IntegrationContent, notification.entity_id)
+        invitation = session.get(CalendarAttendee, (notification.entity_id, user_id))
+        revision = latest_revision(session, item.id) if item else None
+        if not item or not invitation or not revision or revision.deleted:
+            return False
+        channel_id = item.channel_id
+    elif notification.entity_type == "message_reminder":
         from ..models.chat_productivity import MessageReminder
         from ..services.matrix_bridge import is_secure_channel
         record = session.get(MessageReminder, notification.entity_id)

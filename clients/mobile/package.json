@@ -1,6 +1,6 @@
 {
   "name": "@freecollab/mobile",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "Customer-owned FreeCollab Android and iOS clients",
   "author": "Kris Ledel",

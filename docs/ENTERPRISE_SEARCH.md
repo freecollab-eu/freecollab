@@ -55,8 +55,13 @@ chosen personal provider. Connections belong to one current user and workspace;
 workspace/channel administrators do not gain access to another person's results.
 Channel membership is never substituted for external-provider ACLs.
 
-Customers issue their own **personal, read-only delegated access tokens** and
-register them using `POST /workspaces/{workspace_id}/enterprise-search/connections`:
+For Google/Microsoft, **Integrations → Provider accounts** now supports customer-
+owned OAuth applications, personal read-only consent, automatic refresh and
+revocation. Registrations remain separate from workspace SSO. See
+[PERSONAL_OAUTH.md](PERSONAL_OAUTH.md) for exact scopes, deployment and source-
+session boundaries. The manual token option remains compatible: customers can
+register their own **personal, read-only delegated access tokens** using
+`POST /workspaces/{workspace_id}/enterprise-search/connections`:
 
 ```json
 {
@@ -69,9 +74,9 @@ register them using `POST /workspaces/{workspace_id}/enterprise-search/connectio
 ```
 
 Microsoft config is `{"drive_id":"...","folder_id":"..."}`. The product does
-not supply a shared vendor SSO app. The customer's identity integration obtains
-and replaces tokens. This search grant does not currently run its own OAuth
-authorization/refresh flow: expired tokens fail closed and need replacement.
+not supply a shared vendor SSO app. In the manual-token path the customer's
+identity integration obtains/replaces tokens; manual tokens do not acquire an
+inferred refresh grant. The separate OAuth path renews its own source-bound grant.
 Credentials are encrypted at rest and omitted from all responses. Deleting the
 connection removes the delegation and invalidates outstanding citations.
 

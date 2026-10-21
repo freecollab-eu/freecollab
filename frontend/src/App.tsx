@@ -68,6 +68,13 @@ export default function App() {
       }
       setMeetingRoute(null)
       const syncConnected = params.get('sync_connected')
+      const providerConnected = params.get('provider_connected')
+      const providerError = params.get('provider_error')
+      if (providerConnected || providerError) {
+        window.history.replaceState(null, '', window.location.pathname + window.location.search)
+        setNotice(providerError ? t('Provider consent could not be completed. Open Provider accounts and try again.') : t('Provider account connected. Your delegated access is available in Provider accounts.'))
+        setView(api.isAuthenticated() ? 'chat' : 'auth'); return
+      }
       const syncError = params.get('sync_error')
       if (syncConnected || syncError) {
         window.history.replaceState(null, '', window.location.pathname + window.location.search)

@@ -1,0 +1,13 @@
+.fc-offline-summary { display:flex;flex-wrap:wrap;gap:16px;margin:18px 0;color:var(--fc-muted);font-size:.78rem; }
+.fc-offline-summary span,.fc-offline-file-choice>span { display:flex;align-items:center;gap:8px;min-width:0;overflow-wrap:anywhere; }
+.fc-offline-enroll,.fc-offline-file-choice { display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 0;flex-wrap:wrap; }
+.fc-offline-enroll small,.fc-offline-file-choice small { display:block;color:var(--fc-muted);font-size:.74rem;margin-top:5px; }
+.fc-offline-library .fc-mobile-queue li { display:flex;justify-content:space-between;gap:12px;align-items:center; }
+.fc-offline-history { border:1px solid var(--fc-border);border-radius:var(--fc-radius-md,12px);padding:16px;margin:18px 0; }
+.fc-offline-history ol { list-style:none;padding:0;max-height:360px;overflow:auto; }
+.fc-offline-history li { border-top:1px solid var(--fc-border);padding:12px 0; }
+.fc-offline-history li>strong { display:block;font-size:.77rem;margin-bottom:5px; }
+.fc-offline-history time { color:var(--fc-muted);font-size:.7rem; }
+.fc-offline-history p { white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;line-height:1.6; }
+.fc-offline-file-picker>input { display:block;width:100%;font:inherit;font-size:.8rem;margin:12px 0; }
+@media(max-width:480px) { .fc-offline-library .fc-mobile-queue li { align-items:flex-start;flex-wrap:wrap; }.fc-offline-library .fc-account-actions { flex-wrap:wrap; } }

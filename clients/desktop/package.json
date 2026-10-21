@@ -1,6 +1,6 @@
 {
   "name": "@freecollab/desktop",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "private": true,
   "description": "FreeCollab desktop client for your own installation",
   "author": "Kris Ledel",

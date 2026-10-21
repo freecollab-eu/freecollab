@@ -97,7 +97,7 @@ def check_response(response, allowed=(200, 201, 204, 207)):
     return response
 
 
-def request(method, url, *, headers=None, body=None, max_bytes=MAX_JSON_BYTES, timeout=30, allow_redirect_location=False):
+def request(method, url, *, headers=None, body=None, max_bytes=MAX_JSON_BYTES, timeout=30, allow_redirect_location=False, http2=False):
     """Return one bounded response; HTTP errors stay typed without body leakage.
 
     Non-2xx responses are returned for protocol-specific handling. Redirects are
@@ -106,7 +106,7 @@ def request(method, url, *, headers=None, body=None, max_bytes=MAX_JSON_BYTES, t
     """
     try:
         if (method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "PROPFIND", "REPORT", "OPTIONS"}
-                or type(allow_redirect_location) is not bool
+                or type(allow_redirect_location) is not bool or type(http2) is not bool
                 or type(max_bytes) is not int or not 0 <= max_bytes <= MAX_BYTES
                 or type(timeout) not in {int, float} or not 0 < timeout <= 60):
             raise ValueError()
@@ -139,7 +139,7 @@ def request(method, url, *, headers=None, body=None, max_bytes=MAX_JSON_BYTES, t
         proxy = pinned._proxy(host, port)
         context = ssl.create_default_context()
         backend = pinned._PinnedBackend(address, host, deadline, proxy_tls=bool(proxy and proxy[2]))
-        options = {"ssl_context": context, "network_backend": backend, "max_connections": 1, "max_keepalive_connections": 0}
+        options = {"ssl_context": context, "network_backend": backend, "max_connections": 1, "max_keepalive_connections": 0, "http1": not http2, "http2": http2}
         pool = (httpcore.HTTPProxy(proxy[0], proxy_auth=proxy[1], proxy_ssl_context=context if proxy[2] else None, **options)
                 if proxy else httpcore.ConnectionPool(**options))
         with pool:

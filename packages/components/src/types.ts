@@ -41,7 +41,9 @@ export type CollaborationProject = ProductRecord<ProjectFields>;
 export type CollaborationTask = ProductRecord<TaskFields>;
 export interface DecisionFields { title: string; content: string; status: 'proposed' | 'accepted' | 'superseded'; responsible_user_id: string | null; decision_date: string | null; source_message_id: string | null }
 export interface CollaborationDecision extends DecisionFields { id: string; channel_id: string; created_by: string; created_at: string; revision: number; content_mode: 'server' }
-export interface CalendarFields { title: string; description: string; location: string; starts_at: string; ends_at: string; all_day: boolean; timezone: string; reminder_minutes: number | null; external_uid: string | null }
+export interface CalendarRecurrence { frequency: 'daily' | 'weekly' | 'monthly'; interval?: number; count?: number }
+export interface CalendarException { original_start: string; cancelled?: boolean; starts_at?: string | null; ends_at?: string | null; title?: string | null; location?: string | null; description?: string | null }
+export interface CalendarFields { title: string; description: string; location: string; starts_at: string; ends_at: string; all_day: boolean; timezone: string; reminder_minutes: number | null; external_uid: string | null; recurrence?: CalendarRecurrence | null; exceptions?: CalendarException[] }
 export interface CollaborationCalendarEvent { id: string; channel_id: string; kind: 'calendar'; revision: number; deleted: boolean; content_mode: 'server'; fields: CalendarFields; created_by: string }
 export interface CollaborationMeeting { id: string; channel_id: string; host_user_id: string; created_at: string; expires_at: string; ended: boolean; max_participants: number; encryption: 'webrtc-dtls-srtp' }
 export interface WorkflowDefinition { id: string; workspace_id: string; channel_id: string; revision: number; enabled: boolean; fields: {name: string; trigger: string; steps: Array<{kind: string}>} }

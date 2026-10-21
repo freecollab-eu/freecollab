@@ -3,6 +3,7 @@ import WebKit
 import Capacitor
 import CryptoKit
 import Security
+import UserNotifications
 
 class SceneDelegate: UIResponder, UIWindowSceneDelegate {
     var window: UIWindow?
@@ -22,7 +23,36 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
 }
 
 class FreeCollabBridgeViewController: CAPBridgeViewController {
-    override func capacitorDidLoad() { bridge?.registerPluginInstance(FreeCollabNativePlugin()) }
+    override func capacitorDidLoad() {
+        bridge?.registerPluginInstance(FreeCollabNativePlugin())
+        bridge?.registerPluginInstance(FreeCollabPushPlugin())
+        if let runtime = bridge as? CapacitorBridge, let view = webView {
+            // Capacitor's JS export is main-frame-only, but an iframe can still
+            // address a WK message handler directly. Guard the actual native edge.
+            let controller = view.configuration.userContentController
+            controller.removeScriptMessageHandler(forName: "bridge")
+            controller.add(FreeCollabFrameGuard(delegate: runtime.webViewDelegationHandler, webView: view,
+                configured: runtime.config.serverURL), name: "bridge")
+        }
+    }
+}
+
+private final class FreeCollabFrameGuard: NSObject, WKScriptMessageHandler {
+    private let delegate: WebViewDelegationHandler
+    private weak var webView: WKWebView?
+    private let configured: URL?
+    init(delegate: WebViewDelegationHandler, webView: WKWebView, configured: URL?) {
+        self.delegate = delegate; self.webView = webView; self.configured = configured
+    }
+    func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
+        guard message.frameInfo.isMainFrame, let own = configured, own.scheme == "https", own.user == nil, own.password == nil,
+              let current = webView?.url, current.scheme == "https", current.host == own.host,
+              (current.port ?? 443) == (own.port ?? 443) else { return }
+        let origin = message.frameInfo.securityOrigin
+        guard origin.protocol == "https", origin.host == own.host,
+              (origin.port == 0 ? 443 : origin.port) == (own.port ?? 443) else { return }
+        delegate.userContentController(controller, didReceive: message)
+    }
 }
 
 /// System-browser login; only one-use PKCE material crosses the callback URL.
@@ -127,3 +157,121 @@ public class FreeCollabNativePlugin: CAPPlugin, CAPBridgedPlugin {
     }
 }
 
+
+
+extension Notification.Name {
+    static let freecollabAPNsRegistration = Notification.Name("FreeCollabAPNsRegistration")
+}
+
+/// Only opaque, validated routing and one-use device proofs persist natively.
+enum FreeCollabPushStore {
+    static let key = "freecollab-native-push-pending"
+    static func valid(_ value: Any?, _ length: Int) -> String? {
+        guard let text = value as? String, text.range(of: "^[A-Za-z0-9_-]{\(length)}$", options: .regularExpression) != nil else { return nil }
+        return text
+    }
+    static func items() -> [[String: String]] { return UserDefaults.standard.array(forKey: key) as? [[String: String]] ?? [] }
+    static func store(_ values: [AnyHashable: Any]) {
+        guard let type = values["type"] as? String else { return }
+        var item: [String: String] = ["type": type]
+        if type == "subscription_confirmation" {
+            guard let device = valid(values["device_id"], 32), let challenge = valid(values["challenge"], 43) else { return }
+            item["key"] = device; item["device_id"] = device; item["challenge"] = challenge
+        } else if type == "activity" || type == "incoming_call" {
+            guard let identifier = valid(values["id"], 32) else { return }
+            item["key"] = identifier; item["id"] = identifier
+        } else { return }
+        var pending = items().filter { $0["key"] != item["key"] }
+        pending = Array(pending.suffix(9)); pending.append(item)
+        UserDefaults.standard.set(pending, forKey: key)
+    }
+    static func clear(_ identifier: String) {
+        UserDefaults.standard.set(items().filter { $0["key"] != identifier }, forKey: key)
+    }
+}
+
+/// Registration only follows explicit device consent from the configured origin.
+@objc(FreeCollabPushPlugin)
+public class FreeCollabPushPlugin: CAPPlugin, CAPBridgedPlugin {
+    public let identifier = "FreeCollabPushPlugin"
+    public let jsName = "FreeCollabPush"
+    public let pluginMethods: [CAPPluginMethod] = [
+        CAPPluginMethod(name: "registerPush", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "refreshPush", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "unregisterPush", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getPendingPush", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearPush", returnType: CAPPluginReturnPromise)
+    ]
+    private var pending: CAPPluginCall?
+    private var observer: NSObjectProtocol?
+    private func origin(_ url: URL?) -> String? {
+        guard let url = url, url.scheme == "https", let host = url.host, url.user == nil, url.password == nil else { return nil }
+        return "https://" + host + (url.port.map { $0 == 443 ? "" : ":\($0)" } ?? "")
+    }
+    private func installation() -> Bool {
+        guard let configured = origin(bridge?.config.serverURL) else { return false }
+        return configured == origin(webView?.url)
+    }
+    public override func load() {
+        observer = NotificationCenter.default.addObserver(forName: .freecollabAPNsRegistration, object: nil, queue: .main) { [weak self] notification in
+            guard let self = self, let call = self.pending else { return }
+            self.pending = nil
+            guard self.installation(), let token = notification.object as? String else {
+                call.reject("Native registration could not be completed."); return
+            }
+            call.resolve(["platform": "ios", "token": token])
+        }
+    }
+    deinit { if let observer = observer { NotificationCenter.default.removeObserver(observer) } }
+    @objc func registerPush(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.installation(), self.pending == nil else { call.reject("Native notifications are unavailable or already opening."); return }
+            self.pending = call
+            UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound, .badge]) { [weak self] granted, error in
+                DispatchQueue.main.async {
+                    guard let self = self, self.pending === call else { return }
+                    guard granted, error == nil, self.installation() else {
+                        self.pending = nil; call.reject("Notifications are disabled or the installation changed."); return
+                    }
+                    UIApplication.shared.registerForRemoteNotifications()
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+                guard let self = self, self.pending === call else { return }
+                self.pending = nil; call.reject("Native registration timed out. Check signing and the push capability.")
+            }
+        }
+    }
+    @objc func refreshPush(_ call: CAPPluginCall) {
+        UNUserNotificationCenter.current().getNotificationSettings { [weak self] settings in
+            DispatchQueue.main.async {
+                guard let self = self, self.installation(), self.pending == nil, settings.authorizationStatus == .authorized else {
+                    call.reject("Notifications require explicit device consent."); return
+                }
+                self.pending = call
+                UIApplication.shared.registerForRemoteNotifications()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 30) { [weak self] in
+                    guard let self = self, self.pending === call else { return }
+                    self.pending = nil; call.reject("Native registration timed out.")
+                }
+            }
+        }
+    }
+    @objc func unregisterPush(_ call: CAPPluginCall) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self, self.installation() else { call.reject("The installation changed."); return }
+            self.pending?.reject("Native registration cancelled."); self.pending = nil
+            UIApplication.shared.unregisterForRemoteNotifications()
+            UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+            UserDefaults.standard.removeObject(forKey: FreeCollabPushStore.key); call.resolve()
+        }
+    }
+    @objc func getPendingPush(_ call: CAPPluginCall) {
+        guard installation() else { call.reject("The installation changed."); return }
+        call.resolve(["items": FreeCollabPushStore.items()])
+    }
+    @objc func clearPush(_ call: CAPPluginCall) {
+        guard installation() else { call.reject("The installation changed."); return }
+        FreeCollabPushStore.clear(call.getString("key") ?? ""); call.resolve()
+    }
+}

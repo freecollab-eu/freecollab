@@ -5,6 +5,8 @@ Run with its /data volume mounted. Secrets are read from environment or *_FILE;
 no secrets are printed. The application backend must be the only client gateway.
 """
 import os
+import json
+import re
 from pathlib import Path
 import subprocess
 import sys
@@ -23,6 +25,14 @@ server_name = os.environ.get("MATRIX_SERVER_NAME", os.environ.get("SYNAPSE_SERVE
 if not server_name or any(ch in server_name for ch in "/ \r\n"):
     raise SystemExit("A stable MATRIX_SERVER_NAME is required")
 registration_secret = secret("MATRIX_REGISTRATION_SHARED_SECRET")
+try:
+    federation_domains = json.loads(os.environ.get("MATRIX_FEDERATION_DOMAINS", "[]"))
+    if (not isinstance(federation_domains, list) or len(federation_domains) > 20
+            or any(not isinstance(domain, str) or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]", domain)
+                   for domain in federation_domains)):
+        raise ValueError()
+except (ValueError, TypeError):
+    raise SystemExit("MATRIX_FEDERATION_DOMAINS must be a JSON array of explicit DNS server names") from None
 if not path.exists():
     env = {**os.environ, "SYNAPSE_SERVER_NAME": server_name, "SYNAPSE_REPORT_STATS": "no"}
     subprocess.run(["/start.py", "generate"], env=env, check=True, stdout=subprocess.DEVNULL)
@@ -35,7 +45,7 @@ config.update({
     "enable_registration_without_verification": False,
     "report_stats": False,
     "trusted_key_servers": [],
-    "federation_domain_whitelist": [],
+    "federation_domain_whitelist": federation_domains,
     "allow_public_rooms_without_auth": False,
     "allow_public_rooms_over_federation": False,
     "enable_room_list_search": False,
@@ -45,7 +55,7 @@ config.update({
     "rc_login": {"address": {"per_second": 10, "burst_count": 1000}},
     "url_preview_enabled": False,
     "listeners": [{"port": 8008, "tls": False, "type": "http", "x_forwarded": False,
-                   "resources": [{"names": ["client"], "compress": False}]}],
+                   "resources": [{"names": ["client", "federation"] if federation_domains else ["client"], "compress": False}]}],
 })
 if os.environ.get("MATRIX_DATABASE_HOST"):
     config["database"] = {"name": "psycopg2", "args": {
@@ -56,4 +66,4 @@ if os.environ.get("MATRIX_DATABASE_HOST"):
     }}
 path.write_text(yaml.safe_dump(config))
 path.chmod(0o600)
-print("Private Matrix configuration initialized; registration and federation are disabled.")
+print("Private Matrix configuration initialized; registration is disabled and federation uses only the explicit operator allowlist.")

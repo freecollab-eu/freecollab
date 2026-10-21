@@ -94,12 +94,11 @@ backend/tests/test_shared_documents.py -q` from the repository root with
 `CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python
 frontend/tests/shared-documents-browser.py`. Its temporary API, Vite server,
 accounts, SQLite database and cryptographic keys are isolated and removed after
-the run. Add `--secure` to use configured `MATRIX_INTERNAL_URL`,
-`MATRIX_SERVER_NAME` and `MATRIX_REGISTRATION_SHARED_SECRET` environment variables,
-or reuse the retained homeserver identified by
-`/workspace/.freecollab/matrix-poc/runtime.json` (or
-`SHARED_DOCUMENTS_MATRIX_RUNTIME`). Only new isolated identities are created;
-the homeserver, its volume and existing keys are preserved. This additional
+the run. For `--secure`, start a disposable test homeserver and explicitly set
+`MATRIX_INTERNAL_URL`, `MATRIX_SERVER_NAME` and
+`MATRIX_REGISTRATION_SHARED_SECRET` for that fixture. The harness requires all
+three values and creates isolated test identities. The caller owns cleanup of
+the test homeserver and its volume. This additional
 proof verifies two trusted devices, chunked encrypted updates and snapshots,
 authenticated comments, document reconstruction, project/task peer edits and
 revision history, an encrypted approval note completed by the real workflow

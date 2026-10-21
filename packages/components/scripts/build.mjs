@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 const directory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
@@ -38,5 +38,23 @@ async function recordSources(path, prefix = '') {
   }
 }
 await recordSources(resolve(directory, 'src'));
-await writeFile(resolve(directory, 'dist/release.json'), JSON.stringify({ schemaVersion: 1, name: packageJson.name, version: packageJson.version, apiLine: '0.11', sourceDigest: createHash('sha256').update(JSON.stringify(sources)).digest('hex'), entries: Object.keys(packageJson.exports), encryption: 'trusted-origin-embed', nativeChannels: 'server-processed' }, null, 2) + '\n');
+await writeFile(resolve(directory, 'dist/release.json'), JSON.stringify({ schemaVersion: 1, name: packageJson.name, version: packageJson.version, apiLine: packageJson.version.split('.').slice(0, 2).join('.'), sourceDigest: createHash('sha256').update(JSON.stringify(sources)).digest('hex'), entries: Object.keys(packageJson.exports), encryption: 'trusted-origin-embed', nativeChannels: 'server-processed' }, null, 2) + '\n');
+// These are public distribution inputs. Canonical permissions keep npm's tar
+// headers reproducible across restrictive developer and ordinary CI umasks,
+// and let installed consumers read every export. Never follow a symlink when
+// changing permissions or touch private configuration outside this allowlist.
+async function normalizePublic(path) {
+  const entry = await lstat(path);
+  if (entry.isDirectory()) {
+    await chmod(path, 0o755);
+    for (const child of await readdir(path)) await normalizePublic(resolve(path, child));
+  } else if (entry.isFile()) await chmod(path, 0o644);
+  else throw new Error('Public package inputs must be regular files or directories.');
+}
+await normalizePublic(resolve(directory, 'dist'));
+for (const name of ['package.json', 'README.md', 'LICENSE', 'COMPATIBILITY.md']) {
+  const path = resolve(directory, name);
+  if (!(await lstat(path)).isFile()) throw new Error('A public package input is not a regular file: ' + name);
+  await chmod(path, 0o644);
+}
 process.stdout.write('Built ' + packageJson.name + '@' + packageJson.version + ' (typed ESM; React remains an optional peer).\n');

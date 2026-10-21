@@ -57,9 +57,9 @@ test('all-day dates retain an exclusive end and zero-minute display reminder thr
   assert.equal(restored.external_uid, fields.external_uid); assert.equal(restored.reminder_minutes, 0);
 });
 
-test('calendar import rejects recurrence and active alarms instead of silently changing behavior', () => {
+test('calendar import rejects unbounded recurrence and active alarms instead of silently changing behavior', () => {
   const base = calendar.exportCalendar([{ id: 'one', fields: event() }]);
-  assert.throws(() => calendar.importCalendar(base.replace('SUMMARY:', 'RRULE:FREQ=DAILY\r\nSUMMARY:')), /Recurring events/);
+  assert.throws(() => calendar.importCalendar(base.replace('SUMMARY:', 'RRULE:FREQ=DAILY\r\nSUMMARY:')), /with COUNT/);
   assert.throws(() => calendar.importCalendar(base.replace('ACTION:DISPLAY', 'ACTION:EMAIL')), /Only display reminders/);
   assert.throws(() => calendar.importCalendar(base.replace('TRIGGER:-PT15M', 'TRIGGER;RELATED=END:-PT15M')), /Only display reminders/);
   assert.throws(() => calendar.importCalendar(base.replace('TRIGGER:-PT15M', 'TRIGGER:-PT10081M')), /seven days/);
@@ -124,4 +124,38 @@ test('an account switch during secure lookup prevents a document write under the
   const f = apiFixture({ switchDuringHandles: true });
   await assert.rejects(f.api.saveDocument('room', f.fields), /account changed/);
   assert.equal(f.wire(), undefined); assert.equal(f.payload(), undefined);
+});
+
+test('bounded daily and monthly recurrence keeps local wall time across DST and skips absent month days', () => {
+  const rows = calendar.expandCalendarOccurrences(event({ starts_at: '2026-10-23T07:00:00Z', ends_at: '2026-10-23T07:30:00Z', recurrence: { frequency: 'daily', interval: 1, count: 4 } }), '2026-01-01', '2027-01-01');
+  assert.deepEqual(plain(rows.map(row => row.starts_at)), ['2026-10-23T07:00:00.000Z', '2026-10-24T07:00:00.000Z', '2026-10-25T08:00:00.000Z', '2026-10-26T08:00:00.000Z']);
+  const monthly = calendar.expandCalendarOccurrences(event({ all_day: true, starts_at: '2026-01-31', ends_at: '2026-02-01', recurrence: { frequency: 'monthly', interval: 1, count: 3 } }), '2026-01-01', '2027-01-01');
+  assert.deepEqual(plain(monthly.map(row => row.starts_at)), ['2026-01-31', '2026-03-31', '2026-05-31']);
+});
+
+test('spring-gap recurrence skips invalid local dates and counts valid occurrences', () => {
+  const rows = calendar.expandCalendarOccurrences(event({ starts_at: '2026-03-28T01:30:00Z', ends_at: '2026-03-28T02:00:00Z', recurrence: { frequency: 'daily', interval: 1, count: 3 } }), '2026-03-01', '2026-04-02');
+  assert.deepEqual(plain(rows.map(row => row.starts_at)), ['2026-03-28T01:30:00.000Z', '2026-03-30T00:30:00.000Z', '2026-03-31T00:30:00.000Z']);
+});
+
+test('recurrence exceptions cancel and move an occurrence into the requested window; nullable server fields resolve', () => {
+  const fields = event({ starts_at: '2026-10-23T07:00:00Z', ends_at: '2026-10-23T07:30:00Z', recurrence: { frequency: 'weekly', interval: 1, count: 3 }, exceptions: [
+    { original_start: '2026-10-30T08:00:00Z', cancelled: true, title: null, starts_at: null, ends_at: null, description: null, location: null },
+    { original_start: '2026-11-06T08:00:00Z', cancelled: false, starts_at: '2026-10-27T12:00:00Z', ends_at: '2026-10-27T13:00:00Z', title: 'Moved' },
+  ] });
+  const rows = calendar.expandCalendarOccurrences(fields, '2026-10-27', '2026-10-28');
+  assert.equal(rows.length, 1); assert.equal(rows[0].title, 'Moved'); assert.equal(rows[0].original_start, '2026-11-06T08:00:00.000Z');
+  assert.throws(() => calendar.validateCalendar(event({ recurrence: { frequency: 'daily', interval: 1, count: 367 } })), /366/);
+  assert.throws(() => calendar.validateCalendar({ ...fields, exceptions: [{ original_start: '2027-01-01T00:00:00Z', cancelled: true }] }), /distinct dates/);
+});
+
+test('bounded RRULE and EXDATE import and expanded ICS export preserve actual occurrence instants', () => {
+  const source = calendar.exportCalendar([{ id: 'one', fields: event({ starts_at: '2026-10-23T07:00:00Z', ends_at: '2026-10-23T07:30:00Z' }) }]);
+  const [imported] = calendar.importCalendar(source.replace('SUMMARY:', 'RRULE:FREQ=DAILY;COUNT=3\r\nEXDATE:20261024T070000Z\r\nSUMMARY:'));
+  // UTC DTSTART specifies a UTC recurrence; TZID imports retain local-wall DST.
+  assert.equal(imported.recurrence.count, 3); assert.equal(imported.exceptions.length, 1);
+  const fields = event({ starts_at: '2026-10-23T07:00:00Z', ends_at: '2026-10-23T07:30:00Z', recurrence: { frequency: 'daily', interval: 1, count: 3 }, exceptions: [{ original_start: '2026-10-24T07:00:00Z', cancelled: true }] });
+  const restored = calendar.importCalendar(calendar.exportCalendar([{ id: 'series', fields }]));
+  assert.equal(restored.length, 2); assert.deepEqual(plain(restored.map(row => row.starts_at)), ['2026-10-23T07:00:00.000Z', '2026-10-25T08:00:00.000Z']);
+  assert.notEqual(restored[0].external_uid, restored[1].external_uid);
 });

@@ -1,6 +1,6 @@
 # FreeCollab security model
 
-This describes the current product boundaries and supported single-replica installation. New secure channels use client-side Matrix encryption; legacy channels retain server-side encryption. The FreeCollab integration has not received an independent security audit. See [E2EE_IMPLEMENTATION.md](E2EE_IMPLEMENTATION.md) for device trust, recovery and visible routing metadata.
+This describes current product boundaries. The default is one API process; configured replicas require the complete shared-runtime controls in [SCALING.md](SCALING.md). New secure channels use client-side Matrix encryption; legacy channels retain server-side encryption. The FreeCollab integration has not received an independent security audit. See [E2EE_IMPLEMENTATION.md](E2EE_IMPLEMENTATION.md) for device trust, recovery and visible routing metadata.
 
 ## Content, credentials and keys
 
@@ -11,18 +11,19 @@ This describes the current product boundaries and supported single-replica insta
 | Message content keys | Independent versioned key ring, with an active key ID. New authenticated envelopes bind key ID and channel context. | Anyone with the database and required content key can decrypt it. |
 | JWT signing | Separate private secret signs seven-day login tokens. New logins have random identifiers; current-token logout persists a digest/expiry. | Signing-key holders and trusted server operators. |
 | Old unversioned ciphertext | Reads require an explicitly retained legacy content key. It is never implicitly derived from the live signing secret for new writes. | Retained old key and controlled offline migration. |
-| Legacy uploaded files | Original bytes are stored on the filesystem. API metadata truthfully identifies this as unencrypted storage. | Storage/backup administrators, server and authorized members. |
+| Native uploaded files | Original bytes use a local volume or explicitly configured S3-compatible storage. Native file bytes do not receive application-level content encryption. | Storage/backup administrators, server and authorized members; provider storage encryption is separate. |
 | Passwords | bcrypt; the API validates the UTF-8 byte limit rather than silently truncating. Passwords reach the backend over the configured transport. | Backend and TLS termination. |
 | Legacy user/channel key helpers | Registration creates key material on the server; Argon2id wraps the generated private key. These helpers are not the active content-encryption protocol. | The server handles the submitted password and generated key material. |
-| Browser credentials | React retains bearer credentials in localStorage; the widget takes a user-scoped token from its host. | Scripts on the application origin. XSS can expose browser credentials. |
+| Browser credentials | The standalone app retains its bearer in localStorage; the trusted embedded client keeps its child session in memory. The legacy widget takes a user-scoped host token. | Trusted client origins and host integration authorization. XSS can expose an origin’s credentials. |
+| Offline browser copies | Opted-in history/file metadata and bytes, drafts and queued content use account-bound AES-GCM ciphertext with nonextractable browser keys. No private API/media responses enter service-worker CacheStorage. | Trusted same-origin code and the unlocked browser; offline copies cannot observe revocation until reconnection. |
 
-Legacy file bytes and routing metadata do not inherit message-body encryption. Native decision/document/calendar revision payloads use the server key ring; secure document/calendar payloads use encrypted Matrix events. Generic notifications and webhook payloads disclose routing IDs and activity without decrypted content. Use storage-level encryption separately where required. The repository does not implement S3 storage. OTRUST digests, receipts and timestamps do not encrypt content.
+Legacy file bytes and routing metadata do not inherit message-body encryption. Native decision/document/calendar revision payloads use the server key ring; secure document/calendar payloads use encrypted Matrix events. Generic notifications and webhook payloads disclose routing IDs and activity without decrypted content. Use storage-level encryption separately where required. Optional [S3-compatible native storage](OBJECT_STORAGE.md) uses immutable conditional writes, bounded verified reads and version-aware erasure; it does not turn native files into Matrix E2EE. OTRUST digests, receipts and timestamps do not encrypt content.
 
 ## Content-key lifecycle
 
 Production requires an explicit `MESSAGE_ENCRYPTION_KEYS` JSON map, an active ID present in that map, a separate private `JWT_SECRET` and explicit HTTPS origins. The content key is a random standard-base64 32-byte value; it must not be the current signing-secret-derived legacy key. Development can generate a private persistent key file outside uploads; keep it with the associated development database.
 
-New encrypted bodies use a versioned envelope. The encrypted payload authenticates channel context, so copying it to a different channel fails. Retain older ring entries while any required live history or backup uses them. Signing-key rotation and content-key rotation are separate operations; changing the former does not re-encrypt legacy data.
+New encrypted bodies use a versioned envelope. The encrypted payload authenticates channel context, so copying it to a different channel fails. Retain older ring entries while any required live history or backup uses them. Optional [Vault Transit](ENTERPRISE_GOVERNANCE.md) wraps native data keys without changing the server-readable content boundary; a configured provider failure has no local-write fallback. Signing-key rotation and content-key rotation are separate operations; changing the former does not re-encrypt legacy data.
 
 Upgrade with writers stopped, a tested backup and an explicit legacy key retained from the old installation. Run the migration audit, then an applying transaction and a second audit. Malformed encrypted rows abort without partial updates; they must not be relabeled as plaintext automatically. See [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) for the exact commands and key-retention requirements. A database backup without its required content keys cannot recover encrypted history.
 
@@ -40,11 +41,11 @@ Personal Matrix identity and backup span the native account, requiring a separat
 
 Current-token logout persists revocation. Browser token clearing alone cannot revoke an already copied credential; the client must receive a successful server response to claim completed revocation. Blocking/deleting a user affects all credentials. Rotation of the signing secret invalidates outstanding tokens. Revocation checks also apply to existing sockets before authorized events/private delivery.
 
-Authentication throttling is bounded and process-local. It does not directly trust client-supplied forwarding headers. Keep one API worker/replica and admit only the intended private proxy as a trusted forwarder. Add shared limits/state before scaling. Process restarts reset in-memory limits, so these controls are not a complete denial-of-service defense.
+Authentication throttling is bounded. The single-process default uses local state; explicitly configured TLS Valkey supplies shared atomic limits, realtime fanout and presence for replicas. Configured shared authentication limits fail closed during broker outages. Admit only the intended private proxy as a trusted forwarder. Complete [SCALING.md](SCALING.md) before adding replicas; these controls are not a complete denial-of-service defense.
 
 Use HTTPS/WSS for public traffic, exact browser origins and a private API/database network. The default Compose profile binds only a loopback frontend and uses local HTTP; it is not a public TLS endpoint. Nginx proxies API/socket traffic and overwrites untrusted forwarding headers. Additional edge proxies need a deliberate client-IP policy. Set request-body limits at the edge as well as in the application.
 
-Permanent account/channel deletion is currently rejected with HTTP 409 until a reviewed retention workflow exists. Pausing an account or removing channel membership changes access without erasing retained content or backups. Message moderation uses soft deletion to preserve thread references.
+Direct permanent channel deletion remains fenced; [reviewed data controls](DATA_CONTROLS.md) provide preview-bound native retention, physical file cleanup and a separate dependency-checked account identity erasure action. Preservation holds and current authority apply. Removing membership changes access without erasing previously delivered content or backups. Message moderation uses soft deletion to preserve thread references.
 
 Protect durable file/database volumes, private configuration and backups. Backup helpers retain server signing/content/account keys and may contain legacy plaintext files. They do not contain users’ client encryption recovery keys; private filesystem permissions are not archive encryption. The restore workflow requires exact retained images and a new target. Follow [OPERATIONS.md](OPERATIONS.md) and independently verify restoration before accepting important content.
 
@@ -60,7 +61,7 @@ Recording is best effort after the action. A failed activity write emits only a 
 
 ## Optional integrations and advanced routes
 
-Posts/flows and comments are disabled by default. Core mentions are enabled and member-scoped. Advanced routes are disabled with `ENABLE_EXPERIMENTAL_FEATURES=false`; the server AI-demo routes use separate `ENABLE_DEMO_AI=false`. Opt-in is an operator choice and requires validation of the enabled surface. When the AI demo is enabled and `GROQ_API_KEY` is configured, demo messages/history can be sent to Groq. Do not send private production content to a demo provider.
+Experimental posts and comments are disabled by default. Core mentions are enabled and member-scoped. Advanced routes are disabled with `ENABLE_EXPERIMENTAL_FEATURES=false`; the server AI-demo routes use separate `ENABLE_DEMO_AI=false`. Opt-in is an operator choice and requires validation of the enabled surface. When the AI demo is enabled and `GROQ_API_KEY` is configured, demo messages/history can be sent to Groq. Do not send private production content to a demo provider.
 
 The legacy widget sends plaintext to the authenticated server and is refused access to secure channels. Its current protocol cannot join or send to encrypted rooms. It polls the latest 50 messages every three seconds. It does not reconcile edits/deletions or fill larger gaps. Render all host/user text as text. A host page must protect its user token, host a trusted bundle and never embed operator credentials. The [standalone example](../examples/widget/README.md) stores no token in the URL or persistent browser storage.
 
@@ -69,6 +70,56 @@ The legacy widget sends plaintext to the authenticated server and is refused acc
 [SCIM](SCIM.md) bearer credentials are shown once and stored as hashes. Authentication rechecks the issuing owner's current membership; demotion, blocking or removal requires another current owner to rotate the credential. Channel grants require both current workspace and channel approval. Provisioning cannot create a workspace owner or global administrator, merge personal accounts or erase previously held content keys. Deactivation removes access while retaining history.
 
 [OTRUST version timestamps](OTRUST_INTEGRATION.md) are optional and require explicit digest-sharing consent. The server hashes exact native bytes; secure versions carry a client-asserted digest and opaque event reference. OpenTimestamps checks the proof commitment, while independent Bitcoin-chain verification remains unclaimed. Timestamps do not establish authorship, legal identity or content confidentiality. Local tests used a synthetic provider and made no hosted claims.
+
+## Personal views, devices and optional connections
+
+[My day](MY_DAY.md) aggregates only currently permitted source references and
+bounded native fields. It creates no new channel grants or persistent plaintext
+index. Secure tasks and calendars are resolved on the trusted device. Calendar
+recurrence and exceptions follow the existing content encryption mode; internal
+attendee identities/responses remain server metadata. [Shared-time planning](CALENDAR_PLANNING.md)
+checks only the selected visible channel, not private or provider calendars.
+
+The [offline library](MOBILE_OFFLINE.md) is explicit per channel/file, bounded,
+same-sign-in and seven-day limited. Online reads recheck access and refresh the
+snapshot; known revocation removes retained copies. While offline, a device can
+still read content it previously received. An unlocked browser can use its own
+nonextractable key; this is not an independent password lock. Signing out erases
+browser vault records/keys, not files explicitly downloaded to the operating system.
+
+Browser Web Push and [native FCM/APNs alerts](NATIVE_PUSH.md) are separate opt-in
+transports, both disabled until their operator-owned provider setup is complete.
+Native alerts require the delivered device proof and current source-session,
+workspace/channel and activity/call checks. Payloads contain generic activity
+and opaque references, not conversation text, names or content keys. A delivered
+OS alert may outlive revocation, but resolving it checks current access. Call
+alerts do not admit a participant, activate media or guarantee background ringing.
+
+[Personal provider OAuth](PERSONAL_OAUTH.md) uses each customer's Google/Microsoft
+registration with purpose-specific delegated consent, one-use PKCE/browser state,
+sealed tokens and original verified source claims. Read-only search and reviewed
+fixed-endpoint calendar actions use separate grants. Refresh rotation is serialized
+and fails closed after ambiguous results; source logout or changed grants prevent
+reuse. Manual/custom token connectors retain their manual lifecycle. SSO alone
+does not authorize provider content or actions.
+
+[Slack imports](SLACK_IMPORT.md) create new native, server-readable archive
+channels only after explicit review. They never fetch embedded remote file URLs,
+merge accounts or retroactively claim E2EE. A mapped person receives a channel
+seat only through the importing administrator's selected mapping. Import rollback
+tracks owned file writes, but a storage cleanup outage can require operator
+reconciliation. The [integration library](INTEGRATION_LIBRARY.md) publishes bounded,
+reviewed declarative packages and exact digests; installation still requires its
+own current scopes and channel grants. Contract fixtures do not certify a
+publisher, source repository, provider service or security properties.
+
+[Connect](CONNECT.md) keeps the same-installation bilateral path. Optional
+[cross-installation Connect](CONNECT_FEDERATION.md) is disabled by default and
+requires deliberately pinned installation keys, allowed HTTPS peers and separately
+configured Matrix federation. Each side authorizes only its own accounts; no
+foreign workspace membership is inferred. Peer signatures and opaque control
+messages do not prevent a malicious participating operator from redistributing
+content its recipients already received. Neither path recalls recipient-held keys.
 
 ## Verification and remaining responsibilities
 

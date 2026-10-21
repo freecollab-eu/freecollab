@@ -15,7 +15,7 @@ class RequestBodyLimitMiddleware:
         path = scope.get("path", "")
         is_upload = scope.get("method") in {"POST", "PUT"} and (
             path.startswith("/files/") or path.startswith("/office-edit/") or path.startswith("/_matrix/media/") or
-            path.startswith("/_matrix/client/v1/media/") or path.startswith("/workspaces/") and path.endswith("/logo")
+            path.startswith("/_matrix/client/v1/media/") or path.startswith("/workspaces/") and (path.endswith("/logo") or path.endswith("/slack-imports/preview"))
         )
         limit = self.upload_limit if is_upload else self.json_limit
         lengths = [value for name, value in scope.get("headers", []) if name.lower() == b"content-length"]

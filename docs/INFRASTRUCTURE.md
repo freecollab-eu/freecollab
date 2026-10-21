@@ -46,7 +46,8 @@ or Google client secret built into the source.
 - [Meetings and clips](MEETINGS.md): LiveKit, TURN, dedicated worker, verified model
   preparation and the distinction between SFU transport and Matrix encryption.
 - [Shared channels](CONNECT.md): bilateral organizations on the same installation;
-  separate-installation federation is not enabled.
+  optional [cross-installation Connect](CONNECT_FEDERATION.md) requires pinned peer
+  keys and explicitly configured Matrix federation, and is disabled by default.
 - [Search](ENTERPRISE_SEARCH.md): current-source bounds and personal external grants.
 - [Apps](APP_PLATFORM.md): customer-installed commands, scoped bots and signed delivery.
 - [Governance](ENTERPRISE_GOVERNANCE.md): native DLP, preservation and Vault Transit.

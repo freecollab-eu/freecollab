@@ -446,6 +446,8 @@ def _preserved_metadata(content):
 def serialize_calendar(fields):
     try:
         fields = CalendarFields.model_validate(fields).model_dump()
+        if fields.get('recurrence') or fields.get('exceptions'):
+            raise ProviderError('unsupported_recurrence')
         uid = fields.get('external_uid') or secrets.token_urlsafe(24) + '@freecollab'
         lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//FreeCollab//Calendar Sync//EN', 'CALSCALE:GREGORIAN',
                  'BEGIN:VEVENT', 'UID:' + uid, 'DTSTAMP:' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'),

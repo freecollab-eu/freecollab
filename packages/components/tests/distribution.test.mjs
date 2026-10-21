@@ -15,6 +15,8 @@ test('the actual tarball resolves every framework-neutral entry and declarations
   try {
     const [packed] = JSON.parse(execFileSync(npm, ['pack', '--json', '--ignore-scripts', '--cache', resolve(temporary, 'npm-cache'), '--pack-destination', temporary], {cwd: directory, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024}));
     assert.equal(packed.name, '@freecollab/components');
+    assert.ok(packed.files.length > 0);
+    assert.ok(packed.files.every(file => file.mode === 0o644), 'Every public tarball member must be readable with canonical mode 0644');
     const modules = resolve(temporary, 'node_modules');
     const installed = resolve(modules, '@freecollab/components');
     await mkdir(resolve(modules, '@freecollab'), {recursive: true});
@@ -31,7 +33,7 @@ test('the actual tarball resolves every framework-neutral entry and declarations
     const manifest = JSON.parse(await readFile(resolve(installed, 'package.json'), 'utf8'));
     const metadata = JSON.parse(await readFile(resolve(installed, 'dist/release.json'), 'utf8'));
     assert.equal(metadata.version, manifest.version);
-    assert.equal(metadata.apiLine, '0.11');
+    assert.equal(metadata.apiLine, manifest.version.split('.').slice(0, 2).join('.'));
     assert.deepEqual(metadata.entries, Object.keys(manifest.exports));
     assert.equal(manifest.peerDependenciesMeta.react.optional, true);
     assert.equal(manifest.dependencies.yjs, '13.6.27');
@@ -46,6 +48,7 @@ test('the actual tarball resolves every framework-neutral entry and declarations
     const consumer = resolve(temporary, 'consumer.mts');
     await writeFile(consumer, Object.entries(expected).map(([entry, name], index) => 'import {' + name + ' as entry' + index + '} from ' + JSON.stringify('@freecollab/components' + (entry === '.' ? '' : entry.slice(1))) + ';\nvoid entry' + index + ';').join('\n') + '\nimport type {EmbedConfig} from "@freecollab/components/embed";\nimport type {EmbedSignIn} from "@freecollab/components/auth";\nexport type HostContracts = [EmbedConfig, EmbedSignIn];\n');
     const require = createRequire(import.meta.url);
+    await writeFile(consumer, (await readFile(consumer, 'utf8')) + '\nimport type {CalendarFields} from "@freecollab/components";\nconst series: CalendarFields = {title:"Weekly",description:"",location:"",starts_at:"2026-10-21T09:00:00Z",ends_at:"2026-10-21T10:00:00Z",all_day:false,timezone:"UTC",reminder_minutes:null,external_uid:null,recurrence:{frequency:"weekly",interval:1,count:4},exceptions:[{original_start:"2026-10-28T09:00:00Z",cancelled:true}]};\nvoid series;\n');
     const compiler = require.resolve('typescript/lib/tsc.js');
     execFileSync(process.execPath, [compiler, '--noEmit', '--strict', '--target', 'ES2020', '--module', 'NodeNext', '--moduleResolution', 'NodeNext', '--lib', 'ES2020,DOM,DOM.Iterable', consumer], {cwd: temporary, stdio: 'pipe'});
   } finally { await rm(temporary, {recursive: true, force: true}); }

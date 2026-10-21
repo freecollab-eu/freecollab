@@ -1,6 +1,6 @@
 # SDK release and distribution
 
-The source release builds `@freecollab/components@0.11.0`. Building or packing
+The source release builds `@freecollab/components@0.12.0`. Building or packing
 does not publish to npm, create a GitHub release, tag a repository or deploy an
 application. This SDK is pre-1.0 and uses the npm `next` distribution tag.
 
@@ -18,7 +18,7 @@ checks their declaration files, packs only the public allowlist and verifies
 npm's SHA-1/SHA-512 against the exact resulting bytes. It writes:
 
 ```text
-artifacts/freecollab-components-0.11.0.tgz
+artifacts/freecollab-components-0.12.0.tgz
 artifacts/release-manifest.json
 artifacts/SHA256SUMS
 ```
@@ -30,14 +30,22 @@ verifies the artifact; use `release:check` when test execution is also required.
 tarball includes the MIT license and the [compatibility contract](../packages/components/COMPATIBILITY.md).
 No runtime configuration, private test reports or secret values are included.
 
+The build normalizes only the public package inputs and generated distribution:
+directories use `0755`, and packed files use `0644`. This keeps consumers' files
+readable and prevents a developer's restrictive umask from changing tar headers.
+Release artifacts, checksum files and manifests also use `0644`; their parent
+directory can remain private. Identical payload bytes were packed identically
+under umasks `077` and `022` with the reviewed Node 24/npm 11 toolchain. Pin the
+toolchain and dependency lock when reproducing a reviewed archive.
+
 Install the reviewed artifact in the host application:
 
 ```sh
-npm install --save-exact /path/to/freecollab-components-0.11.0.tgz
+npm install --save-exact /path/to/freecollab-components-0.12.0.tgz
 ```
 
 Once that exact version has actually been published, the corresponding registry
-installation is `npm install --save-exact @freecollab/components@0.11.0`. That
+installation is `npm install --save-exact @freecollab/components@0.12.0`. That
 command is a future registry option, not evidence of publication. The package's
 Yjs runtime dependency is resolved by the host bundler; React is optional.
 
@@ -87,7 +95,7 @@ bundler. The legacy floating-widget IIFE remains a separate integration.
 
 ## Upgrade rules
 
-- Keep the SDK, backend and trusted embedded client on the same `0.11.x` release
+- Keep the SDK, backend and trusted embedded client on the same `0.12.x` release
   line. Check deployment health and current server capabilities before rollout.
 - Patch releases preserve documented APIs; fixes may reject insecure or obsolete
   behavior. A pre-1.0 minor release can change APIs and needs migration notes.

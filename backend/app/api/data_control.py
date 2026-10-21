@@ -279,6 +279,11 @@ def closure_state(session, user):
                             # are erased in this closure. Another participant's
                             # private records still protect the workspace.
                             if service._records(session, table.name, (fk.parent == member.workspace_id) & (table.c.user_id != user.id)): empty = False
+                        elif table.name == "slackimport":
+                            imports = service._records(session, table.name, fk.parent == member.workspace_id)
+                            own_imports = [row["id"] for row in imports if row["actor_id"] == user.id]
+                            if any(row["actor_id"] != user.id for row in imports): empty = False
+                            if own_imports and service._children(session, "slackimportmessage", "import_id", own_imports): empty = False
                         elif service._records(session, table.name, fk.parent == member.workspace_id): empty = False
         if empty: empty_homes.append(member.workspace_id)
         else: blockers.append(member.workspace_id)
@@ -384,6 +389,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "datacontroljob", "id", disposable_jobs)
     _delete_rows(session, "datacontrolpreview", "requested_by", [actor.id])
     service.erase_pilot_feedback_for_account(session, actor.id)
+    from ..services.slack_import import close_account_resources as close_slack_imports
+    close_slack_imports(session, actor.id)
     # Meeting device grants hold verified restriction snapshots independently
     # of JWT/native/embed session sidecars; erase them before session cleanup.
     _delete_rows(session, "meetingparticipantauthority", "user_id", [actor.id])
@@ -392,8 +399,13 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     subscription_ids = service._records(session, subscriptions.name, subscriptions.c.user_id == actor.id) if subscriptions is not None else []
     _delete_rows(session, "pushdelivery", "subscription_id", service._ids(subscription_ids))
     _delete_rows(session, "pushsubscription", "user_id", [actor.id])
+    native_devices = service._table("nativepushdevice")
+    native_device_rows = service._records(session, native_devices.name, native_devices.c.user_id == actor.id) if native_devices is not None else []
+    _delete_rows(session, "nativepushdelivery", "device_id", service._ids(native_device_rows))
+    _delete_rows(session, "nativepushdevice", "user_id", [actor.id])
     notifications = service._table("notification")
     notification_rows = service._records(session, notifications.name, notifications.c.user_id == actor.id) if notifications is not None else []
+    _delete_rows(session, "nativepushdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "pushdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notificationdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notification", "user_id", [actor.id])

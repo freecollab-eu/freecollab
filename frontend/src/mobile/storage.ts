@@ -5,7 +5,7 @@ const DATABASE = 'freecollab-mobile-v1';
 // An embedded session never borrows, purges or persists the standalone app's drafts.
 const transient = new Map<string, { owner: string; kind: Kind; id: string; value: unknown }>();
 if (typeof window !== 'undefined') window.addEventListener('freecollab:auth-changed', () => { if (api.isMemorySession()) transient.clear(); });
-type Kind = 'draft' | 'outbox';
+export type Kind = 'draft' | 'outbox' | 'offline-channel' | 'offline-file' | 'attachment-outbox';
 interface CipherRecord { id: string; owner: string; kind: Kind; iv: Uint8Array<ArrayBuffer>; ciphertext: ArrayBuffer }
 export interface Owner { user: string; token: string }
 
@@ -45,7 +45,7 @@ async function keyFor(db: IDBDatabase, expected: Owner): Promise<CryptoKey> {
   });
 }
 const recordId = (user: string, kind: Kind, id: string) => user + ':' + kind + ':' + id;
-const context = (user: string, kind: Kind, id: string) => new TextEncoder().encode('freecollab-mobile-v1\0' + user + '\0' + kind + '\0' + id);
+const context = (user: string, kind: Kind, id: string) => new TextEncoder().encode('freecollab-mobile-v1\0' + user + '\0' + kind + '\0' + id + (kind === 'draft' || kind === 'outbox' ? '' : '\0' + location.origin));
 
 export async function savePrivate<T>(kind: Kind, id: string, value: T, expected = owner()) {
   if (api.isMemorySession()) { assertOwner(expected); transient.set(recordId(expected.user, kind, id), { owner: expected.user, kind, id, value: structuredClone(value) }); return; }

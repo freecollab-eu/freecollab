@@ -150,8 +150,9 @@ with sync_playwright() as p:
         multiline = first_line + '\n' + second_line
         expect(entry).to_have_value(multiline)
         submitted = []
+        delivery_path = '/mobile/offline/channels/' + studio['id'] + '/messages'
         page.on('request', lambda request: submitted.append(request)
-                if request.method == 'POST' and request.url.endswith('/messages/channels/' + studio['id']) else None)
+                if request.method == 'POST' and request.url.endswith(delivery_path) else None)
         entry.dispatch_event('keydown', {'key': 'Enter', 'code': 'Enter', 'isComposing': True, 'bubbles': True, 'cancelable': True})
         next_paint(page)
         expect(entry).to_have_value(multiline)
@@ -159,7 +160,7 @@ with sync_playwright() as p:
         entry.press('Enter')
         expect(entry).to_have_value('')
         assert any(record['content'] == multiline for record in api('GET', '/messages/channels/' + studio['id'], alice))
-        assert len(submitted) == 1, 'Enter sent a multiline message more than once'
+        assert len(submitted) == 1, 'Enter must make exactly one durable multiline delivery request'
         article = page.locator('article').filter(has=page.get_by_text(multiline, exact=True))
         article.hover()
         article.get_by_role('button', name='Edit', exact=True).click()
@@ -175,21 +176,26 @@ with sync_playwright() as p:
         failed = 'A draft that stays here ' + RUN + '\nIncluding its second line.'
         def fail_send(route):
             route.abort('failed') if route.request.method == 'POST' else route.continue_()
-        route_pattern = '**/api/messages/channels/' + studio['id']
+        route_pattern = '**/api' + delivery_path
         page.route(route_pattern, fail_send)
         entry.fill(failed)
         page.get_by_role('button', name='Send message', exact=True).click()
-        expect(page.get_by_role('alert')).to_contain_text('Message was not sent')
-        expect(entry).to_have_value(failed)
+        expect(entry).to_have_value('')
+        expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.', exact=True)).to_be_visible()
+        assert not any(record['content'] == failed for record in api('GET', '/messages/channels/' + studio['id'], alice))
+        queued = page.evaluate("async()=>{const {mobileOutbox}=await import('/src/mobile/index.ts');return mobileOutbox.list();}")
+        pending = [record for record in queued if record['content'] == failed]
+        assert len(pending) == 1 and pending[0]['state'] == 'queued', 'A failed network send must retain exactly one durable queue entry'
         choose_channel(page, notes)
         expect(composer(page, notes)).to_have_value('')
         choose_channel(page, studio)
-        expect(composer(page, studio)).to_have_value(failed)
-        page.unroute(route_pattern, fail_send)
-        page.get_by_role('button', name='Send message', exact=True).click()
         expect(composer(page, studio)).to_have_value('')
+        page.unroute(route_pattern, fail_send)
+        page.evaluate("async()=>{const {mobileOutbox}=await import('/src/mobile/index.ts');await mobileOutbox.flush();await mobileOutbox.flush();}")
+        expect(page.get_by_text(failed, exact=True)).to_have_count(1)
         assert sum(record['content'] == failed for record in api('GET', '/messages/channels/' + studio['id'], alice)) == 1
-        print('PASS: failed multiline draft survives channel changes and retries exactly once', flush=True)
+        assert not page.evaluate("async()=>{const {mobileOutbox}=await import('/src/mobile/index.ts');return (await mobileOutbox.list()).some(row=>row.id===" + json.dumps(pending[0]['id']) + ");}")
+        print('PASS: network-failed multiline send survives channel changes in its encrypted queue and reconciles exactly once', flush=True)
 
         timeline = page.get_by_label('Channel messages', exact=True)
         wait_bottom(page)
@@ -407,6 +413,8 @@ with sync_playwright() as p:
             assert_fit(page, f'Typography controls overflowed at {width}px')
             page.keyboard.press('Escape')
             for trigger_name, dialog_name in (('Channel files', 'Channel files'), ('Channel members', 'Channel members'), ('Notifications', 'Notifications')):
+                if not page.get_by_role('button', name=trigger_name, exact=True).is_visible():
+                    page.get_by_role('button', name='More channel tools', exact=True).click()
                 page.get_by_role('button', name=trigger_name, exact=True).click()
                 panel = page.get_by_role('dialog', name=dialog_name, exact=True)
                 assert_modal(page, panel, composer(page, studio))

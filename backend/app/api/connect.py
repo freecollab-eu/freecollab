@@ -72,10 +72,16 @@ def source_authority_valid(session, connection):
 
 @router.get("/capabilities")
 def capabilities(user=Depends(get_current_user)):
-    return {"local_shared_channels": True, "cross_installation": False,
+    from ..services.connect_federation import configuration
+    try:
+        _, peers = configuration()
+        federated = bool(peers)
+    except HTTPException:
+        federated = False
+    return {"local_shared_channels": True, "cross_installation": federated,
             "encryption_configured": bool(getattr(settings, "matrix_enabled", False)),
             "transport": "local",
-            "external_requirement": "Separate installations require an operator-managed federated Matrix/provider integration; this endpoint does not enable federation."}
+            "external_requirement": "Across installations uses explicitly pinned installation keys and separately configured federated Matrix homeservers. Configure both operators before inviting a partner."}
 
 
 @router.get("/workspaces/{workspace_id}/connections")

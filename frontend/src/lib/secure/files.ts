@@ -13,13 +13,17 @@ function check(signal?: AbortSignal) { if (signal?.aborted) throw new DOMExcepti
 const accountId = (sender: string) => /^@fc_([^:]+):/.exec(sender)?.[1];
 const domainOf = (sender: string) => sender.slice(sender.indexOf(':') + 1);
 
-function authenticatedOwner(event: MatrixEvent, domain: string): string | null {
+function authenticatedOwner(event: MatrixEvent, domain: string, peerServer?: string): string | null {
   const owner = event.getContent().owner_id;
-  return typeof owner === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(owner) && event.getSender() === `@fc_${owner}:${domain}` ? owner : null;
+  if (typeof owner !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(owner)) return null;
+  if (event.getSender() === `@fc_${owner}:${domain}`) return owner;
+  // The authorized room binding supplies one explicitly pinned peer domain.
+  // Remote owners retain their domain and cannot claim a local document owner.
+  return peerServer && event.getSender() === `@fc_${owner}:${peerServer}` ? event.getSender()! : null;
 }
 
-function asFile(channelId: string, event: MatrixEvent, domain: string): ManagedFile | null {
-  const content = event.getContent(), owner = authenticatedOwner(event, domain);
+function asFile(channelId: string, event: MatrixEvent, domain: string, peerServer?: string): ManagedFile | null {
+  const content = event.getContent(), owner = authenticatedOwner(event, domain, peerServer);
   if (!owner || event.getType() !== FILE_EVENT || !event.isEncrypted() || event.isRedacted() || !event.getId()?.startsWith('$') || content.deleted ||
       typeof content.document_id !== 'string' || !content.document_id || content.document_id.length > 256 ||
       !Number.isSafeInteger(content.version_number) || content.version_number < 1 || content.version_number > 1_000_000 ||
@@ -35,7 +39,7 @@ function asFile(channelId: string, event: MatrixEvent, domain: string): ManagedF
 
 async function index(channelId: string, signal?: AbortSignal): Promise<FileIndex> {
   check(signal);
-  const { c, room, roomId } = await secureMessaging.roomFor(channelId);
+  const { c, room, roomId, federatedPeerServer } = await secureMessaging.roomFor(channelId);
   const domain = domainOf(c.getUserId()!);
   // Metadata remains in encrypted room history. Do not create a server-side name index.
   while (room.oldState.paginationToken) {
@@ -48,13 +52,13 @@ async function index(channelId: string, signal?: AbortSignal): Promise<FileIndex
   const documents = new Map<string, ManagedFile>(), deleted = new Set<string>();
   for (const event of events) {
     if (event.getType() !== FILE_EVENT || event.getRoomId() !== roomId || !event.isEncrypted() || event.isRedacted() || !event.getId()?.startsWith('$')) continue;
-    const content = event.getContent(), owner = authenticatedOwner(event, domain);
+    const content = event.getContent(), owner = authenticatedOwner(event, domain, federatedPeerServer);
     if (!owner) continue;
     if (content.deleted === true) {
       if (typeof content.document_id === 'string' && documents.get(content.document_id)?.document_owner_id === owner) deleted.add(content.document_id);
       continue;
     }
-    const file = asFile(channelId, event, domain);
+    const file = asFile(channelId, event, domain, federatedPeerServer);
     if (!file || deleted.has(file.document_id!)) continue;
     const previous = documents.get(file.document_id!);
     if (previous ? previous.document_owner_id !== owner || file.version_number !== previous.version_number! + 1 : file.version_number !== 1) continue;
@@ -140,9 +144,9 @@ export const secureFileProvider: ChannelFileProvider = {
     check(options.signal);
     const state = await index(file.channel_id, options.signal), stored = state.files.find(row => row.id === file.id);
     if (!stored) throw new Error('This encrypted file is no longer available.');
-    const { c, roomId } = await secureMessaging.roomFor(file.channel_id);
+    const { c, roomId, federatedPeerServer } = await secureMessaging.roomFor(file.channel_id);
     // Re-read the authenticated room event; injected locators and keys are ignored.
-    const event = await secureMessaging.getDecryptedEvent(file.channel_id, stored.id), actual = asFile(file.channel_id, event, domainOf(c.getUserId()!));
+    const event = await secureMessaging.getDecryptedEvent(file.channel_id, stored.id), actual = asFile(file.channel_id, event, domainOf(c.getUserId()!), federatedPeerServer);
     if (!actual?.secure_url || event.getRoomId() !== roomId) throw new Error('Encrypted attachment metadata is unavailable.');
     const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(actual.secure_url);
     if (!parsed) throw new Error('Invalid encrypted attachment locator.');

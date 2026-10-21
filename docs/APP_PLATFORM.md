@@ -8,7 +8,7 @@ own HTTPS endpoint and optional authorization. **Work → Apps & automation** is
 available to current channel members for installed commands, app cards and private
 AI drafts. Customers continue using their own identity provider and provider apps.
 
-## Five working setup recipes
+## Seven working setup recipes
 
 | Recipe | Actual outgoing protocol | Customer configuration |
 | --- | --- | --- |
@@ -17,10 +17,15 @@ AI drafts. Customers continue using their own identity provider and provider app
 | Jira Cloud issues | `POST /rest/api/3/issue`, project key, summary, Task issue type, Atlassian Document Format description | Tenant endpoint and your own scoped OAuth gateway or Basic base64(email:API-token) |
 | Zendesk tickets | `POST /api/v2/tickets.json` with ticket subject and comment body | Tenant endpoint and Bearer OAuth token or Basic base64(email/token:API-token) |
 | Salesforce cases | `POST /services/data/v61.0/sobjects/Case` with Subject/Description | Organization instance endpoint and customer-owned Connected App OAuth token |
+| Google Calendar | Fixed `POST /calendar/v3/calendars/primary/events` with reviewed title/start/end, no attendees | Customer-owned OAuth registration plus the invoking person's calendar-action consent |
+| Microsoft Calendar | Fixed `POST /v1.0/me/events` with reviewed title/start/end, no attendees | Customer-owned exact Entra tenant registration plus the invoking person's calendar-action consent |
 
-These are explicit create-action recipes. They do not silently configure OAuth,
-refresh customer tokens, subscribe to provider webhooks, synchronize all records,
-or claim a provider was connected merely because configuration was saved. A
+These are explicit create-action recipes. Google/Microsoft use the separate
+[personal OAuth setup](PERSONAL_OAUTH.md) with encrypted refresh and revocation;
+installation alone never grants another person's provider account. The other
+recipes keep their existing customer-managed token/gateway lifecycle. Recipes do
+not subscribe to provider webhooks, synchronize all records, or claim a provider
+was connected merely because configuration was saved. A
 customer gateway can own refresh, conditional logic and additional providers.
 Existing Google/Microsoft cloud synchronization, calendar, document, SSO and
 metadata-only n8n/webhook connections remain separate and compose with this API.
@@ -28,7 +33,7 @@ No customer provider credentials are requested by FreeCollab's publisher.
 
 ## Manifest and installation contract
 
-`GET /workspaces/{workspace}/apps/catalog` returns all five recipe manifests and
+`GET /workspaces/{workspace}/apps/catalog` returns all seven recipe manifests and
 setup notes. A custom app uses the same `POST /workspaces/{workspace}/apps` API:
 
 ```json

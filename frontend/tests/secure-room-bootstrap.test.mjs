@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 
-function fixture({ joined = false, allowed = true, status = 'active' } = {}) {
+function fixture({ joined = false, allowed = true, status = 'active', federated = false, unexpected = false } = {}) {
   const calls = [], callbacks = new Map();
   let invited = false;
-  const room = { getMyMembership: () => joined ? 'join' : 'invite', currentState: { setStateEvents() {} }, getLiveTimeline: () => ({ getEvents: () => [] }) };
+  const room = { getMyMembership: () => joined ? 'join' : 'invite', currentState: { setStateEvents() {} }, getLiveTimeline: () => ({ getEvents: () => [] }),
+    getJoinedMembers: () => [{ userId: '@fc_partner:private.test' }, ...(unexpected ? [{ userId: '@fc_unapproved:remote.test' }] : [])] };
   const crypto = { globalBlacklistUnverifiedDevices: false, forceDiscardSession: async () => calls.push('discard') };
   const client = {
     on(event, callback) { callbacks.set(event, [...(callbacks.get(event) || []), callback]); },
@@ -37,15 +38,18 @@ function fixture({ joined = false, allowed = true, status = 'active' } = {}) {
       calls.push(path);
       if (path === '/api/secure/session') return { ok: true, json: async () => ({ user_id: '@fc_partner:private.test', access_token: 'fixture-matrix-token', device_id: 'BROWSER' }) };
       if (path === '/api/secure/channels') return { ok: true, json: async () => [{ channel_id: 'shared', room_id: '!room:private.test', status }] };
+      if (path === '/api/channels/shared/members') return { ok: true, json: async () => [{ user_id: 'partner', name: 'Partner' }] };
       assert.equal(path, '/api/secure/channels/shared/sync');
       assert.equal(options.method, 'POST');
       if (!allowed) return { ok: false, status: 403, json: async () => ({ detail: 'Current channel membership required' }) };
       invited = true;
-      return { ok: true, json: async () => ({ membership_epoch: 'current-epoch', revoked_devices: [] }) };
+      return { ok: true, json: async () => ({ membership_epoch: 'current-epoch', revoked_devices: [],
+        ...(federated ? { federated_operators: ['@control:private.test', '@control:remote.test'] } : {}) }) };
     },
   });
   exports.configureSecureMessaging({ baseUrl: '/api', getAccessToken: () => 'fixture-scoped-session', getUserId: () => 'partner' });
-  return { calls, open: writing => exports.secureMessaging.roomFor('shared', writing) };
+  return { calls, open: writing => exports.secureMessaging.roomFor('shared', writing),
+    send: () => exports.secureMessaging.sendEvent('shared', 'eu.freecollab.channel.metadata', { name: 'Private title' }) };
 }
 
 test('first encrypted read synchronizes the current product seat before joining Matrix', async () => {
@@ -72,4 +76,9 @@ test('encrypted writes retain current epoch synchronization and session rotation
   assert.equal((await f.open(true)).membershipEpoch, 'current-epoch');
   assert.ok(f.calls.includes('/api/secure/channels/shared/sync'));
   assert.ok(f.calls.includes('discard'));
+});
+
+test('federated encryption rejects an unexpected joined device before distributing even metadata keys', async () => {
+  const f = fixture({ joined: true, federated: true, unexpected: true });
+  await assert.rejects(f.send(), /Unexpected encrypted room occupants/);
 });

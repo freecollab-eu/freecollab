@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { AlertCircle, ArrowUpRight, Laptop, Loader2, ShieldCheck, X } from 'lucide-react';
 import { t, useI18n } from '../i18n';
 import { api } from '../lib/api';
+import { NativePushController } from './NativePushSettings';
 import { nativeContextKey, validateNativeContext, type NativeClientContext } from '../lib/native-client-context';
 import { useModalFocus } from '../lib/useModalFocus';
 import '../styles/native-clients.css';
@@ -94,7 +95,7 @@ export function NativeClientSignIn({ children }: { children: ReactNode }) {
     } catch { if (mounted.current) setError('The connection could not be completed. Start again from your app.'); }
     finally { if (mounted.current) { setBusy(false); inFlight.current = false; } }
   }
-  return <>{children}
+  return <>{children}<NativePushController/>
     {bridge && !signedIn && <aside className="fc-native-signin" aria-label={t('Native app sign-in')}><ShieldCheck size={18} /><span>{t('Use your browser for organization sign-in.')}</span><button type="button" className="fc-button fc-button-primary" disabled={busy} onClick={() => void browserSignIn()}>{busy ? <Loader2 size={16} className="fc-account-spinner" /> : <ArrowUpRight size={16} />}{t('Sign in with browser')}</button>{busy && bridge.cancelSignIn && <button type="button" className="fc-button" onClick={() => void bridge.cancelSignIn!().catch(() => {})}>{t('Cancel')}</button>}{error && <p role="alert">{t(error)}</p>}</aside>}
     {context && signedIn && createPortal(<div className="fc-account-overlay"><section ref={dialog} className="fc-account-panel fc-native-approval" role="dialog" aria-modal="true" aria-label={t('Connect your app')} tabIndex={-1}>
       <header className="fc-account-header"><div><span className="fc-kicker">FreeCollab</span><h2>{t('Connect your app')}</h2></div><button type="button" className="fc-icon-button" aria-label={t('Cancel')} disabled={busy} onClick={close}><X size={20} /></button></header>

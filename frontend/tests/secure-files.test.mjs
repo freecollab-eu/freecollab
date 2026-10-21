@@ -9,7 +9,7 @@ const source = readFileSync(new URL('../src/lib/secure/files.ts', import.meta.ur
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const previewHelpers = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/file-preview.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: previewHelpers, File });
-function fixture() {
+function fixture({ peerServer } = {}) {
   const exports = {}, events = [], media = new Map(), transactions = new Map(), uploads = [], downloads = [];
   const control = { owner: 'owner', failAfterSend: false, upload: null };
   function event(content, sender = '@fc_owner:local.test', id = '$' + crypto.randomUUID()) {
@@ -22,7 +22,7 @@ function fixture() {
       if (control.upload) return control.upload(blob, options);
       const uri = 'mxc://local.test/' + crypto.randomUUID(); media.set(uri.split('/').at(-1), await blob.arrayBuffer()); return { content_uri: uri };
     } };
-  const secureMessaging = { handles: async () => true, roomFor: async () => ({ c, room: { oldState: {} }, roomId: '!room:local.test' }),
+  const secureMessaging = { handles: async () => true, roomFor: async () => ({ c, room: { oldState: {} }, roomId: '!room:local.test', federatedPeerServer: peerServer }),
     events: async () => events,
     sendEvent: async (channel, type, content, transactionId) => {
       if (transactionId && transactions.has(transactionId)) return { event_id: transactions.get(transactionId) };
@@ -95,4 +95,20 @@ test('secure upload abort reaches the homeserver upload and sends no metadata ac
   control.upload = (blob, options) => new Promise((resolve, reject) => { release(); options.abortController.signal.addEventListener('abort', () => reject(new DOMException('aborted','AbortError'))); });
   const pending = provider.upload('channel', file(), { ...opts(), signal: controller.signal }), rejected = assert.rejects(pending, { name:'AbortError' });
   await ready; controller.abort(); await rejected; assert.equal(uploads[0].options.abortController.signal.aborted, true); assert.equal(events.length, 0);
+});
+
+test('only an explicitly bound peer domain may supply remote encrypted files and cannot impersonate a local owner', async () => {
+  const { provider, events, event } = fixture({ peerServer: 'peer.test' });
+  await provider.upload('channel', file(), opts());
+  const content = events[0].getContent();
+  events.push(event({ ...content, document_id: 'remote-document', name: 'peer-file.txt' }, '@fc_owner:peer.test'));
+  events.push(event({ ...content, document_id: 'evil-document', name: 'evil.txt' }, '@fc_owner:untrusted.test'));
+  const records = await provider.list('channel');
+  assert.equal(records.length, 2);
+  const remote = records.find(row => row.document_id === 'remote-document');
+  assert.equal(remote.document_owner_id, '@fc_owner:peer.test');
+  assert.equal(remote.uploader_id, '@fc_owner:peer.test');
+  assert.equal(await (await provider.download(remote)).text(), 'private attachment bytes');
+  await assert.rejects(provider.delete(remote), /owner/);
+  await assert.rejects(provider.upload('channel', file(), { ...opts(), documentId: remote.document_id }), /owner/);
 });

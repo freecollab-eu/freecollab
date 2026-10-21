@@ -2,6 +2,7 @@ import { t, useI18n, currentLocale } from '../i18n';
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import { Check, Download, Eye, FileJson, FileText, History, Image as ImageIcon, Plus, RotateCcw, ShieldCheck, Trash2, Upload, X } from 'lucide-react';
 import { api } from '../lib/api';
+import { attachmentOutbox } from '../mobile/library';
 import { deleteChannelFile, downloadChannelFile, listFileVersions, uploadChannelFile, wasCancelled, type ManagedFile } from '../lib/files-api';
 import { FilePreview, canPreviewFile } from './FilePreview';
 import { VersionProofs } from './VersionProofs';
@@ -22,7 +23,7 @@ interface UploadItem {
   id: string;
   file: File;
   documentId?: string;
-  status: 'queued' | 'uploading' | 'done' | 'failed' | 'cancelled';
+  status: 'queued' | 'uploading' | 'done' | 'offline' | 'failed' | 'cancelled';
   progress: number;
   error?: string;
 }
@@ -94,6 +95,13 @@ export function ChannelFiles({ channelId, files, setFiles, loading, onNotice, on
     void (async () => {
       const invalid = validation(item.file);
       if (invalid) throw new Error(invalid);
+      if (!navigator.onLine) {
+        if (controller.signal.aborted) return;
+        await attachmentOutbox.enqueue(channelId, item.file, item.documentId, item.id);
+        if (controller.signal.aborted) { await attachmentOutbox.remove(item.id); return; }
+        if (valid()) { update(item.id, { status: 'offline', progress: 0 }); onNotice(t('Attachment saved in the encrypted outbox. Current access is checked before sending.')); }
+        return;
+      }
       const saved = await uploadChannelFile(channelId, item.file, {
         signal: controller.signal, requestId: item.id, documentId: item.documentId,
         onProgress: progress => { if (valid() && !controller.signal.aborted) update(item.id, { progress }); },
@@ -189,7 +197,7 @@ export function ChannelFiles({ channelId, files, setFiles, loading, onNotice, on
       <p className="fc-file-access"><ShieldCheck size={12} />{files.some(file => file.encrypted) ? t("Encrypted files open only on your device.") : t("Only channel members can download these files.")}</p>
     </section>
     <input ref={versionInput} type="file" aria-label={t("Choose a new version")} accept={accept} className="fc-file-version-input" tabIndex={-1} onChange={event => { if (event.target.files?.length && versionTarget.current) enqueue(event.target.files, versionTarget.current); versionTarget.current = null; }} />
-    {queue.length > 0 && <section className="fc-upload-queue" aria-labelledby="upload-queue-heading"><header><h3 id="upload-queue-heading">{t("Uploads")}{pending > 0 ? t(" · {value0} remaining", { value0: String(pending) }) : ''}</h3>{!pending && <button type="button" className="fc-text-button" onClick={() => setQueue([])}>{t("Clear list")}</button>}</header><ul>{queue.map(item => <li key={item.id} className={`fc-upload-item is-${item.status}`}><div className="fc-upload-item-heading"><div><strong>{t("Upload · ")}{item.file.name}</strong><span>{size(item.file.size)}{item.documentId ? t(" · New version") : ''}</span></div>{item.status === 'done' ? <Check size={17} aria-label={t("Upload acknowledged")} /> : item.status === 'queued' || item.status === 'uploading' ? <button type="button" className="fc-icon-button" aria-label={t("Cancel upload {value0}", { value0: String(item.file.name) })} onClick={() => cancel(item.id)}><X size={16} /></button> : <button type="button" className="fc-text-button" onClick={() => update(item.id, { status: 'queued', error: undefined, progress: 0 })} aria-label={t("Retry upload {value0}", { value0: String(item.file.name) })}><RotateCcw size={13} />{t("Retry")}</button>}</div>{item.status === 'uploading' && <div role="progressbar" aria-label={t("Uploading {value0}", { value0: String(item.file.name) })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress} className="fc-upload-progress"><span style={{ width: `${item.progress}%` }} /></div>}<p role={item.status === 'failed' ? 'alert' : 'status'}>{item.status === 'queued' ? t("Waiting…") : item.status === 'uploading' ? item.progress >= 99 ? t("Waiting for confirmation…") : t("Uploading · {value0}%", { value0: String(item.progress) }) : item.status === 'done' ? t("Uploaded") : item.status === 'failed' ? item.error : t("Cancelled locally. Refresh to check delivery, or retry safely.")}</p></li>)}</ul></section>}
+    {queue.length > 0 && <section className="fc-upload-queue" aria-labelledby="upload-queue-heading"><header><h3 id="upload-queue-heading">{t("Uploads")}{pending > 0 ? t(" · {value0} remaining", { value0: String(pending) }) : ''}</h3>{!pending && <button type="button" className="fc-text-button" onClick={() => setQueue([])}>{t("Clear list")}</button>}</header><ul>{queue.map(item => <li key={item.id} className={`fc-upload-item is-${item.status}`}><div className="fc-upload-item-heading"><div><strong>{t("Upload · ")}{item.file.name}</strong><span>{size(item.file.size)}{item.documentId ? t(" · New version") : ''}</span></div>{item.status === 'done' || item.status === 'offline' ? <Check size={17} aria-label={t("Upload acknowledged")} /> : item.status === 'queued' || item.status === 'uploading' ? <button type="button" className="fc-icon-button" aria-label={t("Cancel upload {value0}", { value0: String(item.file.name) })} onClick={() => cancel(item.id)}><X size={16} /></button> : <button type="button" className="fc-text-button" onClick={() => update(item.id, { status: 'queued', error: undefined, progress: 0 })} aria-label={t("Retry upload {value0}", { value0: String(item.file.name) })}><RotateCcw size={13} />{t("Retry")}</button>}</div>{item.status === 'uploading' && <div role="progressbar" aria-label={t("Uploading {value0}", { value0: String(item.file.name) })} aria-valuemin={0} aria-valuemax={100} aria-valuenow={item.progress} className="fc-upload-progress"><span style={{ width: `${item.progress}%` }} /></div>}<p role={item.status === 'failed' ? 'alert' : 'status'}>{item.status === 'queued' ? t("Waiting…") : item.status === 'uploading' ? item.progress >= 99 ? t("Waiting for confirmation…") : t("Uploading · {value0}%", { value0: String(item.progress) }) : item.status === 'done' ? t("Uploaded") : item.status === 'offline' ? t("Saved in encrypted attachment outbox") : item.status === 'failed' ? item.error : t("Cancelled locally. Refresh to check delivery, or retry safely.")}</p></li>)}</ul></section>}
     {loading && !files.length && !queue.length ? <div className="fc-panel-loading" role="status"><span className="fc-panel-spinner" /><span>{t("Loading files…")}</span></div> : files.length === 0 ? <div className="fc-panel-empty"><span className="fc-empty-file-icon"><FileText size={24} strokeWidth={1.25} /></span><h3>{t("No files yet.")}</h3><p>{t("Useful references, all in one place. Choose files above to share them with this channel.")}</p></div> : <section className="fc-shared-files" aria-labelledby="shared-files-heading"><div className="fc-shared-files-heading"><h3 id="shared-files-heading">{t("Recently shared")}</h3><span>{size(files.reduce((sum, file) => sum + file.size, 0))} {t(" total")}</span></div><div className="fc-file-view-controls" role="group" aria-label={t("File view")}><button type="button" className={button} aria-pressed={view === 'list'} onClick={() => setView('list')}>{t("List")}</button><button type="button" className={button} aria-pressed={view === 'grid'} onClick={() => setView('grid')}>{t("Gallery")}</button></div>{view === 'grid' ? <FileGallery files={ordered} onPreview={setPreview} /> : <ul className="fc-file-list">{ordered.map(file => {
       const Icon = file.content_type.startsWith('image/') ? ImageIcon : file.content_type === 'application/json' ? FileJson : FileText;
       const owner = (file.document_owner_id || file.uploader_id) === currentUser;

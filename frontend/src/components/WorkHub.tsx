@@ -20,7 +20,7 @@ import { ChannelApps } from './ChannelApps';
 import '../styles/work-hub.css';
 
 export type WorkHubTab = 'tasks' | 'meetings' | 'documents' | 'workflows' | 'data' | 'mobile' | 'feed' | 'copilot' | 'cloud' | 'external-meetings' | 'apps';
-interface Props { workspaceId: string; channel: Channel; onClose: () => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean }
+interface Props { workspaceId: string; channel: Channel; onClose: () => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string }
 const tabs = [
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
   { id: 'copilot', label: 'Copilot', icon: Sparkles },
@@ -35,7 +35,7 @@ const tabs = [
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
 
-export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false }: Props) {
+export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId }: Props) {
   useI18n();
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [unrestricted, setUnrestricted] = useState(false);
@@ -73,7 +73,7 @@ export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', d
           {tab === 'copilot' && <CopilotPanel {...props} isAdmin={dataAdmin && unrestricted} />}
           {tab === 'cloud' && <><ChannelSyncNotice channelId={channel.id} kind="files" /><CloudFilesPicker workspaceId={workspaceId} channelId={channel.id} /></>}
           {tab === 'external-meetings' && <ExternalMeetingsPanel {...props} isAdmin={integrationAdmin && unrestricted && channel.role === 'admin'} />}
-          {tab === 'tasks' && <ProjectTasksPanel {...props} />}
+          {tab === 'tasks' && <ProjectTasksPanel {...props} initialProjectId={initialProjectId} focusTaskId={focusTaskId} />}
           {tab === 'documents' && <SharedDocumentsPanel {...props} onPendingChange={onDocumentPending} />}
           {tab === 'workflows' && <WorkflowsPanel {...props} />}
           {tab === 'apps' && <ChannelApps workspaceId={workspaceId} channelId={channel.id} />}

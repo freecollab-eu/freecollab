@@ -51,10 +51,13 @@ import { WorkspaceFeedbackDialog } from './WorkspaceFeedbackDialog';
 import { shouldSuggestWorkspaceLaunch } from '../lib/workspace-launch';
 import { WorkHub, type WorkHubTab } from './WorkHub';
 import { ChatProductivityPanel } from './ChatProductivityPanel';
+import { MyDay } from './MyDay';
+import type { PersonalSource } from '../lib/my-day';
 import { MeetingDock } from './MeetingDock';
 import { reconcileMessageChanges } from '../lib/message-reconcile';
 import { MobileSettings, MobileStatus } from './MobileSettings';
 import { mobileDrafts, mobileOutbox } from '../mobile';
+import { offlineLibrary } from '../mobile/library';
 import { useModalFocus } from '../lib/useModalFocus';
 import '../styles/chat.css';
 
@@ -95,14 +98,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [focusDecisionId, setFocusDecisionId] = useState<string | undefined>();
   const [decisionSource, setDecisionSource] = useState<Message | undefined>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [myDayOpen, setMyDayOpen] = useState(false);
   const [productivity, setProductivity] = useState<{message?:Message;draft?:string;mentions?:string[]}|null>(null);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [nativeSession, setNativeSession] = useState(false);
-  const [integrationEntry, setIntegrationEntry] = useState<{ tab: 'connections' | 'health'; channelId?: string; revision: number } | null>(null);
+  const [integrationEntry, setIntegrationEntry] = useState<{ tab: 'connections' | 'health' | 'calendar'; channelId?: string; revision: number } | null>(null);
   const [workHubOpen, setWorkHubOpen] = useState(false);
   const [workHubInitialTab, setWorkHubInitialTab] = useState<WorkHubTab>('tasks');
+  const [workHubTask, setWorkHubTask] = useState<{ projectId?: string; taskId?: string } | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [mobileNotice, setMobileNotice] = useState('');
@@ -132,7 +137,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   
   const channelsRequestRef = useRef(0);
   const workspaceRef = useRef(workspace?.id); workspaceRef.current = workspace?.id;
+  const channelsWorkspaceRef = useRef<string | null>(null);
   const pendingJumpRef = useRef<Message | null>(null);
+  const pendingPersonalSource = useRef<(PersonalSource & { token: string }) | null>(null);
+  const personalNavigation = useRef(0);
   const timelineRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const followingLatestRef = useRef(false);
@@ -255,6 +263,49 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     window.addEventListener('freecollab:open-search-source',open);
     return()=>window.removeEventListener('freecollab:open-search-source',open);
   },[channels,embeddedChannelId]);
+
+  useEffect(() => {
+    const open = async (event: Event) => {
+      const detail = (event as CustomEvent<PersonalSource>).detail;
+      if (!detail || typeof detail.channel_id !== 'string' || typeof detail.workspace_id !== 'string'
+          || !['task', 'calendar', 'message', 'meeting'].includes(detail.kind)
+          || embeddedChannelId && detail.channel_id !== embeddedChannelId) return;
+      const token = api.getAccessToken(), request = ++personalNavigation.current;
+      if (!token) return;
+      try {
+        // Device notifications and a retained personal view are navigation
+        // hints. Neither grants a channel, workspace or meeting admission.
+        const channel = await api.getChannel(detail.channel_id);
+        if (request !== personalNavigation.current || token !== api.getAccessToken()) return;
+        if (channel.workspace_id !== detail.workspace_id) throw new Error('This source is no longer available in your current workspace.');
+        pendingPersonalSource.current = { ...detail, token };
+        setMyDayOpen(false);
+        if (workspaceRef.current !== channel.workspace_id) await refreshWorkspaces(channel.workspace_id);
+        else { setChannels(rows => rows.some(row => row.id === channel.id) ? rows.map(row => row.id === channel.id ? channel : row) : [...rows, channel]); }
+      } catch (failure) {
+        if (request === personalNavigation.current && token === api.getAccessToken()) {
+          pendingPersonalSource.current = null; setActionError(failure instanceof Error ? failure.message : 'This source is no longer available in your current workspace.');
+        }
+      }
+    };
+    window.addEventListener('freecollab:open-personal-source', open);
+    return () => { ++personalNavigation.current; window.removeEventListener('freecollab:open-personal-source', open); };
+  }, [embeddedChannelId, refreshWorkspaces]);
+
+  useEffect(() => {
+    const target = pendingPersonalSource.current;
+    if (!target) return;
+    if (target.token !== api.getAccessToken()) { pendingPersonalSource.current = null; return; }
+    if (workspace?.id !== target.workspace_id || channelsWorkspaceRef.current !== target.workspace_id || loading) return;
+    const channel = channels.find(row => row.id === target.channel_id);
+    pendingPersonalSource.current = null;
+    if (!channel) { setActionError('This source is no longer available in your current workspace.'); return; }
+    if (target.kind === 'message' && target.item_id) pendingJumpRef.current = { id: target.item_id, channel_id: channel.id, author_id: '', content: '', encrypted: !!channel.secure, created_at: '' };
+    selectChannel(channel);
+    if (target.kind === 'message' && activeChannelRef.current === channel.id) void loadMessages(channel.id);
+    if (target.kind === 'task' || target.kind === 'meeting') { setWorkHubTask(target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : null); setWorkHubInitialTab(target.kind === 'task' ? 'tasks' : 'meetings'); setWorkHubOpen(true); }
+    if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: channel.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
+  }, [channels, workspace?.id, loading]);
 
   useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)');
@@ -623,6 +674,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       const permitted = await api.getChannels(scope);
       const data = embeddedChannelId ? permitted.filter(channel => channel.id === embeddedChannelId) : permitted;
       if (scope !== workspaceRef.current || request !== channelsRequestRef.current) return;
+      channelsWorkspaceRef.current = scope;
       setChannels(data);
       if (data.some(channel => channel.secure && channel.type !== 'direct')) void getSecureMessaging().then(async secure => {
         await secure.refreshBindings();
@@ -685,6 +737,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         const byId = new Map(updates.map((message) => [message.id, message]));
         return [...timeline.map((message) => byId.get(message.id) || message), ...updates.filter((message) => !ids.has(message.id))];
       });
+      void offlineLibrary.capture(channelId, timeline).catch(() => {});
       timeline.forEach((message) => loadReactions(message.id));
       if (targetId) requestAnimationFrame(() => {
         const selected = pendingJumpRef.current;
@@ -965,6 +1018,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           <button type="button" onClick={() => setCommandOpen(true)} className="fc-chat-switcher" aria-label={t("Quick switcher")} aria-haspopup="dialog"><Search size={16} /><span>{t("Search & switch")}</span><kbd className="fc-shortcut">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : t("Ctrl")} {t(" K")}</kbd></button>
 
           <button type="button" onClick={() => setHistoryOpen(true)} className="fc-chat-text-button fc-chat-history-button"><Search size={15} />{t("Search all history")}</button>
+          {!embeddedChannelId && <button type="button" onClick={() => { setMyDayOpen(true); if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false); }} className="fc-chat-text-button fc-chat-history-button"><ClipboardCheck size={15} />{t('My day')}</button>}
           <button type="button" onClick={openDirectMessages} className="fc-chat-text-button fc-chat-history-button"><MessageCircle size={15} />{t("Direct messages")}</button>
           <button type="button" onClick={() => { setIntegrationEntry(null); setIntegrationsOpen(true); }} className="fc-chat-text-button fc-chat-history-button" aria-label={t("Integrations")}><Plug size={15} />{t("Integrations")}</button>
           {workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <button type="button" onClick={() => setLaunchOpen(true)} className="fc-chat-text-button fc-chat-history-button" aria-label={t('Get started')}><Compass size={15} />{t('Get started')}</button>}
@@ -1032,6 +1086,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
               {mobileToolsOpen && <div id="mobile-channel-tools" className="fc-chat-mobile-tools-popover" role="group" aria-label={t('More channel tools')}>
                 <MobileStatus onOpen={() => openMobileTool(() => setMobileOpen(true))} />
                 <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setMobileOpen(true))}><Smartphone size={17} /><span>{t('Mobile and offline settings')}</span></button>
+                {!embeddedChannelId && <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setMyDayOpen(true))}><ClipboardCheck size={17} /><span>{t('My day')}</span></button>}
                 {activeChannel && <>
                   <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setCollaborationTab('pins'); setDecisionSource(undefined); setToolPanel(null); setThreadMessage(null); })}><Check size={17} /><span>{t('Saved items and decisions')}</span></button>
                   <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setThreadMessage(null); setToolPanel(current => current === 'members' ? null : 'members'); })}><Users size={17} /><span>{t('Channel members')}</span></button>
@@ -1100,11 +1155,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       </aside>}
 
       {historyOpen && <HistorySearchPanel channels={channels} onClose={() => setHistoryOpen(false)} onMessage={openHistoryMessage} />}
+      {myDayOpen && !embeddedChannelId && <MyDay onClose={() => setMyDayOpen(false)} />}
       {launchOpen && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <WorkspaceLaunchPanel key={`${workspace.id}:${api.getCurrentUserId()}`} workspace={workspace} channels={channels} onClose={() => setLaunchOpen(false)} onChanged={() => refreshWorkspaces(workspace.id)} onChannelsChanged={async created => { if (created && created.workspace_id === workspaceRef.current) setChannels(records => records.some(row => row.id === created.id) ? records : [...records, created]); await loadChannels(); }} onOpenAppearance={openAppearance} onOpenConnections={channelId => { setIntegrationEntry(previous => ({ tab: 'connections', channelId, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }} onSelectChannel={channel => { if (channel.workspace_id === workspaceRef.current) { selectChannel(channel); setLaunchOpen(false); requestAnimationFrame(() => inputRef.current?.focus()); } }} />}
       {feedbackOpen && workspace && <WorkspaceFeedbackDialog key={`${workspace.id}:${api.getCurrentUserId()}`} workspaceId={workspace.id} onClose={() => setFeedbackOpen(false)} onOpenLaunch={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => setLaunchOpen(true) : undefined} onOpenConnections={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => { setIntegrationEntry(previous => ({ tab: 'connections', revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); } : undefined} />}
       {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} />}
-      {workHubOpen && workspace && activeChannel && <WorkHub key={`${workspace.id}:${activeChannel.id}`} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onClose={() => setWorkHubOpen(false)} />}
-      {mobileOpen && <div className="fc-overlay"><div ref={mobileDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Mobile and offline")} className="fc-dialog" style={{maxWidth:720,maxHeight:"90dvh",overflowY:"auto"}}><button type="button" className="fc-icon-button" aria-label={t("Close mobile settings")} onClick={() => setMobileOpen(false)}><X size={20} /></button><MobileSettings /></div></div>}
+      {workHubOpen && workspace && activeChannel && <WorkHub key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}`} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onClose={() => setWorkHubOpen(false)} />}
+      {mobileOpen && <div className="fc-overlay"><div ref={mobileDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Mobile and offline")} className="fc-dialog" style={{maxWidth:720,maxHeight:"90dvh",overflowY:"auto"}}><button type="button" className="fc-icon-button" aria-label={t("Close mobile settings")} onClick={() => setMobileOpen(false)}><X size={20} /></button><MobileSettings channel={activeChannel || undefined} /></div></div>}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} channels={channels} activeChannelId={activeChannel?.id || null} messages={messages.filter((message) => message.channel_id === activeChannel?.id && !message.deleted)} hasActiveChannel={!!activeChannel} onChannel={(id) => { const channel = channels.find((item) => item.id === id); if (channel) { selectChannel(channel); requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true })); } }} onMessage={jumpToMessage} onAction={runCommand} />
 
       {showNewChannel && <div className="fc-overlay"><div ref={createDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Create channel")} className="fc-dialog fc-chat-create-dialog"><span className="fc-kicker">{t("Bring people together")}</span><h2>{t("Create Channel")}</h2><p>{t("A shared place for a project, a team, or an idea.")}</p><form onSubmit={handleCreateChannel}><label htmlFor="channel-name">{t("Channel name")}</label><input id="channel-name" type="text" value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} placeholder={t("Channel name")} maxLength={100} required className="fc-input" data-autofocus autoFocus />{secureAvailable && <label className="fc-chat-encryption-choice"><input type="checkbox" checked={createSecure} onChange={event => setCreateSecure(event.target.checked)} />{t("End-to-end encrypted")}<span>{t("Only verified devices can read this channel. Keep a recovery key.")}</span></label>}{!secureAvailable && <p className="fc-chat-muted">{t("Messages in this installation use server-side encryption. Configure the encrypted messaging service to create end-to-end encrypted channels.")}</p>}{createError && <p role="alert" className="fc-alert">{createError}</p>}<div className="fc-chat-dialog-actions"><button type="button" onClick={() => setShowNewChannel(false)} className="fc-button">{t("Cancel")}</button><button type="submit" disabled={creating || !newChannelName.trim()} className="fc-button fc-button-primary">{creating ? t("Creating…") : t("Create")}</button></div></form></div></div>}

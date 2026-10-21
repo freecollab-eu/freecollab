@@ -139,6 +139,10 @@ def create_secure_room(session, binding):
 
 
 def sync_secure_membership(session, channel_id):
+    from .connect_federation import connection_for_channel as federated_channel, sync_membership
+    federated = federated_channel(session, channel_id)
+    if federated:
+        return sync_membership(session, federated)
     binding = session.get(SecureChannel, channel_id)
     if not binding or not binding.matrix_room_id:
         return
@@ -213,7 +217,10 @@ def membership_epoch(session, channel_id):
     active = sorted(member.user_id for member in members if workspace_allows_channel(session, channel_id, member.user_id)
                     and (user := session.get(User, member.user_id)) and not user.is_blocked)
     revocations = [row["user_id"] + ":" + row["device_id"] for row in revoked_devices(session, active)]
-    return sha256((channel_id + "\0" + "\0".join(active) + "\0revoked\0" + "\0".join(revocations)).encode()).hexdigest()
+    from .connect_federation import connection_for_channel as federated_channel, epoch_material
+    federated = federated_channel(session, channel_id)
+    remote = epoch_material(session, federated) if federated else ""
+    return sha256((channel_id + "\0" + "\0".join(active) + "\0revoked\0" + "\0".join(revocations) + "\0federation\0" + remote).encode()).hexdigest()
 
 
 def lock_device_accounts(session, user_ids):

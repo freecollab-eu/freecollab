@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
-import { AlertCircle, ArrowRight, Check, Link2, Loader2, RefreshCw, ShieldCheck, Unplug, UserPlus, Users } from 'lucide-react';
+import { AlertCircle, ArrowRight, Check, Globe2, Link2, Loader2, RefreshCw, ShieldCheck, Unplug, UserPlus, Users } from 'lucide-react';
 import { t, useI18n } from '../i18n';
 import { api } from '../lib/api';
 import { connectApi, type ConnectCapabilities, type SharedConnection, type SharedMember } from '../lib/connect-api';
 import { workspaceApi, type WorkspaceMember } from '../lib/workspace-api';
 import '../styles/connect.css';
+import { FederatedConnectPanel } from './FederatedConnectPanel';
 
 interface Props {
   workspaceId: string;
@@ -15,6 +16,8 @@ const failureText = (value: unknown) => value instanceof Error ? value.message :
 
 export function ConnectPanel({ workspaceId, onChanged, onGuardChange }: Props) {
   useI18n();
+  const [installationMode, setInstallationMode] = useState<'local' | 'federated'>('local');
+  const [federatedGuard, setFederatedGuard] = useState<'busy' | 'secret' | null>(null);
   const [connections, setConnections] = useState<SharedConnection[]>([]);
   const [people, setPeople] = useState<WorkspaceMember[]>([]);
   const [grants, setGrants] = useState<SharedMember[]>([]);
@@ -53,8 +56,8 @@ export function ConnectPanel({ workspaceId, onChanged, onGuardChange }: Props) {
     return () => { mounted.current = false; generation.current++; detailGeneration.current++; callbacks.current.onGuardChange?.(null); };
   }, [workspaceId]);
   useEffect(() => {
-    callbacks.current.onGuardChange?.(busy ? 'busy' : issuedToken ? 'secret' : null);
-  }, [busy, issuedToken]);
+    callbacks.current.onGuardChange?.(busy || federatedGuard === 'busy' ? 'busy' : issuedToken || federatedGuard === 'secret' ? 'secret' : null);
+  }, [busy, issuedToken, federatedGuard]);
   useEffect(() => {
     if (selectedId) void loadMembers(selectedId);
     else { detailGeneration.current++; setGrants([]); setDetailsLoading(false); }
@@ -167,7 +170,10 @@ export function ConnectPanel({ workspaceId, onChanged, onGuardChange }: Props) {
   }
   function clearIssuedToken() { setIssuedToken(''); setIssuedConnection(''); setNotice(''); }
 
+  if (installationMode === 'federated') return <div><button type="button" className="fc-button" disabled={Boolean(federatedGuard)} onClick={() => setInstallationMode('local')}>{t('On this installation')}</button><FederatedConnectPanel workspaceId={workspaceId} onChanged={onChanged} onGuardChange={setFederatedGuard} /></div>;
+
   return <section className="fc-connect" aria-label={t('Shared channels')}>
+    <button type="button" className="fc-button" disabled={busy || Boolean(issuedToken)} onClick={() => setInstallationMode('federated')}><Globe2 size={15} />{t('Across installations')}</button>
     <div className="fc-connect-intro"><span className="fc-connect-symbol"><Link2 size={23} /></span><div><span className="fc-kicker">FreeCollab Connect</span><h3>{t('A shared space. Your own boundaries.')}</h3><p>{t('Work with another organization while each team keeps its own sign-in, administrators and member access.')}</p></div></div>
     <p className="fc-connect-scope"><ShieldCheck size={16} /><span>{t('Connect workspaces on this FreeCollab installation. Each invitation creates a new empty channel; existing conversation history stays private.')}</span></p>
     {!loading && capabilities && !capabilities.encryption_configured && <p className="fc-alert" role="status">{t('Shared channels require end-to-end encryption. Ask your installation operator to configure Matrix before creating an invitation.')}</p>}

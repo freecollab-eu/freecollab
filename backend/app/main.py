@@ -31,7 +31,12 @@ from .api import connection_setup
 from .api import pilot_feedback, pilot_readiness
 from .api import embed
 from .api import chat_productivity, connect, app_platform, enterprise_search, clips, sfu, enterprise_governance
-from .api import native_clients
+from .api import native_clients, native_push
+from .api import slack_import, integration_library
+from .api import connect_federation
+from .api import calendar_planning
+from .api import my_day
+from .api import personal_oauth
 from .models import workspace_crypto_grant  # Register additive tables before init_db.
 from .realtime.socket import sio, start_realtime_broker, stop_realtime_broker, realtime_broker_ready
 
@@ -55,7 +60,7 @@ async def lifespan(app):
         await stop_realtime_broker()
 
 
-app = FastAPI(title="FreeCollab", version="0.11.0", lifespan=lifespan)
+app = FastAPI(title="FreeCollab", version="0.12.0", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -127,6 +132,13 @@ app.include_router(clips.router)
 app.include_router(sfu.router)
 app.include_router(enterprise_governance.router)
 app.include_router(native_clients.router)
+app.include_router(slack_import.router)
+app.include_router(integration_library.router)
+app.include_router(connect_federation.router)
+app.include_router(native_push.router)
+app.include_router(calendar_planning.router)
+app.include_router(my_day.router)
+app.include_router(personal_oauth.router)
 if settings.enable_experimental_features:
     app.include_router(posts.router)
     app.include_router(comments.router)
@@ -141,7 +153,7 @@ socket_app = socketio.ASGIApp(sio, app)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.11.0"}
+    return {"status": "ok", "version": "0.12.0"}
 
 
 @app.get("/ready")
@@ -163,13 +175,21 @@ def ready():
 @app.get("/capabilities")
 def capabilities():
     return {
-        "version": "0.11.0",
+        "version": "0.12.0",
         "experimental_features": settings.enable_experimental_features,
         "demo_ai": settings.enable_demo_ai,
         "max_file_size": files.MAX_FILE_SIZE,
         "file_types": sorted(files.ALLOWED_TYPES),
         "invitations": True,
         "workspaces": True,
+        "my_day": True,
+        "slack_import": "reviewed-native-archive",
+        "integration_library": "instance-reviewed-declarative-versions",
+        "personal_provider_oauth": ["google", "microsoft"],
+        "calendar_recurrence": True,
+        "calendar_invitations": "internal-current-channel-members",
+        "native_push": native_push.service.configuration(),
+        "encrypted_offline_library": "opt-in-same-sign-in-device-storage",
         "direct_messages": True,
         "group_conversations": True,
         "scheduled_messages": True,
@@ -180,6 +200,7 @@ def capabilities():
         "clips": True,
         "local_clip_transcription": True,
         "shared_channels": "same-installation-matrix" if settings.matrix_enabled else False,
+        "cross_installation_shared_channels": bool(settings.matrix_enabled and settings.connect_federation_enabled and settings.connect_federation_peers),
         "meeting_sfu": settings.meetings_sfu_provider,
         "enterprise_governance": True,
         "project_tasks": True,
@@ -201,6 +222,8 @@ def capabilities():
         "workflows": settings.workflows_enabled,
         "data_controls": settings.data_controls_enabled,
         "push_notifications": settings.push_enabled,
+        "native_push_notifications": settings.native_push_enabled,
+        "native_background_calls": "notification_then_explicit_foreground_join",
         "account_security": True,
         "secure_messaging": settings.matrix_enabled,
         "message_encryption": "hybrid" if settings.matrix_enabled else "server-side",

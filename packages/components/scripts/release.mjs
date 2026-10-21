@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -9,7 +9,7 @@ const directory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const destination = resolve(process.argv[2] || resolve(directory, 'artifacts'));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const manifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8'));
-if (!/^0\.11\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Review the compatibility line before releasing a new minor version.');
+if (!/^0\.12\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Review the compatibility line before releasing a new minor version.');
 execFileSync(npm, ['run', 'build'], { cwd: directory, stdio: 'inherit' });
 await mkdir(destination, { recursive: true });
 // npm pack still writes its content cache. Keep that disposable cache outside
@@ -29,6 +29,7 @@ for (const entry of Object.values(manifest.exports)) {
   }
 }
 for (const required of ['LICENSE', 'COMPATIBILITY.md', 'dist/release.json']) if (!paths.has(required)) throw new Error('Missing release contract: ' + required);
+if (packed.files.some(file => file.mode !== 0o644)) throw new Error('Public package files must use canonical readable permissions.');
 const bytes = await readFile(resolve(destination, packed.filename));
 const sha256 = createHash('sha256').update(bytes).digest('hex');
 const shasum = createHash('sha1').update(bytes).digest('hex');
@@ -37,4 +38,5 @@ if (shasum !== packed.shasum || integrity !== packed.integrity) throw new Error(
 const metadata = { schemaVersion: 1, name: manifest.name, version: manifest.version, artifact: packed.filename, sha256, shasum, integrity, files: [...paths].sort(), publishTag: manifest.publishConfig.tag, registry: manifest.publishConfig.registry };
 await writeFile(resolve(destination, 'release-manifest.json'), JSON.stringify(metadata, null, 2) + '\n');
 await writeFile(resolve(destination, 'SHA256SUMS'), sha256 + '  ' + packed.filename + '\n');
+for (const name of [packed.filename, 'release-manifest.json', 'SHA256SUMS']) await chmod(resolve(destination, name), 0o644);
 process.stdout.write('Verified package artifact: ' + packed.filename + '\nSHA-256: ' + sha256 + '\nPublishing was not performed.\n');

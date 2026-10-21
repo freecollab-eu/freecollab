@@ -181,7 +181,11 @@ def start_session(data: StartSession, user=Depends(get_current_user), credential
 def channels(user=Depends(get_current_user), session=Depends(get_session)):
     rows = session.exec(select(SecureChannel).join(ChannelMember, ChannelMember.channel_id == SecureChannel.channel_id)
                         .where(ChannelMember.user_id == user.id)).all()
-    return [{"channel_id": r.channel_id, "room_id": r.matrix_room_id, "status": r.status} for r in rows if workspace_allows_channel(session, r.channel_id, user.id)]
+    from ..services.connect_federation import peer_server_for_channel
+    return [{"channel_id": r.channel_id, "room_id": r.matrix_room_id, "status": r.status,
+        **({"federated_peer_server": peer_server_for_channel(session, r.channel_id)}
+           if peer_server_for_channel(session, r.channel_id) else {})}
+        for r in rows if workspace_allows_channel(session, r.channel_id, user.id)]
 
 
 def has_native_product_history(session, channel_id: str) -> bool:
@@ -239,7 +243,13 @@ def sync_channel(channel_id: str, user=Depends(get_current_user), session=Depend
     if not binding or not binding.matrix_room_id:
         raise HTTPException(409, "Encrypted channel is not ready")
     members = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)).all()
-    return {"room_id": binding.matrix_room_id, "membership_epoch": membership_epoch(session, channel_id), "revoked_devices": revoked_devices(session, members)}
+    from ..services.connect_federation import peer_revocations, cached_peer_members, connection_for_channel as federated_channel, control_ids
+    federated = federated_channel(session, channel_id)
+    return {"room_id": binding.matrix_room_id, "membership_epoch": membership_epoch(session, channel_id),
+        "revoked_devices": revoked_devices(session, members) + peer_revocations(session, channel_id),
+        "federated_operators": control_ids(session, federated) if federated else [],
+        "federated_peers": [{"user_id": row.matrix_user_id, "name": row.name,
+            "matrix_user_id": row.matrix_user_id} for row in cached_peer_members(session, channel_id)]}
 
 
 class RevokeDevice(BaseModel):
@@ -262,7 +272,8 @@ def device_revocations(channel_id: str | None = None, user=Depends(get_current_u
     if channel_id:
         require_channel_member(session, channel_id, user.id)
         users = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)).all()
-    return {"revoked_devices": revoked_devices(session, users)}
+    from ..services.connect_federation import peer_revocations
+    return {"revoked_devices": revoked_devices(session, users) + (peer_revocations(session, channel_id) if channel_id else [])}
 
 
 @router.post("/secure/devices/{device_id}/revoke")
@@ -448,8 +459,17 @@ async def matrix_proxy(path: str, request: Request, session=Depends(get_session)
         if request.headers.get("content-type", "").split(";", 1)[0] != "application/octet-stream" or "filename" in request.query_params:
             raise HTTPException(400, "Encrypted uploads require anonymous ciphertext")
     media = re.search(r"/media/(?:v3|r0)/download/([^/]+)/|^media/(?:v3|r0)/download/([^/]+)/|^client/v1/media/download/([^/]+)/", decoded)
+    remote_media = False
     if media and next(group for group in media.groups() if group) != settings.matrix_server_name:
-        raise HTTPException(403, "Only local encrypted media is available")
+        server = next(group for group in media.groups() if group)
+        from ..services.connect_federation import peer_server_for_channel
+        mappings = session.exec(select(SecureChannel).join(ChannelMember,
+            ChannelMember.channel_id == SecureChannel.channel_id).where(ChannelMember.user_id == row.user_id)).all()
+        remote_media = any(workspace_allows_channel(session, mapped.channel_id, row.user_id)
+            and peer_server_for_channel(session, mapped.channel_id) == server
+            for mapped in mappings)
+        if not remote_media:
+            raise HTTPException(403, "Encrypted media requires a current explicitly shared peer")
     body = await request.body()
     if len(body) > 52 * 1024 * 1024:
         raise HTTPException(413, "Encrypted upload is too large")
@@ -485,13 +505,19 @@ async def matrix_proxy(path: str, request: Request, session=Depends(get_session)
     sending = '/send/m.room.encrypted/' in decoded
     parameters = [(key, value) for key, value in request.query_params.multi_items() if key not in ('access_token', 'allow_remote')]
     if media:
-        parameters.append(('allow_remote', 'false'))
+        parameters.append(('allow_remote', 'true' if remote_media else 'false'))
     try:
         if sending:
             # The DB lock and upstream send run in one worker. A concurrent native
             # removal cannot interleave between epoch validation and event ACK.
             from starlette.concurrency import run_in_threadpool
             from ..services.workspaces import channel_workspace_id, lock_workspace
+            from ..services.connect_federation import connection_for_channel as federated_channel, remote_snapshot
+            federated = federated_channel(session, binding.channel_id)
+            if federated:
+                # A second fresh remote check precedes the local send lock. Never
+                # hold opposing SQL write locks across an inter-installation call.
+                await run_in_threadpool(remote_snapshot, session, federated)
             def send_bound_event():
                 recipients = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == binding.channel_id)).all()
                 lock_device_accounts(session, recipients)
@@ -514,6 +540,9 @@ async def matrix_proxy(path: str, request: Request, session=Depends(get_session)
                 require_direct_message_writable(session, binding.channel_id, row.user_id)
                 if request.headers.get('x-freecollab-membership-epoch') != membership_epoch(session, binding.channel_id):
                     raise HTTPException(409, "Channel membership changed; prepare encryption again before sending")
+                if federated:
+                    from ..services.connect_federation import validate_room_roster
+                    validate_room_roster(session, federated)
                 try:
                     with httpx.Client(timeout=40, trust_env=False, follow_redirects=False) as upstream:
                         return upstream.request(request.method, settings.matrix_internal_url.rstrip('/')+'/_matrix/'+path,
@@ -580,6 +609,10 @@ async def matrix_proxy(path: str, request: Request, session=Depends(get_session)
             peers = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == mapped.channel_id)).all()
             crypto_user_ids.update(peer for peer in peers if workspace_allows_channel(session, mapped.channel_id, peer))
         crypto_matrix = set(session.exec(select(MatrixAccount.matrix_user_id).where(MatrixAccount.user_id.in_(crypto_user_ids))).all())
+        from ..services.connect_federation import peer_crypto_ids
+        for mapped in mappings:
+            if mapped.matrix_room_id in allowed_rooms:
+                crypto_matrix.update(peer_crypto_ids(session, mapped.channel_id))
         for kind in ("changed", "left"):
             if kind in payload.get("device_lists", {}):
                 payload["device_lists"][kind] = [user_id for user_id in payload["device_lists"][kind] if user_id in crypto_matrix]

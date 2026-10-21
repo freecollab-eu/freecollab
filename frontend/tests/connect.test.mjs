@@ -84,6 +84,7 @@ function fixture({ encrypted = true, list } = {}) {
     '../lib/connect-api': { connectApi },
     '../lib/workspace-api': { workspaceApi: { members: track('people', [{ user_id: 'our-colleague', name: 'Our colleague', role: 'member' }]) } },
     '../styles/connect.css': {},
+    './FederatedConnectPanel': { FederatedConnectPanel: 'FederatedConnectPanel' },
     window: { addEventListener: (event, handler) => listeners.set(event, handler), removeEventListener: event => listeners.delete(event) },
   });
   const render = () => { cursor = 0; tree = ConnectPanel({ workspaceId: 'our-workspace', onGuardChange: value => state.guards.push(value) }); while (effects.length) effects.shift()(); return tree; };

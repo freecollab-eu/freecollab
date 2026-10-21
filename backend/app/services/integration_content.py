@@ -5,7 +5,7 @@ import re
 from urllib.parse import unquote, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from typing import Literal
 
 
@@ -82,6 +82,19 @@ class CalendarFields(BaseModel):
     timezone: str = Field(default="UTC", min_length=1, max_length=100)
     reminder_minutes: int | None = Field(default=None, ge=0, le=10080)
     external_uid: str | None = Field(default=None, max_length=255)
+    recurrence: "CalendarRecurrence | None" = None
+    exceptions: list["CalendarException"] = Field(default_factory=list, max_length=100)
+
+    @model_serializer(mode="wrap")
+    def preserve_single_event_shape(self, handler):
+        # Existing sync fingerprints must not change merely on upgrade. Keep
+        # the released standalone payload shape when no new feature is used.
+        result = handler(self)
+        if self.recurrence is None:
+            result.pop("recurrence", None)
+        if not self.exceptions:
+            result.pop("exceptions", None)
+        return result
 
     @model_validator(mode="after")
     def validate_fields(self):
@@ -109,4 +122,41 @@ class CalendarFields(BaseModel):
                 raise ValueError()
         except (ValueError, TypeError, OverflowError):
             raise ValueError("Use valid dates with an end after the start; timed events need a UTC offset") from None
+        # The same bounded expansion validates exception identities. Encrypted
+        # channels run its equivalent on the trusted device, never this API.
+        if self.recurrence:
+            from .calendar_planning import _dates
+            list(_dates(self))  # Reject series that overflow before persisting.
+        if self.exceptions:
+            from .calendar_planning import validate_exceptions
+            validate_exceptions(self)
         return self
+
+
+class CalendarRecurrence(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    frequency: Literal["daily", "weekly", "monthly"]
+    interval: int = Field(default=1, ge=1, le=30)
+    count: int = Field(default=10, ge=1, le=366)
+
+
+class CalendarException(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    original_start: str = Field(min_length=1, max_length=64)
+    cancelled: bool = False
+    starts_at: str | None = Field(default=None, max_length=64)
+    ends_at: str | None = Field(default=None, max_length=64)
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    location: str | None = Field(default=None, max_length=1000)
+    description: str | None = Field(default=None, max_length=10000)
+
+    @model_validator(mode="after")
+    def paired_dates(self):
+        if (self.starts_at is None) != (self.ends_at is None):
+            raise ValueError("An occurrence override needs both start and end")
+        if self.cancelled and any(value is not None for value in (self.starts_at, self.ends_at, self.title, self.location, self.description)):
+            raise ValueError("A cancelled occurrence must not contain replacement details")
+        return self
+
+
+CalendarFields.model_rebuild()

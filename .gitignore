@@ -93,3 +93,7 @@ dist/
 build/
 *.fcsealed
 freecollab-backup.key
+
+# Customer native push build configuration and Apple signing material
+clients/mobile/android/app/google-services.json
+clients/mobile/**/*.p8

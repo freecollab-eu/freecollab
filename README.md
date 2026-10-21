@@ -1,4 +1,4 @@
-> **FreeCollab 0.11:** group conversations, scheduled messages, personal reminders, encrypted shared channels, installable apps, content search, recorded clips, local transcription, larger meetings, organization governance and native clients. [Choose infrastructure](docs/INFRASTRUCTURE.md) · [Apps](docs/APP_PLATFORM.md) · [Meetings](docs/MEETINGS.md) · [Validation](docs/VALIDATION.md).
+> **FreeCollab 0.12:** a personal working day, recurring calendar planning, reviewed Slack imports, personal Google/Microsoft OAuth, an encrypted offline library, native push adapters, versioned community integrations and optional channels across installations. [What changed](docs/PRODUCT_012.md) · [Choose infrastructure](docs/INFRASTRUCTURE.md) · [Validation](docs/VALIDATION.md).
 
 # FreeCollab
 
@@ -49,7 +49,7 @@ Open **Work** in a channel for connected tools, including:
 
 1. [Projects and tasks](docs/PROJECT_TASKS.md): Kanban boards, assignees, deadlines, checklists, current file/decision links and immutable revision history.
 2. [Meetings](docs/MEETINGS.md): actual browser voice/video and screen sharing, host-admitted guests and explicit encryption status. Small calls support up to six admitted participants; Internet/NAT deployment needs operator-provided TURN.
-3. [Mobile and offline](docs/MOBILE_OFFLINE.md): an installable PWA, encrypted device drafts and outbox, reconnection with idempotent delivery, optional generic Web Push. **Mobile** stays available even during an offline reload without loaded channels.
+3. [Mobile and offline](docs/MOBILE_OFFLINE.md): an installable PWA, encrypted drafts, an opt-in encrypted history/file library, durable text and attachment queues, and idempotent reconnection. Optional [native notifications](docs/NATIVE_PUSH.md) use the installer's own FCM/APNs configuration. **Mobile** stays available during an offline reload.
 4. [Shared documents](docs/SHARED_DOCUMENTS.md): simultaneous Yjs editing, comments, named immutable revisions and restoration as a new edit. Native channel document updates are encrypted at rest; secure channels use verified encrypted Matrix events.
 5. [Workflows](docs/WORKFLOWS.md): visual trigger/condition/step editing, approvals, bounded reminders and task/notification actions. Secure channels allow metadata rules and encrypted approval notes, with no server reading their content.
 6. [Data controls](docs/DATA_CONTROLS.md): explicit channel exports, retention policy, reviewable deletion previews and permanent selected native-content erasure. Retention defaults to disabled and on hold. Personal account closure erases the login identity while retaining an opaque disabled author for shared history.
@@ -70,7 +70,7 @@ In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter u
 
 Advanced posts/flows, comments and the server AI-demo routes are **disabled by default**. `ENABLE_EXPERIMENTAL_FEATURES=true` opts into the advanced API routes; `ENABLE_DEMO_AI=true` separately opts into the AI-demo API. These are not dependencies of ordinary chat and need separate validation before use with real content.
 
-The typed **`@freecollab/components@0.11.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
+The typed **`@freecollab/components@0.12.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
 
 The older widget polls the latest 50 messages every three seconds and does not reconcile edits/deletions or recover larger gaps. [Its standalone integration example](examples/widget/README.md) remains available for this limited client.
 
@@ -162,6 +162,12 @@ Account access does not recover encrypted history. Personal accounts linked thro
 ```
 
 - [Product plan and release gates](docs/PRODUCT_PLAN.md)
+- [0.12 features and supported boundaries](docs/PRODUCT_012.md)
+- [Personal working day](docs/MY_DAY.md)
+- [Slack archive import](docs/SLACK_IMPORT.md)
+- [Personal Google and Microsoft OAuth](docs/PERSONAL_OAUTH.md)
+- [Integration library](docs/INTEGRATION_LIBRARY.md)
+- [Channels across installations](docs/CONNECT_FEDERATION.md)
 - [0.11 features and supported boundaries](docs/PRODUCT_011.md)
 - [Native desktop and mobile clients](docs/NATIVE_CLIENTS.md)
 - [Implementation and validation record](docs/VALIDATION.md)

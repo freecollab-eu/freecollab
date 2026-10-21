@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     matrix_server_name: str = "freecollab.local"
     matrix_registration_shared_secret: SecretStr | None = None
     matrix_public_base_url: str = ""
+    connect_federation_enabled: bool = False
+    connect_federation_public_url: str = ""
+    connect_federation_peers: dict[str, dict[str, str]] = Field(default_factory=dict)
     oidc_enabled: bool = False
     oidc_provider_name: str = "Organization SSO"
     oidc_issuer_url: str = ""
@@ -75,6 +78,14 @@ class Settings(BaseSettings):
     push_enabled: bool = False
     push_vapid_private_key: SecretStr | None = None
     push_vapid_subject: str = ""
+    native_push_enabled: bool = False
+    native_push_fcm_project_id: str = ""
+    native_push_fcm_service_account: SecretStr | None = None
+    native_push_apns_team_id: str = ""
+    native_push_apns_key_id: str = ""
+    native_push_apns_topic: str = "eu.freecollab.mobile"
+    native_push_apns_private_key: SecretStr | None = None
+    native_push_apns_sandbox: bool = False
     meetings_ice_servers: list[str] = Field(default_factory=list, max_length=10)
     meetings_turn_urls: list[str] = Field(default_factory=list, max_length=10)
     meetings_turn_secret: SecretStr | None = None

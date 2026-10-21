@@ -57,14 +57,15 @@ class Command(Strict):
     description: str = Field(min_length=1, max_length=200)
     arguments: list[Argument] = Field(default_factory=list, max_length=8)
     # Direct provider recipes are compiled to these bounded schemas, not scripts.
-    protocol: Literal["signed-webhook", "github.issue", "jira.issue", "zendesk.ticket", "salesforce.case"] = "signed-webhook"
+    protocol: Literal["signed-webhook", "github.issue", "jira.issue", "zendesk.ticket", "salesforce.case", "google.calendar-event", "microsoft.calendar-event"] = "signed-webhook"
 
     @model_validator(mode="after")
     def names(self):
         if len({row.name for row in self.arguments}) != len(self.arguments):
             raise ValueError("Argument names must be unique")
         expected = {"github.issue": {"title", "body"}, "jira.issue": {"project", "summary", "description"},
-                    "zendesk.ticket": {"subject", "body"}, "salesforce.case": {"subject", "description"}}
+                    "zendesk.ticket": {"subject", "body"}, "salesforce.case": {"subject", "description"},
+                    "google.calendar-event": {"title", "start", "end"}, "microsoft.calendar-event": {"title", "start", "end"}}
         if self.protocol in expected and {row.name for row in self.arguments} != expected[self.protocol]:
             raise ValueError("Use the exact provider recipe argument schema")
         return self
@@ -156,6 +157,10 @@ def catalog():
          "https://YOUR-TENANT.zendesk.com/api/v2/tickets.json", "Use Bearer OAuth token with tickets:write or Basic base64(email/token:API-token), owned and rotated by your organization."),
         ("salesforce.case", "Salesforce cases", "Create a Case in your own Salesforce organization.", "create-case", [arg("subject"), arg("description", False)],
          "https://YOUR-INSTANCE.my.salesforce.com/services/data/v61.0/sobjects/Case", "Use a customer-owned Connected App OAuth access token with API access and Case create permission. Your gateway owns token refresh; FreeCollab does not act as your SSO provider."),
+        ("google.calendar-event", "Google Calendar", "Create an explicitly reviewed event in your own Google calendar.", "create-event", [arg("title"), arg("start"), arg("end")],
+         "https://www.googleapis.com/calendar/v3/calendars/primary/events", "Install this recipe, then connect your personal Google account in Provider accounts. Your organization supplies its own OAuth registration. Enter start/end as ISO dates with an explicit timezone. No attendee invitations are sent."),
+        ("microsoft.calendar-event", "Microsoft Calendar", "Create an explicitly reviewed event in your own Microsoft calendar.", "create-event", [arg("title"), arg("start"), arg("end")],
+         "https://graph.microsoft.com/v1.0/me/events", "Install this recipe, then connect your personal Microsoft account in Provider accounts. Your organization supplies its own OAuth registration. Enter start/end as ISO dates with an explicit timezone. No attendee invitations are sent."),
     ]
     result = []
     for protocol, name, description, command, arguments, endpoint, setup in recipes:
@@ -163,7 +168,8 @@ def catalog():
             scopes=["commands:invoke", "cards:write"] if protocol == "signed-webhook" else ["commands:invoke", "actions:write"],
             commands=[Command(name=command, description=description, arguments=[Argument(**item) for item in arguments], protocol=protocol)])
         result.append({"id": protocol, "manifest": manifest.model_dump(), "endpoint_example": endpoint, "setup": setup,
-                       "credential_required": protocol != "signed-webhook", "status": "recipe"})
+                       "credential_required": protocol not in {"signed-webhook", "google.calendar-event", "microsoft.calendar-event"},
+                       "oauth_provider": protocol.split(".")[0] if protocol.endswith(".calendar-event") else None, "status": "recipe"})
     return result
 
 
@@ -235,6 +241,10 @@ def save_installation(session, workspace_id, user_id, data, row=None):
     if len(protocols) > 1:
         raise HTTPException(422, "One installation has one transport protocol")
     protocol = next(iter(protocols), "signed-webhook")
+    oauth_endpoints = {"google.calendar-event": "https://www.googleapis.com/calendar/v3/calendars/primary/events",
+        "microsoft.calendar-event": "https://graph.microsoft.com/v1.0/me/events"}
+    if protocol in oauth_endpoints and (normalized != oauth_endpoints[protocol] or data.authorization):
+        raise HTTPException(422, "Use this recipe's fixed calendar endpoint and connect your personal OAuth account separately")
     patterns = {
         "github.issue": r"/repos/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues",
         "jira.issue": r"/rest/api/3/issue", "zendesk.ticket": r"/api/v2/tickets\.json",
@@ -280,7 +290,17 @@ def arguments_for(command, arguments):
         value = arguments.get(name, "")
         if not isinstance(value, str) or len(value) > field.max_length or "\x00" in value or field.required and not value.strip():
             raise HTTPException(422, "An installed command argument is missing or too long")
-    return {name: arguments.get(name, "") for name in definitions}
+    result = {name: arguments.get(name, "") for name in definitions}
+    if command.protocol in {"google.calendar-event", "microsoft.calendar-event"}:
+        try:
+            from datetime import timezone
+            start, end = (datetime.fromisoformat(result[key].replace("Z", "+00:00")) for key in ("start", "end"))
+            if start.tzinfo is None or end.tzinfo is None or not timedelta(0) < end - start <= timedelta(days=7):
+                raise ValueError()
+            result["start"], result["end"] = start.astimezone(timezone.utc).isoformat(), end.astimezone(timezone.utc).isoformat()
+        except (ValueError, TypeError):
+            raise HTTPException(422, "Enter start and end with an explicit timezone and a duration of at most seven days") from None
+    return result
 
 
 def queue_invocation(session, row, actor_id, data):
@@ -294,9 +314,20 @@ def queue_invocation(session, row, actor_id, data):
     if not command or "commands:invoke" not in manifest.scopes:
         raise HTTPException(404, "Command is not installed")
     args = arguments_for(command, data.arguments)
+    provider_grant_id = None
+    if command.protocol in {"google.calendar-event", "microsoft.calendar-event"}:
+        from . import personal_oauth
+        grant = personal_oauth.grant_for_target(session, "calendar-action", row.id, actor_id)
+        if not grant:
+            raise HTTPException(409, "Connect your own provider account for this installed calendar app first")
+        personal_oauth.current_grant(session, grant.id, user_id=actor_id)
+        provider_grant_id = grant.id
     from .enterprise_governance import enforce_native_content
     enforce_native_content(session, data.channel_id, actor_id, dump(args), surface="app")
-    digest = hashlib.sha256(dump([row.generation, actor_id, data.channel_id, data.command, args]).encode()).hexdigest()
+    identity = [row.generation, actor_id, data.channel_id, data.command, args]
+    if provider_grant_id:
+        identity.append(provider_grant_id)
+    digest = hashlib.sha256(dump(identity).encode()).hexdigest()
     previous = session.exec(select(AppJob).where(AppJob.installation_id == row.id, AppJob.request_id == data.request_id)).first()
     if previous:
         if previous.request_digest != digest:
@@ -311,6 +342,8 @@ def queue_invocation(session, row, actor_id, data):
     payload = {"schema_version": 1, "id": job.id, "type": "app.command", "installation_id": row.id,
                "generation": row.generation, "workspace_id": row.workspace_id, "channel_id": data.channel_id,
                "actor_id": actor_id, "bot_id": row.bot_id, "command": command.name, "arguments": args}
+    if provider_grant_id:
+        payload["provider_grant_id"] = provider_grant_id
     job.encrypted_payload = seal_private(dump(payload), "app-job", job.id)
     session.add(job)
     return job
@@ -327,6 +360,15 @@ def provider_payload(protocol, payload):
             "description": {"type": "doc", "version": 1, "content": [{"type": "paragraph", "content": [{"type": "text", "text": args["description"] or "Created from FreeCollab"}]}]}}}
     if protocol == "zendesk.ticket":
         return {"ticket": {"subject": args["subject"], "comment": {"body": args["body"]}}}
+    if protocol == "google.calendar-event":
+        # A stable client identifier makes manual outcome inspection practical;
+        # the worker still never blindly retries an ambiguous create request.
+        return {"id": hashlib.sha256(payload["id"].encode()).hexdigest(), "summary": args["title"],
+            "start": {"dateTime": args["start"]}, "end": {"dateTime": args["end"]}}
+    if protocol == "microsoft.calendar-event":
+        return {"subject": args["title"], "transactionId": payload["id"],
+            "start": {"dateTime": args["start"].replace("+00:00", ""), "timeZone": "UTC"},
+            "end": {"dateTime": args["end"].replace("+00:00", ""), "timeZone": "UTC"}}
     return {"Subject": args["subject"], "Description": args["description"]}
 
 
@@ -380,7 +422,33 @@ contract. Signed app receivers may retry with the stable request identifier.
                 body = dump(provider_payload(protocol, raw)).encode()
                 headers = webhooks.signature_headers(secret, body, job.id, "app.command")
                 headers["Idempotency-Key"] = job.id
-                if config["authorization"]:
+                if protocol in {"google.calendar-event", "microsoft.calendar-event"}:
+                    from . import personal_oauth
+                    # Approval binds an immutable consent, not whichever
+                    # provider account this person connects most recently.
+                    # Token rotation preserves the grant ID; new consent does
+                    # not transfer already-approved external write effects.
+                    provider_grant_id = raw.get("provider_grant_id")
+                    if not isinstance(provider_grant_id, str):
+                        raise HTTPException(409, "Review this action under a current personal provider consent")
+                    grant, _ = personal_oauth.current_grant(session, provider_grant_id, user_id=job.actor_id)
+                    if (grant.purpose != "calendar-action" or grant.target_id != row.id
+                            or grant.workspace_id != row.workspace_id or protocol != personal_oauth.PROTOCOLS.get(grant.provider)):
+                        raise HTTPException(403, "This action belongs to another provider delegation")
+                    headers["Authorization"] = "Bearer " + personal_oauth.access_token(session, grant.id, user_id=job.actor_id)
+                    # Refresh can release SQL locks. Reacquire the installation
+                    # and channel fences before disclosing any reviewed arguments.
+                    lock_workspace(session, row.workspace_id)
+                    lock_channel_writes(session, job.channel_id)
+                    session.expire_all()
+                    row = session.get(AppInstallation, job.installation_id)
+                    job = session.get(AppJob, identifier)
+                    if (not row or not job or job.claim_token != claim or row.generation != job.generation
+                            or not allowed_installation(session, row) or job.channel_id not in channels(row)):
+                        raise HTTPException(403, "The installed provider grant changed")
+                    native_channel(session, row.workspace_id, job.channel_id, job.actor_id)
+                    personal_oauth.current_grant(session, grant.id, user_id=job.actor_id)
+                elif config["authorization"]:
                     headers["Authorization"] = config["authorization"]
                 if protocol == "github.issue":
                     headers.update({"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"})
@@ -624,6 +692,8 @@ def close_account_resources(session, user_id):
     remain shared records under the retained authorship stub.
     """
     from .enterprise_governance import assert_deletion_allowed
+    from .personal_oauth import close_account_resources as close_provider_grants
+    close_provider_grants(session, user_id)
     drafts = session.exec(select(AppAIDraft).where(AppAIDraft.owner_id == user_id)).all()
     jobs = session.exec(select(AppJob).where(AppJob.actor_id == user_id, AppJob.encrypted_payload != "")).all()
     for channel_id in sorted({row.channel_id for row in drafts+jobs}):

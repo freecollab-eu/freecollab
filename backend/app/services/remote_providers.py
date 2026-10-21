@@ -343,6 +343,8 @@ def read_item(provider, kind, config, credentials, item):
 def _calendar_write(resource, provider):
     try: fields = CalendarFields(**{key: resource[key] for key in CalendarFields.model_fields if key in resource}).model_dump()
     except (ValueError, TypeError): raise ProviderError("invalid_resource") from None
+    if fields.get("recurrence") or fields.get("exceptions"):
+        raise ProviderError("unsupported_recurrence")
     if provider == "google":
         start = {"date": fields["starts_at"]} if fields["all_day"] else {"dateTime": fields["starts_at"], "timeZone": fields["timezone"]}
         end = {"date": fields["ends_at"]} if fields["all_day"] else {"dateTime": fields["ends_at"], "timeZone": fields["timezone"]}
@@ -376,6 +378,8 @@ def _remote_key(resource):
 
 def write_item(provider, kind, config, credentials, resource, remote_id=None, expected_etag=None):
     config = validate_config(provider, kind, config)
+    if kind == "calendar" and (resource.get("recurrence") or resource.get("exceptions")):
+        raise ProviderError("unsupported_recurrence")
     if provider in {"nextcloud", "caldav"}:
         from .remote_dav import write_item as dav_write
         return dav_write(kind, config, _dav_credentials(credentials), resource, remote_id, expected_etag)

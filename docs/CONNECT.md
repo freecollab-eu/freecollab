@@ -1,7 +1,9 @@
 # FreeCollab Connect
 
-Connect shares a new, end-to-end encrypted channel between two organization
-workspaces on **the same FreeCollab installation**. Each organization keeps its
+Connect supports bilateral end-to-end encrypted channels. The local mode
+described here connects two organization workspaces on **the same FreeCollab
+installation**. The separately configured [Across installations mode](CONNECT_FEDERATION.md)
+connects independently operated installations and is disabled by default. Each organization keeps its
 own SSO provider, directory and administrators. It does not become a member of
 the other workspace. Both administrators must consent, and acceptance does not
 give the receiving administrator or their coworkers access to the conversation.
@@ -9,7 +11,9 @@ give the receiving administrator or their coworkers access to the conversation.
 An operator must first configure the existing private Matrix service described
 in [E2EE_IMPLEMENTATION.md](E2EE_IMPLEMENTATION.md). Connect has no plaintext
 fallback. `GET /api/connect/capabilities` reports whether encryption is configured
-and explicitly reports `cross_installation: false`.
+and reports `cross_installation` from the separate operator federation
+configuration. Its default is `false`; this flag alone does not verify peer DNS,
+TLS, Matrix connectivity or customer acceptance.
 
 ## Share a channel
 
@@ -84,17 +88,24 @@ single owning `workspacechannel` mapping. Upgrades use the normal additive
 
 ## Separate installations
 
-This release does not exchange messages or identities between independent
-FreeCollab installations. A local workspace grant is not Matrix federation. The
-default private homeserver and gateway remain private; Connect does not enable
-public federation or accept arbitrary external room IDs, URLs or credentials.
+Open **Integrations → Shared channels → Across installations** for the separate
+cross-installation path in [CONNECT_FEDERATION.md](CONNECT_FEDERATION.md). Each
+installation retains its own local channel ID, users, database and customer SSO.
+Both administrators consent, then explicitly enroll only their own current
+members; acceptance grants neither administrator an implicit content seat.
 
-A production cross-installation adapter needs operator-approved remote domains,
-standard Matrix federation and encrypted room membership, remote identity and
-device verification, bilateral administrative authorization, interoperable key
-sharing, revocation and gateway filtering. It also needs tests against two real
-homeservers. Hosting capacity alone does not provide those trust boundaries.
-Until that adapter is configured and validated, this capability reports false.
+The default remains private and federation-disabled. Operators deliberately pin
+the peer installation's Ed25519 public key and Matrix server domain, configure
+exact public HTTPS API origins, and permit the peer in each homeserver's Matrix
+federation allowlist. This does not publish federation routes, DNS or TLS for them.
+Control-plane requests contain signed bounded metadata and opaque references;
+message/file content and keys stay in the existing Matrix client encryption path.
+Unavailable peers block new sends, and previously received content cannot be
+recalled. Both operators are trusted to enforce their own rosters.
+
+The local endpoints and validation below cover same-installation sharing. The
+separate guide documents the independent API, rollout requirements and two-server
+verification; a local workspace grant alone is never treated as federation.
 
 ## Validation
 

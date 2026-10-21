@@ -34,6 +34,9 @@ def require_workspace_member(session, workspace_id: str, user_id: str):
     member = session.get(WorkspaceMember, (workspace_id, user_id))
     if not member or member.role not in WORKSPACE_ROLES:
         raise HTTPException(403, "Workspace membership required")
+    from .enterprise_governance import organization_workspace_access_allowed
+    if not organization_workspace_access_allowed(session, workspace_id, user_id):
+        raise HTTPException(403, "This organization requires its workspace sign-in")
     return member
 
 
@@ -46,6 +49,20 @@ def require_workspace_admin(session, workspace_id: str, user_id: str):
 
 def workspace_allows_channel(session, channel_id: str, user_id: str) -> bool:
     """Unmapped legacy records retain their existing channel-only policy."""
+    from .connect import connection_for_channel, shared_channel_allows, shared_channel_home
+    from .enterprise_governance import organization_workspace_access_allowed
+    from .sso_scope import current_scope_actor_id
+    connection = connection_for_channel(session, channel_id)
+    if connection:
+        scope = current_workspace_scope(session)
+        actor = current_scope_actor_id(session) or user_id
+        actor_home = shared_channel_home(session, channel_id, actor)
+        if not actor_home or not organization_workspace_access_allowed(session, actor_home, actor):
+            return False
+        if scope is not None:
+            if not actor or not shared_channel_allows(session, channel_id, actor, scope):
+                return False
+        return shared_channel_allows(session, channel_id, user_id)
     mapping = session.get(WorkspaceChannel, channel_id)
     principal = principal_snapshot(session, user_id)
     if principal is not None and (not principal[1] or mapping is None or mapping.workspace_id != principal[0]):
@@ -55,6 +72,9 @@ def workspace_allows_channel(session, channel_id: str, user_id: str) -> bool:
         return False
     if mapping is None:
         return True
+    if not organization_workspace_access_allowed(session, mapping.workspace_id,
+                                                  current_scope_actor_id(session) or user_id):
+        return False
     member = session.get(WorkspaceMember, (mapping.workspace_id, user_id))
     return bool(session.get(Workspace, mapping.workspace_id) and member and member.role in WORKSPACE_ROLES)
 
@@ -229,6 +249,17 @@ def visible_user_ids(session, user_id: str) -> set[str]:
     )).all()
     if legacy_channels and scope is None:
         visible.update(session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id.in_(legacy_channels))).all())
+    # Shared-channel peers are visible as peers, never as a foreign directory.
+    from .connect import shared_channel_allows
+    from ..models.connect import ConnectConnection
+    shared_channels = session.exec(select(ChannelMember.channel_id).join(
+        ConnectConnection, ConnectConnection.channel_id == ChannelMember.channel_id,
+    ).where(ChannelMember.user_id == user_id)).all()
+    for channel_id in shared_channels:
+        if not shared_channel_allows(session, channel_id, user_id, scope):
+            continue
+        peers = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == channel_id)).all()
+        visible.update(peer for peer in peers if shared_channel_allows(session, channel_id, peer))
     blocks = session.exec(select(UserBlock).where((UserBlock.blocker_id == user_id) | (UserBlock.blocked_id == user_id))).all()
     hidden = {row.blocked_id if row.blocker_id == user_id else row.blocker_id for row in blocks}
     return set(session.exec(select(User.id).where(User.id.in_(visible - hidden), User.is_blocked == False)).all())

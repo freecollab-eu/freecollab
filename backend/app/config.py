@@ -15,6 +15,16 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./freecollab.db"
     jwt_secret: str = "change-me-in-production"
     storage_path: str = "./data/files"
+    storage_backend: Literal["local", "s3"] = "local"
+    s3_endpoint_url: str = ""
+    s3_bucket: str = ""
+    s3_region: str = "us-east-1"
+    s3_access_key_id: SecretStr | None = None
+    s3_secret_access_key: SecretStr | None = None
+    s3_session_token: SecretStr | None = None
+    s3_key_prefix: str = "freecollab/"
+    s3_ca_bundle: str = ""
+    s3_allow_insecure_http: bool = False
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     enable_experimental_features: bool = False
     enable_demo_ai: bool = False
@@ -68,6 +78,53 @@ class Settings(BaseSettings):
     meetings_ice_servers: list[str] = Field(default_factory=list, max_length=10)
     meetings_turn_urls: list[str] = Field(default_factory=list, max_length=10)
     meetings_turn_secret: SecretStr | None = None
+    enterprise_search_enabled: bool = True
+    meetings_sfu_provider: Literal["disabled", "livekit"] = "disabled"
+    meetings_sfu_url: str = ""
+    meetings_sfu_api_url: str = ""
+    meetings_sfu_api_key: str = ""
+    meetings_sfu_api_secret: SecretStr | None = None
+    meetings_sfu_max_participants: int = Field(default=100, ge=2, le=1000)
+    enterprise_vault_url: str = ""
+    enterprise_vault_token: SecretStr | None = None
+    enterprise_vault_mount: str = "transit"
+    enterprise_vault_key: str = "freecollab"
+    enterprise_vault_namespace: str = ""
+    redis_url: SecretStr | None = None
+    redis_namespace: str = "freecollab"
+    redis_tls_required: bool = True
+    redis_presence_lease_seconds: int = Field(default=75, ge=30, le=300)
+
+    @field_validator("redis_url", mode="before")
+    @classmethod
+    def optional_redis_url(cls, value):
+        raw = value.get_secret_value() if isinstance(value, SecretStr) else value
+        return None if raw is None or raw == "" else value
+
+    @model_validator(mode="after")
+    def validate_object_storage(self):
+        if self.storage_backend != "s3":
+            return self
+        if not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", self.s3_bucket) or ".." in self.s3_bucket:
+            raise ValueError("S3_BUCKET must be an explicit valid bucket name")
+        if (not self.s3_access_key_id or not self.s3_secret_access_key
+                or not self.s3_access_key_id.get_secret_value().strip()
+                or not self.s3_secret_access_key.get_secret_value().strip()
+                or not self.s3_region.strip()):
+            raise ValueError("S3 storage requires its own access key, secret key and region")
+        if len(self.s3_key_prefix) > 256 or (self.s3_key_prefix and (
+            not self.s3_key_prefix.endswith("/") or any(
+                not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", part)
+                for part in self.s3_key_prefix[:-1].split("/")))):
+            raise ValueError("S3_KEY_PREFIX must contain safe directory components and end with /")
+        if self.s3_endpoint_url:
+            endpoint = urlsplit(self.s3_endpoint_url)
+            insecure = self.s3_allow_insecure_http and self.environment in {"development", "test"} and endpoint.scheme == "http"
+            if (endpoint.scheme != "https" and not insecure) or not endpoint.hostname or endpoint.username or endpoint.password or endpoint.query or endpoint.fragment or endpoint.path not in {"", "/"} or any(c.isspace() for c in self.s3_endpoint_url):
+                raise ValueError("S3_ENDPOINT_URL must be an explicit HTTPS origin; development HTTP requires S3_ALLOW_INSECURE_HTTP")
+        if self.environment == "production" and self.s3_allow_insecure_http:
+            raise ValueError("Production object storage requires verified HTTPS")
+        return self
 
     @field_validator("meetings_ice_servers", "meetings_turn_urls")
     @classmethod

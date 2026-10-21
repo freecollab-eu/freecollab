@@ -1,6 +1,6 @@
 # SDK release and distribution
 
-The source release builds `@freecollab/components@0.10.0`. Building or packing
+The source release builds `@freecollab/components@0.11.0`. Building or packing
 does not publish to npm, create a GitHub release, tag a repository or deploy an
 application. This SDK is pre-1.0 and uses the npm `next` distribution tag.
 
@@ -18,7 +18,7 @@ checks their declaration files, packs only the public allowlist and verifies
 npm's SHA-1/SHA-512 against the exact resulting bytes. It writes:
 
 ```text
-artifacts/freecollab-components-0.10.0.tgz
+artifacts/freecollab-components-0.11.0.tgz
 artifacts/release-manifest.json
 artifacts/SHA256SUMS
 ```
@@ -33,11 +33,11 @@ No runtime configuration, private test reports or secret values are included.
 Install the reviewed artifact in the host application:
 
 ```sh
-npm install --save-exact /path/to/freecollab-components-0.10.0.tgz
+npm install --save-exact /path/to/freecollab-components-0.11.0.tgz
 ```
 
 Once that exact version has actually been published, the corresponding registry
-installation is `npm install --save-exact @freecollab/components@0.10.0`. That
+installation is `npm install --save-exact @freecollab/components@0.11.0`. That
 command is a future registry option, not evidence of publication. The package's
 Yjs runtime dependency is resolved by the host bundler; React is optional.
 
@@ -87,7 +87,7 @@ bundler. The legacy floating-widget IIFE remains a separate integration.
 
 ## Upgrade rules
 
-- Keep the SDK, backend and trusted embedded client on the same `0.10.x` release
+- Keep the SDK, backend and trusted embedded client on the same `0.11.x` release
   line. Check deployment health and current server capabilities before rollout.
 - Patch releases preserve documented APIs; fixes may reject insecure or obsolete
   behavior. A pre-1.0 minor release can change APIs and needs migration notes.

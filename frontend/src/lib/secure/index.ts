@@ -122,8 +122,12 @@ async function ensureSession(): Promise<MatrixClient> {
 async function roomFor(channelId: string, writing = false) {
   const c = await ensureSession(); if (!bindingsLoaded || !bindings.has(channelId)) await refreshBindings();
   const binding = bindings.get(channelId); if (!binding?.room_id || binding.status !== 'active') throw new Error('This encrypted channel is not ready.');
-  const snapshot = writing ? await request<{ membership_epoch: string; revoked_devices: RevokedDevice[] }>('/secure/channels/' + encodeURIComponent(channelId) + '/sync', {}) : undefined;
-  let room = c.getRoom(binding.room_id); if (!room || room.getMyMembership() !== 'join') { await c.joinRoom(binding.room_id); room = c.getRoom(binding.room_id); }
+  let room = c.getRoom(binding.room_id);
+  const joining = !room || room.getMyMembership() !== 'join';
+  // A newly granted Connect member has a product seat before Matrix invites
+  // exist. Synchronize that current authorized seat before the first read/join.
+  const snapshot = writing || joining ? await request<{ membership_epoch: string; revoked_devices: RevokedDevice[] }>('/secure/channels/' + encodeURIComponent(channelId) + '/sync', {}) : undefined;
+  if (joining) { await c.joinRoom(binding.room_id); room = c.getRoom(binding.room_id); }
   if (!room || !c.isRoomEncrypted(binding.room_id)) throw new Error('Encrypted room state is unavailable. Sending is blocked.');
   if (writing) {
     if (!snapshot || !Array.isArray(snapshot.revoked_devices)) throw new Error('Encrypted device snapshot is unavailable.');

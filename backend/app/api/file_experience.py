@@ -236,6 +236,8 @@ async def office_dav(session_id: str, secret: str, filename: str, request: Reque
     session.expire_all(); cap,record,document=service.capability(session,session_id,secret,writing=True)
     check_lock(request,live_lock(session,document.id),cap)
     if expected != service.etag(record): raise HTTPException(412,"A newer version exists; reopen before saving")
+    from ..services.enterprise_governance import enforce_native_file
+    enforce_native_file(session,cap.channel_id,cap.user_id,cap.filename,cap.content_type,bytes(content))
     new_id=uuid4().hex; path=None
     try:
         path=await storage_service.save_file(new_id,bytes(content))

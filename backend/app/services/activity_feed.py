@@ -191,9 +191,12 @@ def validate_content(session, channel_id, kind, fields, event_id, actor_id):
         return None
     if event_id: raise HTTPException(400, "Encrypted activity references require an encrypted channel")
     try:
-        return SCHEMAS[kind].model_validate(fields).model_dump(mode="json")
+        payload = SCHEMAS[kind].model_validate(fields).model_dump(mode="json")
     except (ValueError, TypeError):
         raise HTTPException(422, "Invalid activity content") from None
+    from .enterprise_governance import enforce_native_document
+    enforce_native_document(session, channel_id, actor_id, payload)
+    return payload
 
 
 def seal_fields(channel_id, kind, identifier, revision, fields):

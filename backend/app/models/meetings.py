@@ -35,6 +35,21 @@ class MeetingParticipant(SQLModel, table=True):
     expires_at: datetime
 
 
+class MeetingParticipantAuthority(SQLModel, table=True):
+    """Immutable verified claim snapshot, independent of child-session sidecars.
+
+    Polymorphic references keep this additive for existing mesh tables while
+    sharing the exact same restriction checks with the new SFU transport.
+    """
+    transport: str = Field(primary_key=True)
+    participant_id: str = Field(primary_key=True)
+    meeting_id: str = Field(index=True)
+    user_id: str = Field(foreign_key="user.id", index=True)
+    token_hash: str = Field(index=True)
+    encrypted_claims: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+
+
 class MeetingInvitation(SQLModel, table=True):
     id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
     meeting_id: str = Field(foreign_key="meeting.id", index=True)

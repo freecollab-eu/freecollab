@@ -14,6 +14,7 @@ from ..services.access import require_channel_member, lock_channel_writes
 from ..services.workspaces import require_direct_message_writable
 from ..services.direct_messages import restore_direct_inbox
 from ..services.crypto import encrypt_message, decrypt_message
+from ..services.enterprise_governance import assert_deletion_allowed, enforce_native_content
 from ..schemas import MessageText
 from ..realtime.socket import broadcast_to_channel
 from ..api.mentions import process_message_mentions
@@ -65,6 +66,7 @@ async def send_message(
         if not parent or parent.deleted or parent.channel_id != channel_id:
             raise HTTPException(404, "Parent message not found in channel")
 
+    warnings = enforce_native_content(session, channel_id, user.id, data.content)
     # Encrypt and store
     encrypted_content = encrypt_message(data.content, channel_id)
 
@@ -118,6 +120,7 @@ async def send_message(
         **message.model_dump(),
         "content": data.content,
         "mentions": mention_ids,
+        "policy_warnings": warnings,
     }
 
 
@@ -167,6 +170,14 @@ def sync_messages(channel_id: str, after: int = Query(0, ge=0), limit: int = Que
     return {"messages": messages, "next_cursor": selected[-1].id if selected else after, "has_more": has_more}
 
 
+@router.get("/channels/{channel_id}/sync/head")
+def sync_head(channel_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    require_channel_member(session, channel_id, user.id)
+    require_native_channel(session, channel_id)
+    cursor = session.query(func.max(MessageChange.id)).filter(MessageChange.channel_id == channel_id).scalar() or 0
+    return {"cursor": cursor}
+
+
 @router.get("/{message_id}")
 def get_message(message_id: str, user=Depends(get_current_user), session=Depends(get_session)):
     message = session.get(Message, message_id)
@@ -202,6 +213,8 @@ async def edit_message(
         raise HTTPException(400, "Cannot edit deleted message")
 
     mention_ids = validate_mentions(session, message.channel_id, data.mentions) if data.mentions is not None else message_mentions(message)
+    assert_deletion_allowed(session, message.channel_id, author_id=message.author_id)
+    warnings = enforce_native_content(session, message.channel_id, user.id, data.content)
 
     # Encrypt new content
     encrypted_content = encrypt_message(data.content, message.channel_id)
@@ -233,6 +246,7 @@ async def edit_message(
         "content": data.content,
         "edited_at": message.edited_at.isoformat(),
         "mentions": mention_ids,
+        "policy_warnings": warnings,
     }
 
 
@@ -258,6 +272,7 @@ async def delete_message(
     if message.deleted:
         raise HTTPException(400, "Message already deleted")
 
+    assert_deletion_allowed(session, message.channel_id, author_id=message.author_id)
     message.deleted = True
     message.content = "[Message deleted]"
     message.edited_at = datetime.utcnow()

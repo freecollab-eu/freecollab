@@ -1,0 +1,10 @@
+# Also match a dependency-directory symlink used by isolated build environments.
+node_modules
+dist/
+artifacts/
+
+# Customer-owned signing material stays outside published source.
+*.p12
+*.pfx
+*.key
+*.pem

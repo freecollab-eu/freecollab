@@ -25,7 +25,7 @@ def test_disabled_integration_worker_never_contacts_a_provider(tmp_path, monkeyp
     def unexpected(_):
         raise AssertionError("Disabled queue contacted a provider")
 
-    assert run_once(engine, webhook_batch=unexpected, proof_batch=unexpected, sync_batch=unexpected) == {"webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "workflows": "disabled", "data": "disabled", "push": "disabled"}
+    assert run_once(engine, webhook_batch=unexpected, proof_batch=unexpected, sync_batch=unexpected) == {"webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "workflows": "disabled", "data": "disabled", "push": "disabled", "chat": 0, "apps": 0, "recaps": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "integrations").last_seen_at <= datetime.utcnow()
 
@@ -48,7 +48,7 @@ def test_failed_queue_rolls_back_without_blocking_other_provider(tmp_path, monke
         session.commit()
         return 1
 
-    assert run_once(engine, webhook_batch=failed, proof_batch=remaining, sync_batch=lambda session: 2) == {"webhooks": "error", "otrust": 1, "sync": 2, "workflows": "disabled", "data": "disabled", "push": "disabled"}
+    assert run_once(engine, webhook_batch=failed, proof_batch=remaining, sync_batch=lambda session: 2) == {"webhooks": "error", "otrust": 1, "sync": 2, "workflows": "disabled", "data": "disabled", "push": "disabled", "chat": 0, "apps": 0, "recaps": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "proof-work-completed")
         assert session.get(WorkerHeartbeat, "partial-write") is None
@@ -104,7 +104,7 @@ def test_local_jobs_run_without_external_integrations_and_fail_independently(tmp
 
     assert run_once(engine, workflow_batch=failed, data_batch=export, push_batch=lambda session: 2) == {
         "webhooks": "disabled", "otrust": "disabled", "sync": "disabled",
-        "workflows": "error", "data": 1, "push": 2}
+        "workflows": "error", "data": 1, "push": 2, "chat": 0, "apps": 0, "recaps": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "export-completed")
     assert "secret-customer-document" not in caplog.text

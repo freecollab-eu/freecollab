@@ -12,7 +12,7 @@ export interface DataState { policy: RetentionPolicy; channels: DataChannel[]; j
 export interface DataPreview { id: string; counts: Record<string, number>; channels: { channel_id: string; counts: Record<string, number> }[]; cutoff: string; expires_at: string; policy: RetentionPolicy; confirmation: string; scope: string }
 export interface ClosurePreview {
   can_erase_identity: boolean; fingerprint: string; confirmation: 'ERASE MY ACCOUNT'; effect: string;
-  blocking_workspaces: string[]; blocking_channels: string[]; blocking_installation_admin: boolean; active_data_jobs: string[];
+  blocking_workspaces: string[]; blocking_channels: string[]; blocking_organizations?: string[]; blocking_installation_admin: boolean; active_data_jobs: string[];
   memberships: [string, string][]; channels: [string, string][]; empty_personal_workspaces: string[];
 }
 const base = (workspace: string) => `/workspaces/${encodeURIComponent(workspace)}/data-controls`;

@@ -29,7 +29,7 @@ def presence_context(monkeypatch):
         with Session(engine) as session:
             yield session
     app.dependency_overrides[get_session] = sessions
-    monkeypatch.setattr(presence, 'get_online_users', lambda: ['member', 'colleague', 'outsider', 'blocked', 'deleted'])
+    monkeypatch.setattr(presence, 'get_online_users', lambda *_: ['member', 'colleague', 'outsider', 'blocked', 'deleted'])
     with TestClient(app) as client:
         yield client
     engine.dispose()

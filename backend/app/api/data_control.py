@@ -156,7 +156,7 @@ def preview(workspace_id: str, data: Selection, user=Depends(get_current_user), 
             "scope": "Selected native-channel content only; external providers, Matrix history, device caches and backups are separate."}
 
 
-def queue_job(session, actor, state, credentials, workspace_id, kind, request):
+def queue_job(session, actor, state, credentials, workspace_id, kind, request, *, before_commit=None):
     pending = session.exec(select(func.count()).select_from(DataControlJob).where(DataControlJob.requested_by == actor.id,
         DataControlJob.status.in_(["queued", "processing", "erasing_files"]))).one()
     if pending >= 2: raise HTTPException(429, "Wait for an existing data-control job to complete")
@@ -165,7 +165,11 @@ def queue_job(session, actor, state, credentials, workspace_id, kind, request):
         token_hash=token_digest(credentials.credentials), auth_version=state.auth_version, kind=kind,
         encrypted_request=seal_private(service._json(request), "data-job", identifier), expires_at=datetime.utcnow() + timedelta(hours=1))
     recheck_actor(session, actor.id)
-    session.add(row); session.commit(); return job_payload(row)
+    session.add(row)
+    if before_commit is not None:
+        session.flush()
+        before_commit(row)
+    session.commit(); return job_payload(row)
 
 
 @router.post("/exports", status_code=202)
@@ -270,10 +274,10 @@ def closure_state(session, user):
             for table in service.SQLModel.metadata.sorted_tables:
                 for fk in table.foreign_keys:
                     if fk.column.table.name == "workspace" and table.name not in permitted:
-                        if table.name == "pilotfeedback":
-                            # Own optional feedback is erased in this closure;
-                            # another participant's private notes still protect
-                            # the workspace from implicit account-only deletion.
+                        if table.name in {"pilotfeedback", "enterprisesearchconnection"}:
+                            # Own optional reports/personal search credentials
+                            # are erased in this closure. Another participant's
+                            # private records still protect the workspace.
                             if service._records(session, table.name, (fk.parent == member.workspace_id) & (table.c.user_id != user.id)): empty = False
                         elif service._records(session, table.name, fk.parent == member.workspace_id): empty = False
         if empty: empty_homes.append(member.workspace_id)
@@ -292,12 +296,22 @@ def closure_state(session, user):
     pending_erasure = session.exec(select(DataFileErasure.job_id).join(DataControlJob, DataControlJob.id == DataFileErasure.job_id).where(
         DataControlJob.requested_by == user.id, DataFileErasure.erased_at.is_(None))).all()
     active_jobs = sorted(set(active_jobs + pending_erasure))
+    from ..models.enterprise_governance import OrganizationMember
+    organization_blockers = []
+    own_organizations = session.exec(select(OrganizationMember.organization_id).where(
+        OrganizationMember.user_id == user.id, OrganizationMember.role == "owner")).all()
+    for identifier in own_organizations:
+        successor = session.exec(select(OrganizationMember.user_id).join(User, User.id == OrganizationMember.user_id).where(
+            OrganizationMember.organization_id == identifier, OrganizationMember.role == "owner",
+            OrganizationMember.user_id != user.id, User.is_blocked == False)).first()
+        if not successor: organization_blockers.append(identifier)
     result = {"user_id": user.id, "memberships": sorted([[row.workspace_id, row.role] for row in memberships]),
               "channels": sorted([[row.channel_id, row.role] for row in channels]), "empty_personal_workspaces": sorted(empty_homes),
               "blocking_workspaces": sorted(blockers), "blocking_channels": sorted(channel_blockers),
+              "blocking_organizations": sorted(organization_blockers),
               "blocking_installation_admin": bool(installation_blocked), "active_data_jobs": sorted(active_jobs)}
     result["fingerprint"] = hashlib.sha256(service._json(result).encode()).hexdigest()
-    result["can_erase_identity"] = not (blockers or channel_blockers or installation_blocked or active_jobs)
+    result["can_erase_identity"] = not (blockers or channel_blockers or organization_blockers or installation_blocked or active_jobs)
     return result
 
 
@@ -333,6 +347,10 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     state = ensure_reauthentication(session, actor, data.password, data.code)
     # Lock the resources whose last-owner/admin protection is being assessed.
     workspaces = session.exec(select(WorkspaceMember.workspace_id).where(WorkspaceMember.user_id == actor.id)).all()
+    from ..models.enterprise_governance import OrganizationMember
+    from ..services.enterprise_governance import lock_organization
+    organization_ids = session.exec(select(OrganizationMember.organization_id).where(OrganizationMember.user_id == actor.id)).all()
+    for identifier in sorted(organization_ids): lock_organization(session, identifier)
     for identifier in sorted(workspaces): lock_workspace(session, identifier)
     channel_ids = session.exec(select(ChannelMember.channel_id).where(ChannelMember.user_id == actor.id)).all()
     for identifier in sorted(channel_ids): lock_channel_writes(session, identifier)
@@ -340,7 +358,7 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     snapshot = closure_state(session, actor)
     if snapshot["fingerprint"] != data.preview_fingerprint: raise HTTPException(409, "Account dependencies changed; refresh the erasure preview")
     if not snapshot["can_erase_identity"]:
-        raise HTTPException(409, "Transfer workspace/channel ownership and finish data jobs before erasing this identity")
+        raise HTTPException(409, "Transfer organization/workspace/channel ownership and finish data jobs before erasing this identity")
     from ..services.matrix_bridge import remove_secure_member
     for identifier in sorted(channel_ids): remove_secure_member(session, identifier, actor.id)
     recheck_actor(session, actor.id)
@@ -351,10 +369,24 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     # shared workspace content is intentionally not swept by identity closure.
     data_jobs = session.exec(select(DataControlJob).where(DataControlJob.requested_by == actor.id)).all()
     for job in data_jobs: service._artifact_path(job.id).unlink(missing_ok=True)
-    _delete_rows(session, "datafileerasure", "job_id", [job.id for job in data_jobs])
-    _delete_rows(session, "datacontroljob", "requested_by", [actor.id])
+    from ..models.enterprise_governance import GovernanceCaseExport
+    evidence_ids = set(session.exec(select(GovernanceCaseExport.job_id).where(GovernanceCaseExport.requested_by == actor.id)).all())
+    for job in data_jobs:
+        if job.id in evidence_ids:
+            # Preserve shared case hash/review provenance, expire private copies
+            # and erase the requester's retained session/request material.
+            job.status = "expired"; job.token_hash = "erased"; job.auth_version = 0
+            job.encrypted_request = seal_private("{}", "data-job", job.id)
+            job.lease_token = None; job.lease_expires_at = None
+            session.add(job)
+    disposable_jobs = [job.id for job in data_jobs if job.id not in evidence_ids]
+    _delete_rows(session, "datafileerasure", "job_id", disposable_jobs)
+    _delete_rows(session, "datacontroljob", "id", disposable_jobs)
     _delete_rows(session, "datacontrolpreview", "requested_by", [actor.id])
     service.erase_pilot_feedback_for_account(session, actor.id)
+    # Meeting device grants hold verified restriction snapshots independently
+    # of JWT/native/embed session sidecars; erase them before session cleanup.
+    _delete_rows(session, "meetingparticipantauthority", "user_id", [actor.id])
     # Remove account/device credentials and private profile data explicitly.
     subscriptions = service._table("pushsubscription")
     subscription_ids = service._records(session, subscriptions.name, subscriptions.c.user_id == actor.id) if subscriptions is not None else []
@@ -365,7 +397,7 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "pushdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notificationdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notification", "user_id", [actor.id])
-    for name in ("userappearance", "userlanguage", "notificationpreference", "bookmark", "threadsubscription", "encryptedthreadsubscription",
+    for name in ("userappearance", "userlanguage", "notificationpreference", "bookmark", "threadsubscription", "encryptedthreadsubscription", "enterprisesearchconnection", "scheduledmessage", "messagereminder", "saveditemcompletion", "organizationmember",
                  "channelnotificationsetting", "notificationdelivery", "directmessagestate", "offlinemessagereceipt"):
         _delete_rows(session, name, "user_id", [actor.id])
     conversations = service._table("copilotconversation")
@@ -374,6 +406,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "copilottoolapproval", "turn_id", service._ids(turns))
     _delete_rows(session, "copilotturn", "conversation_id", service._ids(own_conversations))
     _delete_rows(session, "copilotconversation", "user_id", [actor.id])
+    from ..services.app_platform import close_account_resources
+    close_account_resources(session, actor.id)
     for name in ("copilotconsent", "copilotactivity", "cloudfileoauthattempt", "externalmeetingoauthattempt", "cloudfileimport", "activityfeedfollow", "activityfeedread"):
         _delete_rows(session, name, "user_id", [actor.id])
     _delete_rows(session, "activityfeedfollow", "target_id", [actor.id])
@@ -396,10 +430,16 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     for name in ("workspaceoidcmfachallenge", "oidcmfachallenge"):
         _delete_rows(session, name, "token_hash", [row["token_hash"] for row in challenges])
     _delete_rows(session, "mfachallenge", "user_id", [actor.id])
+    matrix_table = service._table("matrixsession")
+    matrix_rows = service._records(session, matrix_table.name, matrix_table.c.user_id == actor.id) if matrix_table is not None else []
+    _delete_rows(session, "nativeclientmatrixbinding", "matrix_token_hash", [row["matrix_token_hash"] for row in matrix_rows])
+    _delete_rows(session, "embedmatrixbinding", "matrix_token_hash", [row["matrix_token_hash"] for row in matrix_rows])
+    for name in ("nativeclientgrant", "nativeclientsession", "embedgrant"):
+        _delete_rows(session, name, "user_id", [actor.id])
     for name in ("accounttoken", "accountrecoverycode", "matrixsession", "matrixaccount"):
         _delete_rows(session, name, "user_id", [actor.id])
     tracked = session.exec(select(ActiveSession).where(ActiveSession.user_id == actor.id)).all()
-    for name in ("workspaceencryptionunlock", "workspaceoidcsession"):
+    for name in ("workspaceencryptionunlock", "workspaceoidcsession", "embedsession"):
         _delete_rows(session, name, "token_hash", [row.token_hash for row in tracked])
     _delete_rows(session, "activesession", "user_id", [actor.id])
     mail_table = service._table("mailoutbox")
@@ -429,6 +469,13 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
             session.execute(delete(signals).where((signals.c.sender_id.in_(ids)) | (signals.c.recipient_id.in_(ids))))
         session.execute(update(table).where(table.c.user_id == actor.id).values(name="Deleted account", state="removed", expires_at=datetime.utcnow()))
     table = service._table("meeting")
+    if table is not None: session.execute(update(table).where(table.c.host_user_id == actor.id).values(ended_at=datetime.utcnow()))
+    table = service._table("sfuparticipant")
+    if table is not None:
+        session.execute(update(table).where(table.c.user_id == actor.id).values(name="Deleted account", state="removed",
+            disconnected=True, expires_at=datetime.utcnow(), auth_token_hash="erased", auth_version=0,
+            scope_workspace_id=None, scope_provider_revision=None))
+    table = service._table("sfuroom")
     if table is not None: session.execute(update(table).where(table.c.host_user_id == actor.id).values(ended_at=datetime.utcnow()))
     # Invalidate every prior JWT through the retained monotonically increasing
     # security version, while clearing all factor/recovery/profile values.

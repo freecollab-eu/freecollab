@@ -1,8 +1,10 @@
 import hashlib
 from uuid import uuid4
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Header, HTTPException, UploadFile, File as FastAPIFile
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
+from starlette.concurrency import run_in_threadpool
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy import delete, update
 from ..services.request_guard import recheck_actor
@@ -135,6 +137,8 @@ async def upload_file(channel_id: str, file: UploadFile = FastAPIFile(...),
     previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
     if previous:
         return previous
+    from ..services.enterprise_governance import enforce_native_file
+    warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
     file_id = uuid4().hex
     storage_path = await storage_service.save_file(file_id, content)
     record = File(id=file_id, channel_id=channel_id, uploader_id=actor_id,
@@ -169,7 +173,7 @@ async def upload_file(channel_id: str, file: UploadFile = FastAPIFile(...),
         session.rollback()
         await storage_service.delete_file(file_id)
         raise
-    return file_metadata(record, version, document)
+    return {**file_metadata(record, version, document), "policy_warnings": warnings}
 
 
 @router.get("/channels/{channel_id}")
@@ -234,6 +238,8 @@ async def upload_version(file_id: str, file: UploadFile = FastAPIFile(...),
     if previous:
         return previous
     new_id = uuid4().hex
+    from ..services.enterprise_governance import enforce_native_file
+    warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
     path = None
     try:
         if document:
@@ -281,20 +287,27 @@ async def upload_version(file_id: str, file: UploadFile = FastAPIFile(...),
         if path:
             await storage_service.delete_file(new_id)
         raise
-    return file_metadata(replacement, version, document)
+    return {**file_metadata(replacement, version, document), "policy_warnings": warnings}
 
 
 @router.get("/{file_id}")
 async def download_file(file_id: str, user=Depends(get_current_user), session=Depends(get_session)):
     record = find_file(session, file_id, user.id)
     try:
-        path = storage_service.get_file_path(record.id)
-    except ValueError:
+        content = await run_in_threadpool(storage_service.read_file, record.id, MAX_FILE_SIZE, record.size)
+    except (OSError, ValueError):
         raise HTTPException(404, "File not found")
-    if not path.is_file():
+    if content is None:
         raise HTTPException(404, "File not found")
-    return FileResponse(path, filename=safe_filename(record.filename), media_type=record.content_type,
-                        headers={"X-Content-Type-Options": "nosniff"})
+    session.expire_all()
+    recheck_actor(session, user.id)
+    record = find_file(session, file_id, user.id)
+    filename = safe_filename(record.filename)
+    encoded = quote(filename)
+    disposition = "attachment; filename*=UTF-8''" + encoded if encoded != filename else 'attachment; filename="' + filename + '"'
+    return Response(content, media_type=record.content_type,
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, no-store",
+                 "Content-Disposition": disposition})
 
 
 @router.delete("/{file_id}")
@@ -308,6 +321,14 @@ async def delete_file(file_id: str, user=Depends(get_current_user), session=Depe
     _, document = file_context(session, record)
     if (document.owner_id if document else record.uploader_id) != user.id:
         raise HTTPException(403, "Not the uploader")
+    from ..services.enterprise_governance import assert_deletion_allowed
+    preserved_authors = {record.uploader_id}
+    if document:
+        preserved_authors.add(document.owner_id)
+        preserved_authors.update(session.exec(select(File.uploader_id).join(FileVersion, FileVersion.file_id == File.id)
+            .where(FileVersion.document_id == document.id)).all())
+    for author_id in sorted(preserved_authors):
+        assert_deletion_allowed(session, channel_id, author_id=author_id)
     identity = document.id if document else record.id
     session.execute(delete(OfficeEditLock).where(OfficeEditLock.document_id == identity))
     session.execute(delete(OfficeEditSession).where(OfficeEditSession.channel_id == channel_id, OfficeEditSession.document_id == identity))

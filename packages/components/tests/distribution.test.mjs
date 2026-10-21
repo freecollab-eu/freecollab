@@ -31,7 +31,7 @@ test('the actual tarball resolves every framework-neutral entry and declarations
     const manifest = JSON.parse(await readFile(resolve(installed, 'package.json'), 'utf8'));
     const metadata = JSON.parse(await readFile(resolve(installed, 'dist/release.json'), 'utf8'));
     assert.equal(metadata.version, manifest.version);
-    assert.equal(metadata.apiLine, '0.10');
+    assert.equal(metadata.apiLine, '0.11');
     assert.deepEqual(metadata.entries, Object.keys(manifest.exports));
     assert.equal(manifest.peerDependenciesMeta.react.optional, true);
     assert.equal(manifest.dependencies.yjs, '13.6.27');

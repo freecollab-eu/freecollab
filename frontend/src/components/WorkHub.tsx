@@ -16,9 +16,10 @@ import { CopilotPanel } from './CopilotPanel';
 import { CloudFilesPicker } from './CloudFilesPicker';
 import { ExternalMeetingsPanel } from './ExternalMeetingsPanel';
 import { ChannelSyncNotice } from './ChannelSyncNotice';
+import { ChannelApps } from './ChannelApps';
 import '../styles/work-hub.css';
 
-export type WorkHubTab = 'tasks' | 'meetings' | 'documents' | 'workflows' | 'data' | 'mobile' | 'feed' | 'copilot' | 'cloud' | 'external-meetings';
+export type WorkHubTab = 'tasks' | 'meetings' | 'documents' | 'workflows' | 'data' | 'mobile' | 'feed' | 'copilot' | 'cloud' | 'external-meetings' | 'apps';
 interface Props { workspaceId: string; channel: Channel; onClose: () => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean }
 const tabs = [
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -29,6 +30,7 @@ const tabs = [
   { id: 'meetings', label: 'Meetings', icon: Video },
   { id: 'documents', label: 'Documents', icon: FileText },
   { id: 'workflows', label: 'Workflows', icon: GitBranch },
+  { id: 'apps', label: 'Apps & automation', icon: Sparkles },
   { id: 'data', label: 'Data & retention', icon: ShieldCheck },
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
@@ -74,6 +76,7 @@ export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', d
           {tab === 'tasks' && <ProjectTasksPanel {...props} />}
           {tab === 'documents' && <SharedDocumentsPanel {...props} onPendingChange={onDocumentPending} />}
           {tab === 'workflows' && <WorkflowsPanel {...props} />}
+          {tab === 'apps' && <ChannelApps workspaceId={workspaceId} channelId={channel.id} />}
           {tab === 'data' && <DataControlsPanel {...props} isAdmin={dataAdmin && unrestricted} />}
           {tab === 'mobile' && <MobileSettings />}
         </div>}

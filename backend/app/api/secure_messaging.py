@@ -15,6 +15,8 @@ from ..models.secure_channel import SecureChannel, MatrixSession, MatrixAccount,
 from ..models.session import ActiveSession, RevokedToken
 from ..models.account_security import AccountSecurity
 from ..models.user import User
+from ..models.native_clients import NativeClientMatrixBinding, NativeClientSession
+from ..models.embed import EmbedMatrixBinding, EmbedSession
 from ..models.workspace_oidc import WorkspaceOIDCSession
 from ..models.workspace_crypto_grant import WorkspaceEncryptionUnlock
 from ..models.activity_feed import ActivityFeedPost
@@ -151,6 +153,21 @@ def start_session(data: StartSession, user=Depends(get_current_user), credential
         session.add(row)
     # Provisioning/login can wait on the homeserver. Do not expose a credential
     # after a concurrent provider disable, membership removal or native logout.
+    claims = decode_token_claims(credentials.credentials)
+    if claims.get("native_client_id"):
+        matrix_hash = token_digest(auth["access_token"])
+        marker = session.get(NativeClientMatrixBinding, matrix_hash)
+        if marker is None:
+            session.add(NativeClientMatrixBinding(matrix_token_hash=matrix_hash,
+                native_client_id=claims["native_client_id"]))
+    if claims.get("embed_application_id"):
+        matrix_hash = token_digest(auth["access_token"])
+        marker = session.get(EmbedMatrixBinding, matrix_hash)
+        if marker is None:
+            session.add(EmbedMatrixBinding(matrix_token_hash=matrix_hash,
+                application_id=claims["embed_application_id"]))
+        elif marker.application_id != claims["embed_application_id"]:
+            raise HTTPException(401, "Embedded client sign-in expired")
     session.flush()
     session.expire_all()
     if active_user_for_token(credentials.credentials, session) is None:
@@ -363,6 +380,15 @@ def _matrix_authorize(request, session):
     user = session.get(User, row.user_id)
     if not user or user.is_blocked or not tracked or (tracked.revoked_at or tracked.expires_at <= datetime.utcnow()) or (state.auth_version if state else 0) != row.auth_version:
         raise HTTPException(401, "Session expired")
+    marker = session.get(NativeClientMatrixBinding, row.matrix_token_hash)
+    native = session.get(NativeClientSession, row.auth_token_hash)
+    if (marker is not None or native is not None) and (marker is None or native is None or marker.native_client_id != native.id):
+        raise HTTPException(401, "Native client sign-in expired")
+    embed_marker = session.get(EmbedMatrixBinding, row.matrix_token_hash)
+    embedded = session.get(EmbedSession, row.auth_token_hash)
+    if (embed_marker is not None or embedded is not None) and (
+            embed_marker is None or embedded is None or embed_marker.application_id != embedded.application_id):
+        raise HTTPException(401, "Embedded client sign-in expired")
     if not bind_scope_for_hash(session, row.auth_token_hash, row.user_id):
         raise HTTPException(401, "Workspace sign-in expired")
     grant_scope = session.exec(select(WorkspaceEncryptionUnlock.workspace_id).where(
@@ -470,11 +496,17 @@ async def matrix_proxy(path: str, request: Request, session=Depends(get_session)
                 recipients = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == binding.channel_id)).all()
                 lock_device_accounts(session, recipients)
                 workspace_id = channel_workspace_id(session, binding.channel_id)
-                if workspace_id:
+                from ..services.connect import connection_for_channel
+                if workspace_id and not connection_for_channel(session, binding.channel_id):
                     lock_workspace(session, workspace_id)
                 lock_channel_writes(session, binding.channel_id)
                 session.expire_all()
                 _matrix_authorize(request, session)
+                current_room = session.exec(select(SecureChannel.matrix_room_id).where(
+                    SecureChannel.channel_id == binding.channel_id,
+                )).first()
+                if current_room != match[1]:
+                    raise HTTPException(403, "Encrypted room binding changed")
                 current_recipients = session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == binding.channel_id)).all()
                 if not set(current_recipients).issubset(recipients):
                     raise HTTPException(409, "Channel recipients changed; prepare encryption again before sending")

@@ -58,15 +58,16 @@ def https(tmp_path, monkeypatch):
             if path == "/redirect-test":
                 return self.reply(302, b"must not be followed", {"Location": "https://dl.fixture.boxcloud.com/content" if state["mode"] != "oversized" else "https://dl.fixture.boxcloud.com/" + "x" * 16400})
             if host == "www.googleapis.com":
-                file = {"id": "remote-file", "name": "notes.txt", "mimeType": "text/plain", "size": str(len(state["bytes"])), "version": str(revision), "parents": ["outside" if state["mode"] == "outside" else "selected-folder"]}
+                file = {"id": "remote-file", "name": "notes.txt", "mimeType": "text/plain", "size": str(len(state["bytes"])), "version": str(revision), "parents": ["outside" if state["mode"] == "outside" else "selected-folder"], "webViewLink": "https://docs.google.com/document/d/remote-file"}
                 if path == "/drive/v3/files/selected-folder": return self.reply(200, {"id": "selected-folder", "name": "Root", "mimeType": "application/vnd.google-apps.folder"})
                 if path == "/drive/v3/files": return self.reply(200, {"files": [file]})
                 if urlsplit(self.path).query == "alt=media": return self.content()
                 return self.reply(200, file, {"ETag": '"g' + str(revision) + '"'})
             if host == "graph.microsoft.com":
-                file = {"id": "remote-file", "name": "notes.txt", "size": len(state["bytes"]), "eTag": '"m' + str(revision) + '"', "file": {"mimeType": "text/plain"}, "parentReference": {"id": "outside" if state["mode"] == "outside" else "selected-folder", "driveId": "drive"}, "@microsoft.graph.downloadUrl": "https://files.fixture.1drv.com/content"}
+                file = {"id": "remote-file", "name": "notes.txt", "size": len(state["bytes"]), "eTag": '"m' + str(revision) + '"', "file": {"mimeType": "text/plain"}, "parentReference": {"id": "outside" if state["mode"] == "outside" else "selected-folder", "driveId": "drive"}, "@microsoft.graph.downloadUrl": "https://files.fixture.1drv.com/content", "webUrl": "https://fixture.sharepoint.com/notes.txt"}
                 if path.endswith("/selected-folder"): return self.reply(200, {"id": "selected-folder", "folder": {}, "name": "Root"})
                 if path.endswith("/children"): return self.reply(200, {"value": [file]})
+                if "/search(q=" in path: return self.reply(200, {"value": [file]})
                 return self.reply(200, file)
             if host == "api.dropboxapi.com":
                 file = {".tag": "file", "id": "id:file", "name": "notes.txt", "path_lower": "/outside/notes.txt" if state["mode"] == "outside" else "/chosen/notes.txt", "rev": "r" + str(revision), "size": len(state["bytes"])}

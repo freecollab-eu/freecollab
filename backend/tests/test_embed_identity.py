@@ -14,7 +14,7 @@ from app.config import settings
 from app.database import get_session
 from app.models.account_security import AccountSecurity
 from app.models.channel import Channel, ChannelMember
-from app.models.embed import EmbedApplication, EmbedGrant, EmbedSession
+from app.models.embed import EmbedApplication, EmbedGrant, EmbedMatrixBinding, EmbedSession
 from app.models.session import ActiveSession
 from app.models.secure_channel import MatrixSession
 from app.models.user import User
@@ -183,6 +183,30 @@ def test_launch_rejects_native_account_token_and_cross_workspace_channel(api):
     assert api.client.post("/workspaces/team/embed/launch", headers=headers(api.scoped, APP), json=body).status_code == 200
 
 
+def test_native_client_cannot_create_a_nested_embed_session(api):
+    from app.api import native_clients
+    from app.services.auth import revoke_token
+
+    api.client.app.include_router(native_clients.router)
+    callback = "http://127.0.0.1:43127/freecollab-native/callback"
+    grant = api.client.post("/native-clients/connect", headers=headers(api.scoped), json={
+        "code_challenge": proof_challenge(VERIFIER), "redirect_uri": callback, "client_kind": "desktop"})
+    assert grant.status_code == 200, grant.text
+    result = api.client.post("/native-clients/exchange", json={"code": grant.json()["code"],
+        "code_verifier": VERIFIER, "redirect_uri": callback})
+    assert result.status_code == 200, result.text
+    token = result.json()["access_token"]
+    assert api.client.get("/auth/me", headers=headers(token)).status_code == 200
+    body = {"application_id": "application", "channel_id": "shared", "parent_origin": HOST,
+            "code_challenge": proof_challenge(VERIFIER)}
+    blocked = api.client.post("/workspaces/team/embed/launch", headers=headers(token), json=body)
+    assert blocked.status_code == 403, blocked.text
+    with Session(api.engine) as session:
+        assert session.exec(select(EmbedGrant)).first() is None
+        revoke_token(api.scoped, session)
+    assert api.client.get("/auth/me", headers=headers(token)).status_code == 401
+
+
 def test_pkce_wrong_parent_wrong_channel_and_wrong_origin_do_not_consume_grant(api):
     code = launch(api).json()["code"]
     assert exchange(api, code, code_verifier="B" * 64).status_code == 400
@@ -303,6 +327,8 @@ def test_matrix_gateway_and_socket_membership_recheck_live_child_restrictions(ap
         session.add(MatrixSession(matrix_token_hash=token_digest("matrix-child"), user_id="owner",
             auth_token_hash=token_digest(token), auth_expires_at=datetime.utcfromtimestamp(claims["exp"]),
             device_id="CHILD", encrypted_access_token="not-opened-by-authorization"))
+        session.flush()
+        session.add(EmbedMatrixBinding(matrix_token_hash=token_digest("matrix-child"), application_id="application"))
         session.add(WorkspaceEncryptionUnlock(token_hash=token_digest(token), workspace_id="team",
             provider_revision=4, auth_version=0, expires_at=datetime.utcnow() + timedelta(minutes=5)))
         session.commit()
@@ -388,6 +414,8 @@ def test_renewal_preserves_existing_matrix_gateway_and_remaining_personal_unlock
         session.add(MatrixSession(matrix_token_hash=token_digest("same-matrix-token"), user_id="owner",
             auth_token_hash=token_digest(old), auth_expires_at=datetime.utcfromtimestamp(decode_token_claims(old)["exp"]),
             device_id="VERIFIED-DEVICE", encrypted_access_token="existing-sealed-matrix-token"))
+        session.flush()
+        session.add(EmbedMatrixBinding(matrix_token_hash=token_digest("same-matrix-token"), application_id="application"))
         session.add(WorkspaceEncryptionUnlock(token_hash=token_digest(old), workspace_id="team", provider_revision=4,
             auth_version=0, expires_at=expiry))
         session.commit()
@@ -501,6 +529,8 @@ def test_expired_server_lease_rejects_future_signed_jwt_rest_renew_socket_and_ma
         session.add(MatrixSession(matrix_token_hash=token_digest("leased-matrix"), user_id="owner",
             auth_token_hash=token_digest(token), auth_expires_at=datetime.utcfromtimestamp(claims["exp"]),
             device_id="LEASED", encrypted_access_token="unchanged"))
+        session.flush()
+        session.add(EmbedMatrixBinding(matrix_token_hash=token_digest("leased-matrix"), application_id="application"))
         session.add(WorkspaceEncryptionUnlock(token_hash=token_digest(token), workspace_id="team", provider_revision=4,
             auth_version=0, expires_at=datetime.utcnow() + timedelta(minutes=20)))
         row = session.exec(select(ActiveSession).where(ActiveSession.token_hash == token_digest(token))).one()
@@ -526,6 +556,8 @@ def test_held_matrix_sync_response_is_discarded_when_child_lease_expires_during_
         session.add(MatrixSession(matrix_token_hash=token_digest("held-matrix"), user_id="owner",
             auth_token_hash=token_digest(token), auth_expires_at=datetime.utcfromtimestamp(decode_token_claims(token)["exp"]),
             device_id="HELD", encrypted_access_token="unchanged"))
+        session.flush()
+        session.add(EmbedMatrixBinding(matrix_token_hash=token_digest("held-matrix"), application_id="application"))
         session.add(WorkspaceEncryptionUnlock(token_hash=token_digest(token), workspace_id="team", provider_revision=4,
             auth_version=0, expires_at=datetime.utcnow() + timedelta(minutes=20))); session.commit()
     class HeldUpstream:

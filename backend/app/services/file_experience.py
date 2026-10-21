@@ -84,7 +84,7 @@ def saved_claims(token):
     claims = decode_token_claims(token)
     if not claims:
         raise HTTPException(401, "Sign in again before editing in Office")
-    return token_digest(token), json.dumps({key: claims[key] for key in ("sub", "exp", "av", "amr", "sso_workspace_id", "sso_provider_revision") if key in claims}, separators=(",", ":"))
+    return token_digest(token), json.dumps({key: claims[key] for key in ("sub", "iat", "exp", "av", "amr", "sso_workspace_id", "sso_provider_revision", "native_client_id", "embed_application_id") if key in claims}, separators=(",", ":"))
 
 
 def etag(record):
@@ -92,14 +92,15 @@ def etag(record):
 
 
 def bounded_file(record):
-    from .storage import storage_service
+    from .storage import storage_service, StorageLimitError
     try:
-        with storage_service.get_file_path(record.id).open("rb") as source:
-            content = source.read(MAX_PREVIEW_FILE + 1)
+        content = storage_service.read_file(record.id, max_bytes=MAX_PREVIEW_FILE, expected_size=record.size)
+    except StorageLimitError:
+        raise HTTPException(413, "Office preview and edit limit is 10 MiB") from None
     except (OSError, ValueError):
         raise HTTPException(404, "File content unavailable") from None
-    if len(content) > MAX_PREVIEW_FILE:
-        raise HTTPException(413, "Office preview and edit limit is 10 MiB")
+    if content is None:
+        raise HTTPException(404, "File content unavailable")
     return content
 
 

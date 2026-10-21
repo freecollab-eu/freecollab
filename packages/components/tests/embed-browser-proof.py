@@ -241,7 +241,7 @@ def main():
                 assert all(member.name.startswith('package/') and '..' not in Path(member.name).parts for member in tar.getmembers())
                 tar.extractall(private / 'packed', filter='data')
             package_release = json.loads((private / 'packed/package/dist/release.json').read_text())
-            assert package_release['apiLine'] == '0.10' and './embed' in package_release['entries'] and './auth' in package_release['entries']
+            assert package_release['apiLine'] == '0.11' and './embed' in package_release['entries'] and './auth' in package_release['entries']
             web = private / 'web'
             web.mkdir()
             shutil.copytree(private / 'packed/package/dist', web / 'sdk')

@@ -170,3 +170,51 @@ def test_restore_quarantines_outbound_workers_until_explicit_opt_in(
     output = capsys.readouterr().out
     assert ("Mail worker remains stopped" in output) == (was_running and not resume_mail)
     assert ("Outbound integration worker remains stopped" in output) == (was_running and not resume_integrations)
+
+
+@pytest.mark.parametrize("host_override", [False, True])
+def test_s3_backup_refuses_before_output_docker_or_writer_stop(tmp_path, monkeypatch, capsys, host_override):
+    config = tmp_path / "source.env"
+    config.write_text("POSTGRES_USER=fixture\nPOSTGRES_DB=fixture\nPOSTGRES_PASSWORD=private-fixture-password\nJWT_SECRET=private-fixture-signing\nMESSAGE_ENCRYPTION_KEYS=private-fixture-key\n"
+                      + ("" if host_override else "STORAGE_BACKEND=s3\n"))
+    output = tmp_path / "must-not-exist"
+    module = ModuleType("pilot_common")
+    module.__dict__.update({name: value for name, value in vars(helpers).items() if not name.startswith("__")})
+    calls = []
+    def forbidden(*args, **kwargs):
+        calls.append(args); raise AssertionError("S3 refusal must happen before Docker or Compose")
+    module.compose = module.docker = forbidden
+    monkeypatch.setitem(sys.modules, "pilot_common", module)
+    if host_override: monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    else: monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.setattr(sys, "argv", ["pilot-backup.py", str(output), "--env-file", str(config)])
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/pilot-backup.py"), run_name="__main__")
+    assert error.value.code == 1 and not output.exists() and calls == []
+    message = capsys.readouterr().err
+    assert "S3 cold backup is not supported" in message and "private-fixture" not in message
+
+
+@pytest.mark.parametrize("version,host_override", [(1, False), (2, False), (2, True)])
+def test_s3_restore_refuses_old_archives_before_docker_or_target_mutations(tmp_path, monkeypatch, capsys, version, host_override):
+    backup = tmp_path / "backup"
+    manifest = fixture_backup(backup, version=version)
+    if not host_override:
+        with (backup / "pilot.env").open("a") as output: output.write("STORAGE_BACKEND=s3\n")
+        manifest["sha256"]["pilot.env"] = helpers.file_hash(backup / "pilot.env")
+        (backup / "manifest.json").write_text(json.dumps(manifest))
+    target = tmp_path / "must-not-exist.env"
+    calls = []
+    module = ModuleType("pilot_common")
+    module.__dict__.update({name: value for name, value in vars(helpers).items() if not name.startswith("__")})
+    def forbidden(*args, **kwargs):
+        calls.append(args); raise AssertionError("S3 refusal must happen before any target operation")
+    module.assert_fresh_project = module.compose = module.docker = module.write_env = forbidden
+    monkeypatch.setitem(sys.modules, "pilot_common", module)
+    if host_override: monkeypatch.setenv("STORAGE_BACKEND", "s3")
+    else: monkeypatch.delenv("STORAGE_BACKEND", raising=False)
+    monkeypatch.setattr(sys, "argv", ["pilot-restore.py", str(backup), "--project", "fresh-s3-review", "--env-file", str(target)])
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/pilot-restore.py"), run_name="__main__")
+    assert error.value.code == 1 and not target.exists() and calls == []
+    assert "Automatic S3 cold restore is not supported" in capsys.readouterr().err

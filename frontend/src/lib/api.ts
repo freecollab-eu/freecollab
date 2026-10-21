@@ -253,7 +253,10 @@ class FreeCollabAPI {
       throw await responseError(response, 'Request failed. Please try again.');
     }
     if (response.status === 204) return undefined as T;
-    return response.json();
+    const data = await response.json();
+    if (requestToken === this.token && Array.isArray(data?.policy_warnings) && data.policy_warnings.length)
+      window.dispatchEvent(new CustomEvent('freecollab:policy-warning', {detail:{count:data.policy_warnings.length}}));
+    return data;
   }
 
   private async rawRequest(endpoint: string, options: RequestInit = {}): Promise<Response> {
@@ -459,7 +462,10 @@ class FreeCollabAPI {
       throw await responseError(response, 'Upload failed. Please try again.');
     }
 
-    return response.json();
+    const data=await response.json();
+    if(requestToken===this.token&&Array.isArray(data?.policy_warnings)&&data.policy_warnings.length)
+      window.dispatchEvent(new CustomEvent('freecollab:policy-warning',{detail:{count:data.policy_warnings.length}}));
+    return data;
   }
 
   async getFiles(channelId: string): Promise<FileInfo[]> {

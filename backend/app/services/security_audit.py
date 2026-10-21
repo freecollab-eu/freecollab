@@ -35,6 +35,12 @@ def authenticated_actor(request, identifier: str, *, kind="account", workspace_i
 
 def action_for(method, route):
     fixed = {
+        ("POST", "/connect/workspaces/{workspace_id}/connections"): "connect.invite_create",
+        ("POST", "/connect/workspaces/{workspace_id}/accept"): "connect.accept",
+        ("POST", "/connect/workspaces/{workspace_id}/connections/{connection_id}/members"): "connect.member_grant",
+        ("DELETE", "/connect/workspaces/{workspace_id}/connections/{connection_id}/members/{member_user_id}"): "connect.member_revoke",
+        ("DELETE", "/connect/workspaces/{workspace_id}/connections/{connection_id}"): "connect.revoke",
+        ("POST", "/connect/workspaces/{workspace_id}/connections/{connection_id}/retry-sync"): "connect.sync",
         ("PUT", "/workspaces/{workspace_id}/data-controls/policy"): "data.retention_configure",
         ("POST", "/workspaces/{workspace_id}/data-controls/exports"): "data.export_request",
         ("POST", "/workspaces/{workspace_id}/data-controls/purges/{preview_id}"): "data.purge_request",

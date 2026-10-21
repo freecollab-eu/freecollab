@@ -14,17 +14,20 @@ from sqlmodel import Session
 
 from ..config import settings
 from ..models.operations import WorkerHeartbeat
+from ..models import app_platform, chat_productivity, user, channel, workspace  # noqa: F401 -- register queue tables before schema creation
 
 log = logging.getLogger("freecollab.integrations")
 
 
-def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, workflow_batch=None, data_batch=None, push_batch=None):
+def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, workflow_batch=None, data_batch=None, push_batch=None, productivity_batch=None, apps_batch=None, recaps_batch=None):
     from .webhooks import deliver_pending
     from .otrust import process_pending
     from .remote_sync import process_pending as sync_pending
     from .workflow import run_pending as workflow_pending
     from .data_control import run_pending as data_pending
     from .push import run_pending as push_pending
+    from .chat_productivity import run_pending as productivity_pending
+    from .app_platform import run_pending as apps_pending, run_recaps
 
     batches = (
         ("webhooks", settings.webhooks_enabled, webhook_batch or (lambda session: deliver_pending(session, limit=2))),
@@ -33,6 +36,9 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, w
         ("workflows", settings.workflows_enabled, workflow_batch or (lambda session: workflow_pending(session, limit=5))),
         ("data", settings.data_controls_enabled, data_batch or (lambda session: data_pending(session, limit=1))),
         ("push", settings.push_enabled, push_batch or (lambda session: push_pending(session, limit=5))),
+        ("chat", True, productivity_batch or (lambda session: productivity_pending(session, limit=10))),
+        ("apps", True, apps_batch or (lambda session: apps_pending(session, limit=2))),
+        ("recaps", settings.copilot_enabled, recaps_batch or (lambda session: run_recaps(session, limit=1))),
     )
     with Session(engine) as session:
         heartbeat = session.get(WorkerHeartbeat, "integrations") or WorkerHeartbeat(name="integrations")

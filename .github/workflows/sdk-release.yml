@@ -41,7 +41,7 @@ jobs:
           node --input-type=module <<'JS'
           import {readFileSync,appendFileSync} from 'node:fs';
           const p=JSON.parse(readFileSync('packages/components/package.json','utf8'));
-          if(p.version!==process.env.EXPECTED_VERSION || !/^0\.10\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(p.version)) throw new Error('Input must match the reviewed 0.10 package version.');
+          if(p.version!==process.env.EXPECTED_VERSION || !/^0\.11\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(p.version)) throw new Error('Input must match the reviewed 0.11 package version.');
           appendFileSync(process.env.GITHUB_OUTPUT,'version='+p.version+'\n');
           JS
       - name: Install the locked standalone package
@@ -81,7 +81,7 @@ jobs:
           node --input-type=module <<'JS'
           import{readFileSync}from'node:fs';import{createHash}from'node:crypto';import{execFileSync}from'node:child_process';
           const m=JSON.parse(readFileSync('artifact/release-manifest.json','utf8'));
-          if(m.name!=='@freecollab/components'||m.version!==process.env.EXPECTED_VERSION||!/^freecollab-components-0\.10\.\d+(?:-[0-9A-Za-z.-]+)?\.tgz$/.test(m.artifact)||m.publishTag!=='next'||m.registry!=='https://registry.npmjs.org/')throw new Error('Unexpected release identity.');
+          if(m.name!=='@freecollab/components'||m.version!==process.env.EXPECTED_VERSION||!/^freecollab-components-0\.11\.\d+(?:-[0-9A-Za-z.-]+)?\.tgz$/.test(m.artifact)||m.publishTag!=='next'||m.registry!=='https://registry.npmjs.org/')throw new Error('Unexpected release identity.');
           const p='artifact/'+m.artifact,b=readFileSync(p);
           if(createHash('sha256').update(b).digest('hex')!==m.sha256||'sha512-'+createHash('sha512').update(b).digest('base64')!==m.integrity)throw new Error('Artifact integrity failed.');
           execFileSync('npm',['publish',p,'--access','public','--provenance','--tag','next','--ignore-scripts'],{stdio:'inherit'});

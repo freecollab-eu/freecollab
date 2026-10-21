@@ -8,6 +8,8 @@ from sqlmodel import select
 
 from ..models.session import ActiveSession
 from ..models.embed import EmbedSession  # noqa: F401 -- register additive session restrictions before init_db
+from ..models.connect import ConnectConnection, ConnectGrant  # noqa: F401 -- additive access metadata
+from ..models.enterprise_governance import Organization, OrganizationWorkspace  # noqa: F401
 from ..models.oidc import OIDCIdentity, OIDCLoginAttempt  # noqa: F401 -- referenced additive metadata
 from ..models.workspace import Workspace, WorkspaceChannel, WorkspaceMember
 from ..models.workspace_oidc import WorkspaceOIDCProvider, WorkspaceOIDCSession
@@ -54,6 +56,9 @@ def bind_scope_for_hash(session, token_hash: str, user_id: str, *, claims: dict 
     Matrix credentials are bound to an existing native ActiveSession by hash.
     """
     clear_scope(session)
+    from .native_clients import hash_session_valid
+    if not hash_session_valid(session, token_hash, user_id, claims=claims):
+        return False
     with session.no_autoflush:
         scoped = session.exec(select(WorkspaceOIDCSession.workspace_id,
                                      WorkspaceOIDCSession.provider_revision).where(
@@ -63,7 +68,12 @@ def bind_scope_for_hash(session, token_hash: str, user_id: str, *, claims: dict 
         claimed_revision = claims.get("sso_provider_revision") if claims is not None else None
         has_claims = claims is not None and ("sso_workspace_id" in claims or "sso_provider_revision" in claims)
         if scoped is None:
-            return not has_claims and not is_managed(session, user_id)
+            valid = not has_claims and not is_managed(session, user_id)
+            if valid:
+                # Track the authenticated actor for current policy checks even
+                # when this is an unrestricted personal-account session.
+                session.info[_ACTOR] = user_id
+            return valid
         workspace_id, revision = scoped
         if not managed_scope_valid(session, user_id, workspace_id):
             return False
@@ -94,6 +104,8 @@ def bind_scope_for_hash(session, token_hash: str, user_id: str, *, claims: dict 
     session.info[_CLAIMS] = {"sso_workspace_id": workspace_id, "sso_provider_revision": revision}
     if claims is not None and "embed_application_id" in claims:
         session.info[_CLAIMS]["embed_application_id"] = claims["embed_application_id"]
+    if claims is not None and "native_client_id" in claims:
+        session.info[_CLAIMS]["native_client_id"] = claims["native_client_id"]
     return True
 
 
@@ -115,7 +127,10 @@ def require_channel_scope(session, channel_id: str):
             WorkspaceChannel.channel_id == channel_id,
         )).first()
         if workspace_id != scope:
-            raise HTTPException(403, "This sign-in only grants access to its workspace")
+            from .connect import shared_channel_allows
+            actor = current_scope_actor_id(session)
+            if not actor or not shared_channel_allows(session, channel_id, actor, scope):
+                raise HTTPException(403, "This sign-in only grants access to its workspace")
 
 
 def require_request_scope(session, path: str):

@@ -85,6 +85,7 @@ def independent_key_status() -> str:
 
 
 def storage_status() -> dict:
+    """Capacity of the local private volume, never an S3 connectivity claim."""
     try:
         usage = shutil.disk_usage(settings.storage_path)
         if usage.total <= 0 or usage.free < 0 or usage.free > usage.total:
@@ -215,4 +216,7 @@ def security_status(session, *, now: datetime | None = None) -> dict:
         checks.append({"id": identifier, "status": "disabled" if not counters["enabled"] else
                        "attention" if counters["expired_leases"] or counters["failed"] else "pass"})
     return {"checked_at": now, "environment": settings.environment, "checks": checks,
-            "operators": operators, "storage": storage, "queues": queues}
+            "operators": operators, "storage": storage, "queues": queues,
+            "blob_storage": {"backend": settings.storage_backend,
+                             "status": "configured_not_probed" if settings.storage_backend == "s3" else "local",
+                             "automatic_remote_probe": False}}

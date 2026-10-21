@@ -1,0 +1,20 @@
+{
+  "appId": "eu.freecollab.mobile",
+  "appName": "FreeCollab",
+  "webDir": "www",
+  "loggingBehavior": "none",
+  "server": {
+    "url": "https://freecollab.eu",
+    "cleartext": false,
+    "allowNavigation": [],
+    "errorPath": "index.html"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "ios": {
+    "limitsNavigationsToAppBoundDomains": true,
+    "contentInset": "automatic"
+  }
+}

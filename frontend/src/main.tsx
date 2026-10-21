@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { EmbedSignIn, isEmbedSignInRoute } from './components/EmbedSignIn'
+import { NativeClientSignIn } from './components/NativeClientSignIn'
 import { api } from './lib/api'
 import { initializeMobile } from './mobile'
 import { AccountProvider } from './account/AccountProvider'
@@ -19,6 +20,6 @@ else initializeMobile()
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <LocaleProvider><AppearanceProvider><AccountProvider>{embeddedSignIn ? <EmbedSignIn /> : <App />}</AccountProvider></AppearanceProvider></LocaleProvider>
+    <LocaleProvider><AppearanceProvider><AccountProvider>{embeddedSignIn ? <EmbedSignIn /> : <NativeClientSignIn><App /></NativeClientSignIn>}</AccountProvider></AppearanceProvider></LocaleProvider>
   </React.StrictMode>,
 )

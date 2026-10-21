@@ -1,0 +1,25 @@
+.fc-governance { display: grid; gap: 1.15rem; color: var(--fc-text); }
+.fc-governance-intro { display: flex; align-items: flex-start; gap: .9rem; padding: .7rem 0 1rem; }
+.fc-governance-intro > svg { flex: none; margin-top: .4rem; color: var(--fc-accent); }
+.fc-governance-intro h3 { margin: .3rem 0; font-size: 1.35rem; letter-spacing: -.025em; }
+.fc-governance-intro p, .fc-governance-item p { margin: .35rem 0; color: var(--fc-muted); font-size: .88rem; line-height: 1.6; }
+.fc-governance-tabs, .fc-governance-inline { display: flex; flex-wrap: wrap; align-items: center; gap: .55rem; }
+.fc-governance-tabs { padding-bottom: .7rem; border-bottom: 1px solid var(--fc-border); }
+.fc-governance-tabs [aria-current] { border-color: var(--fc-accent); color: var(--fc-accent); }
+.fc-governance-form { display: grid; gap: .65rem; }
+.fc-governance-form > .fc-button { justify-self: start; margin-top: .4rem; }
+.fc-governance-form-row { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; }
+.fc-governance-form-row > div { display: grid; gap: .4rem; }
+.fc-governance-fieldset { padding: .8rem; border: 1px solid var(--fc-border); border-radius: 10px; display: flex; flex-wrap: wrap; gap: .75rem; }
+.fc-governance-fieldset legend { font-size: .82rem; color: var(--fc-muted); padding: 0 .35rem; }
+.fc-governance-choice-list { display: grid; gap: .55rem; max-height: 230px; overflow: auto; width: 100%; }
+.fc-governance-item { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; padding: 1rem 0; border-bottom: 1px solid var(--fc-border); }
+.fc-governance-item > div { min-width: 0; }
+.fc-governance-item .fc-account-actions { flex-wrap: wrap; justify-content: flex-end; }
+.fc-governance-digest { overflow-wrap: anywhere; font-size: .7rem; color: var(--fc-muted); }
+.fc-governance-metrics { display: grid; gap: .7rem; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); margin-top: 1rem; }
+.fc-governance-metrics article { padding: .9rem; border: 1px solid var(--fc-border); border-radius: 10px; }
+.fc-governance-metrics dl { display: grid; gap: .5rem; margin: .8rem 0 0; font-size: .82rem; }
+.fc-governance-metrics dl > div { display: flex; justify-content: space-between; gap: .7rem; }
+.fc-governance-metrics dd { margin: 0; font-variant-numeric: tabular-nums; }
+@media (max-width: 640px) { .fc-governance-form-row { grid-template-columns: 1fr; } .fc-governance-item { flex-direction: column; } .fc-governance-item .fc-account-actions { justify-content: flex-start; } }

@@ -3,6 +3,7 @@
 import argparse
 import base64
 import json
+import os
 from pathlib import Path
 import secrets
 import subprocess
@@ -17,6 +18,7 @@ parser.add_argument("--env-file", type=Path, required=True, help="New private co
 parser.add_argument("--port", type=int, default=8081)
 parser.add_argument("--resume-integrations", action="store_true", help="Resume the restored outbound worker after reviewing destinations and deduplication")
 parser.add_argument("--resume-mail", action="store_true", help="Resume restored mail delivery after reviewing retained messages and SMTP destinations")
+parser.add_argument("--resume-sfu", action="store_true", help="Resume meeting authorization after reviewing external LiveKit rooms and restored participant leases")
 args = parser.parse_args()
 project_name(args.project)
 if not 1024 <= args.port <= 65535:
@@ -24,12 +26,14 @@ if not 1024 <= args.port <= 65535:
 if args.env_file.exists():
     parser.exit(1, "Refusing to overwrite existing configuration\n")
 manifest = check_backup(args.backup)
+settings = read_env(args.backup / "pilot.env")
+if settings.get("STORAGE_BACKEND", "local").strip().lower() == "s3" or os.environ.get("STORAGE_BACKEND", "").strip().lower() == "s3":
+    parser.exit(1, "Automatic S3 cold restore is not supported by this local-volume helper. No target configuration or volumes were created. Restore and verify a consistent external object-storage snapshot with the database and key volumes using the manual process in docs/OBJECT_STORAGE.md.\n")
 assert_fresh_project(args.project)
 for identifier in manifest["images"].values():
     if not isinstance(identifier, str) or not identifier.startswith("sha256:"):
         parser.exit(1, "Backup image identifier is invalid\n")
     docker("image", "inspect", identifier, stdout=subprocess.DEVNULL)
-settings = read_env(args.backup / "pilot.env")
 if "ACCOUNT_SECURITY_KEY" not in settings:
     # Legacy v1 installations had no encrypted authenticator/outbox material.
     # Do not derive this new independent key from signing or content secrets.
@@ -40,7 +44,7 @@ if settings.get("ENVIRONMENT") != "production":
     settings["CORS_ORIGINS"] = json.dumps([f"http://localhost:{args.port}", f"http://127.0.0.1:{args.port}"], separators=(",", ":"))
     settings["PUBLIC_APP_URL"] = f"http://127.0.0.1:{args.port}"
 write_env(args.env_file, settings)
-profiles = (["secure"] if "matrix" in manifest["images"] else []) + (["mail"] if "mail-worker" in manifest["images"] else []) + (["integrations"] if "integration-worker" in manifest["images"] else [])
+profiles = (["secure"] if "matrix" in manifest["images"] else []) + (["mail"] if "mail-worker" in manifest["images"] else []) + (["integrations"] if "integration-worker" in manifest["images"] else []) + (["large-meetings"] if "sfu-worker" in manifest["images"] else [])
 volumes = manifest.get("volumes", ["files"])
 with tempfile.TemporaryDirectory(prefix="freecollab-restore-") as directory:
     overrides = Path(directory) / "images.json"
@@ -58,6 +62,8 @@ with tempfile.TemporaryDirectory(prefix="freecollab-restore-") as directory:
         services.append("mail-worker")
     if args.resume_integrations and "integration-worker" in manifest.get("running_services", []):
         services.append("integration-worker")
+    if args.resume_sfu and "sfu-worker" in manifest.get("running_services", []):
+        services.append("sfu-worker")
     compose(args.env_file, args.project, "up", "-d", "--no-build", "--wait", "--wait-timeout", "120", *services, extra_file=overrides, profiles=profiles)
 print(f"Restored private pilot project {args.project} on local port {args.port}")
 print("Run the smoke checks before routing user traffic. Keep the restored key configuration.")
@@ -65,3 +71,5 @@ if "integration-worker" in manifest.get("running_services", []) and not args.res
     print("Outbound integration worker remains stopped. Review restored destinations before starting it.")
 if "mail-worker" in manifest.get("running_services", []) and not args.resume_mail:
     print("Mail worker remains stopped. Review retained messages and SMTP destinations before starting it.")
+if "sfu-worker" in manifest.get("running_services", []) and not args.resume_sfu:
+    print("Meeting authorization worker remains stopped. Review restored leases and external LiveKit rooms before starting it.")

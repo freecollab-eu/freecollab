@@ -10,6 +10,7 @@ import os
 import re
 from pathlib import Path
 import tempfile
+import time
 import uuid
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
@@ -119,9 +120,15 @@ with sync_playwright() as p:
         auth = credentials(alice)
         channels = api('GET', '/channels', auth['token'])
         channel_id = next(channel['id'] for channel in channels if channel['name'] == shared)
-        pattern = '**/api/messages/channels/' + channel_id
+        pattern = '**/api/mobile/offline/channels/' + channel_id + '/messages'
         def fail_send(route):
-            route.abort('failed') if route.request.method == 'POST' else route.continue_()
+            # Network failures deliberately enter the encrypted outbox. An
+            # explicit server rejection must instead preserve the composer.
+            if route.request.method == 'POST':
+                route.fulfill(status=503, content_type='application/json',
+                              body=json.dumps({'detail': 'Temporary send rejection'}))
+            else:
+                route.continue_()
         alice.route(pattern, fail_send)
         draft = 'Retained failed draft ' + RUN
         alice.get_by_placeholder('Message #' + shared).fill(draft)
@@ -131,12 +138,42 @@ with sync_playwright() as p:
         alice.unroute(pattern, fail_send)
         alice.get_by_role('button', name='Send message', exact=True).click()
         expect(bob.get_by_text(draft, exact=True)).to_be_visible()
+        expect(bob.get_by_text(draft, exact=True)).to_have_count(1)
         print('PASS: failed send retains draft and retry delivers once', flush=True)
 
         filename = 'pilot-' + RUN + '.txt'
         content = b'Private pilot document bytes\n'
+        file_pattern = '**/api/files/channels/' + channel_id
+        held_file_lists = []
+
+        def hold_file_list(route):
+            if route.request.method != 'GET':
+                route.continue_()
+                return
+            slot = len(held_file_lists)
+            held_file_lists.append(None)
+            response = route.fetch()
+            held_file_lists[slot] = (route, response)
+
+        def wait_for_held_file_lists():
+            deadline = time.monotonic() + 15
+            while not held_file_lists or any(record is None for record in held_file_lists):
+                assert time.monotonic() < deadline, 'The actual file listing did not complete'
+                alice.wait_for_timeout(20)
+
+        def release_file_lists():
+            for route, response in held_file_lists:
+                route.fulfill(response=response)
+            alice.unroute(file_pattern, hold_file_list)
+            expect(alice.locator('.fc-channel-panel')).to_have_attribute('aria-busy', 'false')
+
+        alice.route(file_pattern, hold_file_list)
         alice.get_by_role('button', name='Channel files', exact=True).click()
+        wait_for_held_file_lists()
+        assert all(response.json() == [] for _, response in held_file_lists)
         alice.get_by_label('Choose a file', exact=True).set_input_files({'name': filename, 'mimeType': 'text/plain', 'buffer': content})
+        expect(alice.get_by_text(filename, exact=True)).to_be_visible()
+        release_file_lists()
         expect(alice.get_by_text(filename, exact=True)).to_be_visible()
         bob.get_by_role('button', name='Channel files', exact=True).click()
         expect(bob.get_by_text(filename, exact=True)).to_be_visible()
@@ -152,10 +189,17 @@ with sync_playwright() as p:
         file_id = next(file['id'] for file in uploaded if file['filename'] == filename)
         outsider = api('POST', '/auth/register', data={'name': 'Pilot outsider', 'email': f'outsider-{RUN}@example.com', 'password': PASSWORD})
         api('GET', '/files/' + file_id, outsider['access_token'], expected=403)
+        held_file_lists.clear()
+        alice.route(file_pattern, hold_file_list)
+        alice.get_by_role('button', name='Refresh', exact=True).click()
+        wait_for_held_file_lists()
+        assert all(any(record['id'] == file_id for record in response.json()) for _, response in held_file_lists)
         alice.once('dialog', lambda dialog: dialog.accept())
         alice.get_by_role('button', name='Delete ' + filename, exact=True).click()
         expect(alice.get_by_text(filename, exact=True)).to_have_count(0)
-        print('PASS: UI upload, authorized download bytes, owner-only deletion and outsider denial', flush=True)
+        release_file_lists()
+        expect(alice.get_by_text(filename, exact=True)).to_have_count(0)
+        print('PASS: UI upload/download/delete, delayed-list mutation fences and outsider denial', flush=True)
         for page in (alice, bob):
             page.get_by_role('button', name='Close channel panel', exact=True).click()
 
@@ -178,7 +222,8 @@ with sync_playwright() as p:
         alice.set_viewport_size({'width': 390, 'height': 844})
         expect(alice.get_by_placeholder('Message #' + shared)).to_be_visible()
         assert alice.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Core chat overflowed a mobile viewport'
-        alice.get_by_role('button', name='Channel files', exact=True).click()
+        alice.get_by_role('button', name='More channel tools', exact=True).click()
+        alice.get_by_role('group', name='More channel tools', exact=True).get_by_role('button', name='Channel files', exact=True).click()
         expect(alice.get_by_label('Choose a file', exact=True)).to_be_visible()
         assert alice.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Files panel overflowed a mobile viewport'
         alice.get_by_role('button', name='Close channel panel', exact=True).click()

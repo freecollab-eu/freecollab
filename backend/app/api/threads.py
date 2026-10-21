@@ -106,6 +106,8 @@ async def reply_to_message(
     require_native_channel(session, parent.channel_id)
     mention_ids = validate_mentions(session, parent.channel_id, data.mentions)
     
+    from ..services.enterprise_governance import enforce_native_content
+    warnings = enforce_native_content(session, parent.channel_id, user.id, data.content)
     # Create reply message
     reply = Message(
         id=str(uuid.uuid4()),
@@ -137,6 +139,7 @@ async def reply_to_message(
         "parent_id": reply.parent_id,
         "created_at": reply.created_at.isoformat(),
         "mentions": mention_ids,
+        "policy_warnings": warnings,
     }
     
     # Broadcast thread reply

@@ -1,0 +1,18 @@
+# Ignore both dependency directories and external dependency-directory symlinks.
+node_modules
+
+# Customer-owned signing credentials are never part of the native source tree.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.key
+*.pem
+*.mobileprovision
+*.provisionprofile
+
+# Native distribution outputs, including the simulator ZIP produced by CI.
+*.ipa
+*.xcarchive/
+*.dSYM/
+/ios/FreeCollab-simulator.zip

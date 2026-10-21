@@ -17,13 +17,15 @@ parser.add_argument("--project", default="freecollab")
 args = parser.parse_args()
 project_name(args.project)
 settings = read_env(args.env_file)
+if settings.get("STORAGE_BACKEND", "local").strip().lower() == "s3" or os.environ.get("STORAGE_BACKEND", "").strip().lower() == "s3":
+    parser.exit(1, "S3 cold backup is not supported by this local-volume helper. No writers were stopped and no backup was created. Create and verify a consistent database/key-volume plus external object-storage snapshot using your provider's backup process; see docs/OBJECT_STORAGE.md.\n")
 if settings.get("MATRIX_DATABASE_HOST"):
     parser.exit(1, "This backup supports the local Matrix SQLite pilot; snapshot an external Matrix database separately\n")
 args.output.mkdir(mode=0o700, parents=False, exist_ok=False)
 running = compose(args.env_file, args.project, "ps", "--status", "running", "--services", profiles=["*"], capture_output=True, text=True).stdout.split()
 if "db" not in running:
     parser.exit(1, "Database must be running before a backup\n")
-writers = [name for name in ("frontend", "backend", "mail-worker", "integration-worker", "matrix") if name in running]
+writers = [name for name in ("frontend", "backend", "mail-worker", "integration-worker", "sfu-worker", "matrix") if name in running]
 images = {}
 for service in sorted(BASE_SERVICES | OPTIONAL_SERVICES):
     container_id = compose(args.env_file, args.project, "ps", "-aq", service, profiles=["*"], capture_output=True, text=True).stdout.strip()

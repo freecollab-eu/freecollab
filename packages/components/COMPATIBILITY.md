@@ -1,6 +1,6 @@
 # SDK compatibility contract
 
-`@freecollab/components` **0.10.x** targets FreeCollab **0.10.x** servers and the
+`@freecollab/components` **0.11.x** targets FreeCollab **0.11.x** servers and the
 matching trusted embedded client. It is a pre-1.0 API distributed under the npm
 `next` tag. Install an exact version or reviewed tarball during evaluation.
 

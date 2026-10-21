@@ -230,10 +230,12 @@ def import_file(session, workspace_id, channel_id, public_id, actor_id, data):
         if document.owner_id != actor_id: raise HTTPException(403, "Only the file owner can import a new version")
         if document.version_count >= 10000: raise HTTPException(409, "This document reached its version limit")
         if document.version_count != data.expected_version: raise HTTPException(409, "This file changed; reload before importing a new version")
+    from .enterprise_governance import enforce_native_file
+    warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(selected["name"]), mime, content)
     identifier, created = uuid4().hex, False
-    path = storage_service.get_file_path(identifier)
     try:
-        with path.open("xb") as target: created = True; target.write(content)
+        path = storage_service.save_file_sync(identifier, content)
+        created = True
         file = StoredFile(id=identifier, channel_id=channel_id, uploader_id=actor_id, filename=safe_filename(selected["name"]),
             content_type=mime, size=len(content), storage_path=str(path))
         session.add(file); session.flush()
@@ -249,10 +251,10 @@ def import_file(session, workspace_id, channel_id, public_id, actor_id, data):
         from .webhooks import enqueue_channel_event
         enqueue_channel_event(session, channel_id, "file.created" if version.number == 1 else "file.version.created", identifier)
         session.commit()
-        return file_metadata(file, version, document)
+        return {**file_metadata(file, version, document), "policy_warnings": warnings}
     except BaseException:
         session.rollback()
-        if created: path.unlink(missing_ok=True)
+        if created: storage_service.delete_file_sync(identifier)
         raise
 
 

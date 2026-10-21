@@ -130,6 +130,9 @@ def write_content(channel_id: str, kind: Kind, data: ContentWrite, user=Depends(
         except ValueError as error:
             raise HTTPException(422, "Invalid integration fields: " + str(error).split("\n")[0]) from None
     number = previous.revision + 1 if previous else 1
+    if not secure and fields:
+        from ..services.enterprise_governance import enforce_native_document
+        enforce_native_document(session, channel_id, user.id, fields)
     payload = {"id": item.id, "kind": kind, "revision": number, "fields": fields, "deleted": data.deleted}
     revision = IntegrationContentRevision(item_id=item.id, revision=number, created_by=user.id,
               content_mode="matrix" if secure else "server", matrix_event_id=data.matrix_event_id,

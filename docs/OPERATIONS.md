@@ -4,7 +4,9 @@ This runbook targets a single Linux Docker Engine with Docker Compose v2 and Pyt
 
 ## Product queues and browser capabilities
 
-Version 0.8 uses the **integration-worker** for six independent queues: webhooks, timestamp proofs, remote sync, workflows, data export/erasure and push. Local workflows and data controls are enabled by default; retention itself remains disabled and on hold. Start Compose profile `integrations` even when all external connectors are disabled. Each queue has its own transaction and durable claims, so one failure does not block the others. Native installation admins can inspect all seven queues including email, and 14 fixed configuration/lease checks, in Operations. Restores keep both workers stopped by default; review queued jobs and current grants before explicitly resuming them.
+Version 0.11 starts the **integration-worker** in the default Compose installation. It handles scheduled messages and reminders alongside signed apps, consented recaps, webhooks, timestamp proofs, remote sync, workflows, data export/erasure and push. External services remain inactive until explicitly configured and granted. Local workflows and data controls are enabled by default; retention itself remains disabled and on hold. Each queue has its own transaction and durable claims, so one failure does not block the others. Restores keep outbound workers stopped by default; review queued jobs, current grants and pending scheduled sends before explicitly resuming them.
+
+The optional `large-meetings` profile starts a separate **sfu-worker** every five seconds so slow provider jobs cannot delay meeting-access reconciliation. Configure your own LiveKit HTTPS/WSS service first; see [MEETINGS.md](MEETINGS.md). Restoring it requires `--resume-sfu` after reviewing external rooms and restored leases. Live media is transient and is not part of a cold application backup. [OBJECT_STORAGE.md](OBJECT_STORAGE.md) explains the separate snapshot requirements for S3 file storage.
 
 The complete frontend is an installable PWA on HTTPS (localhost is allowed for development). The service worker revalidates itself and caches only public application shell/assets. Offline drafts and queued messages live in an account-bound encrypted IndexedDB vault; authenticated API responses and Matrix content are excluded from CacheStorage. Browser storage and open-document pending edits are separate from server backups.
 
@@ -20,7 +22,7 @@ From the repository root:
 
 ```bash
 python scripts/pilot-init.py
-docker compose --env-file pilot.env --project-name freecollab --profile integrations up --build -d --wait
+docker compose --env-file pilot.env --project-name freecollab up --build -d --wait
 ```
 
 `pilot-init.py` creates a mode-0600 `pilot.env` with separate random database, JWT, account-security and message-encryption keys. It refuses to overwrite any existing file. Keep this configuration: losing the message keys prevents recovery of encrypted history; losing the account-security key prevents decrypting existing authenticator secrets and queued recovery messages. Neither the helper nor these instructions print key values. `pilot.env`, `pilot-*.env` and `pilot-backups/` are ignored by Git.
@@ -74,7 +76,7 @@ Keep the same server name and registration secret across upgrades and restores. 
 
 ## External integrations
 
-Use [INTEGRATIONS.md](INTEGRATIONS.md) for customer-owned workspace OIDC, channel-granted webhooks/n8n, document links, calendar exchange and optional version timestamps. Customer admins configure their own IdP in the app; no installation-wide OIDC credentials are required. Preserve the account-security key that encrypts their client secrets, and keep PUBLIC_APP_URL at the correct trusted public HTTPS origin for callbacks. Enable the `integrations` Compose profile only after configuring the intended outbound features. Its worker uses durable database queues and independent bounded batches. It is included among cold-backup writers and exact image records. Mail remains a separate `mail` profile. [INTEGRATION_OPERATIONS.md](INTEGRATION_OPERATIONS.md) describes authenticated diagnostics, limited metrics credentials, SMTP tests and alert inputs.
+Use [INTEGRATIONS.md](INTEGRATIONS.md) for customer-owned workspace OIDC, channel-granted webhooks/n8n, document links, calendar exchange and optional version timestamps. Customer admins configure their own IdP in the app; no installation-wide OIDC credentials are required. Preserve the account-security key that encrypts their client secrets, and keep PUBLIC_APP_URL at the correct trusted public HTTPS origin for callbacks. The default integration worker uses durable database queues and independent bounded batches; enable outbound features only after configuring their intended grants. The worker is included among cold-backup writers and exact image records. Mail remains a separate `mail` profile. [INTEGRATION_OPERATIONS.md](INTEGRATION_OPERATIONS.md) describes authenticated diagnostics, limited metrics credentials, SMTP tests and alert inputs.
 
 Version 0.7 adds opt-in [workforce admission](WORKFORCE_IDENTITY.md),
 [SCIM provisioning](SCIM.md) and selected native-channel [two-way remote
@@ -93,7 +95,7 @@ This default is an isolated local pilot, not an installed public TLS endpoint. B
 - Set `ENVIRONMENT=production` and `CORS_ORIGINS` to a JSON array of the actual HTTPS frontend origins. Keep the independently generated signing/content/account-security keys. Configure HTTPS `PUBLIC_APP_URL` and production SMTP or disable email delivery explicitly.
 - Terminate TLS at a trusted reverse proxy and route the same origin to the loopback frontend. Configure certificates, renewal, firewalling and the proxy's request/body limits. Do not remove TLS verification in clients or builds.
 - Keep API/database services internal. Nginx overwrites `X-Forwarded-For` with its peer address; the internal API trusts this private proxy. An additional public proxy needs an explicit trusted-client-IP policy before per-client rate limits can be assumed correct. Client-supplied forwarding headers must never bypass limits.
-- Retain one API worker/replica while presence and request limits are process-local. Do not scale replicas without shared presence/rate-limit state.
+- Retain one API worker/replica with the default process-local coordination. Additional replicas require private TLS Valkey and the complete shared storage/key/proxy setup in [SCALING.md](SCALING.md).
 - Use private durable storage and protect/retain backups. Database/file encryption and key retention are described in [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md).
 
 No DNS, certificate provisioning or public deployment is performed by these commands.

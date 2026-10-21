@@ -48,7 +48,7 @@ Email instructions are queued in a durable outbox; their subject/body, including
 
 ## Auth throttling
 
-The pilot supports **one application worker/replica**. A bounded in-memory limiter applies to authentication routes:
+The default pilot uses **one application worker/replica**. A bounded in-memory limiter applies to authentication routes when `REDIS_URL` is unset:
 
 | Scope | Limit |
 | --- | --- |
@@ -59,7 +59,7 @@ The pilot supports **one application worker/replica**. A bounded in-memory limit
 
 HTTP 429 responses include `Retry-After`. Successful login clears the account failure bucket but does not clear the address failure bucket. Account throttling temporarily affects legitimate logins too; wait for the indicated interval rather than automatically retrying. State is bounded to 10,000 keys, cleaned as it expires, and never evicts a live restriction to accommodate new untrusted identities. When capacity is exhausted, new buckets are refused temporarily. Account keys are hashes rather than raw email addresses.
 
-The limiter uses `request.client.host`; it does not trust caller-supplied `X-Forwarded-For` directly. The reverse proxy must overwrite forwarding headers, and Uvicorn's trusted-forwarder configuration must admit only that proxy/network. Keep the backend private. A shared trusted limiter is required before adding workers or replicas. In-memory limits reset when the process restarts, so they are an application safeguard rather than a distributed denial-of-service defense.
+The limiter uses `request.client.host`; it does not trust caller-supplied `X-Forwarded-For` directly. The reverse proxy must overwrite forwarding headers, and Uvicorn's trusted-forwarder configuration must admit only that proxy/network. Keep the backend private. Additional replicas require the TLS Valkey limiter and full coordination setup in [SCALING.md](SCALING.md); configured shared limits fail closed on broker failure. In-memory limits reset when the process restarts, so they are an application safeguard rather than a distributed denial-of-service defense.
 
 Recovery and sensitive account routes also use persistent database buckets. Recovery requests allow three per canonical email and twenty per address per fifteen minutes; email-verification requests allow three per account and twenty per address. Sensitive account changes allow fifteen per account and thirty per address per five minutes. Link confirmation and MFA challenges have additional address/account limits. These restrictions survive process restarts and return `Retry-After`; account identifiers and client addresses are hashed in rate-limit keys.
 

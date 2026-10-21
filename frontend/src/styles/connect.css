@@ -1,0 +1,53 @@
+.fc-connect { padding-top: 24px; min-width: 0; }
+.fc-connect-intro { display: flex; align-items: flex-start; gap: 15px; margin-bottom: 20px; }
+.fc-connect-symbol { display: grid; place-items: center; width: 48px; height: 48px; flex-shrink: 0; border: 1px solid var(--fc-border); border-radius: 13px; color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-connect-intro h3 { margin: 7px 0; font-size: 22px; letter-spacing: -.035em; }
+.fc-connect p { font-size: 12px; line-height: 1.8; }
+.fc-connect-intro p { margin: 0; color: var(--fc-muted); }
+.fc-connect-scope { display: flex; gap: 10px; color: var(--fc-muted); padding: 14px; border-radius: 9px; background: var(--fc-bg); }
+.fc-connect-scope svg { flex-shrink: 0; margin-top: 3px; color: var(--fc-accent); }
+.fc-connect-forms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin: 23px 0 30px; }
+.fc-connect-form { display: flex; flex-direction: column; align-items: stretch; min-width: 0; padding: 18px; border: 1px solid var(--fc-border); border-radius: 12px; }
+.fc-connect h4 { margin: 0 0 8px; font-size: 13px; }
+.fc-connect-form > p { margin: 0 0 17px; color: var(--fc-muted); min-height: 43px; font-size: 11px; }
+.fc-connect label { display: block; margin: 0 0 7px; font-size: 11px; font-weight: 600; }
+.fc-connect .fc-input { width: 100%; min-width: 0; box-sizing: border-box; margin-bottom: 15px; }
+.fc-connect textarea { resize: vertical; }
+.fc-connect-form > button { align-self: flex-start; margin-top: auto; }
+.fc-connect button { white-space: normal; }
+.fc-connect-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 15px; }
+.fc-connect-heading h4 { margin: 0; }
+.fc-connect-empty { color: var(--fc-muted); padding: 25px 0; }
+.fc-connect-directory { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.3fr); gap: 18px; }
+.fc-connect-directory > nav { display: flex; flex-direction: column; gap: 8px; align-self: start; }
+.fc-connect-directory > nav > button { display: flex; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--fc-border); border-radius: 9px; color: var(--fc-text); background: var(--fc-bg); font: inherit; text-align: left; cursor: pointer; min-width: 0; }
+.fc-connect-directory > nav > button[aria-pressed='true'] { border-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-connect-directory > nav > button > span:first-child { display: grid; gap: 6px; flex: 1; min-width: 0; }
+.fc-connect-directory strong { font-size: 12px; overflow-wrap: anywhere; }
+.fc-connect-directory small { color: var(--fc-muted); font-size: 10px; overflow-wrap: anywhere; }
+.fc-connect-directory .fc-badge { flex-shrink: 0; max-width: 96px; text-align: center; line-height: 1.5; }
+.fc-connect-details { min-width: 0; padding: 18px; border: 1px solid var(--fc-border); border-radius: 12px; }
+.fc-connect-details > p { overflow-wrap: anywhere; }
+.fc-connect-details .fc-account-muted svg { display: inline; vertical-align: middle; margin: 0 3px; }
+.fc-connect-members { list-style: none; margin: 17px 0; padding: 0; }
+.fc-connect-members li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--fc-border); font-size: 12px; }
+.fc-connect-members li span { min-width: 0; overflow-wrap: anywhere; }
+.fc-connect-members li button { flex-shrink: 0; }
+.fc-connect-grant { margin-top: 22px; }
+.fc-connect-revoke { margin-top: 23px; padding-top: 19px; border-top: 1px solid var(--fc-border); }
+.fc-connect-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.fc-connect-token { margin-top: 20px; padding: 20px; border: 1px solid var(--fc-accent); border-radius: 12px; background: var(--fc-accent-soft); }
+.fc-connect-token > p { color: var(--fc-muted); }
+.fc-connect-token .fc-input { font: 12px ui-monospace, monospace; }
+.fc-connect-token > small { display: block; overflow-wrap: anywhere; margin-top: 14px; font-size: 10px; color: var(--fc-muted); }
+.fc-connect button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-connect button:disabled { cursor: default; opacity: .5; }
+@media (max-width: 640px) {
+  .fc-connect-forms, .fc-connect-directory { grid-template-columns: minmax(0, 1fr); }
+  .fc-connect-intro { gap: 11px; }
+  .fc-connect-intro h3 { font-size: 20px; }
+  .fc-connect-symbol { width: 39px; height: 39px; }
+  .fc-connect-form > p { min-height: 0; }
+  .fc-connect .fc-button { min-height: 38px; }
+  .fc-connect-token, .fc-connect-form, .fc-connect-details { padding: 15px; }
+}

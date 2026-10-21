@@ -35,7 +35,7 @@ def list_online_users(
 ):
     """Return online people visible to this account."""
     visible = visible_user_ids(session, user.id)
-    online = [person for person in get_online_users() if person in visible]
+    online = [person for person in get_online_users(visible) if person in visible]
     return {"online_users": online, "count": len(online)}
 
 
@@ -53,8 +53,8 @@ def get_channel_presence(
         .where(ChannelMember.channel_id == channel_id, User.is_blocked == False)
     ).all())
     visible = visible_user_ids(session, user.id)
-    online = [user_id for user_id in get_online_users() if user_id in member_ids and user_id in visible
-              and workspace_allows_channel(session, channel_id, user_id)]
+    online = [user_id for user_id in get_online_users(member_ids & visible)
+              if user_id in member_ids and user_id in visible and workspace_allows_channel(session, channel_id, user_id)]
     return {
         "channel_id": channel_id,
         "online_users": online,

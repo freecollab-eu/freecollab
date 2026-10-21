@@ -247,10 +247,24 @@ def change_member_role(workspace_id: str, member_user_id: str, data: MemberRole,
     return {"user_id": member_user_id, "role": target.role}
 
 
-async def remove_workspace_membership(session, workspace_id: str, member_user_id: str, actor_id: str):
+async def remove_workspace_membership(session, workspace_id: str, member_user_id: str, actor_id: str,
+                                      *, scim_directory_id: str | None = None):
     lock_workspace(session, workspace_id)
     actor = require_workspace_member(session, workspace_id, actor_id)
-    target = require_workspace_member(session, workspace_id, member_user_id)
+    if scim_directory_id is not None:
+        from ..models.scim import SCIMDirectory
+        directory = session.get(SCIMDirectory, workspace_id, populate_existing=True)
+        if (not directory or directory.directory_id != scim_directory_id or not directory.enabled
+                or not directory.token_hash or directory.token_issued_by != actor_id or actor.role != "owner"):
+            raise HTTPException(403, "Current workspace provisioning owner required")
+    # The removed person is an authorization subject, not a second sign-in
+    # actor. In particular, an authorized directory owner can offboard someone
+    # after disabling their managed identity under an SSO-required policy.
+    from ..services.workforce_access import require_principal_workspace
+    require_principal_workspace(session, member_user_id, workspace_id)
+    target = session.get(WorkspaceMember, (workspace_id, member_user_id))
+    if not target or target.role not in {"owner", "admin", "member", "guest"}:
+        raise HTTPException(403, "Workspace membership required")
     if actor_id != member_user_id:
         if actor.role not in {"owner", "admin"}:
             raise HTTPException(403, "Workspace administrator access required")
@@ -262,12 +276,32 @@ async def remove_workspace_membership(session, workspace_id: str, member_user_id
     ).join(WorkspaceChannel, WorkspaceChannel.channel_id == Channel.id).where(
         WorkspaceChannel.workspace_id == workspace_id, ChannelMember.user_id == member_user_id,
     )).all()
+    from ..services.connect import (connection_for_channel, revoke_workspace_grants,
+                                    shared_channel_allows, workspace_grant_channel_ids)
+    shared_ids = workspace_grant_channel_ids(session, workspace_id, member_user_id)
+    # A personal account can belong to both organizations while participating
+    # through only one. The canonical owner must not remove the other tenant's
+    # independent seat when terminating its own workspace membership.
+    affected = [(channel, membership) for channel, membership in affected
+                if not connection_for_channel(session, channel.id) or channel.id in shared_ids]
+    known = {channel.id for channel, _ in affected}
+    if shared_ids:
+        affected.extend(session.exec(select(Channel, ChannelMember).join(
+            ChannelMember, ChannelMember.channel_id == Channel.id,
+        ).where(Channel.id.in_(shared_ids), ChannelMember.user_id == member_user_id,
+                Channel.id.not_in(known))).all())
+    # Offboarding is tenant control, not a content read grant. Lock only the
+    # explicitly selected channel rows without rebinding a recipient's SSO to
+    # the other organization's canonical workspace.
+    channel_ids = sorted({channel.id for channel, _ in affected} | set(shared_ids))
+    for channel_id in channel_ids:
+        session.execute(update(Channel).where(Channel.id == channel_id).values(name=Channel.name))
     handovers = []
     from ..services.matrix_bridge import remove_secure_member
     # Complete every remote revocation before mutating native memberships.
     # Partial remote failure leaves native access unchanged and can be retried.
-    for channel, _ in affected:
-        remove_secure_member(session, channel.id, member_user_id)
+    for channel_id in channel_ids:
+        remove_secure_member(session, channel_id, member_user_id)
     for channel, membership in affected:
         if channel.type == "direct":
             # Keep the canonical participant pair and retained history. The
@@ -277,18 +311,38 @@ async def remove_workspace_membership(session, workspace_id: str, member_user_id
             remaining = session.exec(select(ChannelMember).where(
                 ChannelMember.channel_id == channel.id, ChannelMember.user_id != member_user_id,
             ).order_by(ChannelMember.joined_at, ChannelMember.user_id)).all()
-            remaining = [row for row in remaining if workspace_allows_channel(session, channel.id, row.user_id)]
+            if connection_for_channel(session, channel.id):
+                remaining = [row for row in remaining if shared_channel_allows(
+                    session, channel.id, row.user_id, workspace_id)]
+            elif scim_directory_id is not None:
+                # A validated directory owner authenticates this removal. A
+                # successor is a current eligible subject, not another login
+                # actor who must independently present an interactive SSO JWT.
+                from ..models.workforce import WorkforcePrincipal
+                eligible = set(session.exec(select(WorkspaceMember.user_id).join(
+                    User, User.id == WorkspaceMember.user_id,
+                ).outerjoin(WorkforcePrincipal, WorkforcePrincipal.user_id == WorkspaceMember.user_id).where(
+                    WorkspaceMember.workspace_id == workspace_id,
+                    WorkspaceMember.user_id.in_([row.user_id for row in remaining]),
+                    WorkspaceMember.role.in_({"owner", "admin", "member", "guest"}), User.is_blocked == False,
+                    (WorkforcePrincipal.user_id == None) | ((WorkforcePrincipal.workspace_id == workspace_id) &
+                                                            (WorkforcePrincipal.active == True)),
+                )).all())
+                remaining = [row for row in remaining if row.user_id in eligible]
+            else:
+                remaining = [row for row in remaining if workspace_allows_channel(session, channel.id, row.user_id)]
             if remaining and not any(row.role == "admin" for row in remaining):
                 successor = remaining[0]
                 successor.role = "admin"
                 session.add(successor)
                 handovers.append({"channel_id": channel.id, "user_id": successor.user_id})
         session.delete(membership)
+    revoke_workspace_grants(session, workspace_id, member_user_id)
     session.delete(target)
     session.commit()
     for channel, _ in affected:
         await broadcast_to_channel(channel.id, "members_changed", {"channel_id": channel.id})
-        await send_to_user(member_user_id, "channel_removed", {"channel_id": channel.id})
+        await send_to_user(member_user_id, "channel_removed", {"channel_id": channel.id, "workspace_id": workspace_id})
     await send_to_user(member_user_id, "workspace_removed", {"workspace_id": workspace_id})
     return {"removed": True, "user_id": member_user_id, "workspace_id": workspace_id, "admin_handovers": handovers}
 

@@ -43,8 +43,10 @@ def digest_for(session, channel_id, data, user_id):
             if not record or record.channel_id != channel_id:
                 raise HTTPException(404, "File version not found in this channel")
             try:
-                with storage_service.get_file_path(record.id).open("rb") as content:
-                    digest = hashlib.file_digest(content, "sha256").hexdigest()
+                content = storage_service.read_file(record.id, max_bytes=50 * 1024 * 1024, expected_size=record.size)
+                if content is None:
+                    raise ValueError("Missing exact version")
+                digest = hashlib.sha256(content).hexdigest()
             except (OSError, ValueError):
                 raise HTTPException(409, "The exact file version is unavailable") from None
     else:

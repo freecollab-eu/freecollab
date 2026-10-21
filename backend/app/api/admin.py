@@ -340,7 +340,12 @@ async def delete_message(
     message = session.get(Message, message_id)
     if not message:
         raise HTTPException(status_code=404, detail="Message not found")
-    
+    from ..services.enterprise_governance import assert_deletion_allowed
+    from ..services.request_guard import recheck_actor
+    assert_deletion_allowed(session, message.channel_id, author_id=message.author_id)
+    recheck_actor(session, staff.id)
+    staff = session.get(User, staff.id, populate_existing=True)
+    require_staff(staff, session)
     message.deleted = True
     message.content = "[Message deleted]"
     message.encrypted = False

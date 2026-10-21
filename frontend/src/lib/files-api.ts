@@ -79,6 +79,8 @@ function uploadNative(channelId: string, file: File, options: FileTransferOption
       if (settled) return;
       cleanup();
       if (xhr.status >= 200 && xhr.status < 300 && xhr.response && typeof xhr.response.id === 'string') {
+        if(token===api.getAccessToken()&&Array.isArray(xhr.response.policy_warnings)&&xhr.response.policy_warnings.length)
+          window.dispatchEvent(new CustomEvent('freecollab:policy-warning',{detail:{count:xhr.response.policy_warnings.length}}));
         options.onProgress?.(100);
         resolve(xhr.response as ManagedFile);
       } else {

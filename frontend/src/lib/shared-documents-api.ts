@@ -199,6 +199,31 @@ export const sharedDocumentsApi = {
   },
 };
 
+/** Read-only, in-memory reconstruction for local search; no query is uploaded. */
+export async function readSharedDocumentForSearch(channelId: string, documentId: string, signal?: AbortSignal) {
+  const token = api.getAccessToken(), doc = new Y.Doc(); let sequence = 0, metadata: SharedDocumentRecord | undefined;
+  try {
+    for (let pageNumber = 0; pageNumber < 50; pageNumber++) {
+      current(token); if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const page = await api.request<Page>(path(channelId, documentId) + '/updates?after_sequence=' + sequence + '&limit=200', { signal });
+      current(token); metadata = page.document;
+      if (metadata.archived) throw new Error('This document was archived.');
+      for (const row of page.items) {
+        if (row.document_id !== documentId || row.channel_id !== channelId || row.sequence !== sequence + 1) throw new DocumentIntegrityError('Shared document history has a sequence gap.');
+        const fields = await verifiedContent(row, 'update'); current(token);
+        if (signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+        applyChecked(doc, decodeDocumentUpdate(fields?.update_base64)); sequence = row.sequence!;
+      }
+      if (!page.has_more) {
+        if (sequence !== metadata.update_count) throw new DocumentIntegrityError('Shared document changed during search. Refresh the search.');
+        return { document: metadata, sequence, title: doc.getText('title').toString(), text: doc.getText('body').toString() };
+      }
+      if (!page.items.length) throw new DocumentIntegrityError('Shared document pagination did not advance.');
+    }
+    throw new Error('This document exceeds the local search synchronization limit.');
+  } finally { doc.destroy(); }
+}
+
 export class SharedDocumentSession {
   readonly doc = new Y.Doc();
   private readonly owner = api.getAccessToken();

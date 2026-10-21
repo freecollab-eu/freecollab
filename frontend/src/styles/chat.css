@@ -15,11 +15,12 @@
 @keyframes fc-chat-spin { to { transform: rotate(360deg); } }
 .fc-chat-sidebar { width: 0; min-width: 0; flex-shrink: 0; overflow: hidden; background: var(--fc-sidebar); transition: width .2s ease; }
 .fc-chat-sidebar.is-open { width: 264px; border-right: 1px solid var(--fc-border); }
-.fc-chat-sidebar-inner { height: 100%; width: 263px; display: flex; flex-direction: column; }
+.fc-chat-sidebar-inner { height: 100%; width: 263px; display: flex; flex-direction: column; overflow-y: auto; overscroll-behavior: contain; }
+.fc-chat-sidebar-inner > * { flex-shrink: 0; }
 .fc-chat-identity { padding: 2rem 1.5rem 2.6rem; }
 .fc-chat-wordmark { display: flex; align-items: center; gap: .65rem; font-size: 1.12rem; font-weight: 600; letter-spacing: -.055em; margin-bottom: 1rem; }
 .fc-chat-identity .fc-kicker { font-size: .62rem; }
-.fc-chat-channel-nav { flex: 1; min-height: 0; overflow-y: auto; padding: 0 .9rem; }
+.fc-chat-channel-nav { flex: 1 0 8rem; min-height: 8rem; overflow-y: auto; padding: 0 .9rem; }
 .fc-chat-section-label { display: flex; align-items: center; justify-content: space-between; padding: 0 .65rem; margin-bottom: .7rem; }
 .fc-chat-section-label .fc-icon-button { width: 1.8rem; min-height: 1.8rem; }
 .fc-chat-channel-list { display: grid; gap: .3rem; }

@@ -78,7 +78,7 @@ def scoped_api(monkeypatch):
                               workspace_scope={"workspace_id": "a", "provider_revision": 3})
         session.add(WorkspaceOIDCSession(token_hash=token_digest(scoped), workspace_id="a", provider_revision=3))
         session.commit()
-    monkeypatch.setattr(presence, "get_online_users", lambda: ["actor", "a-peer", "b-peer", "legacy-peer"])
+    monkeypatch.setattr(presence, "get_online_users", lambda *_: ["actor", "a-peer", "b-peer", "legacy-peer"])
     monkeypatch.setattr(presence, "get_user_presence", lambda user_id: {"status": "online", "last_seen": None})
     api = FastAPI()
     for module in (account, admin, auth, channels, direct_messages, files, integrations_content,

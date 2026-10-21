@@ -1,5 +1,6 @@
 """Immutable file versions, retry receipts and encrypted-channel boundaries."""
 import asyncio
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -198,19 +199,28 @@ def test_block_created_while_body_is_read_is_checked_again_before_file_write(ver
 def test_failed_storage_write_removes_partial_new_blob_without_replacing_existing(version_api, monkeypatch):
     file_id = uuid4().hex
     path = version_api.storage.get_file_path(file_id)
+    original_open = Path.open
 
     class FailedWrite:
-        async def __aenter__(self):
-            path.write_bytes(b'partial')
+        def __enter__(self):
+            self.output = original_open(path, 'xb')
             return self
 
-        async def __aexit__(self, *args):
+        def __exit__(self, *args):
+            self.output.close()
             return False
 
-        async def write(self, content):
+        def write(self, content):
+            self.output.write(b'partial')
+            self.output.flush()
             raise OSError('simulated full disk')
 
-    monkeypatch.setattr('app.services.storage.aiofiles.open', lambda *args: FailedWrite())
+    def open_with_failed_write(candidate, *args, **kwargs):
+        if candidate == path and args == ('xb',) and not kwargs:
+            return FailedWrite()
+        return original_open(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(Path, 'open', open_with_failed_write)
     with pytest.raises(OSError, match='simulated full disk'):
         asyncio.run(version_api.storage.save_file(file_id, b'complete'))
     assert not path.exists()

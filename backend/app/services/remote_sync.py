@@ -173,11 +173,11 @@ def local_item(session, connection, local_id):
     if not record or record.channel_id != connection.channel_id:
         raise HTTPException(409, "Stored file content is unavailable")
     deleted = is_file_deleted(session, document.id)
-    path = storage_service.get_file_path(record.id)
-    if not path.is_file() or record.size > MAX_FILE_SIZE or path.stat().st_size > MAX_FILE_SIZE:
-        raise HTTPException(409, "Stored file content is unavailable")
-    value = path.read_bytes()
-    if len(value) != record.size:
+    try:
+        value = storage_service.read_file(record.id, max_bytes=MAX_FILE_SIZE, expected_size=record.size)
+    except (OSError, ValueError):
+        raise HTTPException(409, "Stored file content is unavailable") from None
+    if value is None:
         raise HTTPException(409, "Stored file content is unavailable")
     return {"id": local_id, "deleted": deleted, "bytes": value, "name": record.filename,
             "mime_type": record.content_type, "fingerprint": _hash({"version": document.version_count,
@@ -256,6 +256,9 @@ def _import_remote(session, connection, item, remote, value):
         number = previous.revision + 1 if previous else 1
         deleted = bool(remote.get("deleted"))
         fields = None if deleted else CalendarFields.model_validate(value["fields"]).model_dump(mode="json")
+        if fields:
+            from .enterprise_governance import enforce_native_document
+            enforce_native_document(session, connection.channel_id, connection.grant_user_id, fields)
         payload = {"id": item.local_id, "kind": "calendar", "revision": number, "fields": fields, "deleted": deleted}
         revision = IntegrationContentRevision(item_id=item.local_id, revision=number,
             created_by=connection.grant_user_id, content_mode="server", deleted=deleted,
@@ -280,11 +283,13 @@ def _import_remote(session, connection, item, remote, value):
         raise HTTPException(409, "Remote file exceeds the supported size")
     if mime not in ALLOWED_TYPES:
         raise HTTPException(409, "Remote file type is not supported")
+    from .enterprise_governance import enforce_native_file
+    enforce_native_file(session, connection.channel_id, connection.grant_user_id, safe_filename(remote.get("name")), mime, content)
     file_id = uuid4().hex
-    path = storage_service.get_file_path(file_id)
+    created = False
     try:
-        with path.open("xb") as stream:
-            stream.write(content)
+        path = storage_service.save_file_sync(file_id, content)
+        created = True
         record = File(id=file_id, channel_id=connection.channel_id, uploader_id=connection.grant_user_id,
             filename=safe_filename(remote.get("name")), content_type=mime, size=len(content), storage_path=str(path))
         session.add(record)
@@ -303,9 +308,10 @@ def _import_remote(session, connection, item, remote, value):
         restore_synced_file(session, document.id)
         session.flush()
         enqueue_channel_event(session, connection.channel_id, "file.version.created" if number > 1 else "file.created", file_id)
-        return path
+        return file_id
     except BaseException:
-        path.unlink(missing_ok=True)
+        if created:
+            storage_service.delete_file_sync(file_id)
         raise
 
 
@@ -412,7 +418,7 @@ def _sync_item(session, connection_id, revision, lease, item_id, secret):
         except (HTTPException, ValueError) as error:
             session.rollback()
             if path:
-                path.unlink(missing_ok=True)
+                storage_service.delete_file_sync(path)
             connection = _current(session, connection_id, revision, lease, lock=True)
             item = session.get(RemoteSyncItem, item_id)
             _conflict(session, connection, item, "unsupported_remote_content", local, remote)
@@ -420,7 +426,7 @@ def _sync_item(session, connection_id, revision, lease, item_id, secret):
         except BaseException:
             session.rollback()
             if path:
-                path.unlink(missing_ok=True)
+                storage_service.delete_file_sync(path)
             raise
         return
     if not local_changed:

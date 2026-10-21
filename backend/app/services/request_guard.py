@@ -36,6 +36,9 @@ def recheck_actor(session, user_id: str):
         # grant checks. The HTTP dependency always supplies the context below.
         return
     claims, digest = context["claims"], context["token_hash"]
+    from .native_clients import child_session_valid
+    if not child_session_valid(session, digest, claims):
+        raise HTTPException(401, "Native client sign-in changed. Please sign in again.")
     version = session.exec(select(AccountSecurity.auth_version).where(AccountSecurity.user_id == user_id)).first()
     tracked = session.exec(select(ActiveSession.user_id, ActiveSession.revoked_at, ActiveSession.expires_at).where(
         ActiveSession.token_hash == digest)).first()

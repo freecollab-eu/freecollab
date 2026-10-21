@@ -30,6 +30,8 @@ import {
   MoreHorizontal,
   Compass,
   ClipboardCheck,
+  Clock,
+  Bell,
 } from 'lucide-react';
 import { TypingIndicator, useTypingEmitter } from './TypingIndicator';
 import { PresenceIndicator } from './PresenceIndicator';
@@ -48,6 +50,9 @@ import { WorkspaceLaunchPanel } from './WorkspaceLaunchPanel';
 import { WorkspaceFeedbackDialog } from './WorkspaceFeedbackDialog';
 import { shouldSuggestWorkspaceLaunch } from '../lib/workspace-launch';
 import { WorkHub, type WorkHubTab } from './WorkHub';
+import { ChatProductivityPanel } from './ChatProductivityPanel';
+import { MeetingDock } from './MeetingDock';
+import { reconcileMessageChanges } from '../lib/message-reconcile';
 import { MobileSettings, MobileStatus } from './MobileSettings';
 import { mobileDrafts, mobileOutbox } from '../mobile';
 import { useModalFocus } from '../lib/useModalFocus';
@@ -90,6 +95,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [focusDecisionId, setFocusDecisionId] = useState<string | undefined>();
   const [decisionSource, setDecisionSource] = useState<Message | undefined>();
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [productivity, setProductivity] = useState<{message?:Message;draft?:string;mentions?:string[]}|null>(null);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -100,6 +106,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [mobileNotice, setMobileNotice] = useState('');
+  const [policyNotice, setPolicyNotice] = useState(false);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [selectedMentions, setSelectedMentions] = useState<string[]>([]);
@@ -138,6 +145,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const activeChannelRef = useRef<string | null>(null);
   const threadMessageRef = useRef<Message | null>(null);
   const messageRequestRef = useRef(0);
+  const nativeSyncRef=useRef<{channelId:string;token:string|null;cursor:number}|null>(null);
   const messagesRef = useRef<Message[]>([]);
   const draftsRef = useRef<Record<string, string>>({});
   const draftWrites = useRef(new Map<string, Promise<void>>());
@@ -235,13 +243,66 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   },[channels]);
 
   useEffect(() => {
+    const open = (event:Event) => {
+      const detail=(event as CustomEvent<{channel_id:string;kind:string;id:string;parent_id?:string}>).detail;
+      const channel=channels.find(item=>item.id===detail?.channel_id);
+      if(!channel||embeddedChannelId&&channel.id!==embeddedChannelId)return;
+      setHistoryOpen(false);selectChannel(channel);
+      if(['file','file-content'].includes(detail.kind)){setToolPanel('files');return;}
+      const target:Record<string,WorkHubTab>={document:'documents',task:'tasks',project:'tasks',feed:'feed'};
+      if(target[detail.kind]){setWorkHubInitialTab(target[detail.kind]);setWorkHubOpen(true);}
+    };
+    window.addEventListener('freecollab:open-search-source',open);
+    return()=>window.removeEventListener('freecollab:open-search-source',open);
+  },[channels,embeddedChannelId]);
+
+  useEffect(() => {
     const media = window.matchMedia('(min-width: 768px)');
     const resize = () => { setSidebarOpen(media.matches); if (media.matches) setMobileToolsOpen(false); };
     media.addEventListener('change', resize);
     return () => media.removeEventListener('change', resize);
   }, []);
 
-  useEffect(() => { setMobileToolsOpen(false); }, [activeChannel?.id, workspace?.id]);
+  useEffect(() => { setMobileToolsOpen(false); setProductivity(null); }, [activeChannel?.id, workspace?.id]);
+  useEffect(()=>{
+    if(!activeChannel||activeChannel.secure)return;
+    const channelId=activeChannel.id,token=api.getAccessToken();let live=true,busy=false;
+    const poll=async()=>{
+      const state=nativeSyncRef.current;
+      if(!live||busy||!navigator.onLine||document.visibilityState==='hidden'||!state||state.channelId!==channelId||state.token!==token||token!==api.getAccessToken())return;
+      busy=true;
+      try{
+        for(let page=0;page<4;page++){
+          const data=await api.request<{messages:Message[];next_cursor:number;has_more:boolean}>('/messages/channels/'+encodeURIComponent(channelId)+'/sync?after='+state.cursor+'&limit=100');
+          if(!live||token!==api.getAccessToken()||activeChannelRef.current!==channelId||nativeSyncRef.current!==state)return;
+          if(data.next_cursor<state.cursor)throw new Error('Message cursor moved backwards.');
+          setMessages(current=>reconcileMessageChanges(current,data.messages));
+          const parentId=threadMessageRef.current?.id;
+          if(parentId){
+            const parent=data.messages.find(message=>message.id===parentId);
+            if(parent?.deleted){setThreadMessage(null);setThreadReplies([]);}
+            else{if(parent)setThreadMessage(parent);setThreadReplies(current=>reconcileMessageChanges(current,data.messages,parentId));}
+          }
+          state.cursor=data.next_cursor;
+          if(!data.has_more)break;
+        }
+        window.dispatchEvent(new Event('freecollab:notifications-updated'));
+      }catch(failure){
+        if(live&&token===api.getAccessToken()&&failure instanceof APIError){
+          if(failure.status===400){nativeSyncRef.current=null;void loadMessages(channelId);}
+          else if([401,403,404,409].includes(failure.status)){
+            nativeSyncRef.current=null;setMessages([]);setThreadMessage(null);setThreadReplies([]);setMessageError(failure.message);
+            if(failure.status!==401)void loadChannels();
+          }
+        }
+      }
+      finally{busy=false;}
+    };
+    const interval=window.setInterval(()=>void poll(),15000),resume=()=>void poll();
+    window.addEventListener('online',resume);document.addEventListener('visibilitychange',resume);
+    return()=>{live=false;window.clearInterval(interval);window.removeEventListener('online',resume);document.removeEventListener('visibilitychange',resume);};
+  },[activeChannel?.id,activeChannel?.secure]);
+  useEffect(()=>{const warn=()=>setPolicyNotice(true);window.addEventListener('freecollab:policy-warning',warn);return()=>window.removeEventListener('freecollab:policy-warning',warn);},[]);
   useEffect(() => {
     if (!mobileToolsOpen) return;
     const outside = (event: PointerEvent) => {
@@ -526,7 +587,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     socket.on('reaction_removed', onReaction);
     socket.on('thread_reply', onThreadReply);
     socket.on('mention', onMention);
+    const onChannelsChanged=(data:{workspace_id?:string})=>{if(!data.workspace_id||data.workspace_id===workspaceRef.current)void loadChannels();};
     socket.on('channel_removed', onChannelRemoved);
+    socket.on('channels_changed',onChannelsChanged);
     socket.on('members_changed', onMembersChanged);
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
@@ -543,6 +606,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       socket.off('thread_reply', onThreadReply);
       socket.off('mention', onMention);
       socket.off('channel_removed', onChannelRemoved);
+      socket.off('channels_changed',onChannelsChanged);
       socket.off('members_changed', onMembersChanged);
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
@@ -589,9 +653,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   const loadMessages = async (channelId: string) => {
     const request = ++messageRequestRef.current;
+    const token=api.getAccessToken();
     const initial = new Map(messagesRef.current.map((message) => [message.id, message]));
     setMessagesLoading(true); setMessageError('');
     try {
+      let cursor:number|null=null;
+      if(!channels.find(channel=>channel.id===channelId)?.secure){
+        try{cursor=(await api.request<{cursor:number}>('/messages/channels/'+encodeURIComponent(channelId)+'/sync/head')).cursor;}
+        catch(failure){if(!(failure instanceof APIError&&failure.status===409))throw failure;}
+      }
+      if(token!==api.getAccessToken()||activeChannelRef.current!==channelId||messageRequestRef.current!==request)return;
       const data = await api.getMessages(channelId);
       const target = pendingJumpRef.current;
       let page = data;
@@ -601,6 +672,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         data.push(...page);
       }
       if (activeChannelRef.current !== channelId || messageRequestRef.current !== request) return;
+      if(token!==api.getAccessToken())return;
+      nativeSyncRef.current=cursor===null?null:{channelId,token,cursor};
       setEncryptionLocked(false);
       setHasOlder(page.length >= 50);
       const timeline = data.reverse().filter((message) => !message.parent_id);
@@ -907,7 +980,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                   onClick={() => selectChannel(channel)}
                   aria-current={activeChannel?.id === channel.id ? 'page' : undefined}
                   className={`fc-chat-channel ${activeChannel?.id === channel.id ? 'is-active' : ''} ${activeChannel?.id !== channel.id && unreadCounts[channel.id] > 0 ? 'has-unread' : ''}`}>
-                  {channel.type === 'direct' ? <MessageCircle size={17} aria-hidden="true" /> : <Hash size={17} aria-hidden="true" />}
+                  {['direct','group_direct'].includes(channel.type) ? <MessageCircle size={17} aria-hidden="true" /> : <Hash size={17} aria-hidden="true" />}
                   <span>{channel.name || t("Unnamed")}</span>
                   {activeChannel?.id !== channel.id && unreadCounts[channel.id] > 0 && <span className="fc-chat-unread" aria-label={t("{value0} unread messages", { value0: String(unreadCounts[channel.id]) })}>{unreadCounts[channel.id]}</span>}
                   {<Lock className="fc-chat-channel-lock" size={12} aria-label={channel.secure ? t("End-to-end encrypted") : t("Server-encrypted messages")} />}
@@ -990,7 +1063,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                         <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}>{msg.content}</p>
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div className="fc-chat-message-actions"><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => { setDecisionSource(message); setCollaborationTab("decisions"); setToolPanel(null); }} /><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div className="fc-chat-message-actions"><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => { setDecisionSource(message); setCollaborationTab("decisions"); setToolPanel(null); }} /><button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
@@ -1004,14 +1077,18 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         {activeChannel && <div className="fc-chat-composer-area">
           {currentUserId && <div className="fc-chat-typing"><TypingIndicator channelId={activeChannel.id} currentUserId={currentUserId} /></div>}
           {actionError && <p role="alert" className="fc-alert">{actionError}</p>}
+          {policyNotice && <p role="status" className="fc-alert">{t('Shared content matched an organization policy. Review it before sharing further.')}<button type="button" className="fc-icon-button" aria-label={t('Dismiss policy notice')} onClick={()=>setPolicyNotice(false)}><X size={14}/></button></p>}
           {mobileNotice && <p role="status" className="fc-chat-muted">{mobileNotice}</p>}
           {mentionOpen && <div className="fc-chat-mention-picker" role="listbox" aria-label={t("Mention a teammate")}>{Object.entries(memberNames).filter(([id,name]) => id !== currentUserId && name.toLocaleLowerCase().includes((/(?:^|\s)@([^@\n]*)$/.exec(newMessage)?.[1] || "").toLocaleLowerCase())).slice(0,8).map(([id,name]) => <button type="button" role="option" aria-selected={selectedMentions.includes(id)} key={id} onClick={() => { const value = newMessage.replace(/(?:^|\s)@[^@\n]*$/, match => (match.startsWith(" ") ? " " : "") + "@" + name + " "); setNewMessage(value); persistDraft(activeChannel.id, value, !!activeChannel.secure); setSelectedMentions(old => [...new Set([...old,id])]); setMentionOpen(false); inputRef.current?.focus(); }}>{name}</button>)}</div>}
           <form onSubmit={handleSendMessage} className="fc-chat-composer"><textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} rows={1} data-modal-return-focus maxLength={10000} aria-label={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} aria-describedby="message-composer-hint" placeholder={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} /><button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending} className="fc-button fc-button-primary"><span>{sending ? t("Sending…") : t("Send")}</span><Send size={15} /></button></form>
-          <div id="message-composer-hint" className="fc-chat-composer-hint"><span>{t("Enter to send ")}<span aria-hidden="true">·</span> {t(" Shift + Enter for a new line")}</span><span>{newMessage.length >= 9000 ? `${newMessage.length.toLocaleString(currentLocale())} / 10,000` : t("A thought worth sharing?")}</span></div>
+          <button type="button" className="fc-chat-text-button" disabled={sending} onClick={() => setProductivity({draft:newMessage,mentions:selectedMentions})}><Clock size={14}/>{t("Schedule & reminders")}</button><div id="message-composer-hint" className="fc-chat-composer-hint"><span>{t("Enter to send ")}<span aria-hidden="true">·</span> {t(" Shift + Enter for a new line")}</span><span>{newMessage.length >= 9000 ? `${newMessage.length.toLocaleString(currentLocale())} / 10,000` : t("A thought worth sharing?")}</span></div>
         </div>}
       </main>
 
       {activeChannel && toolPanel && <ChannelTools key={`${activeChannel.id}:${toolPanel}`} channel={activeChannel} tab={toolPanel} onClose={() => setToolPanel(null)} onRoleChange={(role) => { if (activeChannelRef.current === activeChannel.id) setActiveChannel((current) => current ? { ...current, role } : current); }} onLeave={() => { setChannels((records) => records.filter((record) => record.id !== activeChannel.id)); if (activeChannelRef.current === activeChannel.id) { setActiveChannel(null); setToolPanel(null); } void loadChannels(); }} />}
+
+      <MeetingDock />
+      {activeChannel && productivity && <ChatProductivityPanel key={activeChannel.id} channel={activeChannel} message={productivity.message} draft={productivity.draft} mentions={productivity.mentions} onClose={()=>setProductivity(null)} onScheduled={()=>{if(draftsRef.current[activeChannel.id]===productivity.draft){setNewMessage('');persistDraft(activeChannel.id,'',!!activeChannel.secure);setSelectedMentions([]);}setProductivity(null);}}/>}
 
       {activeChannel && collaborationTab && <CollaborationPanel key={`${activeChannel.id}:${collaborationTab}`} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={() => {setCollaborationTab(null); setDecisionSource(undefined);}} onOpenMessage={(channelId,messageId) => { const channel = channels.find(item => item.id === channelId); if (!channel) return; openHistoryMessage({id:messageId,channel_id:channelId,author_id:'',content:'',encrypted:!!channel.secure,created_at:''}); }} />}
 

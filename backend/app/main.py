@@ -1,7 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi import HTTPException
+from redis.exceptions import RedisError
 from contextlib import asynccontextmanager
+from contextlib import suppress
+import asyncio
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
@@ -26,8 +30,10 @@ from .api import file_experience, activity_feed, copilot, cloud_files, external_
 from .api import connection_setup
 from .api import pilot_feedback, pilot_readiness
 from .api import embed
+from .api import chat_productivity, connect, app_platform, enterprise_search, clips, sfu, enterprise_governance
+from .api import native_clients
 from .models import workspace_crypto_grant  # Register additive tables before init_db.
-from .realtime.socket import sio
+from .realtime.socket import sio, start_realtime_broker, stop_realtime_broker, realtime_broker_ready
 
 install_capability_log_filter()
 
@@ -37,10 +43,19 @@ async def lifespan(app):
     database.init_db()
     init_workspaces(database.engine)
     install_auth_rate_limits(app)
-    yield
+    await start_realtime_broker()
+    from .services.productivity_relay import run as relay_productivity
+    relay = asyncio.create_task(relay_productivity(), name="freecollab-worker-effects")
+    try:
+        yield
+    finally:
+        relay.cancel()
+        with suppress(asyncio.CancelledError):
+            await relay
+        await stop_realtime_broker()
 
 
-app = FastAPI(title="FreeCollab", version="0.10.0", lifespan=lifespan)
+app = FastAPI(title="FreeCollab", version="0.11.0", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -104,6 +119,14 @@ app.include_router(connection_setup.router)
 app.include_router(pilot_feedback.router)
 app.include_router(pilot_readiness.router)
 app.include_router(embed.router)
+app.include_router(chat_productivity.router)
+app.include_router(connect.router)
+app.include_router(app_platform.router)
+app.include_router(enterprise_search.router)
+app.include_router(clips.router)
+app.include_router(sfu.router)
+app.include_router(enterprise_governance.router)
+app.include_router(native_clients.router)
 if settings.enable_experimental_features:
     app.include_router(posts.router)
     app.include_router(comments.router)
@@ -118,7 +141,7 @@ socket_app = socketio.ASGIApp(sio, app)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.10.0"}
+    return {"status": "ok", "version": "0.11.0"}
 
 
 @app.get("/ready")
@@ -126,7 +149,13 @@ def ready():
     try:
         with Session(database.engine) as session:
             session.exec(text("SELECT 1"))
-    except SQLAlchemyError:
+        from .services.shared_runtime import runtime
+        shared = runtime()
+        if shared is not None:
+            if not realtime_broker_ready():
+                return JSONResponse({"status": "unavailable"}, status_code=503)
+            shared.client.ping()
+    except (SQLAlchemyError, RedisError, HTTPException, OSError):
         return JSONResponse({"status": "unavailable"}, status_code=503)
     return {"status": "ready"}
 
@@ -134,7 +163,7 @@ def ready():
 @app.get("/capabilities")
 def capabilities():
     return {
-        "version": "0.10.0",
+        "version": "0.11.0",
         "experimental_features": settings.enable_experimental_features,
         "demo_ai": settings.enable_demo_ai,
         "max_file_size": files.MAX_FILE_SIZE,
@@ -142,6 +171,17 @@ def capabilities():
         "invitations": True,
         "workspaces": True,
         "direct_messages": True,
+        "group_conversations": True,
+        "scheduled_messages": True,
+        "encrypted_scheduling": "trusted-device-online",
+        "personal_message_reminders": True,
+        "apps_platform": True,
+        "enterprise_search": settings.enterprise_search_enabled,
+        "clips": True,
+        "local_clip_transcription": True,
+        "shared_channels": "same-installation-matrix" if settings.matrix_enabled else False,
+        "meeting_sfu": settings.meetings_sfu_provider,
+        "enterprise_governance": True,
         "project_tasks": True,
         "languages": ["en", "sv"],
         "language_preference": True,

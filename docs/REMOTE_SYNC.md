@@ -51,7 +51,7 @@ configuration. The switch enables the sync queue; it does not configure any
 customer's provider credentials or enable an individual connection.
 
 ```bash
-docker compose --env-file pilot.env -p freecollab --profile integrations \
+docker compose --env-file pilot.env -p freecollab \
   up --build -d --wait backend frontend integration-worker
 ```
 

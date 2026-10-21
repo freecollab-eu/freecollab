@@ -1,7 +1,7 @@
 # @freecollab/components
 
 Collaboration inside your product, using your identity provider and infrastructure.
-Version **0.10.0** is a pre-1.0 SDK. Native modules and the trusted embedded
+Version **0.11.0** is a pre-1.0 SDK. Native modules and the trusted embedded
 workspace cover different integration needs:
 
 - Mount Chat, Files, Feed, Notifications, Tasks, Documents, Meetings, Calendar,
@@ -59,7 +59,7 @@ npm run release:check
 
 This builds typed ESM, runs package checks and generates the tarball plus a
 SHA-256/SHA-512 release manifest in `artifacts/`. Install a reviewed tarball with
-`npm install --save-exact /path/to/freecollab-components-0.10.0.tgz`.
+`npm install --save-exact /path/to/freecollab-components-0.11.0.tgz`.
 This command does not publish the package to a registry. React is an optional
 peer; Yjs is a pinned runtime dependency for shared documents.
 

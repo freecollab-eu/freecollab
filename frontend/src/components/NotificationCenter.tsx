@@ -84,7 +84,9 @@ export function NotificationCenter({ onClose, onOpenMessage }: NotificationCente
 
   const openNotification = async (notification: Notification) => {
     if (marking) return;
+    const notificationOwner=api.getAccessToken();
     if (!notification.read && !await markAsRead(notification.id)) return;
+    if(notificationOwner!==api.getAccessToken())return;
     if (['activity_feed_post', 'workflow_run'].includes(notification.entity_type || '') && notification.channel_id) {
       const token = api.getAccessToken(); setMarking(notification.id); setError('');
       try {
@@ -95,24 +97,31 @@ export function NotificationCenter({ onClose, onOpenMessage }: NotificationCente
       finally { if (token === api.getAccessToken()) setMarking(''); }
       return;
     }
-    if (!onOpenMessage || !['message', 'encrypted_message'].includes(notification.entity_type || '') || !notification.entity_id) return;
+    if (!onOpenMessage || !['message', 'encrypted_message', 'message_reminder'].includes(notification.entity_type || '') || !notification.entity_id) return;
     setMarking(notification.id); setError('');
     try {
       let message: Message;
-      if (notification.entity_type === 'encrypted_message') {
+      let targetId=notification.entity_id, targetChannel:string|null=null, encrypted=notification.entity_type==='encrypted_message';
+      if(notification.entity_type==='message_reminder'){
+        const target=await api.request<{channel_id:string;item_id:string;kind:string}>('/reminders/'+encodeURIComponent(notification.entity_id)+'/target');
+        if(notificationOwner!==api.getAccessToken())return;
+        targetId=target.item_id;targetChannel=target.channel_id;encrypted=target.kind==='matrix';
+      }
+      if (encrypted) {
         const parameters = new URLSearchParams(notification.action_url?.startsWith('#') ? notification.action_url.slice(1) : '');
-        const channelId = parameters.get('channel');
+        const channelId = targetChannel || parameters.get('channel');
         if (!channelId) throw new Error(t("This conversation is unavailable."));
-        const client = await getSecureMessaging(), event = await client.getDecryptedEvent(channelId, notification.entity_id);
+        const client = await getSecureMessaging(), event = await client.getDecryptedEvent(channelId, targetId);
         const { roomId } = await client.roomFor(channelId);
         const content = event.getContent();
         if (event.getRoomId() !== roomId || event.getType() !== 'm.room.message' || event.isRedacted() || typeof content.body !== 'string') throw new Error(t("This message is no longer available."));
-        message = api.rememberMessage({ id: notification.entity_id, channel_id: channelId, author_id: (event.getSender() || '').replace(/^@fc_([^:]+):.*$/, '$1'), content: content.body, encrypted: true, created_at: new Date(event.getTs()).toISOString(), parent_id: content['m.relates_to']?.rel_type === 'm.thread' ? content['m.relates_to'].event_id : undefined });
-      } else message = await api.request<Message>(`/messages/${encodeURIComponent(notification.entity_id)}`);
+        message = api.rememberMessage({ id: targetId, channel_id: channelId, author_id: (event.getSender() || '').replace(/^@fc_([^:]+):.*$/, '$1'), content: content.body, encrypted: true, created_at: new Date(event.getTs()).toISOString(), parent_id: content['m.relates_to']?.rel_type === 'm.thread' ? content['m.relates_to'].event_id : undefined });
+      } else message = await api.request<Message>(`/messages/${encodeURIComponent(targetId)}`);
+      if(notificationOwner!==api.getAccessToken())return;
       if (message.deleted) throw new Error(t("This message is no longer available."));
       onOpenMessage(message); onClose?.();
-    } catch (failure) { setError(failure instanceof Error ? failure.message : t("This conversation is no longer available.")); }
-    finally { setMarking(''); }
+    } catch (failure) { if(notificationOwner===api.getAccessToken())setError(failure instanceof Error ? failure.message : t("This conversation is no longer available.")); }
+    finally { if(notificationOwner===api.getAccessToken())setMarking(''); }
   };
 
   const markAllAsRead = async () => {

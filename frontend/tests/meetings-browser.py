@@ -41,14 +41,15 @@ def create_frontend(private, api_base, app_port):
 import {createRoot} from 'react-dom/client';
 import {MeetingsPanel} from COMPONENTS;
 import {MeetingGuest} from GUEST;
+import {MeetingDock} from DOCK;
 import './base.css';
 import ACCOUNT;
 import CONTENT;
 const params=new URLSearchParams(location.hash.slice(1));
 const meeting=params.get('meeting'),invitation=params.get('meeting_invite');
 if(meeting)history.replaceState(null,'',location.pathname+'#meeting='+encodeURIComponent(meeting));
-createRoot(document.getElementById('root')).render(<React.StrictMode>{meeting?<MeetingGuest meetingId={meeting} invitationToken={invitation}/>:<main className="proof-meeting"><h1>Meetings, thoughtfully.</h1><MeetingsPanel workspaceId="team" channelId="shared"/></main>}</React.StrictMode>);
-'''.replace('COMPONENTS', json.dumps(str(ROOT / 'frontend/src/components/MeetingsPanel.tsx'))).replace('GUEST', json.dumps(str(ROOT / 'frontend/src/components/MeetingGuest.tsx'))).replace('ACCOUNT', json.dumps(str(ROOT / 'frontend/src/styles/account.css'))).replace('CONTENT', json.dumps(str(ROOT / 'frontend/src/styles/integration-content.css')))
+createRoot(document.getElementById('root')).render(<React.StrictMode>{meeting?<MeetingGuest meetingId={meeting} invitationToken={invitation}/>:<main className="proof-meeting"><h1>Meetings, thoughtfully.</h1><MeetingsPanel workspaceId="team" channelId="shared"/><MeetingDock/></main>}</React.StrictMode>);
+'''.replace('COMPONENTS', json.dumps(str(ROOT / 'frontend/src/components/MeetingsPanel.tsx'))).replace('GUEST', json.dumps(str(ROOT / 'frontend/src/components/MeetingGuest.tsx'))).replace('DOCK', json.dumps(str(ROOT / 'frontend/src/components/MeetingDock.tsx'))).replace('ACCOUNT', json.dumps(str(ROOT / 'frontend/src/styles/account.css'))).replace('CONTENT', json.dumps(str(ROOT / 'frontend/src/styles/integration-content.css')))
     (web / 'entry.tsx').write_text(source)
     launcher = private / 'vite.mjs'
     launcher.write_text('import {createServer} from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';\nimport react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';\nconst server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],cacheDir:'+json.dumps(str(private/'vite-cache'))+',resolve:{alias:{react:'+json.dumps(str(ROOT/'frontend/node_modules/react'))+',"react-dom":'+json.dumps(str(ROOT/'frontend/node_modules/react-dom'))+',"lucide-react":'+json.dumps(str(ROOT/'frontend/node_modules/lucide-react'))+'}},server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(ROOT/'frontend'))+','+json.dumps(str(web))+']},proxy:{"/api":{target:'+json.dumps(api_base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")}}}});await server.listen();\n')
@@ -102,7 +103,7 @@ def main():
             launcher=private/'api.py'; launcher.write_text('''import json,os
 from fastapi import FastAPI
 from sqlmodel import Session
-from app.api import meetings,auth
+from app.api import meetings,auth,clips,sfu,files,secure_messaging
 from app.database import engine,init_db
 from app.models.user import User
 from app.models.channel import Channel,ChannelMember
@@ -117,7 +118,7 @@ with Session(engine) as session:
     result={name:create_token(name,session) for name in ['host','peer']}
     fd=os.open(os.environ['PROOF_CREDENTIAL_FILE'],os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
     with os.fdopen(fd,'w') as stream:json.dump(result,stream)
-app=FastAPI();app.include_router(meetings.router);app.include_router(auth.router)
+app=FastAPI();app.include_router(meetings.router);app.include_router(auth.router);app.include_router(clips.router);app.include_router(sfu.router);app.include_router(files.router);app.include_router(secure_messaging.router)
 @app.get('/ready')
 def ready():return{'status':'ready'}
 uvicorn.run(app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,access_log=False)

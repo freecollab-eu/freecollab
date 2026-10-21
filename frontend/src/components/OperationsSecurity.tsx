@@ -8,7 +8,7 @@ const checkLabels: Record<string, string> = {
   public_https_origin: 'HTTPS application origin', cors_https_origins: 'Allowed browser origins',
   experimental_features: 'Experimental routes', demo_ai: 'AI demo routes',
   independent_server_keys: 'Independent server keys', operator_mfa: 'Operator authenticators',
-  storage_capacity: 'Storage headroom', mail_leases: 'Email worker leases',
+  storage_capacity: 'Local volume headroom', mail_leases: 'Email worker leases',
   webhook_leases: 'Webhook worker leases', proof_leases: 'Version proof worker leases', sync_leases: 'File and calendar sync leases',
   workflow_leases: 'Workflow worker leases', data_leases: 'Export and retention worker leases', push_leases: 'Push delivery leases',
 };
@@ -118,10 +118,11 @@ export function OperationsSecurity() {
       {loading ? <p className="fc-account-loading" role="status"><Loader2 size={18} className="fc-account-spinner" />{t("Checking security status…")}</p> : snapshot ? <>
         <dl className="fc-integration-status-grid">
           <div><dt><ShieldCheck size={14} />{t("Operator authenticators")}</dt><dd>{snapshot.operators.mfa_enabled} {t(" of ")}{snapshot.operators.active} {t(" enabled")}</dd></div>
-          <div><dt><HardDrive size={14} />{t("Free storage")}</dt><dd>{space(snapshot.storage.free_bytes)}{snapshot.storage.free_percent !== null && <small>{new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 1 }).format(snapshot.storage.free_percent)}{t("% available")}</small>}</dd></div>
+          <div><dt><HardDrive size={14} />{t("Free local storage")}</dt><dd>{space(snapshot.storage.free_bytes)}{snapshot.storage.free_percent !== null && <small>{new Intl.NumberFormat(currentLocale(), { maximumFractionDigits: 1 }).format(snapshot.storage.free_percent)}{t("% available")}</small>}</dd></div>
           <div><dt>{t("Worker claims requiring attention")}</dt><dd>{expired}</dd></div>
           <div><dt>{t("Environment")}</dt><dd>{humanize(snapshot.environment)}</dd></div>
         </dl>
+        {snapshot.blob_storage?.backend === 's3' && <p className="fc-account-muted">{t("S3 object storage is configured. Local volume capacity does not verify the remote service; run the operator storage probe to check it.")}</p>}
         <ul className="fc-operations-checks" aria-label={t("Security configuration checks")}>{snapshot.checks.map(check => <li key={check.id} data-status={check.status}><CheckIcon status={check.status} /><span>{checkLabels[check.id] || humanize(check.id)}</span><strong>{checkState(check.id, check.status)}</strong></li>)}</ul>
         <div className="fc-integration-queue-details" aria-label={t("Worker queue health")}>{Object.entries(snapshot.queues).map(([name, queue]) => <p key={name}><strong>{queueLabels[name] || humanize(name)}</strong><span>{queue.enabled ? t("{value0} due · {value1} expired claims · {value2} failed", { value0: String(queue.due), value1: String(queue.expired_leases), value2: String(queue.failed) }) : t("Not enabled")}</span></p>)}</div>
         <p className="fc-account-muted fc-integration-footnote">{t("Checked ")}{date(snapshot.checked_at)}{t(". Administrator counts and queue totals exclude message content and credentials.")}</p>

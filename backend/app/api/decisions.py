@@ -65,6 +65,8 @@ def validate_content(session, channel_id: str, data: DecisionContent, user_id: s
         return
     if secure:
         raise HTTPException(409, "This channel requires an encrypted decision event")
+    from ..services.enterprise_governance import enforce_native_document
+    enforce_native_document(session, channel_id, user_id, data.model_dump(mode="json", exclude={"matrix_event_id"}))
     if data.responsible_user_id:
         try:
             require_channel_member(session, channel_id, data.responsible_user_id)

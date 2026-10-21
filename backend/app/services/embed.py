@@ -17,7 +17,10 @@ from sqlmodel import select
 
 from ..config import settings
 from ..models.embed import EmbedApplication, EmbedSession
+from ..models.channel import Channel, ChannelMember
+from ..models.native_clients import NativeClientSession
 from ..models.session import ActiveSession, RevokedToken
+from ..models.workspace import WorkspaceChannel
 from ..models.workspace_oidc import WorkspaceOIDCProvider
 
 MODULES = ("workspace", "chat", "tasks", "documents", "meetings", "calendar", "workflows", "decisions", "files", "feed", "integrations", "search", "copilot", "cloud", "external-meetings")
@@ -87,7 +90,30 @@ def parent_session_valid(session, parent_hash, user_id, *, now=None):
     source = session.exec(select(ActiveSession.user_id, ActiveSession.revoked_at, ActiveSession.expires_at).where(
         ActiveSession.token_hash == parent_hash)).first()
     return bool(source and source[0] == user_id and source[1] is None and source[2] > now
-                and not session.get(RevokedToken, parent_hash) and not session.get(EmbedSession, parent_hash))
+                and not session.get(RevokedToken, parent_hash) and not session.get(EmbedSession, parent_hash)
+                and not session.get(NativeClientSession, parent_hash))
+
+
+def channel_grant_valid(session, workspace_id, channel_id, user_id):
+    """Current channel seat in this tenant, including an explicit Connect grant.
+
+    This deliberately reads durable scalar grants without binding a session or
+    calling current_workspace_scope: child validation itself runs inside scope
+    binding. A foreign canonical owner alone never grants an exception.
+    """
+    if not session.exec(select(Channel.id).where(Channel.id == channel_id)).first():
+        return False
+    if not session.exec(select(ChannelMember.user_id).where(
+        ChannelMember.channel_id == channel_id, ChannelMember.user_id == user_id,
+    )).first():
+        return False
+    from .connect import connection_for_channel, shared_channel_allows
+    if connection_for_channel(session, channel_id):
+        return shared_channel_allows(session, channel_id, user_id, workspace_id)
+    owner = session.exec(select(WorkspaceChannel.workspace_id).where(
+        WorkspaceChannel.channel_id == channel_id,
+    )).first()
+    return owner == workspace_id
 
 
 def child_session_valid(session, token_hash, user_id, workspace_id, *, claims=None):
@@ -101,4 +127,5 @@ def child_session_valid(session, token_hash, user_id, workspace_id, *, claims=No
         EmbedApplication.id == child.application_id)).first()
     return bool(application and application[0] and application[1] == child.application_revision
                 and application[2] == child.workspace_id == workspace_id
-                and parent_session_valid(session, child.parent_token_hash, user_id))
+                and parent_session_valid(session, child.parent_token_hash, user_id)
+                and channel_grant_valid(session, workspace_id, child.channel_id, user_id))

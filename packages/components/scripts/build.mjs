@@ -38,5 +38,5 @@ async function recordSources(path, prefix = '') {
   }
 }
 await recordSources(resolve(directory, 'src'));
-await writeFile(resolve(directory, 'dist/release.json'), JSON.stringify({ schemaVersion: 1, name: packageJson.name, version: packageJson.version, apiLine: '0.10', sourceDigest: createHash('sha256').update(JSON.stringify(sources)).digest('hex'), entries: Object.keys(packageJson.exports), encryption: 'trusted-origin-embed', nativeChannels: 'server-processed' }, null, 2) + '\n');
+await writeFile(resolve(directory, 'dist/release.json'), JSON.stringify({ schemaVersion: 1, name: packageJson.name, version: packageJson.version, apiLine: '0.11', sourceDigest: createHash('sha256').update(JSON.stringify(sources)).digest('hex'), entries: Object.keys(packageJson.exports), encryption: 'trusted-origin-embed', nativeChannels: 'server-processed' }, null, 2) + '\n');
 process.stdout.write('Built ' + packageJson.name + '@' + packageJson.version + ' (typed ESM; React remains an optional peer).\n');

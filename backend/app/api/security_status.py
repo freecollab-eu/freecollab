@@ -55,12 +55,19 @@ class QueueDiagnostics(StrictResponse):
     push: QueueStatus
 
 
+class BlobStorageStatus(StrictResponse):
+    backend: Literal["local", "s3"]
+    status: Literal["local", "configured_not_probed"]
+    automatic_remote_probe: Literal[False]
+
+
 class SecurityStatus(StrictResponse):
     checked_at: datetime
     environment: Literal["development", "test", "production"]
     checks: list[SecurityCheck] = Field(max_length=14)
     operators: OperatorCoverage
     storage: StorageStatus
+    blob_storage: BlobStorageStatus
     queues: QueueDiagnostics
 
 

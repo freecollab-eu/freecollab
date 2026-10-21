@@ -185,6 +185,8 @@ async def offline_message(channel_id: str, data: OfflineMessageInput, user=Depen
     parent = session.get(Message, data.parent_id) if data.parent_id else None
     if data.parent_id and (not parent or parent.deleted or parent.channel_id != channel_id):
         raise HTTPException(404, "Parent message not found in channel")
+    from ..services.enterprise_governance import enforce_native_content
+    warnings = enforce_native_content(session, channel_id, current.id, data.content)
     message = Message(id=secrets.token_hex(16), channel_id=channel_id, author_id=current.id,
         content=encrypt_message(data.content, channel_id), encrypted=True,
         parent_id=data.parent_id, mentions=json.dumps(mention_ids))
@@ -206,6 +208,6 @@ async def offline_message(channel_id: str, data: OfflineMessageInput, user=Depen
         session.rollback()
         raise HTTPException(409, "Queued message changed concurrently; retry the same identifier") from None
     await process_message_mentions(message, session.get(Channel, channel_id), current, session, mention_ids=mention_ids)
-    result = {**message_data(message), "client_id": data.client_id, "replayed": False}
+    result = {**message_data(message), "client_id": data.client_id, "replayed": False, "policy_warnings": warnings}
     await broadcast_to_channel(channel_id, "message", {**result, "created_at": message.created_at.isoformat()})
     return result

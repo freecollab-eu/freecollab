@@ -190,6 +190,9 @@ def snapshot(channel_id: str, document_id: str, data: SnapshotInput, user=Depend
     if count >= service.MAX_SNAPSHOTS:
         raise HTTPException(409, "This document reached its named revision limit")
     fields = None if secure else {"name": data.name.strip(), "update_base64": service.canonical_update(data.update_base64, snapshot=True)}
+    if fields:
+        from ..services.enterprise_governance import enforce_native_document
+        enforce_native_document(session, channel_id, actor, fields, opaque_update=True)
     row = SharedDocumentSnapshot(id=data.id, document_id=document.id, covers_sequence=data.covers_sequence,
         created_by=actor, content_mode="matrix" if secure else "server", matrix_event_id=data.matrix_event_id,
         encrypted_payload=None if secure else service.seal(channel_id, "snapshot", document.id, data.id, fields))
@@ -212,6 +215,9 @@ def comment(channel_id: str, document_id: str, data: CommentInput, user=Depends(
     document, _ = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
     secure = service.validate_mode(session, channel_id, actor, data.matrix_event_id, credentials.credentials)
     fields = None if secure else {"text": data.text.strip()}
+    if fields:
+        from ..services.enterprise_governance import enforce_native_document
+        enforce_native_document(session, channel_id, actor, fields)
     checksum = service.fingerprint(fields, data.matrix_event_id)
     previous = session.get(SharedDocumentComment, data.id)
     if previous:

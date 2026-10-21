@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app import database
+from app import main as application  # noqa: F401 -- register the complete released model graph
 from app.api import channels, direct_messages, messages, presence, workspaces
 from app.config import settings
 from app.database import get_session
@@ -213,7 +214,7 @@ def test_logos_are_bounded_raster_and_authorized(workspace_team):
 
 def test_presence_directory_is_directional_and_does_not_leak_other_workspaces(workspace_team, monkeypatch):
     client, engine, headers = workspace_team
-    monkeypatch.setattr(presence, "get_online_users", lambda: ["owner", "guest", "hidden", "outsider", "missing"])
+    monkeypatch.setattr(presence, "get_online_users", lambda *_: ["owner", "guest", "hidden", "outsider", "missing"])
     assert client.get("/presence/online", headers=headers["guest"]).json()["online_users"] == ["owner", "guest"]
     assert client.get("/presence/users/hidden", headers=headers["guest"]).status_code == 404
     assert client.get("/presence/users/guest", headers=headers["hidden"]).status_code == 200
@@ -228,22 +229,23 @@ def test_presence_directory_is_directional_and_does_not_leak_other_workspaces(wo
 
 
 def test_presence_socket_uses_current_recipient_scope_and_private_rooms(workspace_team, monkeypatch):
-    _, engine, _ = workspace_team
+    _, engine, headers = workspace_team
     sio = Mock()
     sio.emit = AsyncMock()
     sio.leave_room = AsyncMock()
-    sio.manager.get_participants.return_value = []
+    sio.manager.get_participants.side_effect=lambda namespace,room:[(room.removeprefix('user:'),'engine-sid')]
+    sio.get_session=AsyncMock(side_effect=lambda sid:{"user_id":sid,"token":headers[sid]["Authorization"].removeprefix('Bearer ')})
     monkeypatch.setattr(socket, "sio", sio)
     monkeypatch.setattr(socket, "presence_store", {name: {"sid": name, "status": "online"} for name in ("owner", "member", "guest", "hidden", "outsider")})
     asyncio.run(socket.broadcast_presence("hidden", {"user_id": "hidden", "status": "away"}))
-    assert {call.kwargs["room"] for call in sio.emit.await_args_list} == {"user:owner", "user:member", "user:hidden"}
-    assert all(call.kwargs.get("room", "").startswith("user:") for call in sio.emit.await_args_list)
+    assert {call.kwargs["room"] for call in sio.emit.await_args_list} == {"owner", "member", "hidden"}
+    assert all(not call.kwargs.get("room", "").startswith("user:") for call in sio.emit.await_args_list)
     sio.emit.reset_mock()
     with Session(engine) as session:
         session.delete(session.get(WorkspaceMember, ("team", "member")))
         session.commit()
     asyncio.run(socket.broadcast_presence("hidden", {"user_id": "hidden", "status": "online"}))
-    assert {call.kwargs["room"] for call in sio.emit.await_args_list} == {"user:owner", "user:hidden"}
+    assert {call.kwargs["room"] for call in sio.emit.await_args_list} == {"owner", "hidden"}
 
 
 def test_channel_security_binding_survives_list_get_and_direct_reopen_without_public_leak(workspace_team):

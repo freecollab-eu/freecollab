@@ -1,6 +1,6 @@
 {
   "name": "@freecollab/components",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "Modular collaboration components and a trusted-origin encrypted workspace for your product, identity provider and infrastructure.",
   "type": "module",
   "license": "MIT",

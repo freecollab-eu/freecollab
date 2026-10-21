@@ -1,5 +1,67 @@
 # FreeCollab validation record
 
+## 0.11 daily collaboration, integrations and infrastructure — 2026-10-21
+
+[PRODUCT_011.md](PRODUCT_011.md) records the implemented entry points and supported
+boundaries. [INFRASTRUCTURE.md](INFRASTRUCTURE.md) explains the recommended
+customer-controlled installation. Provider applications, identity, keys and
+infrastructure remain customer-owned.
+
+| Area | Executed evidence |
+| --- | --- |
+| Backend baseline | The complete **1,708-case** regression run produced **1,707 passes** and one stale test still patching the removed `aiofiles` storage hook. The test now injects a real partial-write failure into the current writer; **48 file/version/security/S3 cases passed** after that correction. Final integration changes passed **60 current-source Connect/Embed/presence/SSO/Valkey cases** and **17 offboarding cases**, following earlier overlapping 138-case identity/Matrix and 101-case lifecycle runs. This does not claim a second complete-suite run. |
+| Client and package | Final TypeScript, main/trusted-embed Vite and widget builds passed; **193 frontend Node cases** and **26 SDK cases** passed. Normal frontend installation scripts passed with the documented Node-only CUDA download disabled. The dependency-only patches preserved all **1,262 browser Transformers/ONNX files** and **78 main/embed output files** byte-for-byte; subsequent sidebar, file-race and secure-room bootstrap fixes received a fresh full client build. |
+| Existing product UI | **13 focused sidebar checks** and **all 7 pilot groups passed**. Create channel, footer and keyboard controls remain reachable at 1280×720, short desktop, 390px and 320px. The pilot exercises real signup/invitation, realtime, an explicit rejected-send draft/retry, file access, current membership loss and logout. Deliberately held real initial file-list responses cannot overwrite a later acknowledged upload or deletion. |
+| Daily chat | **8 actual full-App browser groups passed**: private three-person group creation, durable worker delivery into connected chat without Valkey, encrypted scheduled payload/no stored JWT, generic personal reminder navigation through current authorization, private saved-message completion, AES-GCM device scheduling without early send, recovery of a deliberately missed live message through the bounded native cursor, and Swedish320px without overflow or page errors. Independent backend review also exercised source authority changes, concurrent workers and private reminder access. |
+| Shared runtime | **10 actual two-API/TLS-Valkey groups passed**, including bidirectional message/typing/mention delivery, per-device presence leases, workspace/private notification fences, separate-worker publication across repeated event loops, source/provider/member revocation, no bearer JWT in broker envelopes, shared atomic auth limits and fail-closed outage behavior. This is functional integration evidence, not a capacity/load benchmark. |
+| Apps, search and governance | Actual browser proofs passed **6 apps**, **5 search** and **6 governance** groups. Signed commands/cards used a real private HTTPS receiver; search exercised real Yjs/task/checklist/feed/file-body extraction and reauthorized citations; policy/case/audit UI included current role and mobile checks. Private HTTPS protocol fixtures exercised S3 SigV4 and Vault Transit. These are synthetic customer-owned provider fixtures, not live Microsoft/Google/vendor tenant acceptance. |
+| Shared channels across organizations | **13 actual browser/API/Rust-Matrix groups passed** with two separately managed organizations on one installation, both requiring customer SSO. Bilateral consent, explicit own-organization seats, first recipient-room join, trusted recipient embedding, bidirectional encrypted send/decrypt, no native plaintext fallback and both recipient/connection revocation were exercised. This proof uses fixture-signed workspace SSO sessions and independent provider registrations; actual HTTPS OIDC popup transport is covered separately by the trusted-embed proof. Cross-installation federation is not enabled. |
+| Offboarding and authority | Final lifecycle checks cover permanent grant/seat removal, reinvitation requiring a fresh grant, inactive/orphan directory identities and remote Matrix seats, tenant-safe admin handovers, ordinary SCIM successor promotion under required SSO and remote-failure rollback. Native governed actors remain denied; independent grants survive unrelated group unlink. Additive Embed Matrix markers fail closed when child metadata or the independent marker is lost/mismatched; an existing valid device can refresh its marker through signed `/secure/session`. Actual governed Socket.IO handshake completed in 0.04 seconds after correcting an unbound presence-visibility filter; each recipient still receives current-token directional checks. |
+| Clips and meetings | **9 actual browser groups passed** with real microphone/camera/screen recording, decoding/playback, pinned local Whisper ONNX inference and seven LiveKit devices exchanging real media. After the final participant-authority/fairness fixes, the real seven-device/clip proof passed again with **8 groups**; the unchanged ASR artifacts remained byte-identical. **19 targeted security regressions** covered source authority, fair revocation scanning and private snapshot cleanup, including independent review. SFU transport is not Matrix E2EE; there is no automatic meeting recording or live transcription claim. |
+| Native clients | Actual Linux AppImage/Deb and Android debug APK builds completed. The corrected Linux packages passed ownership/read/traverse checks, exact tested ASAR comparison and actual launcher argument/no-implicit-sandbox-bypass checks. **14 actual packaged Electron browser groups** and **9 real React/API sign-in groups** passed, including explicit PKCE approval, current source logout, 320px and pre-consent media-device privacy. The container could not validate Chromium's OS sandbox; production retains it and does not automatically disable it. Windows/macOS installers and iOS compilation require their platform CI; signing, stores, physical-device acceptance and mobile FCM/APNs/background calls are not claimed. |
+| Packed components and encryption | **26 packed native SDK** and **21 full trusted Embed/SSO/Matrix browser groups passed** against 0.11. Actual Rust-crypto devices verified fingerprints, exchanged encrypted messages and exercised lease renewal/revocation with the customer-owned synthetic HTTPS IdP. Parent DOM/storage isolation, exact origins, current scope, mobile layout and one-use PKCE remained covered. Native-client sources are rejected from creating nested embed sessions; focused regressions exercise the real PKCE rejection and source logout. |
+| Dependency audit | `pip-audit` 2.10.1's PyPI service reported **zero known vulnerabilities across 73 locked Python runtime packages**. Production npm audits reported zero advisories for frontend, SDK, desktop and mobile. Transformers' unused Node branches received scoped sharp/global-agent patches; no browser runtime or ASR model version changed. These audits exclude container OS packages and are not security certification. |
+| Built installation and cold recovery | **9 actual Compose/restore groups passed** with production settings, PostgreSQL, nonroot API, Nginx and the default integration worker. All **79 deployed frontend/widget files** matched the frozen bytes; real mjs/wasm/embed/widget/service-worker types and headers passed. JWT/logout, membership, scoped-admin and provider-revision fences passed. Scheduled delivery happened once; revoked native/SSO authority sent nothing. Normal Create channel submission passed at 1280×720 and native UI at320px. Cold restore retained ciphertext, file bytes, membership and revoked sessions; outbound workers stayed stopped until explicit resume. Corrupt archives and existing targets were rejected before target creation. |
+
+The 0.11 SDK tarball is `freecollab-components-0.11.0.tgz`, SHA-256
+`133b74ec3bc7fccf5e6c01eff931ce4e3dbb22046283f543e22be402bd477e5c`.
+Compatibility targets matching 0.11.x backend/trusted-client deployments. npm
+publication was not performed. Railway deployment remains paused.
+
+Private synthetic reports are retained under `/workspace/.freecollab/proof-results/`:
+`chat-productivity-browser.json`, `valkey-two-apis.json`,
+`enterprise-search-browser.json`, `app-platform-browser.json`,
+`enterprise-governance-browser.json`, `media-all-browser.json`,
+`media-sfu-authority-browser.json`, `frontend-011-dependency-patch-proof.json` and
+`sdk-release-0.11.0-validation.json`. UI regression records are
+`sidebar-011-fixed-review.json` and `file-list-race-fixed-review.json`; the final
+compiled artifact manifest is `frontend-011-final-artifacts.json`. The two-organization
+record is `connect-browser-0.11.0.json`. The SDK record binds the exact tarball,
+frozen frontend bytes and critical product source hashes. TLS hostname/CA
+verification and session network policy were preserved. Existing pilot data,
+keys and the four original Docker services were retained.
+
+The final installation record is `production-compose-011.json`. To fit the VFS
+storage budget, the exact hash-locked backend was flattened after matching its
+runtime configuration and **15,165 filesystem entries** (excluding only
+Docker-generated hosts/hostname/resolv.conf). The final frontend used the frozen
+Node24 build in the normal Nginx final stage; its full Docker builder was not
+rerun locally after a storage-guarded attempt. Source and restore ran sequentially,
+and only their own resources were removed. The HTTP loopback UI origin differed
+from configured production HTTPS, so its expected live-connection banner and HTTP
+reconciliation were observed; this run does **not** verify public TLS/WSS.
+
+CI creates the expected backend virtual environment, selects the installed
+Playwright Chromium, skips unused Node CUDA downloads, retries transient Synapse
+startup resets and includes both production Docker builds plus the shared-channel
+proof. YAML and referenced commands were checked locally; a new GitHub-hosted
+0.11 run is not claimed as passed by this record.
+
+Live customer providers, internet media/TURN routing, platform signing/stores,
+capacity/load acceptance and a complete external security audit remain separate.
+The historical sections below record the source and deployment state at their
+own execution time; their results are not substituted for this increment.
+
 ## 0.10 embedded product and expanded SDK — 2026-10-21
 
 [The SDK guide](COMPONENT_SDK.md), [customer-owned embedding identity](EMBED_IDENTITY.md) and [release procedure](SDK_RELEASES.md) describe the implemented contract. The SDK has eleven native modules, Web Components and optional React wrappers. The trusted-origin adapter runs the actual product client, including Matrix encryption, device verification and recovery. Native inline components continue to reject encrypted channels.

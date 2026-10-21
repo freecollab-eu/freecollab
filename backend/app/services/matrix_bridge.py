@@ -150,7 +150,10 @@ def sync_secure_membership(session, channel_id):
     from .workspaces import channel_workspace_id, lock_workspace
     from .access import lock_channel_writes
     workspace_id = channel_workspace_id(session, channel_id)
-    if workspace_id:
+    from .connect import connection_for_channel
+    # Recipient identities stay in their own tenant. The channel lock below
+    # still checks the actor's explicit bilateral grant on every operation.
+    if workspace_id and not connection_for_channel(session, channel_id):
         lock_workspace(session, workspace_id)
     lock_channel_writes(session, channel_id)
     session.expire_all()

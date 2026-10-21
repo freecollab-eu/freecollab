@@ -13,6 +13,8 @@ from ..models.user import User
 from ..models.workspace import WorkspaceChannel, WorkspaceMember
 from ..models.direct_message import DirectMessageState
 from ..services.access import require_channel_member, lock_channel_writes
+from ..services.connect import (channel_view_workspace_id, reject_shared_membership_changes,
+                                shared_channel_metadata, connection_for_channel)
 from ..services.direct_messages import open_direct_channel
 from ..services.workspaces import (
     channel_workspace_id, channel_security_metadata, ensure_legacy_member, lock_workspace, prepare_channel_workspace,
@@ -44,6 +46,9 @@ class ChannelResponse(BaseModel):
     secure_sync_pending: bool = False
     secure: bool = False
     matrix_room_id: str | None = None
+    shared: bool = False
+    owner_workspace_id: str | None = None
+    connect_connection_id: str | None = None
 
 
 class CreateInvitation(BaseModel):
@@ -63,8 +68,9 @@ def require_member(session, channel_id: str, user_id: str):
 
 
 def reject_direct_membership_changes(session, channel_id: str):
-    if session.get(Channel, channel_id).type == "direct":
-        raise HTTPException(409, "Direct conversations have exactly two participants; use archive or block")
+    reject_shared_membership_changes(session, channel_id)
+    if session.get(Channel, channel_id).type in {"direct", "group_direct"}:
+        raise HTTPException(409, "Direct conversation membership is managed through its conversation controls")
 
 
 def require_admin(session, channel_id: str, user_id: str):
@@ -76,7 +82,7 @@ def require_admin(session, channel_id: str, user_id: str):
 
 def lock_channel(session, channel_id: str):
     workspace_id = channel_workspace_id(session, channel_id)
-    if workspace_id:
+    if workspace_id and not connection_for_channel(session, channel_id):
         lock_workspace(session, workspace_id)
     lock_channel_writes(session, channel_id)
 
@@ -188,12 +194,13 @@ def list_channels(
             type=channel.type,
             encrypted_channel_key=encrypted_key,
             role=role,
-            workspace_id=channel_workspace_id(session, channel.id),
+            workspace_id=channel_view_workspace_id(session, channel.id, user.id),
+            **shared_channel_metadata(session, channel.id),
             **channel_security_metadata(session, channel.id),
         )
         for channel, encrypted_key, role in results
         if workspace_allows_channel(session, channel.id, user.id)
-        and (not workspace_id or channel_workspace_id(session, channel.id) == workspace_id)
+        and (not workspace_id or channel_view_workspace_id(session, channel.id, user.id) == workspace_id)
         and not (channel.type == "direct" and (state := session.get(DirectMessageState, (channel.id, user.id))) and state.archived)
     ]
 
@@ -216,7 +223,8 @@ def get_channel(
         type=channel.type,
         encrypted_channel_key=member.encrypted_channel_key,
         role=member.role,
-        workspace_id=channel_workspace_id(session, channel_id),
+        workspace_id=channel_view_workspace_id(session, channel_id, user.id),
+        **shared_channel_metadata(session, channel_id),
         **channel_security_metadata(session, channel.id),
     )
 
@@ -398,6 +406,16 @@ async def change_member_role(
 async def remove_membership(session, channel_id, member_user_id, actor_id):
     lock_channel(session, channel_id)
     actor = require_member(session, channel_id, actor_id)
+    connection = connection_for_channel(session, channel_id)
+    if connection and member_user_id == actor_id:
+        from ..models.connect import ConnectGrant
+        from .connect import revoke_grants
+        grant = session.get(ConnectGrant, (connection.id, actor_id))
+        if not grant:
+            raise HTTPException(403, "Explicit shared-channel membership required")
+        pending = await revoke_grants(session, connection, [grant])
+        return {"removed": True, "user_id": actor_id, "channel_id": channel_id,
+                "secure_sync_pending": pending}
     reject_direct_membership_changes(session, channel_id)
     if actor_id != member_user_id and actor.role != "admin":
         raise HTTPException(403, "Channel admin access required")

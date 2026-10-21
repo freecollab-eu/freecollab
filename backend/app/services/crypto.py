@@ -69,6 +69,9 @@ def get_box(key_id: str | None = None) -> nacl.secret.SecretBox:
 
 
 def encrypt_message(plaintext: str, channel_id: str) -> str:
+    from . import enterprise_kms
+    if enterprise_kms.enabled():
+        return enterprise_kms.encrypt(plaintext, channel_id)
     key_id = settings.message_encryption_active_key_id
     payload = json.dumps({"version": 1, "key_id": key_id, "channel_id": channel_id, "content": plaintext}, separators=(",", ":"))
     encrypted = get_box(key_id).encrypt(payload.encode(), encoder=Base64Encoder)
@@ -76,6 +79,9 @@ def encrypt_message(plaintext: str, channel_id: str) -> str:
 
 
 def decrypt_message(ciphertext: str, channel_id: str) -> str:
+    from . import enterprise_kms
+    if ciphertext.startswith(enterprise_kms.PREFIX):
+        return enterprise_kms.decrypt(ciphertext, channel_id)
     if not ciphertext.startswith("fc1:"):
         # Legacy content used the JWT-derived key, but reading it now requires
         # an explicitly retained key. Never silently derive from the live JWT.

@@ -3,6 +3,7 @@ from datetime import datetime
 from uuid import uuid4
 
 from sqlmodel import Field, SQLModel
+from .secure_channel import MatrixSession  # noqa: F401 -- register additive FK target
 
 
 class EmbedApplication(SQLModel, table=True):
@@ -45,3 +46,9 @@ class EmbedSession(SQLModel, table=True):
     channel_id: str = Field(foreign_key="channel.id")
     parent_token_hash: str = Field(index=True)
     source_expires_at: int
+
+
+class EmbedMatrixBinding(SQLModel, table=True):
+    """Independent marker prevents a lost child sidecar from broadening Matrix."""
+    matrix_token_hash: str = Field(primary_key=True, foreign_key="matrixsession.matrix_token_hash")
+    application_id: str

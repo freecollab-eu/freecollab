@@ -1,0 +1,3 @@
+.fc-native-signin{position:fixed;z-index:125;inset:auto 1rem 1rem;max-width:48rem;margin:auto;display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:.75rem;padding:1rem;border:1px solid var(--fc-border,#d8dbd8);border-radius:1rem;background:var(--fc-surface,#fff);color:var(--fc-text,#202521);box-shadow:0 .5rem 3rem #16231b1f;font-family:var(--fc-font,inherit)}
+.fc-native-signin>p{flex-basis:100%;margin:0;font-size:.875rem}.fc-native-signin>span{flex:1;min-width:12rem}.fc-native-approval{max-width:32rem}.fc-native-approval .fc-account-body{display:grid;gap:1rem}.fc-native-approval p{margin:0;overflow-wrap:anywhere}
+@media(max-width:400px){.fc-native-signin{inset:auto .5rem .5rem;padding:.75rem}.fc-native-signin .fc-button{width:100%}}

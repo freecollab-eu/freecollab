@@ -7,6 +7,7 @@ from sqlmodel import select
 
 from ..database import get_session
 from ..models.collaboration import Bookmark, ChannelPin
+from ..models.chat_productivity import SavedItemCompletion
 from ..models.message import Message
 from ..services.access import require_channel_member
 from ..services.auth import get_current_user
@@ -58,6 +59,9 @@ def saved_data(session, record):
     result["message_id"] = record.item_id if record.kind == "message" else None
     result["matrix_event_id"] = record.item_id if record.kind == "matrix" else None
     result["available"] = True
+    if isinstance(record, Bookmark):
+        completion = session.get(SavedItemCompletion, (record.user_id, record.channel_id, record.item_id))
+        result["completed_at"] = completion.completed_at if completion else None
     if record.kind == "message":
         from ..services.matrix_bridge import is_secure_channel
         message = session.get(Message, record.item_id)
@@ -149,6 +153,9 @@ def remove_bookmark(channel_id: str, item_id: str, user=Depends(get_current_user
     require_channel_scope(session, channel_id)
     record = session.get(Bookmark, (user.id, channel_id, item_id))
     if record:
+        completion = session.get(SavedItemCompletion, (user.id, channel_id, item_id))
+        if completion:
+            session.delete(completion)
         session.delete(record)
         session.commit()
     return {"removed": True}

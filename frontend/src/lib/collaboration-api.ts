@@ -17,6 +17,7 @@ export interface SavedItem {
   matrix_event_id: string | null;
   message?: Message;
   resolution_error?: string;
+  completed_at?: string | null;
 }
 export interface DecisionFields {
   title: string;

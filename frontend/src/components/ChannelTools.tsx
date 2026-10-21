@@ -1,5 +1,5 @@
 import { t, useI18n, currentLocale } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type SetStateAction } from 'react';
 import { CheckCircle2, Copy, Link, Paperclip, RefreshCw, ShieldCheck, Users, X } from 'lucide-react';
 import { createPortal } from 'react-dom';
 import { api, Channel, ChannelInvite, ChannelMember } from '../lib/api';
@@ -32,6 +32,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange }: P
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState('');
   const generation = useRef(0);
+  const fileRevision = useRef(0);
   const dialog = useRef<HTMLDivElement>(null);
   useModalFocus(dialog, onClose);
   const currentUser = api.getCurrentUserId();
@@ -52,24 +53,34 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange }: P
 
   async function load() {
     const current = generation.current;
+    const token = api.getAccessToken();
+    const revision = fileRevision.current;
+    const valid = () => current === generation.current && token === api.getAccessToken();
     setLoading(true); setError('');
     try {
       if (tab === 'files') {
         const data = await listChannelFiles(channel.id);
-        if (current === generation.current) setFiles(data);
+        if (valid() && revision === fileRevision.current) setFiles(data);
       } else {
         const data = await api.getChannelMembers(channel.id);
-        if (current !== generation.current) return;
+        if (!valid()) return;
         setMembers(data);
         const own = data.find((member) => member.user_id === currentUser);
         if (own?.role) onRoleChange(own.role as 'admin' | 'member');
         if (own?.role === 'admin') {
           const records = await api.getChannelInvites(channel.id);
-          if (current === generation.current) setInvites(records);
+          if (valid()) setInvites(records);
         }
       }
-    } catch (err) { if (current === generation.current) setError(describe(err)); }
-    finally { if (current === generation.current) setLoading(false); }
+    } catch (err) { if (valid()) setError(describe(err)); }
+    finally { if (valid()) setLoading(false); }
+  }
+
+  function updateFiles(update: SetStateAction<ManagedFile[]>) {
+    // A list fetched before an acknowledged upload/delete must not replace its
+    // newer local result when the older response finally arrives.
+    ++fileRevision.current;
+    setFiles(update);
   }
 
   async function run(id: string, operation: () => Promise<void>) {
@@ -143,7 +154,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange }: P
               {activeInvites.length > 0 && <div className="fc-pending-invites"><h4 className="fc-kicker">{t("Pending invitations · ")}{activeInvites.length}</h4>{activeInvites.map(invite => <div key={invite.id} className="fc-invite-record"><div><span>{t("Single-use link")}</span><small>{t("Expires ")}<time dateTime={invite.expires_at}>{new Date(invite.expires_at).toLocaleString(currentLocale(), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</time></small></div><button type="button" className="fc-text-button" disabled={!!busy} onClick={() => void run(invite.id, async () => { await api.revokeChannelInvite(channel.id, invite.id); setInvites(records => records.filter(record => record.id !== invite.id)); setInviteLink(''); setNotice(t("Invitation revoked. The link can no longer be used.")); })}>{t("Revoke")}</button></div>)}</div>}
             </section>}
             <footer className="fc-panel-section fc-leave-section"><h3>{t("Your membership")}</h3><p>{ownMember?.role === 'admin' && adminCount <= 1 ? t("Make another member an admin before leaving.") : t("You will need a new invitation to return after leaving.")}</p><button type="button" className={`${button} fc-danger-action`} disabled={!!busy || (ownMember?.role === 'admin' && adminCount <= 1)} onClick={() => { if (window.confirm('Leave this channel? You will need a new invitation to rejoin.')) void run('leave', async () => { await api.leaveChannel(channel.id); onLeave(); }); }}>{t("Leave channel")}</button></footer>
-          </> : <ChannelFiles key={`${channel.id}:${currentUser}`} channelId={channel.id} files={files} setFiles={setFiles} loading={loading} onNotice={setNotice} onError={setError} />}
+          </> : <ChannelFiles key={`${channel.id}:${currentUser}`} channelId={channel.id} files={files} setFiles={updateFiles} loading={loading} onNotice={setNotice} onError={setError} />}
         </div>
       </section>
     </div>, document.body

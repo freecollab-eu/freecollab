@@ -243,6 +243,15 @@ def test_inaccessible_storage_is_unknown_and_does_not_leak_path(operator, monkey
     assert "private-mount-path" not in response.text
 
 
+def test_s3_configuration_does_not_claim_connectivity_or_replace_local_capacity(operator, monkeypatch):
+    monkeypatch.setattr(diagnostics.settings, "storage_backend", "s3")
+    client, _ = operator
+    response = client.get("/operations/security", headers=headers())
+    assert response.status_code == 200
+    assert response.json()["blob_storage"] == {"backend": "s3", "status": "configured_not_probed", "automatic_remote_probe": False}
+    assert "free_bytes" in response.json()["storage"]
+
+
 @pytest.mark.parametrize("environment,mode,host,enabled", [
     ("test", "file", "", True), ("production", "file", "", False),
     ("test", "smtp", "", False), ("production", "smtp", "private-smtp.example", True),

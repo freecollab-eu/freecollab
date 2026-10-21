@@ -9,6 +9,9 @@ from hashlib import sha256
 from math import ceil
 from threading import Lock
 from time import monotonic
+import secrets
+
+import redis
 
 from fastapi import HTTPException, Request
 
@@ -94,9 +97,83 @@ class AuthRateLimiter:
             self.events.pop(('failed-account', self._account(email)), None)
 
 
+SHARED_WINDOW = """
+local t=redis.call('TIME');local now=tonumber(t[1])*1000+math.floor(tonumber(t[2])/1000)
+redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',now)
+local create=0
+for i=2,#KEYS do
+ local offset=3+(i-2)*3
+ local window=tonumber(ARGV[offset]);local limit=tonumber(ARGV[offset+1]);local mode=tonumber(ARGV[offset+2])
+ redis.call('ZREMRANGEBYSCORE',KEYS[i],'-inf',now-window)
+ local count=redis.call('ZCARD',KEYS[i])
+ if mode~=2 and count>=limit then
+  local first=redis.call('ZRANGE',KEYS[i],0,0,'WITHSCORES')
+  return {0,math.max(1,math.ceil((tonumber(first[2])+window-now)/1000))}
+ end
+ if mode>0 and not redis.call('ZSCORE',KEYS[1],KEYS[i]) then create=create+1 end
+end
+if redis.call('ZCARD',KEYS[1])+create>tonumber(ARGV[1]) then return {-1,5} end
+for i=2,#KEYS do
+ local offset=3+(i-2)*3
+ local window=tonumber(ARGV[offset]);local limit=tonumber(ARGV[offset+1]);local mode=tonumber(ARGV[offset+2])
+ if mode>0 then
+  if redis.call('ZCARD',KEYS[i])<limit then redis.call('ZADD',KEYS[i],now,ARGV[2]..':'..i) end
+  redis.call('PEXPIRE',KEYS[i],window+1000)
+  redis.call('ZADD',KEYS[1],now+window+1000,KEYS[i])
+ end
+end
+redis.call('EXPIRE',KEYS[1],600)
+return {1,0}
+"""
+
+
+class RedisAuthRateLimiter(AuthRateLimiter):
+    """Atomic server-time sliding windows shared by all configured API workers."""
+    def __init__(self, *, shared=None, **kwargs):
+        super().__init__(**kwargs)
+        from .shared_runtime import runtime
+        self.shared = shared or runtime()
+
+    def _run(self, buckets):
+        from .shared_runtime import unavailable
+        self.shared.validate(force=True)
+        keys = [self.shared.namespace + ':auth-index']
+        arguments = [self.max_keys, secrets.token_hex(16)]
+        for label, identifier, limit, seconds, mode in buckets:
+            keys.append(self.shared.key('auth', label + '\0' + identifier))
+            arguments.extend((seconds*1000,limit,mode))
+        try:
+            allowed,retry=self.shared.client.eval(SHARED_WINDOW,len(keys),*keys,*arguments)
+        except (redis.RedisError,OSError,ValueError): raise unavailable() from None
+        if allowed<0: raise unavailable()
+        if not allowed:self._denied(retry)
+
+    def request(self, action, address):
+        limit=self.registration_limit if action=='register' else self.login_limit
+        self._run([(action,address,limit,60,1)])
+
+    def check_login(self,address,email):
+        self._run([('failed-address',address,self.address_failure_limit,300,0),
+            ('failed-account',self._account(email),self.account_failure_limit,300,0)])
+
+    def failed_login(self,address,email):
+        self._run([('failed-address',address,self.address_failure_limit,300,2),
+            ('failed-account',self._account(email),self.account_failure_limit,300,2)])
+
+    def successful_login(self,email):
+        from .shared_runtime import unavailable
+        self.shared.validate(force=True)
+        key=self.shared.key('auth','failed-account\0'+self._account(email))
+        try:
+            with self.shared.client.pipeline(transaction=True) as pipe:
+                pipe.delete(key);pipe.zrem(self.shared.namespace+':auth-index',key);pipe.execute()
+        except (redis.RedisError,OSError):raise unavailable() from None
+
+
 def install_auth_rate_limits(app):
     """Initialize state at startup; safe to call on each application lifespan."""
-    app.state.auth_rate_limiter = AuthRateLimiter()
+    from .shared_runtime import configured
+    app.state.auth_rate_limiter = RedisAuthRateLimiter() if configured() else AuthRateLimiter()
 
 
 def limiter_for(request: Request):

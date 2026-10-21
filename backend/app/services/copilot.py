@@ -2,11 +2,8 @@
 from datetime import datetime, timedelta
 import hashlib
 import json
-import os
-from pathlib import Path
 import re
 import ssl
-import stat
 import time
 from urllib.parse import quote, urlunsplit
 
@@ -24,6 +21,7 @@ from ..models.file import File
 from ..models.file_version import FileVersion
 from ..models.message import Message
 from ..models.shared_documents import SharedDocument
+from ..models.clips import ChannelClip
 from ..models.workspace import WorkspaceChannel
 from . import oidc_transport as transport
 from .access import lock_channel_writes, require_channel_member
@@ -59,7 +57,7 @@ class Provider(Strict):
     agents: list[Agent] = Field(default_factory=lambda:[Agent(name='copilot')], min_length=1, max_length=8)
 
 class Source(Strict):
-    kind: str = Field(pattern=r'^(message|file|shared_document)$')
+    kind: str = Field(pattern=r'^(message|file|shared_document|clip)$')
     id: str = Field(min_length=1, max_length=1024)
     # Only trusted-client text is accepted for secure events and Yjs documents.
     text: str | None = Field(default=None, max_length=12000)
@@ -131,6 +129,10 @@ def source_text(session, conversation, source, user_id, *, content=True):
             doc = session.get(SharedDocument, source.id)
             if not doc or doc.channel_id != conversation.channel_id or doc.archived or source.revision != doc.version:
                 raise HTTPException(409, 'Selected document changed or is unavailable')
+        if source.kind == 'clip':
+            clip = session.get(ChannelClip, source.id, populate_existing=True)
+            if not clip or clip.channel_id != conversation.channel_id or clip.content_mode != 'matrix' or clip.matrix_event_id not in source.event_ids:
+                raise HTTPException(409, 'Selected encrypted clip is unavailable or its event changed')
         ref['fingerprint'] = hashlib.sha256(dump(ref).encode()).hexdigest()
         return ref, source.text if content else ''
     if source.event_ids: raise HTTPException(422, 'Matrix references require an encrypted channel')
@@ -146,14 +148,25 @@ def source_text(session, conversation, source, user_id, *, content=True):
                 or row.size > 12000 or row.content_type not in {'text/plain','application/json'}):
             raise HTTPException(422, 'Select an available UTF-8 text or JSON file of at most 12 KB')
         if not re.fullmatch(r'[a-f0-9]{32}',row.id): raise HTTPException(409, 'Invalid file reference')
-        descriptor = os.open(Path(settings.storage_path).absolute()/row.id, os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-        with os.fdopen(descriptor,'rb') as stream:
-            metadata=os.fstat(stream.fileno())
-            if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != row.size: raise HTTPException(409,'Stored file changed')
-            body=stream.read(12001)
+        from .storage import storage_service
+        try:
+            body = storage_service.read_file(row.id, max_bytes=12000, expected_size=row.size)
+        except (OSError, ValueError):
+            raise HTTPException(409, 'Stored file changed') from None
+        if body is None:
+            raise HTTPException(409, 'Stored file is unavailable')
         try: text=body.decode('utf-8')
         except UnicodeDecodeError: raise HTTPException(422,'Select a UTF-8 text file') from None
         ref['fingerprint']=hashlib.sha256(body).hexdigest()
+    elif source.kind == 'clip':
+        row = session.get(ChannelClip, source.id, populate_existing=True)
+        if not row or row.channel_id != conversation.channel_id or row.content_mode != 'server':
+            raise HTTPException(409, 'Selected clip is unavailable')
+        from .shared_documents import open_payload
+        fields = open_payload(session, row.channel_id, 'clip', row.id, row.id, row.encrypted_payload)
+        if not fields.get('transcript'): raise HTTPException(422, 'Select a clip with a reviewed transcript')
+        text = (fields['title'] + '\n' + fields['transcript'])[:12000]
+        ref['fingerprint'] = row.payload_hash
     else:
         row=session.get(SharedDocument,source.id,populate_existing=True)
         if not row or row.channel_id!=conversation.channel_id or row.archived or source.revision!=row.version or not source.text:

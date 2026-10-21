@@ -4,6 +4,8 @@ services:
     build:
       context: ./frontend
       secrets: [proxy_ca]
+      args:
+        VITE_WHISPER_MODEL_BASE_PATH: ${VITE_WHISPER_MODEL_BASE_PATH:-}
     ports:
       - "127.0.0.1:${PILOT_PORT:-8080}:80"
     depends_on:
@@ -60,6 +62,22 @@ services:
       MEETINGS_ICE_SERVERS: ${MEETINGS_ICE_SERVERS:-[]}
       MEETINGS_TURN_URLS: ${MEETINGS_TURN_URLS:-[]}
       MEETINGS_TURN_SECRET: ${MEETINGS_TURN_SECRET:-}
+      MEETINGS_SFU_PROVIDER: ${MEETINGS_SFU_PROVIDER:-disabled}
+      MEETINGS_SFU_URL: ${MEETINGS_SFU_URL:-}
+      MEETINGS_SFU_API_URL: ${MEETINGS_SFU_API_URL:-}
+      MEETINGS_SFU_API_KEY: ${MEETINGS_SFU_API_KEY:-}
+      MEETINGS_SFU_API_SECRET: ${MEETINGS_SFU_API_SECRET:-}
+      MEETINGS_SFU_MAX_PARTICIPANTS: ${MEETINGS_SFU_MAX_PARTICIPANTS:-100}
+      ENTERPRISE_SEARCH_ENABLED: ${ENTERPRISE_SEARCH_ENABLED:-true}
+      ENTERPRISE_VAULT_URL: ${ENTERPRISE_VAULT_URL:-}
+      ENTERPRISE_VAULT_TOKEN: ${ENTERPRISE_VAULT_TOKEN:-}
+      ENTERPRISE_VAULT_MOUNT: ${ENTERPRISE_VAULT_MOUNT:-transit}
+      ENTERPRISE_VAULT_KEY: ${ENTERPRISE_VAULT_KEY:-freecollab}
+      ENTERPRISE_VAULT_NAMESPACE: ${ENTERPRISE_VAULT_NAMESPACE:-}
+      REDIS_URL: ${REDIS_URL:-}
+      REDIS_NAMESPACE: ${REDIS_NAMESPACE:-freecollab}
+      REDIS_TLS_REQUIRED: ${REDIS_TLS_REQUIRED:-true}
+      REDIS_PRESENCE_LEASE_SECONDS: ${REDIS_PRESENCE_LEASE_SECONDS:-75}
       OTRUST_ENABLED: ${OTRUST_ENABLED:-false}
       OTRUST_BASE_URL: ${OTRUST_BASE_URL:-https://www.otrust.eu}
       OTRUST_TIMEOUT_SECONDS: ${OTRUST_TIMEOUT_SECONDS:-10}
@@ -74,6 +92,16 @@ services:
       MESSAGE_ENCRYPTION_ACTIVE_KEY_ID: ${MESSAGE_ENCRYPTION_ACTIVE_KEY_ID:-pilot-1}
       LEGACY_MESSAGE_ENCRYPTION_KEY: ${LEGACY_MESSAGE_ENCRYPTION_KEY:-}
       STORAGE_PATH: /data/files
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-local}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-us-east-1}
+      S3_ACCESS_KEY_ID: ${S3_ACCESS_KEY_ID:-}
+      S3_SECRET_ACCESS_KEY: ${S3_SECRET_ACCESS_KEY:-}
+      S3_SESSION_TOKEN: ${S3_SESSION_TOKEN:-}
+      S3_KEY_PREFIX: ${S3_KEY_PREFIX:-freecollab/}
+      S3_CA_BUNDLE: ${S3_CA_BUNDLE:-}
+      S3_ALLOW_INSECURE_HTTP: ${S3_ALLOW_INSECURE_HTTP:-false}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:8080","http://127.0.0.1:8080"]}
       # Backend has no host port; only the private network proxy can reach it.
       FORWARDED_ALLOW_IPS: "*"
@@ -126,8 +154,22 @@ services:
 
   integration-worker:
     image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
-    profiles: [integrations]
+    # Core scheduled messages and reminders need this worker in every install.
     command: ["python", "-m", "app.services.integration_worker"]
+    environment: *backend_environment
+    volumes:
+      - files:/data/files
+    depends_on:
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  sfu-worker:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    profiles: [large-meetings]
+    command: ["python", "-m", "app.services.sfu_worker"]
     environment: *backend_environment
     volumes:
       - files:/data/files

@@ -44,8 +44,11 @@ def managed_scope_valid(session, user_id, workspace_id):
     outside = session.exec(select(ChannelMember.channel_id).outerjoin(
         WorkspaceChannel, WorkspaceChannel.channel_id == ChannelMember.channel_id,
     ).where(ChannelMember.user_id == user_id,
-            (WorkspaceChannel.workspace_id.is_(None)) | (WorkspaceChannel.workspace_id != workspace_id))).first()
-    return outside is None
+            (WorkspaceChannel.workspace_id.is_(None)) | (WorkspaceChannel.workspace_id != workspace_id))).all()
+    # A bilateral grant exposes only its one shared channel. It never grants
+    # membership of the other tenant or changes this identity's SSO authority.
+    from .connect import shared_channel_allows
+    return all(shared_channel_allows(session, channel_id, user_id, workspace_id) for channel_id in outside)
 
 
 def require_personal_account(session, user_id):

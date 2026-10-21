@@ -119,7 +119,10 @@ def validate_snapshot(session, kind, channel_id, data, actor_id):
             decision = session.get(Decision, identifier)
             if not decision or decision.channel_id != channel_id:
                 raise HTTPException(400, "Linked decisions must belong to this channel")
-    return fields.model_dump(mode="json")
+    payload = fields.model_dump(mode="json")
+    from .enterprise_governance import enforce_native_document
+    enforce_native_document(session, channel_id, actor_id, payload)
+    return payload
 
 
 def revision_for(session, kind, item_id, number):

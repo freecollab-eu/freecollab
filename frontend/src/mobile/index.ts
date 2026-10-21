@@ -1,7 +1,7 @@
 import { api, APIError, type Message } from '../lib/api';
 import { assertOwner, fingerprint, listPrivate, owner, purgeOtherAccounts, removePrivate, savePrivate, type Owner } from './storage';
 
-export interface QueuedMessage { id: string; channelId: string; content: string; mentions: string[]; secure: boolean; createdAt: string; tokenFingerprint: string; state: 'queued' | 'review'; error?: string }
+export interface QueuedMessage { id: string; channelId: string; content: string; mentions: string[]; secure: boolean; createdAt: string; tokenFingerprint: string; state: 'queued' | 'review'; sendAt?: string; error?: string }
 export interface PrivateDraft { channelId: string; content: string; updatedAt: string; secure?: boolean }
 export type SendResult = { kind: 'sent'; message: Message } | { kind: 'queued'; id: string };
 const changed = () => window.dispatchEvent(new Event('freecollab:mobile-state'));
@@ -56,6 +56,17 @@ async function queued(row: QueuedMessage, expected: Owner) { await savePrivate('
 export const mobileOutbox = {
   async list(): Promise<QueuedMessage[]> { return (await listPrivate<QueuedMessage>('outbox')).map(row => row.value).sort((a, b) => a.createdAt.localeCompare(b.createdAt)); },
   async remove(id: string) { await removePrivate('outbox', id); changed(); },
+  async schedule(channelId: string, content: string, mentions: string[], sendAt: string) {
+    if (api.isMemorySession()) throw new Error('Scheduled encrypted messages need the standalone app on this trusted device.');
+    const due = Date.parse(sendAt), expected = owner();
+    if (!content.trim() || content.length > 10000 || mentions.length > 50 || !Number.isFinite(due) || due <= Date.now() || due > Date.now() + 7 * 86400000)
+      throw new Error('Choose a future time within seven days and a message within the supported size.');
+    if ((await listPrivate('outbox', expected)).length >= 100) throw new Error('The offline queue is full.');
+    const row: QueuedMessage = { id: crypto.randomUUID(), channelId, content, mentions, secure: true,
+      createdAt: new Date().toISOString(), sendAt: new Date(due).toISOString(),
+      tokenFingerprint: await fingerprint(expected.token), state: 'queued' };
+    await queued(row, expected); return row;
+  },
   async sendOrQueue(channelId: string, content: string, mentions: string[] = [], secure = false): Promise<SendResult> {
     if (!content.trim() || content.length > 20000 || mentions.length > 50) throw new Error('Enter a message within the supported size.');
     const expected = owner();
@@ -86,7 +97,7 @@ export const mobileOutbox = {
       const expected = owner();
       const work = async () => {
         for (const row of await mobileOutbox.list()) {
-          assertOwner(expected); if (!navigator.onLine) break; if (row.state !== 'queued') continue;
+          assertOwner(expected); if (!navigator.onLine) break; if (row.state !== 'queued' || row.sendAt && Date.parse(row.sendAt) > Date.now()) continue;
           try {
             const message = await deliver(row, expected); await removePrivate('outbox', row.id, expected);
             window.dispatchEvent(new CustomEvent('freecollab:offline-message-sent', { detail: message })); changed();
@@ -122,6 +133,7 @@ export async function initializeMobile() {
   };
   window.addEventListener('freecollab:auth-changed', sync); window.addEventListener('storage', sync);
   window.addEventListener('online', sync); window.addEventListener('offline', changed);
+  window.setInterval(() => { if (navigator.onLine && api.getCurrentUserId()) void mobileOutbox.flush().catch(() => {}); }, 15000);
   window.addEventListener('beforeinstallprompt', event => { event.preventDefault(); installPrompt = event as typeof installPrompt; changed(); });
   window.addEventListener('appinstalled', () => { installPrompt = null; changed(); });
   navigator.serviceWorker?.addEventListener('message', event => {

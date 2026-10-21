@@ -14,6 +14,7 @@ from ..database import get_session
 from ..models.user import User
 from ..models.session import RevokedToken, ActiveSession
 from ..models.account_security import AccountSecurity
+from ..models.native_clients import NativeClientSession  # noqa: F401 -- register additive restrictions before init_db
 
 security = HTTPBearer()
 
@@ -151,6 +152,9 @@ def track_session(token: str, session, request=None, info: dict | None = None) -
 
 def token_is_revoked(token: str, session, claims: dict) -> bool:
     digest = token_digest(token)
+    from .native_clients import child_session_valid
+    if not child_session_valid(session, digest, claims):
+        return True
     if session.get(RevokedToken, digest):
         return True
     version = session.exec(select(AccountSecurity.auth_version).where(AccountSecurity.user_id == claims["sub"])).first()

@@ -19,7 +19,8 @@ from sqlmodel import select
 from ..config import settings
 from ..models.account_security import AccountSecurity
 from ..models.channel import ChannelMember
-from ..models.meetings import Meeting, MeetingInvitation, MeetingParticipant, MeetingSignal
+from ..models.meetings import Meeting, MeetingInvitation, MeetingParticipant, MeetingSignal, MeetingParticipantAuthority
+from nacl.exceptions import CryptoError
 from ..models.session import ActiveSession, RevokedToken
 from ..models.user import User
 from ..services.access import require_channel_member, lock_channel_writes
@@ -31,6 +32,43 @@ MAX_PEERS = 6
 MAX_PARTICIPANTS = 24
 CALL_SECONDS = 2 * 60 * 60
 SIGNAL_SECONDS = 5 * 60
+AUTHORITY_CLAIMS = ("sub", "iat", "exp", "av", "amr", "sso_workspace_id", "sso_provider_revision",
+                    "native_client_id", "embed_application_id", "jti")
+
+
+def bind_participant_authority(session, participant, claims, *, transport):
+    """Called only with a freshly verified JWT after current actor checks."""
+    if transport not in {"mesh", "sfu"} or claims.get("sub") != participant.user_id:
+        raise HTTPException(401, "Invalid meeting sign-in authority")
+    snapshot = {key: claims[key] for key in AUTHORITY_CLAIMS if key in claims}
+    payload = {"user_id": participant.user_id, "meeting_id": participant.meeting_id,
+               "token_hash": participant.auth_token_hash, "claims": snapshot}
+    session.add(MeetingParticipantAuthority(transport=transport, participant_id=participant.id,
+        meeting_id=participant.meeting_id, user_id=participant.user_id, token_hash=participant.auth_token_hash,
+        encrypted_claims=encrypt_message(json.dumps(payload, separators=(",", ":")),
+            "meeting-authority:" + transport + ":" + participant.id)))
+
+
+def participant_claims(session, participant):
+    transport = "mesh" if isinstance(participant, MeetingParticipant) else "sfu"
+    row = session.get(MeetingParticipantAuthority, (transport, participant.id), populate_existing=True)
+    if (not row or row.token_hash != participant.auth_token_hash or row.user_id != participant.user_id
+            or row.meeting_id != participant.meeting_id):
+        return None
+    try:
+        payload = json.loads(decrypt_message(row.encrypted_claims, "meeting-authority:" + transport + ":" + participant.id))
+        if (payload.get("user_id"), payload.get("meeting_id"), payload.get("token_hash")) != (participant.user_id, participant.meeting_id, participant.auth_token_hash):
+            return None
+        claims = payload.get("claims")
+        if (not isinstance(claims, dict) or claims.get("sub") != participant.user_id
+                or not isinstance(claims.get("exp"), (int, float)) or isinstance(claims["exp"], bool)
+                or claims["exp"] <= time.time() or claims.get("av", 0) != participant.auth_version
+                or claims.get("sso_workspace_id") != participant.scope_workspace_id
+                or claims.get("sso_provider_revision") != participant.scope_provider_revision):
+            return None
+        return claims
+    except (CryptoError, ValueError, TypeError, AttributeError, KeyError):
+        return None
 
 
 def fresh_user(session, user_id):
@@ -53,9 +91,11 @@ def participant_valid(session, participant, meeting):
         return False
     old_info = session.info.copy()
     try:
-        claims = ({"sso_workspace_id": participant.scope_workspace_id,
-                   "sso_provider_revision": participant.scope_provider_revision}
-                  if participant.scope_workspace_id else {})
+        # Never reconstruct restrictions from a mutable/missing child sidecar.
+        # An absent snapshot also fences legacy in-progress calls after upgrade.
+        claims = participant_claims(session, participant)
+        if claims is None:
+            return False
         if not bind_scope_for_hash(session, participant.auth_token_hash, participant.user_id, claims=claims):
             return False
         require_channel_member(session, meeting.channel_id, participant.user_id)
@@ -119,6 +159,8 @@ def native_participant(session, meeting, user, native_token):
     row.last_seen_at = now
     session.add(row)
     session.flush()
+    bind_participant_authority(session, row, claims, transport="mesh")
+    session.flush()
     return row, credential
 
 
@@ -168,6 +210,8 @@ def cleanup_meetings(session):
     identifiers = session.exec(select(Meeting.id).where(or_(Meeting.expires_at < cutoff, Meeting.ended_at < cutoff))
                                .order_by(Meeting.created_at).limit(20)).all()
     if identifiers:
+        session.exec(delete(MeetingParticipantAuthority).where(MeetingParticipantAuthority.transport == "mesh",
+            MeetingParticipantAuthority.meeting_id.in_(identifiers)))
         for model in (MeetingSignal, MeetingInvitation, MeetingParticipant):
             session.exec(delete(model).where(model.meeting_id.in_(identifiers)))
         session.exec(delete(Meeting).where(Meeting.id.in_(identifiers)))

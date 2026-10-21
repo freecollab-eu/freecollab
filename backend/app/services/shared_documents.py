@@ -136,6 +136,9 @@ def fingerprint(fields: dict | None, matrix_event_id: str | None) -> str:
 def append_update(session, document, data, user_id: str, token: str):
     secure = validate_mode(session, document.channel_id, user_id, data.matrix_event_id, token)
     fields = None if secure else {"update_base64": canonical_update(data.update_base64), "title": data.title}
+    if fields:
+        from .enterprise_governance import enforce_native_document
+        enforce_native_document(session, document.channel_id, user_id, fields, opaque_update=True)
     checksum = fingerprint(fields, data.matrix_event_id)
     previous = session.get(SharedDocumentUpdate, (document.id, data.update_id))
     if previous is not None:

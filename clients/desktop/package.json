@@ -1,0 +1,36 @@
+{
+  "name": "@freecollab/desktop",
+  "version": "0.11.0",
+  "private": true,
+  "description": "FreeCollab desktop client for your own installation",
+  "author": "Kris Ledel",
+  "license": "MIT",
+  "repository": { "type": "git", "url": "https://github.com/freecollab-eu/freecollab.git", "directory": "clients/desktop" },
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test tests/*.test.cjs",
+    "pack": "node scripts/build.cjs --dir",
+    "dist": "node scripts/build.cjs"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "eu.freecollab.desktop",
+    "productName": "FreeCollab",
+    "executableName": "freecollab",
+    "icon": "resources/icon.png",
+    "artifactName": "FreeCollab-${version}-${os}-${arch}.${ext}",
+    "files": ["src/**", "resources/**", "package.json"],
+    "asar": true,
+    "afterPack": "scripts/after-pack.cjs",
+    "directories": { "output": "dist" },
+    "appImage": { "executableArgs": [] },
+    "linux": { "target": ["AppImage", "deb"], "category": "Network", "maintainer": "Kris Ledel", "desktop": { "entry": { "StartupWMClass": "freecollab" } } },
+    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.social-networking", "hardenedRuntime": true, "entitlements": "entitlements.mac.plist", "entitlementsInherit": "entitlements.mac.plist", "extendInfo": { "NSCameraUsageDescription": "Share your camera when you choose to join a call or record a clip.", "NSMicrophoneUsageDescription": "Share your microphone when you choose to join a call or record a clip." } },
+    "win": { "target": ["nsis"] },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+  }
+}

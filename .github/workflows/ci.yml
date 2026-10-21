@@ -12,6 +12,8 @@ permissions:
 env:
   PYTHON_VERSION: "3.11"
   NODE_VERSION: "24"
+  # Inference runs in browser WASM; no Node CUDA runtime is distributed.
+  ONNXRUNTIME_NODE_INSTALL_CUDA: "skip"
 
 jobs:
   # Backend tests
@@ -52,11 +54,15 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --require-hashes -r requirements-dev.lock
 
+      - name: Install TLS Redis-compatible integration fixture
+        run: sudo apt-get update && sudo apt-get install -y redis-server
+
       - name: Run tests
         working-directory: backend
         env:
           DATABASE_URL: postgresql://freecollab:freecollab@localhost:5432/freecollab_test
           JWT_SECRET: test-secret-key-for-ci
+          VALKEY_SERVER_BIN: /usr/bin/redis-server
         run: |
           python -m pytest tests/ -v --cov=app --cov-report=xml
 
@@ -138,8 +144,18 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install locked dependencies and browser
         run: |
-          python -m pip install --require-hashes -r backend/requirements-dev.lock
-          python -m playwright install --with-deps chromium
+          python -m venv backend/.venv
+          backend/.venv/bin/python -m pip install --require-hashes -r backend/requirements-dev.lock
+          backend/.venv/bin/python -m playwright install --with-deps chromium
+          backend/.venv/bin/python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          with open(os.environ['GITHUB_PATH'], 'a') as output:
+              output.write(os.path.join(os.environ['GITHUB_WORKSPACE'], 'backend', '.venv', 'bin') + '\n')
+          PY
           sudo apt-get update && sudo apt-get install -y ffmpeg
           npm ci --prefix frontend
           npm ci --prefix packages/components --ignore-scripts
@@ -184,6 +200,11 @@ jobs:
           python frontend/tests/oidc-browser.py
           python frontend/tests/customer-sso-browser.py
           python frontend/tests/embed-admin-browser.py
+          BACKEND_PYTHON=python python frontend/tests/chat-productivity-browser.py
+          BACKEND_PYTHON=python python frontend/tests/enterprise-search-browser.py
+          BACKEND_PYTHON=python python frontend/tests/app-platform-browser.py
+          BACKEND_PYTHON=python python frontend/tests/media-browser.py
+          BACKEND_PYTHON=python python frontend/tests/native-client-browser.py
           python frontend/tests/enterprise-onboarding-browser.py
           python frontend/tests/remote-sync-browser.py
           python frontend/tests/proofs-browser.py
@@ -241,14 +262,24 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - name: Install locked client and browser dependencies
         run: |
-          python -m pip install --require-hashes -r backend/requirements-dev.lock
-          python -m playwright install --with-deps chromium
+          python -m venv backend/.venv
+          backend/.venv/bin/python -m pip install --require-hashes -r backend/requirements-dev.lock
+          backend/.venv/bin/python -m playwright install --with-deps chromium
+          backend/.venv/bin/python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          with open(os.environ['GITHUB_PATH'], 'a') as output:
+              output.write(os.path.join(os.environ['GITHUB_WORKSPACE'], 'backend', '.venv', 'bin') + '\n')
+          PY
           npm ci --prefix frontend
           npm ci --prefix packages/components --ignore-scripts
       - name: Start isolated private homeserver
         run: |
           docker --host=unix:///var/run/docker.sock run -d --name freecollab-secure-ci --mount type=volume,src=freecollab-secure-ci-data,dst=/data --mount type=bind,src="$GITHUB_WORKSPACE/scripts/secure-matrix-config.py",dst=/opt/freecollab-init.py,readonly -p 127.0.0.1:18008:8008 --env MATRIX_SERVER_NAME --env MATRIX_REGISTRATION_SHARED_SECRET --entrypoint /bin/sh ghcr.io/element-hq/synapse@sha256:97665cd4539dcf107c69fb6afdb720e1d1c9c09fb2b5701fb13d6c33b22cd8f0 -c 'python /opt/freecollab-init.py && exec /start.py'
-          curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:18008/health
+          curl --fail --silent --show-error --retry 60 --retry-all-errors --retry-delay 1 --retry-max-time 90 --connect-timeout 2 --max-time 5 http://127.0.0.1:18008/health
       - name: Start authenticated gateway and client
         run: |
           (cd backend && python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --no-proxy-headers) > /tmp/freecollab-secure-api.log 2>&1 &
@@ -271,6 +302,11 @@ jobs:
         run: python frontend/tests/shared-documents-browser.py --secure
       - name: Verify packed SDK and isolated embedded customer SSO with real encryption
         run: python packages/components/tests/embed-browser-proof.py --matrix
+      - name: Verify encrypted shared channels across managed organizations
+        run: python packages/components/tests/connect-browser-proof.py --skip-build
+      - name: Retain isolated homeserver diagnostics
+        if: always()
+        run: docker --host=unix:///var/run/docker.sock logs --timestamps freecollab-secure-ci > /tmp/freecollab-secure-synapse.log 2>&1 || true
       - name: Remove only isolated test resources
         if: always()
         run: |
@@ -305,3 +341,12 @@ jobs:
           tags: freecollab-api:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Build frontend production image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: false
+          tags: freecollab-frontend:latest
+          cache-from: type=gha,scope=frontend
+          cache-to: type=gha,scope=frontend,mode=max

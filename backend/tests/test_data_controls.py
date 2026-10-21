@@ -55,6 +55,8 @@ def controls(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "matrix_enabled", False)
     monkeypatch.setattr(settings, "mail_delivery_mode", "disabled")
     Path(settings.storage_path).mkdir()
+    from app.services import storage
+    monkeypatch.setattr(storage, "storage_service", storage.StorageService())
     engine = create_engine("sqlite:///" + str(tmp_path / "data.db"), connect_args={"check_same_thread": False})
     @event.listens_for(engine, "connect")
     def foreign_keys(connection, _): connection.execute("PRAGMA foreign_keys=ON")
@@ -247,7 +249,17 @@ def test_changed_content_policy_and_secure_channel_fail_closed(controls):
 
 
 def test_account_identity_erasure_preserves_shared_authorship_and_revokes_old_session(controls, monkeypatch):
-    client, engine, _, _ = controls
+    from app.models.embed import EmbedMatrixBinding
+    from app.models.secure_channel import MatrixSession
+    client, engine, tokens, _ = controls
+    matrix_hash = token_digest("old-embedded-device")
+    with Session(engine) as session:
+        session.add(MatrixSession(matrix_token_hash=matrix_hash, user_id="owner",
+            auth_token_hash=token_digest(tokens["owner"]), auth_expires_at=datetime.utcnow() + timedelta(minutes=5),
+            device_id="OLD_EMBEDDED", encrypted_access_token="sealed-unused"))
+        session.flush()
+        session.add(EmbedMatrixBinding(matrix_token_hash=matrix_hash, application_id="old-customer-application"))
+        session.commit()
     # Owner has a successor in every workspace/channel; remote revocation is a
     # stub only because this test installation has no homeserver enabled.
     monkeypatch.setattr("app.services.matrix_bridge.remove_secure_member", lambda *_: None)
@@ -265,6 +277,8 @@ def test_account_identity_erasure_preserves_shared_authorship_and_revokes_old_se
         assert actor.public_key is None and actor.encrypted_private_key is None
         assert session.get(Message, "old-root").author_id == "owner"
         assert session.get(AccountIdentityErasure, "owner")
+        assert session.get(EmbedMatrixBinding, matrix_hash) is None
+        assert session.get(MatrixSession, matrix_hash) is None
         assert not session.exec(select(WorkspaceMember).where(WorkspaceMember.user_id == "owner")).all()
 
 

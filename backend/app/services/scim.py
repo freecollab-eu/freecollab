@@ -241,6 +241,10 @@ def remove_channel_grant(session, grant, member):
             if member.role == "admin":
                 remaining = session.exec(select(ChannelMember).where(ChannelMember.channel_id == grant.channel_id,
                     ChannelMember.user_id != grant.user_id).order_by(ChannelMember.joined_at, ChannelMember.user_id)).all()
+                from .connect import connection_for_channel, shared_channel_allows
+                if connection_for_channel(session, grant.channel_id):
+                    remaining = [item for item in remaining if shared_channel_allows(
+                        session, grant.channel_id, item.user_id, grant.workspace_id)]
                 if remaining and not any(item.role == "admin" for item in remaining):
                     remaining[0].role = "admin"
                     session.add(remaining[0])
@@ -337,7 +341,18 @@ async def deactivate(session, directory, row):
     session.flush()
     if session.get(WorkspaceMember, (directory.workspace_id, row.user_id)):
         from ..api.workspaces import remove_workspace_membership
-        await remove_workspace_membership(session, directory.workspace_id, row.user_id, row.user_id)
+        await remove_workspace_membership(session, directory.workspace_id, row.user_id, directory.token_issued_by,
+                                          scim_directory_id=directory.directory_id)
+    else:
+        # Clean up historical orphan grants as well: a later reprovision must
+        # not reactivate access to another organization's retained room.
+        from .connect import revoke_workspace_grants, workspace_grant_channel_ids
+        from .matrix_bridge import remove_secure_member
+        channel_ids = workspace_grant_channel_ids(session, directory.workspace_id, row.user_id)
+        for channel_id in channel_ids:
+            session.execute(update(Channel).where(Channel.id == channel_id).values(name=Channel.name))
+            remove_secure_member(session, channel_id, row.user_id)
+        revoke_workspace_grants(session, directory.workspace_id, row.user_id)
 
 
 def activate(session, directory, row, data):

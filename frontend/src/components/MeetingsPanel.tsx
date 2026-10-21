@@ -1,9 +1,12 @@
 import { t, useI18n } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Copy, Loader2, Mic, MicOff, Monitor, PhoneOff, Plus, RefreshCw, ShieldCheck, UserCheck, Video, VideoOff, X } from 'lucide-react';
 import { api } from '../lib/api';
 import { MeetingConnection, leaveMeeting, meetingsApi, type Meeting, type MeetingAccess, type MeetingView } from '../lib/meetings-api';
 import '../styles/meetings.css';
+import { ClipsPanel } from './ClipsPanel';
+import { currentMeeting, subscribeMeeting, startMeshMeeting, startSFUMeeting } from '../lib/active-meeting';
+import { sfuApi, type SFURoom, type SFUStatus } from '../lib/sfu-api';
 
 const describe = (error: unknown) => error instanceof Error ? error.message : 'The meeting action could not be completed.';
 function VideoStream({ stream, muted, label }: { stream: MediaStream | null; muted?: boolean; label: string }) {
@@ -56,28 +59,38 @@ export function MeetingSession({ meetingId, access, initialMedia, onLeave }: { m
 
 export function MeetingsPanel({ workspaceId, channelId }: { workspaceId: string; channelId: string; isAdmin?: boolean }) {
   useI18n();
-  const [meetings, setMeetings] = useState<Meeting[]>([]), [active, setActive] = useState<{ id: string; access: MeetingAccess; media: MediaStream } | null>(null), [camera, setCamera] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('');
-  const generation = useRef(0), owner = useRef(api.getAccessToken()), mediaOwner = useRef<MediaStream | null>(null);
+  const active = useSyncExternalStore(subscribeMeeting, currentMeeting);
+  const [meetings, setMeetings] = useState<Meeting[]>([]), [rooms, setRooms] = useState<SFURoom[]>([]), [sfu, setSfu] = useState<SFUStatus | null>(null);
+  const [camera, setCamera] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const generation = useRef(0), owner = useRef(api.getAccessToken());
   async function load() {
     const current = generation.current;
-    try { const result = await meetingsApi.list(channelId); if (current === generation.current && owner.current === api.getAccessToken()) setMeetings(result); }
-    catch (failure) { if (current === generation.current) setError(describe(failure)); }
+    const results = await Promise.allSettled([meetingsApi.list(channelId), sfuApi.list(channelId)]);
+    if (current !== generation.current || owner.current !== api.getAccessToken()) return;
+    if (results[0].status === 'fulfilled') setMeetings(results[0].value); else setError(describe(results[0].reason));
+    if (results[1].status === 'fulfilled') { setRooms(results[1].value.rooms); setSfu(results[1].value.status); }
+    else setSfu({ provider: 'disabled', configured: false, ready: false, reason: describe(results[1].reason), max_participants: 0 });
   }
-  useEffect(() => { ++generation.current; owner.current = api.getAccessToken(); setActive(null); setMeetings([]); setError(''); void load(); const stop = () => { mediaOwner.current?.getTracks().forEach(track => track.stop()); mediaOwner.current = null; }; const changed = () => { ++generation.current; stop(); setActive(null); setMeetings([]); }; window.addEventListener('freecollab:auth-changed', changed); return () => { ++generation.current; stop(); window.removeEventListener('freecollab:auth-changed', changed); }; }, [channelId, workspaceId]);
-  async function join(existing?: Meeting) {
-    if (busy) return;
+  useEffect(() => { ++generation.current; owner.current = api.getAccessToken(); setMeetings([]); setRooms([]); setError(''); void load(); return () => { ++generation.current; }; }, [channelId, workspaceId]);
+  async function join(existing?: Meeting | SFURoom, larger = false) {
+    if (busy || active) return;
     const current = generation.current, token = api.getAccessToken(); setBusy(true); setError(''); let media: MediaStream | null = null;
     try {
-      if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) throw new Error(t("Meetings require a secure HTTPS browser with microphone access."));
+      if (!navigator.mediaDevices?.getUserMedia || !window.RTCPeerConnection) throw new Error(t('Meetings require a secure HTTPS browser with microphone access.'));
       media = await navigator.mediaDevices.getUserMedia({ audio: true, video: camera });
-      mediaOwner.current = media;
-      if (current !== generation.current || token !== api.getAccessToken()) { media.getTracks().forEach(t => t.stop()); return; }
-      const result = existing ? await meetingsApi.join(existing.id) : await meetingsApi.create(channelId);
-      if (current !== generation.current || token !== api.getAccessToken()) { media.getTracks().forEach(t => t.stop()); void leaveMeeting(result.meeting!.id, result.meeting_token).catch(() => undefined); return; }
-      setActive({ id: result.meeting!.id, access: result, media }); media = null;
-    } catch (failure) { media?.getTracks().forEach(t => t.stop()); if (mediaOwner.current === media) mediaOwner.current = null; if (current === generation.current) setError(describe(failure)); }
+      if (current !== generation.current || token !== api.getAccessToken()) { media.getTracks().forEach(track => track.stop()); return; }
+      if (larger) {
+        const room = existing as SFURoom | undefined || await sfuApi.create(channelId), access = await sfuApi.join(room.id);
+        if (current !== generation.current || token !== api.getAccessToken()) { media.getTracks().forEach(track => track.stop()); void sfuApi.leave(room.id, access.participant_id).catch(() => undefined); return; }
+        startSFUMeeting(access, media);
+      } else {
+        const access = existing ? await meetingsApi.join(existing.id) : await meetingsApi.create(channelId);
+        if (current !== generation.current || token !== api.getAccessToken()) { media.getTracks().forEach(track => track.stop()); void leaveMeeting(access.meeting!.id, access.meeting_token).catch(() => undefined); return; }
+        startMeshMeeting(channelId, access, media);
+      }
+      media = null; await load();
+    } catch (failure) { media?.getTracks().forEach(track => track.stop()); if (current === generation.current) setError(describe(failure)); }
     finally { if (current === generation.current) setBusy(false); }
   }
-  if (active) return <MeetingSession key={active.access.meeting_token} meetingId={active.id} access={active.access} initialMedia={active.media} onLeave={() => { setActive(null); void load(); }} />;
-  return <section className="fc-meetings-panel" aria-label={t("Channel meetings")}><div className="fc-integration-content-heading"><div><h3>{t("A conversation, face to face.")}</h3><p>{t("Voice, video and screen sharing for this channel. Media stays between participants' browsers.")}</p></div><button className="fc-icon-button" aria-label={t("Refresh meetings")} disabled={busy} onClick={() => void load()}><RefreshCw size={16} /></button></div>{error && <p className="fc-alert" role="alert">{error}</p>}<div className="fc-meeting-setup"><label><input type="checkbox" checked={camera} onChange={event => setCamera(event.target.checked)} />{t("Start with camera")}</label><button className="fc-button fc-button-primary" disabled={busy || meetings.length > 0} onClick={() => void join()}>{busy ? <Loader2 size={16} /> : <Video size={16} />}{t("Start channel meeting")}</button></div><ul className="fc-meeting-list">{meetings.map(meeting => <li key={meeting.id}><div><strong>{t("Channel meeting")}</strong><span>{t("Up to ")}{meeting.max_participants} {t(" devices · Browser-to-browser WebRTC encryption")}</span></div><button className="fc-button" disabled={busy} onClick={() => void join(meeting)}>{t("Join meeting")}</button></li>)}</ul>{!meetings.length && <p className="fc-account-muted">{t("No active meeting. Start one when the team is ready.")}</p>}<p className="fc-account-muted">{t("Different networks may need your operator's TURN relay. There is no automatic third-party relay or recording.")}</p></section>;
+  return <section className="fc-meetings-panel" aria-label={t('Channel meetings')}><div className="fc-integration-content-heading"><div><h3>{t('A conversation, face to face.')}</h3><p>{t('Start a browser meeting, or use your own LiveKit infrastructure for a larger room.')}</p></div><button className="fc-icon-button" aria-label={t('Refresh meetings')} disabled={busy} onClick={() => void load()}><RefreshCw size={16} /></button></div>{error && <p className="fc-alert" role="alert">{error}</p>}{active && <p role="status" className="fc-account-muted">{t('Your call stays connected in the meeting dock while you keep working.')}</p>}<div className="fc-meeting-setup"><label><input type="checkbox" checked={camera} onChange={event => setCamera(event.target.checked)} />{t('Start with camera')}</label><button className="fc-button fc-button-primary" disabled={busy || !!active || meetings.length > 0} onClick={() => void join()}>{busy ? <Loader2 size={16} /> : <Video size={16} />}{t('Start channel meeting')}</button></div><ul className="fc-meeting-list">{meetings.map(meeting => <li key={meeting.id}><div><strong>{t('Channel meeting')}</strong><span>{t('Up to ')}{meeting.max_participants} {t(' devices · Browser-to-browser WebRTC encryption')}</span></div><button className="fc-button" disabled={busy || !!active} onClick={() => void join(meeting)}>{t('Join meeting')}</button></li>)}</ul><p className="fc-account-muted">{t("Different networks may need your operator's TURN relay. There is no automatic third-party relay or recording.")}</p><section className="fc-meeting-sfu"><h4>{t('Larger meetings on your infrastructure')}</h4><p>{sfu?.ready ? t('LiveKit is configured for up to {count} devices. Rooms stay open when the host leaves.', { count: sfu.max_participants }) : sfu?.reason || t('Checking meeting infrastructure…')}</p><button className="fc-button" disabled={busy || !!active || !sfu?.ready || rooms.length > 0} onClick={() => void join(undefined, true)}>{t('Start larger meeting')}</button><ul className="fc-meeting-list">{rooms.map(room => <li key={room.id}><span>LiveKit · {room.max_participants} {t('devices')}</span><button className="fc-button" disabled={busy || !!active || !sfu?.ready} onClick={() => void join(room, true)}>{t('Join meeting')}</button></li>)}</ul><p className="fc-account-muted">{t('Media uses DTLS-SRTP to your SFU. The SFU can access media. This is separate from Matrix end-to-end channel encryption.')}</p></section><ClipsPanel channelId={channelId} /></section>;
 }

@@ -9,7 +9,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SERVICES = {"frontend", "backend", "db"}
-OPTIONAL_SERVICES = {"mail-worker", "matrix", "integration-worker"}
+OPTIONAL_SERVICES = {"mail-worker", "matrix", "integration-worker", "sfu-worker"}
 VOLUME_NAMES = {"files", "mail", "matrix"}
 
 # The snapshot container has no network and mounts one volume read-only. Root

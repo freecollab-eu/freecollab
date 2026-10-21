@@ -42,7 +42,7 @@ SYNC_ENABLED=false
 Set only the intended flags to true in private deployment configuration, then rebuild/recreate the API and start its worker:
 
 ```bash
-docker compose --env-file pilot.env -p freecollab --profile integrations \
+docker compose --env-file pilot.env -p freecollab \
   up --build -d --wait backend frontend integration-worker
 ```
 

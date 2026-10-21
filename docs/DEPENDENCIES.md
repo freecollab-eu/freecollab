@@ -1,4 +1,29 @@
-# Dependency baseline for the 0.6.0 candidate
+# Dependency baseline and audits
+
+## 0.11 audit — 2026-10-21
+
+The current hash-locked Python runtime resolves **73 packages**, with zero known
+vulnerabilities reported by `pip-audit` 2.10.1's PyPI service. Production npm
+audits also report zero advisories for the frontend, component SDK, desktop and
+mobile projects. These are dated registry results; they do not assess container
+operating systems or certify the application.
+
+New Python adapters pin boto3/botocore 1.42.74, redis 7.1.1, y-py 0.6.2 and
+pypdf 6.21.2. Browser media uses LiveKit and Transformers.js with the exact
+versions/integrities in the frontend lock. Transformers' unused Node branches
+need scoped overrides for patched sharp 0.35.5 and global-agent 4.1.3; the latter
+removes the vulnerable roarr/sprintf-js dependency path. The tested browser
+Transformers/ONNX files remain byte-identical after these overrides.
+
+Use `ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci` for frontend installs. This runs
+normal installation scripts while skipping the Node-only CUDA download; audio
+inference uses the bundled browser WASM runtime. Compose's builder and CI set
+the same option. Keep proxy, CA and checksum verification enabled.
+
+The following sections retain the earlier 0.6 dependency decisions and audit
+history. Current feature validation is recorded in [VALIDATION.md](VALIDATION.md).
+
+## Historical baseline — 2026-10-20
 
 Audit date: 2026-10-20. Use Python 3.11 and Node.js 24 LTS for the validated development/deployment baseline. The frontend requires Node.js 22.12 or newer.
 
@@ -30,7 +55,7 @@ After the updates, the checked Python environment and frontend lockfile each rep
 | Frontend tooling | Vite 7.3.7, React plugin 5.2.0, Tailwind CSS / PostCSS plugin 4.3.3; React stays on the 18.x line. |
 | Browser testing | Python Playwright 1.62.0; install its matching Chromium in CI. |
 
-Unused boto3 was removed: the current storage service is local-only, and no repository code imports it. This does not implement S3 support. Autoprefixer was removed from the PostCSS configuration because Tailwind 4 handles the required processing through its own plugin. The existing Tailwind theme remains loaded through `@config`.
+At 0.6, unused boto3 was removed because storage was local-only. Version 0.11 restores it for the implemented [S3 adapter](OBJECT_STORAGE.md). Autoprefixer was removed from the PostCSS configuration because Tailwind 4 handles the required processing through its own plugin. The existing Tailwind theme remains loaded through `@config`.
 
 ## Reproducible installs
 
@@ -42,7 +67,7 @@ python -m pip install --require-hashes -r requirements.lock
 python -m pip install --require-hashes -r requirements-dev.lock
 ```
 
-The development lockfile was installed successfully into a fresh Python 3.11 virtual environment with hash verification. Use `npm ci` in `frontend` to install its lockfile without changing versions. Do not use an uncompiled direct-requirements file with `uv pip sync`: `sync` expects the complete resolved set and otherwise removes transitive dependencies.
+The development lockfile was installed successfully into a fresh Python 3.11 virtual environment with hash verification. Use `ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci` in `frontend` to install its lockfile without changing versions. Do not use an uncompiled direct-requirements file with `uv pip sync`: `sync` expects the complete resolved set and otherwise removes transitive dependencies.
 
 To intentionally refresh Python locks after reviewing updates:
 

@@ -15,12 +15,10 @@ from sqlmodel import select
 from ..config import settings
 from ..database import get_session
 from ..models.account_security import AccountSecurity
-from ..models.channel import ChannelMember
 from ..models.embed import EmbedApplication, EmbedGrant, EmbedSession
 from ..models.user import User
 from ..models.session import ActiveSession
 from ..models.secure_channel import MatrixSession
-from ..models.workspace import WorkspaceChannel
 from ..models.workspace_oidc import WorkspaceOIDCSession
 from ..services import embed
 from ..services.account_security import account_limit, ensure_reauthentication
@@ -188,7 +186,16 @@ def document(application_id: str, parent_origin: str = Query(min_length=1, max_l
     html = '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FreeCollab</title><link rel="stylesheet" href="/embed-entry.css"></head><body><div id="root" data-embed-application="' + escape(row.id, quote=True) + '" data-embed-parent-origin="' + escape(row.parent_origin, quote=True) + '"></div><script type="module" src="/embed-entry.js"></script></body></html>'
     response = _private(HTMLResponse(html))
     websocket_origin = own_origin.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
-    response.headers["Content-Security-Policy"] = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'self' " + websocket_origin + "; worker-src 'self' blob:; frame-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors " + row.parent_origin + " " + own_origin)
+    # Only the configured SFU origin and explicit model-download hosts extend
+    # connections. Executable ONNX loaders/WASM remain bundled on this origin.
+    from ..config import settings
+    from urllib.parse import urlsplit
+    connections = [websocket_origin, "https://huggingface.co", "https://cas-bridge.xethub.hf.co", "https://cdn-lfs.hf.co"]
+    if settings.meetings_sfu_provider == "livekit":
+        from ..services.sfu import configuration
+        parsed = urlsplit(configuration()[0])
+        connections.append(parsed.scheme + "://" + parsed.netloc)
+    response.headers["Content-Security-Policy"] = ("default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; media-src 'self' blob:; font-src 'self'; connect-src 'self' " + " ".join(connections) + "; worker-src 'self' blob:; frame-src 'self' https:; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors " + row.parent_origin + " " + own_origin)
     response.headers["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=()"
     return response
 
@@ -210,11 +217,10 @@ def launch(workspace_id: str, data: Launch, request: Request, response: Response
         raise HTTPException(403, "This origin cannot launch the embedded application")
     claims = decode_token_claims(credentials.credentials)
     source_hash = token_digest(credentials.credentials)
-    if (not claims or type(claims.get("iat")) is not int or type(claims.get("exp")) is not int
+    if (not claims or claims.get("native_client_id") or type(claims.get("iat")) is not int or type(claims.get("exp")) is not int
             or "sso" not in claims.get("amr", []) or not embed.parent_session_valid(session, source_hash, user.id)):
-        raise HTTPException(403, "A current, non-embedded customer SSO session is required")
-    mapping = session.get(WorkspaceChannel, data.channel_id)
-    if not mapping or mapping.workspace_id != workspace_id or not session.get(ChannelMember, (data.channel_id, user.id)):
+        raise HTTPException(403, "A current customer SSO browser session is required")
+    if not embed.channel_grant_valid(session, workspace_id, data.channel_id, user.id):
         raise HTTPException(403, "Channel membership in the embedded workspace is required")
     require_workspace_member(session, workspace_id, user.id)
     now = datetime.utcnow()
@@ -255,11 +261,15 @@ def exchange(application_id: str, data: Exchange, request: Request, response: Re
     state = session.get(AccountSecurity, grant.user_id, populate_existing=True)
     user = session.get(User, grant.user_id, populate_existing=True)
     source = session.get(WorkspaceOIDCSession, grant.parent_token_hash, populate_existing=True)
-    mapping = session.get(WorkspaceChannel, data.channel_id, populate_existing=True)
     if (not user or user.is_blocked or not state or state.auth_version != grant.source_auth_version
             or not source or source.workspace_id != grant.workspace_id or source.provider_revision != grant.provider_revision
             or provider.revision != grant.provider_revision or not embed.parent_session_valid(session, grant.parent_token_hash, grant.user_id, now=now)
-            or not mapping or mapping.workspace_id != grant.workspace_id or not session.get(ChannelMember, (data.channel_id, grant.user_id))):
+            or not embed.channel_grant_valid(session, grant.workspace_id, data.channel_id, grant.user_id)):
+        raise invalid
+    # The handoff contains a verified parent digest, never its bearer. Bind the
+    # parent's durable SSO scope before organization sign-in policy checks.
+    from ..services.sso_scope import bind_scope_for_hash
+    if not bind_scope_for_hash(session, grant.parent_token_hash, grant.user_id):
         raise invalid
     require_workspace_member(session, grant.workspace_id, grant.user_id)
     changed = session.execute(update(EmbedGrant).where(EmbedGrant.code_hash == grant.code_hash,
@@ -301,10 +311,9 @@ def renew(application_id: str, request: Request, response: Response, user=Depend
     claims = decode_token_claims(credentials.credentials)
     source = session.exec(select(ActiveSession).where(ActiveSession.token_hash == child.parent_token_hash)).first()
     scope = session.get(WorkspaceOIDCSession, old_hash, populate_existing=True)
-    mapping = session.get(WorkspaceChannel, child.channel_id, populate_existing=True)
     if (not claims or not source or not scope or scope.workspace_id != child.workspace_id
             or scope.provider_revision != provider.revision or not embed.parent_session_valid(session, child.parent_token_hash, user.id)
-            or not mapping or mapping.workspace_id != child.workspace_id or not session.get(ChannelMember, (child.channel_id, user.id))):
+            or not embed.channel_grant_valid(session, child.workspace_id, child.channel_id, user.id)):
         raise HTTPException(401, "The embedded session's source authority changed")
     require_workspace_member(session, child.workspace_id, user.id)
     now = datetime.utcnow()

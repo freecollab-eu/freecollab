@@ -37,7 +37,10 @@ def notification_channel(session, notification, _seen=None):
     kind, identifier = key
     if kind == "channel":
         return identifier
-    if kind == "encrypted_message":
+    if kind == "message_reminder":
+        from ..models.chat_productivity import MessageReminder
+        record = session.get(MessageReminder, identifier)
+    elif kind == "encrypted_message":
         record = session.query(EncryptedMessageActivity).filter(EncryptedMessageActivity.event_id == identifier).first()
     elif kind in {"message", "thread"}:
         from ..models.message import Message
@@ -75,8 +78,17 @@ def notification_visible(session, notification, user_id: str, _seen=None) -> boo
     seen.add(key)
     channel_id = None
     encrypted = notification.entity_type == "encrypted_message"
-    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post"}
-    if encrypted:
+    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post", "message_reminder"}
+    if notification.entity_type == "message_reminder":
+        from ..models.chat_productivity import MessageReminder
+        from ..services.matrix_bridge import is_secure_channel
+        record = session.get(MessageReminder, notification.entity_id)
+        if not record or record.user_id != user_id or record.status != "notified":
+            return False
+        if is_secure_channel(session, record.channel_id) != (record.kind == "matrix"):
+            return False
+        channel_id = record.channel_id
+    elif encrypted:
         record = session.query(EncryptedMessageActivity).filter(EncryptedMessageActivity.event_id == notification.entity_id).first()
         if not record:
             return False

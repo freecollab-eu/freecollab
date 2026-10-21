@@ -60,7 +60,9 @@ def require_owner(session, workspace_id, user_id):
         raise HTTPException(403, "Use a personal owner account for data controls")
     member = require_workspace_member(session, workspace_id, user_id)
     actor = session.get(User, user_id, populate_existing=True)
-    if member.role != "owner" or not actor or actor.is_blocked:
+    role = session.exec(select(WorkspaceMember.role).where(WorkspaceMember.workspace_id == workspace_id,
+        WorkspaceMember.user_id == user_id)).first()
+    if role != "owner" or not actor or actor.is_blocked:
         raise HTTPException(403, "Current workspace owner access required")
     return actor
 
@@ -148,6 +150,16 @@ def _active_automation(session, channels):
     table = _table("workflowrun")
     if table is not None and _records(session, table.name, and_(table.c.channel_id.in_(channels), table.c.status.not_in(["completed", "rejected", "cancelled", "timed_out", "failed"]))):
         raise HTTPException(409, "Finish or cancel pending workflow approvals before erasure")
+    table = _table("appinstallation")
+    if table is not None and any(set(json.loads(row["channel_ids_json"])) & set(channels) for row in
+            _records(session, table.name, and_(table.c.enabled == True, table.c.revoked_at.is_(None)))):
+        raise HTTPException(409, "Revoke apps granted to selected channels before permanent erasure")
+    for name, condition in (("channelrecapschedule", "enabled"), ("appjob", "pending")):
+        table = _table(name)
+        if table is not None:
+            active = table.c.enabled == True if condition == "enabled" else table.c.status.in_(["pending", "processing"])
+            if _records(session, table.name, and_(table.c.channel_id.in_(channels), active)):
+                raise HTTPException(409, "Stop recurring recaps and cancel pending app requests before permanent erasure")
 
 
 def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
@@ -225,6 +237,9 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
             row[key] < cutoff for key in ("last_seen_at", "expires_at", "used_at") if row.get(key)) for rows in children.values() for row in rows):
             add("meeting", [meeting])
             for name, rows in children.items(): add(name, rows)
+            authority = _table("meetingparticipantauthority")
+            if authority is not None:
+                add(authority.name, _records(session, authority.name, and_(authority.c.transport == "mesh", authority.c.meeting_id == meeting["id"])))
     # Feed revisions and actor choices are shared channel content. Erase a post
     # only when its complete retained discussion is older than the cutoff.
     for post in _channel_records(session, "activityfeedpost", channel_ids):
@@ -237,6 +252,25 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
             for name, rows in children.items(): add(name, rows)
     for link in _channel_records(session, "cloudfilelink", channel_ids):
         if _old(link, cutoff) and link["content_mode"] == "server": add("cloudfilelink", [link])
+    clips = _channel_records(session, "channelclip", channel_ids)
+    for clip in clips:
+        if _old(clip, cutoff) and clip["content_mode"] == "server":
+            add("channelclip", [clip])
+    for room in _channel_records(session, "sfuroom", channel_ids):
+        participants = _children(session, "sfuparticipant", "meeting_id", [room["id"]])
+        end = room.get("ended_at") or room["expires_at"]
+        if end < cutoff and _old(room, cutoff) and all(
+                row["expires_at"] < cutoff and row["last_seen_at"] < cutoff for row in participants):
+            add("sfuroom", [room]); add("sfuparticipant", participants)
+            authority = _table("meetingparticipantauthority")
+            if authority is not None:
+                add(authority.name, _records(session, authority.name, and_(authority.c.transport == "sfu", authority.c.meeting_id == room["id"])))
+    for name in ("appcard", "appaidraft", "appjob"):
+        for row in _channel_records(session, name, channel_ids):
+            if _old(row, cutoff) and (name != "appjob" or row["status"] not in {"pending", "processing"}):
+                add(name, [row])
+    # App callback deduplication tombstones have no content and remain, so a
+    # retained installation cannot recreate a purged card by replaying an event.
     for conversation in _channel_records(session, "copilotconversation", channel_ids):
         turns = _children(session, "copilotturn", "conversation_id", [conversation["id"]])
         approvals = _children(session, "copilottoolapproval", "turn_id", _ids(turns))
@@ -254,7 +288,9 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
             plan["integrationcontent"] = [row for row in plan.get("integrationcontent", []) if row["id"] != identifier]
             plan["integrationcontentrevision"] = [row for row in plan.get("integrationcontentrevision", []) if row["item_id"] != identifier]
     # Structured links from retained task history protect their targets.
-    protected_files, protected_decisions = set(), set()
+    removed_clips = set(_ids(plan.get("channelclip", [])))
+    protected_files = {row["file_id"] for row in clips if row["id"] not in removed_clips and row.get("file_id")}
+    protected_decisions = set()
     if revision_table is not None:
         purged_revisions = set(_ids(plan.get("projecttaskrevision", [])))
         item_ids = _ids(tasks) + _ids(boards)
@@ -452,6 +488,9 @@ def open_archive(identifier):
 
 
 EXPORT_FIELDS = {
+    "channelclip": "id channel_id created_by created_at content_mode matrix_event_id file_id encrypted_payload",
+    "sfuroom": "id channel_id host_user_id created_at expires_at ended_at max_participants",
+    "appcard": "id workspace_id channel_id bot_id bot_name created_at",
     "activityfeedpost": "id channel_id created_by created_at updated_at revision archived poll_json",
     "activityfeedrevision": "id post_id revision created_by created_at archived content_mode matrix_event_id encrypted_payload",
     "activityfeedcomment": "id post_id created_by created_at updated_at revision archived",
@@ -515,9 +554,9 @@ def export_data(session, job, request):
     records = {"channel": [{"id": row.id, "name": None if row.id in secure_ids else row.name,
                 "type": row.type, "created_at": row.created_at, "content_mode": "matrix" if row.id in secure_ids else "server"} for row in channels]}
     parents = {}
-    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting"):
+    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom"):
         rows = _channel_records(session, name, channel_ids)
-        if name in {"message", "file", "filedocument"}:
+        if name in {"message", "file", "filedocument", "appcard"}:
             # Matrix messages/media are not represented by native file bytes.
             rows = [row for row in rows if row["channel_id"] not in secure_ids]
         records[name] = rows
@@ -564,6 +603,9 @@ def export_data(session, job, request):
                         from .shared_documents import open_payload
                         kind = {"shareddocumentupdate": "update", "shareddocumentsnapshot": "snapshot", "shareddocumentcomment": "comment"}[name]
                         value["fields"] = open_payload(session, channel, kind, row["document_id"], row.get("update_id", row.get("id")), row["encrypted_payload"])
+                    elif name == "channelclip":
+                        from .shared_documents import open_payload
+                        value["fields"] = open_payload(session, channel, "clip", row["id"], row["id"], row["encrypted_payload"])
                     else:
                         value["fields"] = json.loads(decrypt_message(row["encrypted_payload"], channel))
             if name == "shareddocument":
@@ -586,6 +628,8 @@ def export_data(session, job, request):
                     pass
             if name == "message":
                 value["content"] = decrypt_message(row["content"], channel) if row.get("encrypted") else row["content"]
+            if name == "appcard":
+                value["card"] = json.loads(unseal_private(row["encrypted_card"], "app-card", row["id"]))
             if name == "filecomment" and channel not in secure_ids:
                 comment = json.loads(decrypt_message(row["encrypted_text"], channel))
                 if (comment.get("id"), comment.get("document_id"), comment.get("file_id")) != (row["id"], row["document_id"], row["file_id"]):
@@ -600,6 +644,10 @@ def export_data(session, job, request):
                 participant = _table("meetingparticipant")
                 value["participant_count"] = session.execute(sqlselect(func.count()).select_from(participant).where(
                     participant.c.meeting_id == row["id"])).scalar_one() if participant is not None else 0
+            if name == "sfuroom":
+                participant = _table("sfuparticipant")
+                value["participant_count"] = session.execute(sqlselect(func.count()).select_from(participant).where(
+                    participant.c.meeting_id == row["id"])).scalar_one() if participant is not None else 0
             total_bytes += len(_json(value).encode())
             if total_bytes > MAX_BYTES: raise HTTPException(413, "Export exceeds the bounded archive size")
             clean.append(value)
@@ -612,17 +660,26 @@ def export_data(session, job, request):
         CopilotConversation.channel_id.in_(channel_ids))).all()
     exported["copilot_conversations"] = [{"id": row.id, "channel_id": row.channel_id, "secure": row.secure,
         "created_at": row.created_at, "turns": [] if row.secure or row.channel_id in secure_ids else copilot_history(session, row, job.requested_by)} for row in own_conversations]
-    if sum(len(row["turns"]) + 1 for row in exported["copilot_conversations"]) + sum(map(len, records.values())) > MAX_ROWS:
+    from .app_platform import export_private_drafts
+    exported["private_app_drafts"] = export_private_drafts(session, job.workspace_id,
+        [identifier for identifier in channel_ids if identifier not in secure_ids], job.requested_by)
+    if sum(len(row["turns"]) + 1 for row in exported["copilot_conversations"]) + len(exported["private_app_drafts"]) + sum(map(len, records.values())) > MAX_ROWS:
         raise HTTPException(413, "Export is too large; select fewer channels")
     from ..models.preference import UserLanguage
     language = session.get(UserLanguage, job.requested_by)
     exported["personal_preferences"] = {"language": language.locale if language else "auto"}
+    from ..models.enterprise_search import EnterpriseSearchConnection
+    exported["personal_search_connections"] = [{"id": row.id, "name": row.name, "provider": row.provider,
+        "workspace_id": row.workspace_id, "created_at": row.created_at.isoformat(), "revision": row.revision}
+        for row in session.exec(select(EnterpriseSearchConnection).where(
+            EnterpriseSearchConnection.workspace_id == job.workspace_id,
+            EnterpriseSearchConnection.user_id == job.requested_by)).all()]
     exported["pilot_feedback"] = export_pilot_feedback(session, job.workspace_id, job.requested_by)
     # No password/hash/key/session/IdP or remote-provider credential table enters
     # this explicit profile projection.
     memberships = _records(session, "workspacemember", WorkspaceMember.__table__.c.workspace_id == job.workspace_id)
-    private_ai_rows = sum(1 + len(row["turns"]) for row in exported["copilot_conversations"])
-    if sum(map(len, records.values())) + private_ai_rows + len(exported["pilot_feedback"]) + len(memberships) + 1 > MAX_ROWS:
+    private_ai_rows = sum(1 + len(row["turns"]) for row in exported["copilot_conversations"]) + len(exported["private_app_drafts"])
+    if sum(map(len, records.values())) + private_ai_rows + len(exported["pilot_feedback"]) + len(exported["personal_search_connections"]) + len(memberships) + 1 > MAX_ROWS:
         raise HTTPException(413, "Export is too large; select fewer channels")
     users = {row.id: row for row in session.exec(select(User.id, User.name, User.email).where(User.id.in_([member["user_id"] for member in memberships]))).all()}
     exported["members"] = [{"user_id": row["user_id"], "role": row["role"], "name": users[row["user_id"]].name,
@@ -632,6 +689,14 @@ def export_data(session, job, request):
     workspace = session.get(Workspace, job.workspace_id)
     exported["workspace"] = {"id": workspace.id, "name": workspace.name}
     exported["created_at"] = datetime.utcnow()
+    if request.get("governance_case_id"):
+        from ..models.enterprise_governance import GovernanceCase
+        case = session.get(GovernanceCase, request["governance_case_id"], populate_existing=True)
+        if not case or case.workspace_id != job.workspace_id or case.status != "active":
+            raise HTTPException(409, "Evidence preservation changed before collection")
+        exported["preservation_case"] = {"id": case.id, "revision": case.revision,
+            "channel_ids": json.loads(case.channel_ids_json), "custodian_ids": json.loads(case.custodian_ids_json),
+            "collection_scope": "authorized_native_channel_context", "matrix_plaintext_included": False}
     exported["limitations"] = ["Only channels currently assigned to the requesting owner are included.",
         "Matrix records contain opaque references; this archive contains no client-held message keys or decrypted Matrix history.",
         "Provider copies, other members' device caches and old backups are separate retention domains.",
@@ -653,19 +718,12 @@ def create_archive(session, job, request):
             archive.writestr("export.json", _json(data))
             for file in files:
                 if not IDENTIFIER.fullmatch(file["id"]): raise HTTPException(409, "Invalid stored file identity")
-                path = Path(settings.storage_path).absolute() / file["id"]
                 try:
-                    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-                    metadata = os.fstat(fd)
-                    if not stat.S_ISREG(metadata.st_mode) or metadata.st_size != file["size"]:
-                        os.close(fd); raise ValueError("Invalid stored file")
-                    with os.fdopen(fd, "rb") as source, archive.open("files/" + file["id"], "w") as destination:
-                        copied = 0
-                        while chunk := source.read(CHUNK):
-                            copied += len(chunk)
-                            if copied > file["size"]: raise ValueError("File changed")
-                            destination.write(chunk)
-                        if copied != file["size"]: raise ValueError("File changed")
+                    from .storage import storage_service, MAX_BLOB_BYTES
+                    content = storage_service.read_file(file["id"], max_bytes=MAX_BLOB_BYTES, expected_size=file["size"])
+                    if content is None:
+                        raise ValueError("Missing stored file")
+                    archive.writestr("files/" + file["id"], content)
                 except (OSError, ValueError):
                     raise HTTPException(409, "A stored file is missing or changed; no incomplete archive was published") from None
         artifact = _artifact_path(job.id)
@@ -677,6 +735,9 @@ def create_archive(session, job, request):
 
 
 def apply_plan(session, job, plan):
+    from .enterprise_governance import assert_purge_allowed
+    request = json.loads(unseal_private(job.encrypted_request, "data-job", job.id))
+    assert_purge_allowed(session, job.workspace_id, request["channel_ids"])
     # Explicit PK plans + reverse dependency order preserve live FK integrity.
     files = _ids(plan.get("file", []))
     imports = _table("cloudfileimport")
@@ -692,7 +753,13 @@ def apply_plan(session, job, plan):
             session.execute(update(receipt).where(receipt.c.message_id.in_(_ids(plan["message"]))).values(message_id=None))
         # Break only selected self references before deleting their tree.
         session.execute(update(message_table).where(message_table.c.id.in_(_ids(plan["message"]))).values(parent_id=None))
+    authority = _table("meetingparticipantauthority")
+    if authority is not None:
+        for row in plan.get(authority.name, []):
+            key = _pk(authority, row)
+            session.execute(delete(authority).where(and_(*(authority.c[name] == value for name, value in key.items()))))
     for table in reversed(SQLModel.metadata.sorted_tables):
+        if table.name == "meetingparticipantauthority": continue
         for row in plan.get(table.name, []):
             key = _pk(table, row)
             session.execute(delete(table).where(and_(*(table.c[name] == value for name, value in key.items()))))
@@ -711,7 +778,8 @@ def erase_file_bytes(session, job):
     for row in pending:
         if session.get(File, row.file_id): raise HTTPException(409, "A retained file prevents physical erasure")
         if not IDENTIFIER.fullmatch(row.file_id): raise HTTPException(409, "Invalid stored file identity")
-        (Path(settings.storage_path).absolute() / row.file_id).unlink(missing_ok=True)
+        from .storage import storage_service
+        storage_service.delete_file_sync(row.file_id)
         row.erased_at = datetime.utcnow(); session.add(row)
 
 
@@ -731,6 +799,13 @@ def process_job(session, job):
     _job_actor(session, job, request["channel_ids"], purge=job.kind == "purge")
     if job.expires_at <= datetime.utcnow(): raise HTTPException(410, "The data-control authorization expired")
     if job.kind == "export":
+        if request.get("governance_case_id"):
+            from ..models.enterprise_governance import GovernanceCase, GovernanceCaseExport
+            case = session.get(GovernanceCase, request["governance_case_id"], populate_existing=True)
+            bound = session.get(GovernanceCaseExport, job.id, populate_existing=True)
+            if (not case or case.workspace_id != job.workspace_id or case.status != "active"
+                    or not bound or bound.case_id != case.id or bound.case_revision != case.revision):
+                raise HTTPException(409, "Evidence preservation changed before collection")
         create_archive(session, job, request)
         _job_actor(session, job, request["channel_ids"])
         job.status = "ready"; job.finished_at = datetime.utcnow(); job.lease_token = None; job.lease_expires_at = None

@@ -17,10 +17,13 @@ import { SyncSettings } from './SyncSettings';
 import { ConnectionSetupPanel } from './ConnectionSetupPanel';
 import { ConnectionHealthPanel } from './ConnectionHealthPanel';
 import { EmbedApplicationsSettings } from './EmbedApplicationsSettings';
+import { ConnectPanel } from './ConnectPanel';
+import { AppsPanel } from './AppsPanel';
+import { EnterpriseGovernancePanel } from './EnterpriseGovernancePanel';
 import '../styles/account.css';
 import '../styles/integrations.css';
 
-type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding';
+type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding' | 'connect' | 'apps' | 'governance';
 interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations'; initialConnectionId?: string | null }
 interface Capabilities { integrations?: { oidc?: boolean; webhooks?: boolean; document_links?: boolean; calendar_ics?: boolean; otrust?: boolean; workforce?: boolean; scim?: boolean; sync?: boolean } }
 export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId }: Props) {
@@ -54,6 +57,10 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
   const onGuardChange = useCallback((next: 'busy' | 'secret' | null) => { if (next) guardOwner.current = tabRef.current; setGuard(next); if (next === null) setNotice(''); }, []);
   const guardNotice = (leaving: boolean) => guardOwner.current === 'connections'
     ? t("Return to connection setup and finish or discard pending changes before leaving.")
+    : guardOwner.current === 'connect'
+      ? t('Store the shared-channel invitation and confirm it is saved before leaving.')
+    : guardOwner.current === 'apps'
+      ? t('Store the app signing secret and confirm it is saved before leaving.')
     : guardOwner.current === 'webhooks'
       ? leaving ? t("Save your webhook signing secret and confirm it is stored before leaving.") : t("Save your webhook signing secret and confirm it is stored before changing sections.")
       : leaving ? t("Store the displayed provisioning token and confirm it is saved before leaving.") : t("Store the displayed provisioning token and confirm it is saved before changing sections.");
@@ -97,6 +104,9 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
     ...(manages && !scopedSession ? [{ id: 'connections' as const, label: t("Connection setup"), Icon: Blocks }] : []),
     ...(manages && !scopedSession ? [{ id: 'health' as const, label: t("Connection health"), Icon: Activity }] : []),
     ...(manages && !scopedSession ? [{ id: 'embedding' as const, label: t('Embedding'), Icon: Blocks }] : []),
+    ...(manages ? [{ id: 'connect' as const, label: t('Shared channels'), Icon: Users }] : []),
+    ...(manages && !scopedSession ? [{ id: 'apps' as const, label: t('Apps'), Icon: Blocks }] : []),
+    ...(workspace?.role === 'owner' && !scopedSession ? [{ id: 'governance' as const, label: t('Organization & policies'), Icon: ShieldCheck }] : []),
     { id: 'documents' as const, label: t("Documents"), Icon: FolderOpen },
     { id: 'calendar' as const, label: t("Calendar"), Icon: CalendarDays },
     ...(manages ? [{ id: 'webhooks' as const, label: t("Webhooks"), Icon: Webhook }] : []),
@@ -130,6 +140,9 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
           {tab === 'connections' && manages && !scopedSession && <ConnectionSetupPanel key={connectionStart.revision} workspaceId={workspaceId} channels={channels} security={security} isOwner={workspace?.role === 'owner'} initialRecipeId={connectionStart.recipeId} initialChannelId={connectionStart.channelId || channelId || undefined} onGuardChange={onGuardChange} />}
           {tab === 'health' && manages && !scopedSession && <ConnectionHealthPanel workspaceId={workspaceId} channels={channels} initialChannelId={channelId} onOpenSetup={(recipeId, selectedId) => { setConnectionStart(previous => ({ recipeId, channelId: selectedId, revision: previous.revision + 1 })); select('connections'); }} />}
           {tab === 'embedding' && manages && !scopedSession && <EmbedApplicationsSettings key={workspaceId} workspaceId={workspaceId} channels={channels} security={security} onGuardChange={onGuardChange} />}
+          {tab === 'connect' && manages && <ConnectPanel workspaceId={workspaceId} onGuardChange={onGuardChange} />}
+          {tab === 'apps' && manages && !scopedSession && <AppsPanel workspaceId={workspaceId} channels={channels} onGuardChange={onGuardChange} />}
+          {tab === 'governance' && workspace?.role === 'owner' && !scopedSession && <EnterpriseGovernancePanel workspaceId={workspaceId} mfaEnabled={security?.mfa_enabled} onGuardChange={onGuardChange} />}
           {tab === 'webhooks' && manages && <WebhookConnections workspaceId={workspaceId} channels={channels} onGuardChange={onGuardChange} />}
           {tab === 'account' && <>{manages && !scopedSession && <WorkspaceSSOSettings workspaceId={workspaceId} security={security} onGuardChange={onGuardChange} onChanged={() => setSSOVersion(value => value + 1)} />}<SSOConnections key={`${workspaceId}:${ssoVersion}`} workspaceId={workspaceId} scopedSession={scopedSession} managedAccount={managedAccount} security={security || undefined} /></>}
           {tab === 'people' && manages && !scopedSession && <PeopleSettings workspaceId={workspaceId} security={security} isOwner={workspace?.role === 'owner'} channels={channels} onGuardChange={onGuardChange} />}

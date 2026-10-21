@@ -94,6 +94,7 @@ export interface OperationalSecurity {
   checks: { id: string; status: OperationalCheckStatus }[];
   operators: { active: number; mfa_enabled: number; without_mfa: number; email_verified: number };
   storage: { status: OperationalCheckStatus; free_bytes: number | null; total_bytes: number | null; free_percent: number | null };
+  blob_storage?: { backend: 'local' | 's3'; status: 'local' | 'configured_not_probed'; automatic_remote_probe: false };
   queues: Record<string, { enabled: boolean; due: number; expired_leases: number; failed: number }>;
 }
 export type SecurityEventOutcome = 'success' | 'denied' | 'error';

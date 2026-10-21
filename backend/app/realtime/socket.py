@@ -1,4 +1,6 @@
 import socketio
+import asyncio
+from contextlib import suppress
 from datetime import datetime
 from sqlmodel import Session
 from fastapi import HTTPException
@@ -6,14 +8,106 @@ from ..database import engine
 from ..config import settings
 from ..models.channel import Channel, ChannelMember
 from ..models.user import User
-from ..services.auth import active_user_for_token
+from ..services.auth import active_user_for_token, decode_token_claims, token_digest
+from ..services.request_guard import remember_request, recheck_actor
+from ..services.shared_runtime import runtime
+from .broker import broker
 from ..services.sso_scope import current_workspace_scope, require_channel_scope
 from ..services.workspaces import workspace_allows_channel, visible_user_ids, require_direct_message_writable
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins=settings.cors_origins)
 
-# In-memory presence store (use Redis in production)
+# Per-process sessions retain JWTs only in Socket.IO's local session store.
+# Optional Valkey leases contain digests/verified claims, never bearer tokens.
 presence_store: dict[str, dict] = {}  # user_id -> {status, last_seen, sid}
+_presence_task = None
+
+
+def _presence_metadata(user_id, token, status="online"):
+    claims = decode_token_claims(token) or {}
+    allowed = {key: claims[key] for key in ("sub","exp","iat","av","amr","sso_workspace_id","sso_provider_revision","embed_application_id","native_client_id") if key in claims}
+    now = datetime.utcnow()
+    return {"user_id":user_id,"status":status,"last_seen":now.isoformat(),"changed_at":now.timestamp(),
+        "session_hash":token_digest(token),"claims":allowed}
+
+
+def _presence_valid(row):
+    try:
+        with Session(engine) as session:
+            remember_request(session,row["session_hash"],row["claims"])
+            recheck_actor(session,row["user_id"])
+        return True
+    except (HTTPException,KeyError,TypeError): return False
+
+
+def _local_presence(user_id):
+    row=presence_store.get(user_id,{"status":"offline","last_seen":None})
+    if "sessions" not in row:return row
+    valid=[value for value in row["sessions"].values() if _presence_valid(value)]
+    if not valid:return {"status":"offline","last_seen":row.get("last_seen")}
+    latest=max(valid,key=lambda value:value["changed_at"])
+    return {"status":latest["status"],"last_seen":latest["last_seen"]}
+
+
+async def start_realtime_broker():
+    global _presence_task
+    shared=broker()
+    if shared is None:return
+    if shared.listener is not None:return
+    async def deliver(envelope):
+        if envelope["target"]=="channel":
+            await broadcast_to_channel(envelope["id"],envelope["event"],envelope["data"],local_only=True,skip_sid=envelope.get("skip"))
+        elif envelope["target"]=="user":
+            await send_to_user(envelope["id"],envelope["event"],envelope["data"],local_only=True)
+        else:await broadcast_presence(envelope["id"],envelope["data"],local_only=True)
+    await shared.start(deliver)
+    async def heartbeat():
+        while True:
+            await asyncio.sleep(max(10,shared.runtime.lease//3))
+            for user_id,row in list(presence_store.items()):
+                for sid,metadata in list(row.get("sessions",{}).items()):
+                    try:
+                        if not await _active_user(sid):
+                            await shared.remove_presence(sid,user_id)
+                            row["sessions"].pop(sid,None)
+                            await sio.disconnect(sid)
+                        else:
+                            metadata["last_seen"]=datetime.utcnow().isoformat()
+                            await shared.write_presence(sid,metadata)
+                    except HTTPException:
+                        # A broker outage never creates an unshared online
+                        # lease; existing leases expire until recovery.
+                        continue
+    _presence_task=asyncio.create_task(heartbeat(),name="freecollab-presence-leases")
+
+
+async def stop_realtime_broker():
+    global _presence_task
+    if _presence_task:
+        _presence_task.cancel()
+        with suppress(asyncio.CancelledError):await _presence_task
+        _presence_task=None
+    shared=broker()
+    if shared:
+        for user_id,row in list(presence_store.items()):
+            for sid in list(row.get("sessions",{})):
+                with suppress(HTTPException):await shared.remove_presence(sid,user_id)
+        await shared.stop()
+        shared.listener=None
+
+
+def realtime_broker_ready():
+    shared=broker()
+    return shared is None or bool(shared.ready and shared.listener and not shared.listener.done())
+
+
+async def _publish(shared,target,identifier,event,data,*,skip=None):
+    try:await shared.publish(target,identifier,event,data,skip=skip)
+    except HTTPException:
+        # Native mutations have often already committed. Their authoritative
+        # history/inbox and local authorized delivery remain available; a
+        # transient fanout failure must not invite a non-idempotent retry.
+        shared.ready=False
 
 
 def _channel_id(data):
@@ -41,6 +135,7 @@ async def _active_user(sid):
 
 
 def _is_member(user_id, channel_id, token=None):
+    if not isinstance(user_id,str) or not isinstance(channel_id,str) or not channel_id or len(channel_id)>128:return False
     with Session(engine) as session:
         if token is not None:
             actor = active_user_for_token(token, session)
@@ -74,11 +169,14 @@ async def connect(sid, environ, auth):
         user_id = user.id
 
     await sio.save_session(sid, {"user_id": user_id, "token": token})
-    presence_store[user_id] = {
-        "status": "online",
-        "last_seen": datetime.utcnow().isoformat(),
-        "sid": sid,
-    }
+    metadata=_presence_metadata(user_id,token)
+    shared=broker()
+    if shared:
+        try:await shared.write_presence(sid,metadata)
+        except HTTPException:raise socketio.exceptions.ConnectionRefusedError("Presence coordination unavailable") from None
+    current=presence_store.setdefault(user_id,{"sessions":{}})
+    current.setdefault("sessions",{})[sid]=metadata
+    current.update(status="online",last_seen=metadata["last_seen"],sid=sid)
     await sio.enter_room(sid, f"user:{user_id}")
     await broadcast_presence(user_id, {"user_id": user_id, "status": "online"})
 
@@ -90,13 +188,17 @@ async def disconnect(sid):
     except KeyError:
         return
     user_id = saved.get("user_id")
-    if user_id and presence_store.get(user_id, {}).get("sid") == sid:
-        presence_store[user_id] = {
-            "status": "offline",
-            "last_seen": datetime.utcnow().isoformat(),
-            "sid": None,
-        }
-        await broadcast_presence(user_id, {"user_id": user_id, "status": "offline", "last_seen": presence_store[user_id]["last_seen"]})
+    if user_id:
+        row=presence_store.get(user_id,{})
+        row.get("sessions",{}).pop(sid,None)
+        shared=broker()
+        if shared:
+            with suppress(HTTPException):await shared.remove_presence(sid,user_id)
+            try:presence=await asyncio.to_thread(shared.runtime.presence,user_id,_presence_valid)
+            except HTTPException:return
+        else:presence=_local_presence(user_id)
+        row.update(status=presence["status"],last_seen=datetime.utcnow().isoformat(),sid=next(iter(row.get("sessions",{})),None))
+        await broadcast_presence(user_id,{"user_id":user_id,**presence})
 
 
 @sio.event
@@ -127,8 +229,7 @@ async def _typing_event(sid, data, event):
             require_direct_message_writable(session, channel_id, user_id)
     except HTTPException:
         return {"error": "Messaging is unavailable for this conversation"}
-    await _prune_channel(channel_id)
-    await sio.emit(event, {"user_id": user_id, "channel_id": channel_id}, room=channel_id, skip_sid=sid)
+    await broadcast_to_channel(channel_id,event,{"user_id":user_id,"channel_id":channel_id},skip_sid=sid)
     return {"ok": True}
 
 
@@ -154,18 +255,26 @@ async def set_status(sid, data):
     if user_id in presence_store:
         presence_store[user_id]["status"] = status
         presence_store[user_id]["last_seen"] = datetime.utcnow().isoformat()
+        row=presence_store[user_id].get("sessions",{}).get(sid)
+        if row:
+            row.update(status=status,last_seen=datetime.utcnow().isoformat(),changed_at=datetime.utcnow().timestamp())
+            shared=broker()
+            if shared:await shared.write_presence(sid,row)
     await broadcast_presence(user_id, {"user_id": user_id, "status": status})
     return {"ok": True}
 
 
 def get_user_presence(user_id: str) -> dict:
     """Get presence for a specific user."""
-    return presence_store.get(user_id, {"status": "offline", "last_seen": None})
+    shared=runtime()
+    return shared.presence(user_id,_presence_valid) if shared else _local_presence(user_id)
 
 
-def get_online_users() -> list[str]:
+def get_online_users(user_ids=None) -> list[str]:
     """Get list of online user IDs."""
-    return [uid for uid, data in presence_store.items() if data["status"] == "online"]
+    candidates=list(dict.fromkeys(user_ids if user_ids is not None else presence_store))
+    if len(candidates)>1000:raise HTTPException(413,"Presence lookup is limited to 1,000 visible people")
+    return [uid for uid in candidates if get_user_presence(uid)["status"]=="online"]
 
 
 async def _prune_channel(channel_id):
@@ -178,9 +287,16 @@ async def _prune_channel(channel_id):
             await sio.leave_room(sid, channel_id)
 
 
-async def broadcast_to_channel(channel_id: str, event: str, data: dict):
-    await _prune_channel(channel_id)
-    await sio.emit(event, data, room=channel_id)
+async def broadcast_to_channel(channel_id: str, event: str, data: dict, *, local_only=False, skip_sid=None):
+    shared=broker()
+    if shared and not local_only:await _publish(shared,"channel",channel_id,event,data,skip=skip_sid)
+    for sid,_ in list(sio.manager.get_participants("/",channel_id)):
+        if sid==skip_sid:continue
+        user_id=await _active_user(sid)
+        saved=await sio.get_session(sid) if user_id else {}
+        if not user_id or not _is_member(user_id,channel_id,saved.get("token")):
+            await sio.leave_room(sid,channel_id)
+        else:await sio.emit(event,data,room=sid)
 
 
 def _scoped_delivery_allowed(session, user_id, event, data):
@@ -205,37 +321,52 @@ def _scoped_delivery_allowed(session, user_id, event, data):
     return False
 
 
-async def send_to_user(user_id: str, event: str, data: dict):
+async def send_to_user(user_id: str, event: str, data: dict, *, local_only=False):
     """Authorize each browser; one account may have differently scoped logins."""
     room = f"user:{user_id}"
-    recipients = []
-    has_scoped_recipient = False
+    shared=broker()
+    if shared and not local_only:await _publish(shared,"user",user_id,event,data)
     for sid, _ in list(sio.manager.get_participants("/", room)):
         try:
             saved = await sio.get_session(sid)
         except KeyError:
             await sio.leave_room(sid, room)
             continue
-        with Session(engine) as session:
-            actor = active_user_for_token(saved.get("token"), session)
-            if actor is None or actor.id != user_id or saved.get("user_id") != user_id:
-                await sio.leave_room(sid, room)
+        try:
+            with Session(engine) as session:
+                actor = active_user_for_token(saved.get("token"), session)
+                if actor is None or actor.id != user_id or saved.get("user_id") != user_id:
+                    await sio.leave_room(sid, room)
+                    continue
+                scoped = current_workspace_scope(session) is not None
+                if (event in {"notification","presence"} or scoped) and not _scoped_delivery_allowed(session,user_id,event,data):continue
+                # Revocation signals contain only identifiers and must reach a
+                # still-authenticated account after its membership was removed.
+                if event=="channel_removed" and set(data)-{"channel_id","workspace_id"}:continue
+                if data.get("channel_id") and event!="channel_removed" and not _is_member(user_id,data["channel_id"],saved.get("token")):continue
+        except HTTPException:
+            if event == "presence":
+                # One denied browser does not suppress a sibling with a valid
+                # workspace sign-in. Every socket still needs its own check.
                 continue
-            scoped = current_workspace_scope(session) is not None
-            has_scoped_recipient |= scoped
-            if not scoped or _scoped_delivery_allowed(session, user_id, event, data):
-                recipients.append(sid)
-    if has_scoped_recipient:
-        for sid in recipients:
-            await sio.emit(event, data, room=sid)
-    else:
-        await sio.emit(event, data, room=room)
+            raise
+        # Never emit to the room as a fallback when there are zero recipients.
+        await sio.emit(event,data,room=sid)
 
 
-async def broadcast_presence(user_id: str, data: dict):
+async def broadcast_presence(user_id: str, data: dict, *, local_only=False):
     """Recheck directional directory access before private-room delivery."""
-    candidates = set(presence_store) | {user_id}
-    with Session(engine) as session:
-        recipients = [candidate for candidate in candidates if user_id in visible_user_ids(session, candidate)]
-    for recipient in recipients:
-        await send_to_user(recipient, "presence", data)
+    candidates = {identifier for identifier,row in presence_store.items() if row.get("sessions") or row.get("sid")} | {user_id}
+    shared=broker()
+    if shared and not local_only:await _publish(shared,"presence",user_id,"presence",data)
+    # A candidate's directory cannot be checked in an unbound service session:
+    # governed workspaces require that candidate's actual sign-in scope. The
+    # delivery helper checks every current socket token and directional presence
+    # visibility before emitting, including native and shared-channel sessions.
+    for recipient in candidates:
+        try:
+            await send_to_user(recipient,"presence",data,local_only=True)
+        except HTTPException:
+            # A denied recipient must neither receive presence nor abort a
+            # different participant's valid connection or disconnect.
+            continue

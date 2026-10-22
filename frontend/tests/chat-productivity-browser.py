@@ -10,6 +10,7 @@ import secrets
 import sqlite3
 import subprocess
 import sys
+import shutil
 import tempfile
 
 from playwright.sync_api import expect, sync_playwright
@@ -57,7 +58,7 @@ def main():
                 subprocess.run([PYTHON,'-m','app.services.integration_worker','--once'],cwd=ROOT/'backend',env=environment,
                                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=True,timeout=45)
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or '/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),headless=True,args=['--no-sandbox'])
                 context = browser.new_context(viewport={'width':1440,'height':1080},reduced_motion='reduce')
                 page = context.new_page(); page.set_default_timeout(40000)
                 errors, requests = [], []

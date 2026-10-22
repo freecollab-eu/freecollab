@@ -8,6 +8,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     var window: UIWindow?
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
+        FreeCollabCallManager.shared.restore()
         UNUserNotificationCenter.current().delegate = self
         let open = UNNotificationAction(identifier: "freecollab_open_call", title: "Open call", options: [.foreground])
         UNUserNotificationCenter.current().setNotificationCategories([
@@ -50,6 +51,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, UNUserNotificationCenterD
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
+        FreeCollabCallManager.shared.stop(reason: .remoteEnded)
         // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
 

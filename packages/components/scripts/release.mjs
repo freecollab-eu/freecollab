@@ -9,7 +9,7 @@ const directory = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const destination = resolve(process.argv[2] || resolve(directory, 'artifacts'));
 const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 const manifest = JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8'));
-if (!/^0\.12\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Review the compatibility line before releasing a new minor version.');
+if (!/^0\.13\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.version)) throw new Error('Review the compatibility line before releasing a new minor version.');
 execFileSync(npm, ['run', 'build'], { cwd: directory, stdio: 'inherit' });
 await mkdir(destination, { recursive: true });
 // npm pack still writes its content cache. Keep that disposable cache outside

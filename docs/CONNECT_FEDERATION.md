@@ -177,11 +177,18 @@ makes arbitrary customer-selected media HTTP requests or decrypts attachment
 bytes. Participants continue to verify/ decrypt attachments in their browser.
 Native server-side search, bots, DLP and export do not gain Matrix plaintext.
 
+The **Shared work** tab adds encrypted cross-installation tasks, calendar series
+and Yjs text documents. Each installation keeps opaque event pointers; verified
+clients derive the shared view from the same encrypted room. Native local task,
+calendar/provider and document records retain their own installation scope.
+See [FEDERATED_WORK.md](FEDERATED_WORK.md) for collaboration semantics, explicit
+conflict handling, storage bounds, key recovery and availability limitations.
+
 ## Verification and rollout
 
 ```sh
 cd backend
-.venv/bin/python -m pytest tests/test_connect_federation.py tests/test_connect.py -q
+.venv/bin/python -m pytest tests/test_connect_federation.py tests/test_connect.py tests/test_federated_work.py -q
 cd ..
 CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/connect-federation-browser.py
 ```
@@ -191,13 +198,13 @@ with an explicitly synthetic Matrix control plane. It checks consent, separate
 local identities, revoked/current rosters, lifetime, replay, response binding,
 participant authorization and unavailable peers. The browser proof separately
 creates two owned Synapse homeservers with verified fixture TLS, two API
-processes/databases and actual Rust Matrix clients. Its eight proof groups include an actual encrypted attachment upload, remote
+processes/databases and actual Rust Matrix clients. Its proof groups include an actual encrypted attachment upload, remote
 owner namespace and authenticated cross-homeserver download/decryption. Critical
 runtime source hashes are captured before API startup and checked unchanged at
 completion. Its synthetic host mapping
 and private-address exception exist only in the generated test launchers and
 homeserver fixtures; product transport and operator defaults remain unchanged.
 The proof cleans only its own containers/network/processes/data and writes its
-bounded result to `.freecollab/proof-results/connect-federation-browser.json`.
+bounded result to `.freecollab/proof-results/connect-federation-browser-013.json`.
 Customer DNS, public TLS routing/firewalls, real customer IdP login, physical
 clients and production capacity remain installation-specific acceptance checks.

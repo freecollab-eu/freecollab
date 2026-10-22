@@ -82,6 +82,7 @@ public class FreeCollabPushPlugin extends Plugin {
     }
     @PluginMethod public void unregisterPush(PluginCall call) {
         if (!installation()) { call.reject("The installation changed."); return; }
+        FreeCollabCallManager.revoke(getContext());
         getContext().getSharedPreferences("freecollab-push", Context.MODE_PRIVATE).edit().clear().apply();
         NotificationManagerCompat.from(getContext()).cancelAll();
         if (FirebaseApp.getApps(getContext()).isEmpty()) { call.resolve(); return; }

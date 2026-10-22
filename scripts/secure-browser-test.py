@@ -7,6 +7,7 @@ are created. Tokens and recovery keys remain in process memory and are not logge
 """
 import argparse
 import json
+import os
 import secrets
 import shutil
 import time
@@ -17,7 +18,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--api-base', default='http://127.0.0.1:8000')
 parser.add_argument('--app-base', default='http://127.0.0.1:3000')
 parser.add_argument('--threads-only', action='store_true', help='Stop after the focused encrypted thread and reply-edit checks.')
-parser.add_argument('--chromium', default=shutil.which('chromium'))
+parser.add_argument('--chromium', default=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'))
 args = parser.parse_args()
 
 

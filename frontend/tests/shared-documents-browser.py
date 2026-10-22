@@ -275,7 +275,7 @@ def main():
                 OIDC_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', PYTHONPATH=str(ROOT / 'backend'))
             environment['NO_PROXY'] = ','.join(filter(None, [environment.get('NO_PROXY', ''), 'localhost', '127.0.0.1', '::1']))
             if options.secure: environment.update(fixture_matrix_environment())
-            python = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
+            python = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
             server = private / 'api.py'
             server.write_text('import uvicorn\nfrom app.main import socket_app\nuvicorn.run(socket_app,host="127.0.0.1",port=' + str(api_port) + ',proxy_headers=False,access_log=False)\n')
             # Freeze the current UI tree so unrelated panel edits cannot trigger

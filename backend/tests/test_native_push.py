@@ -263,7 +263,8 @@ def test_bad_provider_payload_never_sends(native,monkeypatch):
     assert outgoing==[]
 
 
-def test_actual_apns_tls_http2_through_connect_tunnel(native,tmp_path,monkeypatch):
+@pytest.mark.parametrize("mode", ["alert", "voip"])
+def test_actual_apns_tls_http2_through_connect_tunnel(native,tmp_path,monkeypatch,mode):
     """Real pinned transport, TLS hostname verification, ALPN h2 and vendor JWT."""
     import select as sockets_select
     import socket
@@ -301,9 +302,16 @@ def test_actual_apns_tls_http2_through_connect_tunnel(native,tmp_path,monkeypatc
                         elif isinstance(event,StreamEnded):
                             token=headers['authorization'].split(' ')[1]
                             claims=jwt.decode(token,key.public_key(),algorithms=['ES256'])
-                            observed.append({'authority':headers[':authority'],'path':headers[':path'],'claims':claims,'topic':headers['apns-topic'],'payload':json.loads(body)})
+                            observed.append({'authority':headers[':authority'],'path':headers[':path'],'claims':claims,'topic':headers['apns-topic'],'push_type':headers['apns-push-type'],'expiration':headers['apns-expiration'],'payload':json.loads(body)})
                             protocol.send_headers(event.stream_id,[(':status','200'),('content-length','0')],end_stream=True)
-                            connection.sendall(protocol.data_to_send());return
+                            connection.sendall(protocol.data_to_send())
+                            # Keep TLS open until the real client closes its
+                            # pool. Immediate server close races its SETTINGS
+                            # acknowledgement under parallel CI load.
+                            while True:
+                                try:
+                                    if not connection.recv(65536): return
+                                except (OSError,TimeoutError): return
                     outgoing=protocol.data_to_send()
                     if outgoing:connection.sendall(outgoing)
     receiver=socketserver.ThreadingTCPServer(('127.0.0.1',0),Receiver);receiver.daemon_threads=True
@@ -334,13 +342,18 @@ def test_actual_apns_tls_http2_through_connect_tunnel(native,tmp_path,monkeypatc
     monkeypatch.setattr(remote_transport.pinned,'getproxies',lambda:{'https':'http://127.0.0.1:'+str(proxy.server_address[1])})
     monkeypatch.setattr(service,'request',remote_transport.request)
     try:
-        REAL_DISPATCH('ios','a'*64,{'type':'incoming_call','id':'c'*32},ttl=60)
+        payload={'type':'native_call','id':'c'*32,'device_id':'d'*32} if mode=='voip' else {'type':'incoming_call','id':'c'*32}
+        REAL_DISPATCH('ios','a'*64,payload,ttl=60,mode=mode)
         assert len(observed)==1
         result=observed[0]
         assert result['authority']=='api.push.apple.com' and result['path']=='/3/device/'+'a'*64
-        assert result['topic']=='eu.customer.collab' and result['claims']['iss']=='ABCDEFGHIJ'
-        assert result['payload']['type']=='incoming_call' and result['payload']['id']=='c'*32
-        assert result['payload']['aps']['alert']['body']=='Incoming FreeCollab call'
+        assert result['topic']=='eu.customer.collab'+('.voip' if mode=='voip' else '') and result['claims']['iss']=='ABCDEFGHIJ'
+        assert result['push_type']==mode
+        assert result['payload']['type']==payload['type'] and result['payload']['id']=='c'*32
+        if mode=='voip':
+            assert result['expiration']=='0' and result['payload']['aps']=={'content-available':1}
+            assert set(result['payload'])=={'aps','type','id','device_id'}
+        else: assert result['payload']['aps']['alert']['body']=='Incoming FreeCollab call'
     finally:
         for server in [proxy,receiver]:server.shutdown();server.server_close()
         for thread in threads:thread.join(timeout=3)

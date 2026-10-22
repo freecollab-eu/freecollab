@@ -53,8 +53,8 @@ process decides which reviewed build users install.
 ## Android and iOS builds
 
 Node 24, a Java 21 JDK and Android SDK platform/build-tools 36 are required for
-Android. iOS builds require macOS, Xcode compatible with Capacitor 8, and the
-iOS 15+ target supported by that Xcode version.
+Android. iOS builds require macOS, Xcode16.3+ / Swift6.1 for the pinned LiveKit
+Swift package, and the iOS15+ target supported by that Xcode version.
 
     cd clients/mobile
     npm ci
@@ -63,7 +63,10 @@ iOS 15+ target supported by that Xcode version.
 
 Open the native IDE projects with npm run android or npm run ios.
 FREECOLLAB_APP_URL must be an HTTPS origin without credentials, path, query or
-fragment. Its hostname is also written into iOS's WKAppBoundDomains.
+fragment. Its hostname is also written into iOS's WKAppBoundDomains. Optional
+FREECOLLAB_APPLICATION_ID sets a matching Capacitor, Android and iOS reverse-DNS
+application identity; customer Firebase, signing and APNs topic must match it.
+The same-origin gateway must mount the backend at /api, as the shipped Nginx does.
 The sync command copies the small offline page and synchronizes native projects.
 The real product loads from the customer's origin, so normal web product updates
 do not require rebuilding the native shell. Changing the permitted origin does.
@@ -78,9 +81,13 @@ The mobile shell includes opt-in native FCM HTTP v1 (Android) and APNs HTTP/2
 (iOS) alerts, separate from Web/PWA push. Customers configure and sign their own
 builds. Generic activity and incoming channel-call notifications can display in
 the background; tapping reopens the app and current authorized call controls.
-Joining and camera/microphone access still require a foreground user action.
-There is no PushKit/CallKit integration, automatic answering, guaranteed ringing,
-background call audio service or background recording. See [NATIVE_PUSH.md](NATIVE_PUSH.md).
+Standard alerts open the foreground meeting controls. The separate opt-in
+[Native calling](NATIVE_CALLING.md) feature uses real CallKit/PushKit and Android
+Telecom with native LiveKit audio in the background. OS Answer or foreground
+Join is explicit consent and fetches current admission; ringing never activates
+the microphone. Audio encryption terminates at the customer SFU and encrypted
+channels require a separate per-device acknowledgement. See
+[NATIVE_PUSH.md](NATIVE_PUSH.md) for independent standard alerts.
 Verify camera, microphone, notification delivery, file downloads and Matrix
 recovery on target physical devices before rollout.
 

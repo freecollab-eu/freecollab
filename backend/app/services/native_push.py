@@ -97,13 +97,15 @@ def validate_token(platform, token):
     return token.lower() if platform == "ios" else token
 
 
-def dispatch(platform, token, payload, *, ttl=300, authorize=None):
+def dispatch(platform, token, payload, *, ttl=300, authorize=None, mode="alert"):
     """Only fixed vendor destinations; credentials never select an outbound URL."""
     require_platform(platform)
     validate_token(platform, token)
-    if (not isinstance(payload, dict) or payload.get("type") not in {"activity", "incoming_call", "subscription_confirmation"}
+    if (not isinstance(payload, dict) or payload.get("type") not in {"activity", "incoming_call", "subscription_confirmation", "native_call"}
             or set(payload) - {"type", "id", "device_id", "challenge"}
             or any(not isinstance(v, str) or len(v) > 128 for v in payload.values())):
+        raise ProviderError("invalid_payload")
+    if mode not in {"alert", "android_call", "voip"} or (payload["type"] == "native_call") != (mode != "alert") or mode == "voip" and platform != "ios" or mode == "android_call" and platform != "android":
         raise ProviderError("invalid_payload")
     def recheck():
         if authorize is not None and not authorize():
@@ -131,6 +133,11 @@ def dispatch(platform, token, payload, *, ttl=300, authorize=None):
             "android": {"priority": "high", "ttl": str(ttl) + "s", "notification": {
                 "channel_id": "freecollab_calls" if payload["type"] == "incoming_call" else "freecollab_activity",
                 "tag": payload.get("id", "freecollab-confirmation"), "visibility": "PRIVATE"}}}}
+        if mode == "android_call":
+            # Data-only wakes the native Telecom service; never OS auto-display
+            # a notification that prevents FirebaseMessagingService delivery.
+            message["message"].pop("notification", None)
+            message["message"]["android"].pop("notification", None)
         recheck()
         response = request("POST", "https://fcm.googleapis.com/v1/projects/" + project + "/messages:send",
                            headers={"Authorization": "Bearer " + credential, "Content-Type": "application/json"},
@@ -149,10 +156,12 @@ def dispatch(platform, token, payload, *, ttl=300, authorize=None):
         bearer = jwt.encode({"iss": team, "iat": int(time.time())}, key, algorithm="ES256", headers={"kid": kid})
         host = "api.sandbox.push.apple.com" if settings.native_push_apns_sandbox else "api.push.apple.com"
         body_bytes = json.dumps({"aps": {"alert": {"title": title, "body": body}, "sound": "default", "category": "freecollab_call" if payload["type"] == "incoming_call" else "freecollab_activity"}, **payload}, separators=(",", ":")).encode()
+        if mode == "voip":
+            body_bytes = json.dumps({"aps": {"content-available": 1}, **payload}, separators=(",", ":")).encode()
         recheck()
         response = request("POST", "https://" + host + "/3/device/" + token,
-            headers={"Authorization": "bearer " + bearer, "apns-topic": topic, "apns-push-type": "alert",
-                     "apns-priority": "10", "apns-expiration": str(int(time.time()) + ttl), "Content-Type": "application/json"},
+            headers={"Authorization": "bearer " + bearer, "apns-topic": topic + (".voip" if mode == "voip" else ""), "apns-push-type": "voip" if mode == "voip" else "alert",
+                     "apns-priority": "10", "apns-expiration": "0" if mode == "voip" else str(int(time.time()) + ttl), "Content-Type": "application/json"},
             body=body_bytes, max_bytes=4096, timeout=10, http2=True)
         if response.status != 200:
             reason = None
@@ -322,6 +331,11 @@ def run_pending(session, *, limit=5):
         platform = device.platform
         try:
             destination = unseal_private(device.encrypted_token, "native-push-token", device_id)
+            from .native_calls import delivery_target
+            target = delivery_target(session, device_id, identifier) if kind == "incoming_call" else None
+            mode = target["mode"] if target else "alert"
+            if target and target["token"]: destination = target["token"]
+            expected_target = (target["device_id"], target["credential_hash"]) if target else None
             session.commit()
             def authorized():
                 session.expire_all()
@@ -334,6 +348,11 @@ def run_pending(session, *, limit=5):
                 allowed = bool(latest_device and latest_device.auth_token_hash == expected_hash
                     and latest_device.confirmed_at == expected_confirmation and latest_device.platform == platform
                     and activity_live(session, latest_delivery, latest_device))
+                if allowed and expected_target:
+                    current_target = delivery_target(session, device_id, identifier)
+                    allowed = bool(current_target and current_target["mode"] == mode and
+                        (current_target["device_id"], current_target["credential_hash"]) == expected_target
+                        and (mode != "voip" or current_target["token"] == destination))
                 # Release read transactions before either provider call so an
                 # original-source revocation can commit during FCM OAuth.
                 session.commit()
@@ -341,8 +360,10 @@ def run_pending(session, *, limit=5):
             if not authorized():
                 _finish(session, identifier, status="cancelled", failure_code="access_or_activity_changed")
                 continue
-            dispatch(platform, destination, {"type": kind, "id": identifier},
-                ttl=max(0, int((expires_at - datetime.utcnow()).total_seconds())), authorize=authorized)
+            payload = {"type": "native_call", "id": identifier, "device_id": expected_target[0]} if expected_target else {"type": kind, "id": identifier}
+            options = {"mode": mode} if expected_target else {}
+            dispatch(platform, destination, payload,
+                ttl=max(0, int((expires_at - datetime.utcnow()).total_seconds())), authorize=authorized, **options)
             _finish(session, identifier, status="delivered", delivered_at=datetime.utcnow())
             delivered += 1
         except (ProviderError, HTTPException) as exc:
@@ -353,6 +374,13 @@ def run_pending(session, *, limit=5):
             _finish(session, identifier, status="failed" if expired or attempts >= 5 else "pending",
                 failure_code="subscription_expired" if expired else "push_unavailable",
                 next_attempt_at=datetime.utcnow() + timedelta(seconds=min(3600, 15 * 2 ** attempts)))
+            if expired and mode == "voip" and expected_target:
+                # A stale PushKit token must not revoke independent APNs alerts.
+                from ..models.native_calls import NativeCallDevice
+                current_call = session.get(NativeCallDevice, expected_target[0], populate_existing=True)
+                if current_call and current_call.credential_hash == expected_target[1]:
+                    current_call.encrypted_voip_token = ""; session.add(current_call); session.commit()
+                continue
             if expired:
                 current = session.get(NativePushDevice, device_id, populate_existing=True)
                 if current and current.auth_token_hash == expected_hash and current.confirmed_at == expected_confirmation:

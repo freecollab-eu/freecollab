@@ -1,11 +1,15 @@
 {
   "name": "@freecollab/desktop",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "description": "FreeCollab desktop client for your own installation",
   "author": "Kris Ledel",
   "license": "MIT",
-  "repository": { "type": "git", "url": "https://github.com/freecollab-eu/freecollab.git", "directory": "clients/desktop" },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/freecollab-eu/freecollab.git",
+    "directory": "clients/desktop"
+  },
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
@@ -23,14 +27,54 @@
     "executableName": "freecollab",
     "icon": "resources/icon.png",
     "artifactName": "FreeCollab-${version}-${os}-${arch}.${ext}",
-    "files": ["src/**", "resources/**", "package.json"],
+    "files": [
+      "src/**",
+      "resources/**",
+      "package.json"
+    ],
     "asar": true,
     "afterPack": "scripts/after-pack.cjs",
-    "directories": { "output": "dist" },
-    "appImage": { "executableArgs": [] },
-    "linux": { "target": ["AppImage", "deb"], "category": "Network", "maintainer": "Kris Ledel", "desktop": { "entry": { "StartupWMClass": "freecollab" } } },
-    "mac": { "target": ["dmg", "zip"], "category": "public.app-category.social-networking", "hardenedRuntime": true, "entitlements": "entitlements.mac.plist", "entitlementsInherit": "entitlements.mac.plist", "extendInfo": { "NSCameraUsageDescription": "Share your camera when you choose to join a call or record a clip.", "NSMicrophoneUsageDescription": "Share your microphone when you choose to join a call or record a clip." } },
-    "win": { "target": ["nsis"] },
-    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true }
+    "directories": {
+      "output": "dist"
+    },
+    "appImage": {
+      "executableArgs": []
+    },
+    "linux": {
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "category": "Network",
+      "maintainer": "Kris Ledel",
+      "desktop": {
+        "entry": {
+          "StartupWMClass": "freecollab"
+        }
+      }
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.social-networking",
+      "hardenedRuntime": true,
+      "entitlements": "entitlements.mac.plist",
+      "entitlementsInherit": "entitlements.mac.plist",
+      "extendInfo": {
+        "NSCameraUsageDescription": "Share your camera when you choose to join a call or record a clip.",
+        "NSMicrophoneUsageDescription": "Share your microphone when you choose to join a call or record a clip."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
   }
 }

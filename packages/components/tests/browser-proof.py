@@ -102,7 +102,7 @@ with Session(engine) as session:
 uvicorn.run(app,host='127.0.0.1',port=''' + str(api_port) + ''',lifespan='off',proxy_headers=False,access_log=False)
 ''')
             stream = (private / 'api.log').open('w'); logs.append(stream)
-            python = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
+            python = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
             processes.append(subprocess.Popen([python, str(launcher)], cwd=ROOT / 'backend', env=environment, stdout=stream, stderr=stream, start_new_session=True)); ready(api + '/ready', processes)
             tokens = json.loads((private / 'tokens.json').read_text())
             class Host(SimpleHTTPRequestHandler):

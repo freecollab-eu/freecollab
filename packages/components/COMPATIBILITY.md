@@ -1,6 +1,6 @@
 # SDK compatibility contract
 
-`@freecollab/components` **0.12.x** targets FreeCollab **0.12.x** servers and the
+`@freecollab/components` **0.13.x** targets FreeCollab **0.13.x** servers and the
 matching trusted embedded client. It is a pre-1.0 API distributed under the npm
 `next` tag. Install an exact version or reviewed tarball during evaluation.
 
@@ -47,3 +47,15 @@ matching trusted embedded client. It is a pre-1.0 API distributed under the npm
 digest. `release-manifest.json` and `SHA256SUMS` accompany the packed artifact.
 Checksums identify reviewed bytes; they do not replace a trusted download origin,
 npm provenance, provider acceptance or an independent security review.
+
+## Upgrading from 0.12
+
+Upgrade the API and trusted client together with the SDK. Existing public native
+module signatures and embedding lifecycle remain unchanged. The trusted workspace
+adds encrypted shared work across explicitly connected installations. Reviewed
+external calendar delivery and public subscription management require their own
+current native administrative authority; embedding does not grant that authority.
+The server capability `native_background_calls` now returns a configuration object
+with explicit transport, answer and audio-encryption boundaries. Native mobile
+calling, PushKit and background audio belong to the signed native app contract,
+rather than an embedded browser frame.

@@ -1,6 +1,7 @@
 node_modules
 dist
 dist-widget
+dist-website
 .env*
 tests
 *.log

@@ -391,6 +391,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     service.erase_pilot_feedback_for_account(session, actor.id)
     from ..services.slack_import import close_account_resources as close_slack_imports
     close_slack_imports(session, actor.id)
+    from ..services.calendar_delivery import erase_for_account as erase_calendar_deliveries
+    erase_calendar_deliveries(session, actor.id)
     # Meeting device grants hold verified restriction snapshots independently
     # of JWT/native/embed session sidecars; erase them before session cleanup.
     _delete_rows(session, "meetingparticipantauthority", "user_id", [actor.id])
@@ -399,6 +401,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     subscription_ids = service._records(session, subscriptions.name, subscriptions.c.user_id == actor.id) if subscriptions is not None else []
     _delete_rows(session, "pushdelivery", "subscription_id", service._ids(subscription_ids))
     _delete_rows(session, "pushsubscription", "user_id", [actor.id])
+    from ..services.native_calls import revoke_devices as revoke_native_calls
+    revoke_native_calls(session, user_id=actor.id)
     native_devices = service._table("nativepushdevice")
     native_device_rows = service._records(session, native_devices.name, native_devices.c.user_id == actor.id) if native_devices is not None else []
     _delete_rows(session, "nativepushdelivery", "device_id", service._ids(native_device_rows))

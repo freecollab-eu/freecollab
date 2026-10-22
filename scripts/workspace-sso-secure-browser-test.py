@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BACKEND_PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').exists() else sys.executable)
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--app-base', default='http://127.0.0.1:3000')
-parser.add_argument('--chromium', default=shutil.which('chromium'))
+parser.add_argument('--chromium', default=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'))
 args = parser.parse_args()
 
 

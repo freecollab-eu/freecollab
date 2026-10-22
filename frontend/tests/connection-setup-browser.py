@@ -555,7 +555,7 @@ def main():
                 SYNC_ENABLED='true',CLOUD_FILES_ENABLED='true',EXTERNAL_MEETINGS_ENABLED='true',COPILOT_ENABLED='true',PUSH_ENABLED='false',PYTHONPATH=str(ROOT/'backend'),CONNECTION_PROOF_PRIVATE=str(private))
             environment['NO_PROXY']=','.join(filter(None,[environment.get('NO_PROXY',''),'127.0.0.1','localhost','::1']))
             controls(private)
-            python=os.getenv('BACKEND_PYTHON') or str(ROOT/'backend/.venv/bin/python')
+            python=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
             launcher=private_api_launcher(private,api_port)
             web,vite=frontend_snapshot(private,base,app_port)
             frozen={'frontend_src':source_hash(web/'src'),'backend_app':source_hash(ROOT/'backend/app','*.py')}

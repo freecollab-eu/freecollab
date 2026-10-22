@@ -22,7 +22,8 @@ from playwright.sync_api import expect, sync_playwright
 
 
 BASE = os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
-MAIL = Path(os.getenv('ACCOUNT_MAIL_PATH', '/workspace/.freecollab/product-mail'))
+PROOF_DIR = Path(os.getenv('FREECOLLAB_PROOF_DIR', str(Path(__file__).resolve().parents[2].parent / '.freecollab')))
+MAIL = Path(os.getenv('ACCOUNT_MAIL_PATH', str(PROOF_DIR / 'product-mail')))
 PASSWORD = 'Account-browser-test!2026'
 RUN = uuid.uuid4().hex[:12]
 
@@ -186,7 +187,7 @@ with sync_playwright() as p:
         mobile_account.get_by_role('button', name='Security', exact=True).click()
         expect(mobile_account.get_by_text('Enabled', exact=True)).to_be_visible()
         assert mfa.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Mobile security overflow'
-        mfa.screenshot(path='/workspace/.freecollab/product-account-mobile.png')
+        mfa.screenshot(path=str(PROOF_DIR / 'product-account-mobile.png'))
         mobile_account.get_by_role('button', name='Close account settings', exact=True).click()
         mfa_context.close()
 

@@ -37,7 +37,7 @@ def main():
                 MAIL_DELIVERY_MODE='disabled', PUBLIC_APP_URL=app, CORS_ORIGINS=json.dumps([app]), OIDC_ENABLED='false', WEBHOOKS_ENABLED='false', OTRUST_ENABLED='false',
                 SYNC_ENABLED='true', CLOUD_FILES_ENABLED='true', PYTHONPATH=str(ROOT / 'backend'))
             env['NO_PROXY'] = ','.join(filter(None, [env.get('NO_PROXY', ''), '127.0.0.1', 'localhost', '::1']))
-            python = str(ROOT / 'backend/.venv/bin/python')
+            python = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
             launcher = private / 'api.py'
             launcher.write_text('''import json
 from pathlib import Path

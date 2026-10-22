@@ -15,6 +15,7 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle state) {
         registerPlugin(FreeCollabNativePlugin.class);
         registerPlugin(FreeCollabPushPlugin.class);
+        registerPlugin(FreeCollabCallingPlugin.class);
         super.onCreate(state);
     }
     @Override

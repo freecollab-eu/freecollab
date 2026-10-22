@@ -1,0 +1,26 @@
+import type { Catalog } from './core';
+const catalog: Catalog = {
+  'Native audio calls': 'Mobila ljudsamtal',
+  'Answer with the phone controls and keep audio connected in the background. Answering is your consent to join; ringing never starts your microphone.': 'Svara med telefonens samtalskontroller och behåll ljudet i bakgrunden. När du svarar godkänner du anslutningen; ringsignalen startar aldrig mikrofonen.',
+  'Native audio uses your operator’s LiveKit service. Audio is encrypted to that server; the operator can access it. Matrix message encryption is unchanged.': 'Mobilens samtalsljud använder driftansvarigs LiveKit-tjänst. Ljudet krypteras till servern; driftansvarig kan komma åt det. Matrix-krypteringen av meddelanden påverkas inte.',
+  'Open the connected Android or iOS app to use native calling.': 'Öppna den anslutna Android- eller iOS-appen för att använda mobilsamtal.',
+  'The operator must enable native calling and configure their LiveKit, Apple or Firebase services first.': 'Driftansvarig behöver först aktivera mobilsamtal och konfigurera sina LiveKit-, Apple- eller Firebase-tjänster.',
+  'Reconnect native calling': 'Återanslut mobilsamtal', 'Enable native calling': 'Aktivera mobilsamtal', 'Disable native calling': 'Stäng av mobilsamtal',
+  'Encrypted channels require a separate audio transport acknowledgement on each device. A changed encrypted room requires review again.': 'Krypterade kanaler kräver ett separat godkännande av ljudöverföringen på varje enhet. Ett ändrat krypterat rum kräver ett nytt godkännande.',
+  'I understand that native audio in this channel is accessible to the operator’s LiveKit server.': 'Jag förstår att mobilens samtalsljud i den här kanalen är tillgängligt för driftansvarigs LiveKit-server.',
+  'Native audio transport acknowledged for this channel and device.': 'Ljudöverföringen har godkänts för den här kanalen och enheten.',
+  'Allow native audio for this channel': 'Tillåt mobilsamtal i den här kanalen',
+  'Native calling could not be updated.': 'Mobilsamtal kunde inte uppdateras.',
+  'Use the connected mobile app to enable native calling.': 'Använd den anslutna mobilappen för att aktivera mobilsamtal.',
+  'Your sign-in changed. Enable native calling again.': 'Din inloggning ändrades. Aktivera mobilsamtal igen.',
+  'Enable and confirm incoming call alerts on this device first.': 'Aktivera och bekräfta samtalsnotiser på den här enheten först.',
+  'Enable native calling on this device first.': 'Aktivera mobilsamtal på den här enheten först.',
+  'Connecting native audio…': 'Ansluter samtalsljud…', 'Native audio call active': 'Mobilt ljudsamtal pågår',
+  'Native call controls are unavailable.': 'Samtalskontrollerna är inte tillgängliga.',
+  'Answer call': 'Svara på samtalet',
+  'Mute': 'Stäng av mikrofonen', 'Unmute': 'Slå på mikrofonen',
+  'Call on hold': 'Samtal parkerat', 'End call': 'Avsluta samtal',
+  'Native call could not be started. Check device setup and channel audio consent.': 'Mobilsamtalet kunde inte startas. Kontrollera enhetens inställningar och kanalens ljudgodkännande.',
+  'Join with phone audio': 'Anslut med telefonens ljud',
+};
+export default catalog;

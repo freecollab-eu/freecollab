@@ -3,19 +3,25 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+const transactionRetry = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/secure/transaction-retry.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: transactionRetry });
 
 function fixture({ joined = false, allowed = true, status = 'active', federated = false, unexpected = false } = {}) {
   const calls = [], callbacks = new Map();
-  let invited = false;
+  let invited = false, onTransaction = () => {}, onReceipt = () => {}, encryptedFetch;
   const room = { getMyMembership: () => joined ? 'join' : 'invite', currentState: { setStateEvents() {} }, getLiveTimeline: () => ({ getEvents: () => [] }),
+    getEventForTxnId: () => undefined,
     getJoinedMembers: () => [{ userId: '@fc_partner:private.test' }, ...(unexpected ? [{ userId: '@fc_unapproved:remote.test' }] : [])] };
   const crypto = { globalBlacklistUnverifiedDevices: false, forceDiscardSession: async () => calls.push('discard') };
   const client = {
+    stopClient() {},
     on(event, callback) { callbacks.set(event, [...(callbacks.get(event) || []), callback]); },
     initRustCrypto: async () => {}, getCrypto: () => crypto,
     startClient: async () => { for (const callback of callbacks.get('sync') || []) callback('PREPARED'); },
     getRoom: () => joined ? room : null,
     getUserId: () => '@fc_partner:private.test',
+    makeTxnId: () => { onTransaction(); return 'fixture-transaction'; },
+    sendEvent: async () => { calls.push('encrypted-send'); onReceipt(); return { event_id: '$fixture' }; },
     isRoomEncrypted: () => true,
     roomState: async () => [],
     async joinRoom() { calls.push('join'); if (!invited) throw new Error('No current Matrix invitation'); joined = true; return room; },
@@ -24,11 +30,12 @@ function fixture({ joined = false, allowed = true, status = 'active', federated 
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const exports = {};
   const dependencies = {
-    'matrix-js-sdk': { createClient: () => client, ClientEvent: { Sync: 'sync' }, RoomEvent: { Timeline: 'timeline', Redaction: 'redaction' }, MatrixEventEvent: { Decrypted: 'decrypted' } },
+    'matrix-js-sdk': { createClient: options => { encryptedFetch = options.fetchFn; return client; }, ClientEvent: { Sync: 'sync' }, RoomEvent: { Timeline: 'timeline', Redaction: 'redaction' }, MatrixEventEvent: { Decrypted: 'decrypted' } },
     'matrix-js-sdk/lib/crypto-api/CryptoEvent': { CryptoEvent: { KeyBackupSessionsRemaining: 'backup' } },
     'matrix-js-sdk/lib/crypto-api/recovery-key': {},
     './device-store': { storageKeyFor: async () => new Uint8Array(32), loadPendingNotices: async () => [] },
     '../api': { APIError: class extends Error {} },
+    './transaction-retry': transactionRetry,
   };
   vm.runInNewContext(compiled, { exports, URL, Headers, Uint8Array, setTimeout, clearTimeout,
     location: { origin: 'https://trusted.example.test' },
@@ -48,7 +55,7 @@ function fixture({ joined = false, allowed = true, status = 'active', federated 
     },
   });
   exports.configureSecureMessaging({ baseUrl: '/api', getAccessToken: () => 'fixture-scoped-session', getUserId: () => 'partner' });
-  return { calls, open: writing => exports.secureMessaging.roomFor('shared', writing),
+  return { calls, stop: () => exports.secureMessaging.stop(), beforeSend: action => { onTransaction = action; }, beforeReceipt: action => { onReceipt = action; }, encryptedWire: () => encryptedFetch('https://trusted.example.test/api/secure/matrix/_matrix/client/v3/rooms/!room%3Aprivate.test/send/m.room.encrypted/fixture-transaction', { method: 'PUT' }), open: writing => exports.secureMessaging.roomFor('shared', writing),
     send: () => exports.secureMessaging.sendEvent('shared', 'eu.freecollab.channel.metadata', { name: 'Private title' }) };
 }
 
@@ -82,3 +89,11 @@ test('federated encryption rejects an unexpected joined device before distributi
   const f = fixture({ joined: true, federated: true, unexpected: true });
   await assert.rejects(f.send(), /Unexpected encrypted room occupants/);
 });
+
+test('logout clears per-client epoch state and delayed send cannot recreate it', async () => { const f=fixture({joined:true}); await f.open(true); f.beforeSend(()=>f.stop()); await assert.rejects(f.send(), /encryption session changed/); assert.equal(f.calls.includes('encrypted-send'),false); assert.doesNotThrow(()=>f.stop()); });
+
+test('a stopped client cannot write encrypted wire events after logout', async () => { const f=fixture({joined:true}); await f.open(true); f.stop(); assert.throws(()=>f.encryptedWire(), /encryption session changed/); });
+
+test('first encrypted send initializes its session without a false generation rejection', async () => { const f=fixture({joined:true}); assert.equal((await f.send()).event_id,'$fixture'); assert.equal(f.calls.includes('encrypted-send'),true); });
+
+test('logout before receipt resolution prevents returning stale successful send results', async () => { const f=fixture({joined:true}); f.beforeReceipt(()=>f.stop()); await assert.rejects(f.send(), /encryption session changed/); });

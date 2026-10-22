@@ -10,11 +10,13 @@ import secrets
 import shutil
 import sqlite3
 import subprocess
+import sys
 import tempfile
 from urllib.parse import urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
+PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
 spec = importlib.util.spec_from_file_location('connection_setup_fixture', ROOT / 'frontend/tests/connection-setup-browser.py')
 f = importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
 REPORT = Path(os.getenv('CONNECTION_HEALTH_REPORT', str(ROOT.parent / '.freecollab/proof-results/open-release-health-browser.json')))
@@ -38,7 +40,7 @@ def main():
             launcher = f.private_api_launcher(private, api_port)
             web, vite = f.frontend_snapshot(private, base, web_port)
             frozen = {'frontend_src': f.source_hash(web/'src'), 'backend_app': f.source_hash(ROOT/'backend/app','*.py')}
-            for command, name, cwd in [([str(ROOT/'backend/.venv/bin/python'),str(launcher)],'api.log',ROOT/'backend'),(['node',str(vite)],'vite.log',web)]:
+            for command, name, cwd in [([PYTHON,str(launcher)],'api.log',ROOT/'backend'),(['node',str(vite)],'vite.log',web)]:
                 stream = (private/name).open('w'); streams.append(stream); processes.append(subprocess.Popen(command,cwd=cwd,env=environment,stdout=stream,stderr=stream,start_new_session=True))
             f.ready(base+'/ready',processes); f.ready(origin,processes)
             email = 'health-owner-'+secrets.token_hex(6)+'@example.com'

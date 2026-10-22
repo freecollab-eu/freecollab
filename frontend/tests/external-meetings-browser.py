@@ -51,7 +51,7 @@ def main():
             env = os.environ.copy()
             env.update(ENVIRONMENT='test', DATABASE_URL='sqlite:///' + str(private/'proof.db'), STORAGE_PATH=str(private/'files'), JWT_SECRET=secrets.token_urlsafe(48), ACCOUNT_SECURITY_KEY=base64.b64encode(secrets.token_bytes(32)).decode(), MESSAGE_ENCRYPTION_KEYS=json.dumps({'proof':base64.b64encode(secrets.token_bytes(32)).decode()}), MESSAGE_ENCRYPTION_ACTIVE_KEY_ID='proof', EXTERNAL_MEETINGS_ENABLED='true', MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', OIDC_ENABLED='false', WEBHOOKS_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', PUBLIC_APP_URL=app, CORS_ORIGINS=json.dumps([app]), PYTHONPATH=str(ROOT/'backend'), PROOF_DIRECTORY=str(private), PROOF_API_PORT=str(api_port))
             env['NO_PROXY'] = ','.join(filter(None, [env.get('NO_PROXY',''), 'localhost', '127.0.0.1', '::1']))
-            python = os.getenv('BACKEND_PYTHON') or str(ROOT/'backend/.venv/bin/python')
+            python = os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
             commands = [([python, str(ROOT/'backend/tests/external_meeting_browser_api.py')], 'api.log', ROOT/'backend'), (['node', str(frontend(private, api_base, app_port))], 'vite.log', ROOT/'frontend')]
             for command, name, cwd in commands:
                 stream = (private/name).open('w'); streams.append(stream)

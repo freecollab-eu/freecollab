@@ -1,0 +1,20 @@
+# Docker Compose >=2.24.4. Merge with the repository's docker-compose.yml.
+# Generate images.env from the reviewed release manifest using scripts/release.py.
+services:
+  frontend:
+    image: ${FREECOLLAB_FRONTEND_IMAGE:?Generate images.env from a verified release manifest}
+    build: !reset null
+    pull_policy: always
+  backend:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
+    build: !reset null
+    pull_policy: always
+  integration-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
+    pull_policy: always
+  mail-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
+    pull_policy: always
+  sfu-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
+    pull_policy: always

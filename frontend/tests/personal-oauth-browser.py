@@ -22,7 +22,7 @@ from urllib.parse import parse_qs, urlencode, urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT/'backend/.venv/bin/python')
+PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec = importlib.util.spec_from_file_location('oauth_browser_helpers', ROOT/'frontend/tests/connection-setup-browser.py')
 f = importlib.util.module_from_spec(spec); spec.loader.exec_module(f)
 REPORT = Path(os.getenv('PERSONAL_OAUTH_REPORT',str(ROOT.parent/'.freecollab/proof-results/personal-oauth-browser.json')))

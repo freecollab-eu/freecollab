@@ -6,6 +6,7 @@ Fixture accounts only. No auth secrets, private keys or recovery keys are logged
 """
 import argparse
 import json
+import os
 import secrets
 import shutil
 import time
@@ -16,7 +17,7 @@ from playwright.sync_api import sync_playwright
 parser=argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--api-base',default='http://127.0.0.1:8000')
 parser.add_argument('--app-base',default='http://127.0.0.1:3000')
-parser.add_argument('--chromium',default=shutil.which('chromium'))
+parser.add_argument('--chromium',default=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'))
 args=parser.parse_args()
 
 def request(path,data=None,auth=None):

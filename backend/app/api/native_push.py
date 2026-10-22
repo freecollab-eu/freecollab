@@ -19,6 +19,7 @@ from ..models.native_push import NativePushDevice, NativePushDelivery
 from ..models.notification import NotificationPreference
 from ..services.connect import channel_view_workspace_id
 from ..services import native_push as service
+from ..services import native_calls
 from ..services.account_security import account_limit, digest, seal_private
 from ..services.auth import decode_token_claims, get_current_user, security, token_digest
 from ..services.sso_scope import current_workspace_scope
@@ -98,6 +99,7 @@ def register(data: DeviceInput, user=Depends(get_current_user), credentials=Depe
             raise HTTPException(409, "This native registration belongs to another account. Remove it before switching notification ownership.")
         # A logged-out/expired owner cannot receive new pushes. The replacement
         # account must still prove possession through a fresh vendor delivery.
+        native_calls.revoke_devices(session, push_device_id=row.id)
         session.exec(delete(NativePushDelivery).where(NativePushDelivery.device_id == row.id))
         session.delete(row); session.flush(); row = None
     if (row and row.active and row.confirmed_at and row.calls_enabled == data.calls_enabled
@@ -110,6 +112,7 @@ def register(data: DeviceInput, user=Depends(get_current_user), credentials=Depe
             raise HTTPException(409, "Remove an old native notification device first")
         row = NativePushDevice(user_id=user.id, platform=data.platform, token_hash=capability_hash,
                                encrypted_token="", encrypted_claims="", auth_token_hash=token_hash)
+    native_calls.revoke_devices(session, push_device_id=row.id)
     # Pending/re-registration immediately invalidates deliveries for the prior
     # sign-in. Old references are never rebound to a replacement token/account.
     session.exec(delete(NativePushDelivery).where(NativePushDelivery.device_id == row.id))
@@ -167,6 +170,7 @@ def confirm(device_id: str, data: ConfirmInput, user=Depends(get_current_user), 
     prior = session.exec(select(NativePushDevice).where(NativePushDevice.auth_token_hash == row.auth_token_hash,
         NativePushDevice.platform == row.platform, NativePushDevice.id != row.id)).all()
     for old in prior:
+        native_calls.revoke_devices(session, push_device_id=old.id)
         session.exec(delete(NativePushDelivery).where(NativePushDelivery.device_id == old.id)); session.delete(old)
     session.add(preference); session.add(row); session.commit()
     return details(row, token_digest(credentials.credentials))
@@ -179,6 +183,7 @@ def remove(device_id: str, user=Depends(get_current_user), credentials=Depends(s
     if (not row or row.user_id != user.id or current_workspace_scope(session) is not None
             and not hmac.compare_digest(row.auth_token_hash, token_digest(credentials.credentials))):
         raise HTTPException(404, "Native notification device not found")
+    native_calls.revoke_devices(session, push_device_id=row.id)
     session.exec(delete(NativePushDelivery).where(NativePushDelivery.device_id == row.id))
     session.delete(row); session.commit()
 
@@ -195,3 +200,7 @@ def resolve(delivery_id: str, user=Depends(get_current_user), credentials=Depend
     workspace_id = channel_view_workspace_id(session, row.channel_id, user.id)
     return {"type": row.kind, "channel_id": row.channel_id, "workspace_id": workspace_id,
             "meeting_id": row.meeting_id, "transport": row.transport}
+
+
+from .native_calls import router as calling_router
+router.include_router(calling_router)

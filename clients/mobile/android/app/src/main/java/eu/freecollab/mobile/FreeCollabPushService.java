@@ -47,6 +47,10 @@ public class FreeCollabPushService extends FirebaseMessagingService {
     private static boolean valid(String value, int length) { return value != null && value.matches("[A-Za-z0-9_-]{" + length + "}"); }
     @Override public void onMessageReceived(RemoteMessage message) {
         Map<String, String> data = message.getData();
+        if ("native_call".equals(data.get("type"))) {
+            if (FreeCollabCallManager.incoming(this,data.getOrDefault("id",""),data.getOrDefault("device_id",""))) return;
+            data = new java.util.HashMap<>(data); data.put("type","incoming_call"); data.remove("device_id");
+        }
         if (!store(this, data)) return;
         FreeCollabPushPlugin.channels(this);
         String key = data.containsKey("id") ? data.get("id") : data.get("device_id");

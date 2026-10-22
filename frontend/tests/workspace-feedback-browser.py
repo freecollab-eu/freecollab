@@ -76,7 +76,7 @@ async def proof_controls(request,call_next):
 import uvicorn
 uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,access_log=False)
 ''')
-            python=str(ROOT/'backend/.venv/bin/python')
+            python=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
             for command,name,cwd in [([python,str(launcher)],'api.log',ROOT/'backend'),(['node',str(frontend(private,base,app_port))],'vite.log',ROOT/'frontend')]:
                 stream=(private/name).open('w');streams.append(stream);processes.append(subprocess.Popen(command,cwd=cwd,env=env,stdout=stream,stderr=stream,start_new_session=True))
             helpers.ready(base+'/ready',processes);helpers.ready(app,processes)

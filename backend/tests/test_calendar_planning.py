@@ -157,14 +157,15 @@ def test_secure_availability_never_reads_native_plaintext_and_invites_accept_opa
         assert session.exec(select(IntegrationContentRevision)).one().encrypted_payload is None
 
 
-def test_cloud_sync_cannot_silently_flatten_a_local_series():
+def test_cloud_sync_maps_finite_series_and_never_flattens_unsupported_rules():
     from app.services import remote_providers, remote_dav
     from app.services.remote_transport import ProviderError
     fields = {**EVENT, "recurrence": {"frequency": "daily", "count": 3}}
     for provider in ("google", "microsoft"):
-        with pytest.raises(ProviderError) as error:
-            remote_providers._calendar_write(fields, provider)
-        assert error.value.code == "unsupported_recurrence"
+        mapped = remote_providers._calendar_write(fields, provider)
+        assert mapped['recurrence']
+        with pytest.raises((ProviderError, ValueError)):
+            remote_providers._calendar_write({**fields, 'recurrence': {'frequency': 'yearly', 'count': 3}}, provider)
     with pytest.raises(ProviderError) as error:
         remote_dav.serialize_calendar(fields)
     assert error.value.code == "unsupported_recurrence"

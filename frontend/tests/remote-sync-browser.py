@@ -284,7 +284,7 @@ def main():
                 MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', PUBLIC_APP_URL=app, CORS_ORIGINS=json.dumps([app]),
                 OIDC_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='true', PYTHONPATH=str(ROOT / 'backend'))
             environment['NO_PROXY'] = ','.join(filter(None, [environment.get('NO_PROXY', ''), 'localhost', '127.0.0.1', '::1']))
-            python = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
+            python = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
             service = launcher(private, fixture, cert, api_port)
             for command, filename, cwd in [([python, str(service)], 'api.log', ROOT / 'backend'), (['node', str(vite_launcher(private, base, app_port))], 'vite.log', ROOT / 'frontend')]:
                 stream = (private / filename).open('w'); streams.append(stream)

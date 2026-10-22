@@ -342,7 +342,8 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
     # Delete only known dependents; unknown future FK models fail closed below.
     allowed_dependents = {"reaction", "readreceipt", "messagechange", "threadsubscription", "fileversion", "fileuploadreceipt",
         "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
-        "shareddocumentcomment", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage"}
+        "shareddocumentcomment", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
+        "calendarproviderpublication", "calendarproviderjob", "nativecallsession", "nativecallconsent"}
     expanded = True
     while expanded:
         before = sum(map(len, plan.values()))
@@ -503,6 +504,7 @@ EXPORT_FIELDS = {
     "channel": "id name type created_at",
     "message": "id channel_id author_id content encrypted parent_id thread_count mentions edited_at deleted created_at",
     "slackimportmessage": "message_id import_id source_channel source_timestamp",
+    "slackimportdetail": "message_id encrypted_details",
     "file": "id channel_id uploader_id filename content_type size created_at",
     "filedocument": "id channel_id owner_id current_file_id version_count created_at",
     "fileversion": "file_id document_id number",
@@ -511,6 +513,9 @@ EXPORT_FIELDS = {
     "integrationcontent": "id channel_id kind created_by created_at",
     "integrationcontentrevision": "id item_id revision created_by created_at content_mode matrix_event_id encrypted_payload deleted",
     "calendarattendee": "item_id user_id invited_by invited_at response responded_at revision",
+    "calendarproviderpublication": "id workspace_id channel_id item_id connection_id user_id connection_revision revision state updated_at",
+    "calendarproviderjob": "id user_id channel_id item_id publication_id action event_revision publication_revision connection_revision status created_at finished_at failure_code",
+    "calendarsubscription": "id workspace_id channel_id user_id include_titles expires_at revoked_at created_at",
     "projectboard": "id channel_id created_by created_at updated_at revision archived",
     "taskcard": "id project_id channel_id created_by created_at updated_at revision archived",
     "projecttaskrevision": "id kind item_id revision created_by created_at content_mode matrix_event_id encrypted_payload archived",
@@ -556,14 +561,15 @@ def export_data(session, job, request):
     records = {"channel": [{"id": row.id, "name": None if row.id in secure_ids else row.name,
                 "type": row.type, "created_at": row.created_at, "content_mode": "matrix" if row.id in secure_ids else "server"} for row in channels]}
     parents = {}
-    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom"):
+    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
         rows = _channel_records(session, name, channel_ids)
         if name in {"message", "file", "filedocument", "appcard"}:
             # Matrix messages/media are not represented by native file bytes.
             rows = [row for row in rows if row["channel_id"] not in secure_ids]
         records[name] = rows
         parents[name] = {row["id"]: row["channel_id"] for row in rows if "id" in row}
-    for name, parent, field in (("fileversion", "filedocument", "document_id"), ("decisionrevision", "decision", "decision_id"),
+    for name, parent, field in (("slackimportmessage", "message", "message_id"), ("slackimportdetail", "message", "message_id"),
+        ("fileversion", "filedocument", "document_id"), ("decisionrevision", "decision", "decision_id"),
         ("integrationcontentrevision", "integrationcontent", "item_id"), ("calendarattendee", "integrationcontent", "item_id"), ("shareddocumentupdate", "shareddocument", "document_id"),
         ("shareddocumentsnapshot", "shareddocument", "document_id"), ("shareddocumentcomment", "shareddocument", "document_id"),
         ("workflowrevision", "workflowdefinition", "workflow_id"), ("workflowvote", "workflowrun", "run_id"), ("workflowactivity", "workflowrun", "run_id"),
@@ -586,10 +592,10 @@ def export_data(session, job, request):
             fields = EXPORT_FIELDS[name].split()
             value = {key: row[key] for key in fields if key in row}
             channel = row.get("channel_id")
-            for parent, field in (("decision", "decision_id"), ("integrationcontent", "item_id"), ("shareddocument", "document_id"), ("workflowdefinition", "workflow_id"), ("workflowrun", "run_id"), ("activityfeedpost", "post_id"), ("activityfeedcomment", "comment_id")):
+            for parent, field in (("message", "message_id"), ("decision", "decision_id"), ("integrationcontent", "item_id"), ("shareddocument", "document_id"), ("workflowdefinition", "workflow_id"), ("workflowrun", "run_id"), ("activityfeedpost", "post_id"), ("activityfeedcomment", "comment_id")):
                 if channel is None and field in row: channel = parents.get(parent, {}).get(row[field])
             if name == "projecttaskrevision": channel = task_channels.get(row["item_id"])
-            if row.get("encrypted_payload"):
+            if "encrypted_payload" in fields and row.get("encrypted_payload"):
                 value.pop("encrypted_payload", None)
                 if channel not in secure_ids and row.get("content_mode", "server") == "server":
                     if name == "cloudfilelink":
@@ -630,6 +636,10 @@ def export_data(session, job, request):
                     pass
             if name == "message":
                 value["content"] = decrypt_message(row["content"], channel) if row.get("encrypted") else row["content"]
+            if name == "slackimportdetail":
+                value.pop("encrypted_details", None)
+                if channel not in secure_ids and row.get("encrypted_details"):
+                    value["details"] = json.loads(decrypt_message(row["encrypted_details"], channel))
             if name == "appcard":
                 value["card"] = json.loads(unseal_private(row["encrypted_card"], "app-card", row["id"]))
             if name == "filecomment" and channel not in secure_ids:

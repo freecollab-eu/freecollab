@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import re
 import secrets
+import shutil
 import sqlite3
 import struct
 import subprocess
@@ -22,6 +23,7 @@ from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
+PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
 spec = importlib.util.spec_from_file_location('customer_sso_fixture', Path(__file__).with_name('customer-sso-browser.py'))
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
@@ -43,7 +45,7 @@ def main():
                 MESSAGE_ENCRYPTION_ACTIVE_KEY_ID='launch-proof', MESSAGE_ENCRYPTION_KEY_FILE=str(private / 'message-keys.json'),
                 PUBLIC_APP_URL=app_base, CORS_ORIGINS=json.dumps([app_base]), MATRIX_ENABLED='false', OIDC_ENABLED='false',
                 OTRUST_ENABLED='false', MAIL_DELIVERY_MODE='disabled', PYTHONPATH=str(ROOT / 'backend'))
-            for command, filename, cwd in [([str(ROOT / 'backend/.venv/bin/python'), str(p.create_launcher(private, [], api_port))], 'api.log', ROOT / 'backend'),
+            for command, filename, cwd in [([PYTHON, str(p.create_launcher(private, [], api_port))], 'api.log', ROOT / 'backend'),
                 (['node', str(p.create_vite(private, api_base, app_port))], 'vite.log', ROOT / 'frontend')]:
                 stream = (private / filename).open('w'); streams.append(stream)
                 processes.append(subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream, stderr=stream, start_new_session=True))
@@ -57,7 +59,7 @@ def main():
             logo.write_bytes(b'\x89PNG\r\n\x1a\n' + png_chunk(b'IHDR', struct.pack('!2I5B', 100, 100, 8, 2, 0, 0, 0))
                              + png_chunk(b'IDAT', zlib.compress((b'\x00' + bytes.fromhex('36594c') * 100) * 100)) + png_chunk(b'IEND', b''))
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or '/usr/bin/chromium', headless=True, args=['--no-sandbox'])
+                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'), headless=True, args=['--no-sandbox'])
                 context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce', permissions=['clipboard-read', 'clipboard-write'])
                 page = context.new_page(); page.set_default_timeout(30000)
                 page_errors = []; page.on('pageerror', lambda error: page_errors.append(type(error).__name__))

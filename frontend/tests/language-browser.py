@@ -23,6 +23,7 @@ from urllib.request import Request, urlopen
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
+PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
 REPORT = Path(os.getenv('LANGUAGE_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/language-browser.json')))
 
 
@@ -130,7 +131,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
             (web/'entry.tsx').write_text(entry)
             dependencies=json.loads((ROOT/'frontend/package.json').read_text())['dependencies']; aliases={name:str(ROOT/'frontend/node_modules'/name)for name in dependencies}
             vite=private/'vite.mjs';vite.write_text('import{createServer}from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';import react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';const server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],resolve:{alias:'+json.dumps(aliases)+'},cacheDir:'+json.dumps(str(private/'vite-cache'))+',server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(private))+','+json.dumps(str(ROOT/'frontend'))+']},proxy:{"/api":{target:'+json.dumps(base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")},"/socket.io":{target:'+json.dumps(base)+',ws:true}}}});await server.listen();')
-            for command,name,cwd in [([str(ROOT/'backend/.venv/bin/python'),str(launcher)],'api.log',ROOT/'backend'),(['node',str(vite)],'vite.log',ROOT/'frontend')]:
+            for command,name,cwd in [([PYTHON,str(launcher)],'api.log',ROOT/'backend'),(['node',str(vite)],'vite.log',ROOT/'frontend')]:
                 stream=(private/name).open('w');logs.append(stream);processes.append(subprocess.Popen(command,cwd=cwd,env=environment,stdout=stream,stderr=stream,start_new_session=True))
             ready(base+'/ready',processes);ready(origin,processes);sessions=json.loads((private/'sessions.json').read_text())
             with sync_playwright()as playwright:

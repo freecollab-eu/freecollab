@@ -13,10 +13,12 @@ import shutil
 import sqlite3
 import ssl
 import subprocess
+import sys
 import tempfile
 import threading
 from playwright.sync_api import expect,sync_playwright
 ROOT=Path(__file__).resolve().parents[2]
+PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec=importlib.util.spec_from_file_location('copilot_proof_helpers',Path(__file__).with_name('remote-sync-browser.py'))
 helpers=importlib.util.module_from_spec(spec);spec.loader.exec_module(helpers)
 from tests.oidc_mock import tls_fixture
@@ -65,7 +67,7 @@ copilot.transport.public_addresses=lambda host,**kw:['127.0.0.1'] if host=='loca
 copilot.transport._proxy=lambda host,port:None if host=='localhost' else proxy(host,port)
 uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,access_log=False)
 ''')
-            for command,filename,cwd in [([str(ROOT/'backend/.venv/bin/python'),str(launcher)],'api.log',ROOT/'backend'),(['node',str(helpers.vite_launcher(private,base,app_port))],'vite.log',ROOT/'frontend')]:
+            for command,filename,cwd in [([PYTHON,str(launcher)],'api.log',ROOT/'backend'),(['node',str(helpers.vite_launcher(private,base,app_port))],'vite.log',ROOT/'frontend')]:
                 stream=(private/filename).open('w');streams.append(stream);processes.append(subprocess.Popen(command,cwd=cwd,env=environment,stdout=stream,stderr=stream,start_new_session=True))
             helpers.ready(base+'/ready',processes);helpers.ready(app+'/',processes)
             email='copilot-'+secrets.token_hex(5)+'@example.com'

@@ -128,7 +128,7 @@ def main():
                 MESSAGE_ENCRYPTION_ACTIVE_KEY_ID='proof',MESSAGE_ENCRYPTION_KEY_FILE=str(private/'message-keys.json'),MATRIX_ENABLED='false',PUBLIC_APP_URL=app,CORS_ORIGINS=json.dumps([app]),MAIL_DELIVERY_MODE='disabled',OIDC_ENABLED='false',OTRUST_ENABLED='false',SYNC_ENABLED='false',CLOUD_FILES_ENABLED='true',PYTHONPATH=str(ROOT/'backend'))
             environment['NO_PROXY']=','.join(filter(None,[environment.get('NO_PROXY',''),'localhost','127.0.0.1','::1']))
             if options.secure:environment.update(documents.retained_matrix_environment())
-            python=os.getenv('BACKEND_PYTHON') or str(ROOT/'backend/.venv/bin/python')
+            python=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
             source=private/'api.py';source.write_text('import uvicorn\nfrom app.main import socket_app\nuvicorn.run(socket_app,host="127.0.0.1",port='+str(api_port)+',proxy_headers=False,access_log=False)\n')
             frontend=private/'frontend';shutil.copytree(ROOT/'frontend',frontend,ignore=shutil.ignore_patterns('node_modules','dist','.git','__pycache__'))
             (frontend/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)

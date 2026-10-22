@@ -95,6 +95,7 @@ export default {
   'Get the source': 'Hämta källkoden',
   'MIT licence': 'MIT-licens',
   'v0.9 · Open source': 'v0.9 · Öppen källkod',
+  'Open source · MIT': 'Öppen källkod · MIT',
   'Friday’s review is on. Let’s keep the ideas and decisions here.': 'Fredagens genomgång blir av. Vi samlar idéerna och besluten här.',
   'The first draft is ready. A few notes for us to work through together.': 'Första utkastet är klart. Några anteckningar att gå igenom tillsammans.',
   'For the next draft: clearer type and a little more breathing room.': 'Till nästa utkast: tydligare typografi och lite mer luft.',

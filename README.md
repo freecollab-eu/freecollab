@@ -1,4 +1,4 @@
-> **FreeCollab 0.12:** a personal working day, recurring calendar planning, reviewed Slack imports, personal Google/Microsoft OAuth, an encrypted offline library, native push adapters, versioned community integrations and optional channels across installations. [What changed](docs/PRODUCT_012.md) · [Choose infrastructure](docs/INFRASTRUCTURE.md) · [Validation](docs/VALIDATION.md).
+> **FreeCollab 0.13:** native mobile calling, reviewed Google/Microsoft calendar delivery and subscription links, encrypted shared work across installations, resumable Slack migration and versioned release pipelines. [What changed](docs/PRODUCT_013.md) · [Choose infrastructure](docs/INFRASTRUCTURE.md) · [Validation](docs/VALIDATION.md).
 
 # FreeCollab
 
@@ -70,13 +70,19 @@ In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter u
 
 Advanced posts/flows, comments and the server AI-demo routes are **disabled by default**. `ENABLE_EXPERIMENTAL_FEATURES=true` opts into the advanced API routes; `ENABLE_DEMO_AI=true` separately opts into the AI-demo API. These are not dependencies of ordinary chat and need separate validation before use with real content.
 
-The typed **`@freecollab/components@0.12.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
+The typed **`@freecollab/components@0.13.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
 
 The older widget polls the latest 50 messages every three seconds and does not reconcile edits/deletions or recover larger gaps. [Its standalone integration example](examples/widget/README.md) remains available for this limited client.
 
 Open **Integrations** for document links, calendar/ICS, customer SSO, directory management, cloud synchronization and authorized webhooks. Each workspace configures **its own** OIDC provider in **Sign-in**, using the customer's application and encrypted client secret. **People → Onboarding** keeps the default personal-link workflow or opts into separate managed accounts through SCIM, one-use invitations or explicit first-sign-in creation. **People → Directory & groups** supplies the owner-issued SCIM token and explicit group access rules. Equal email addresses never merge personal accounts or identities from different customers.
 
-**Sync** connects a selected native channel's supported files or standalone calendar events to Google Drive/Calendar, Microsoft OneDrive/SharePoint/Outlook, Nextcloud WebDAV/CalDAV or generic CalDAV. The customer owns the OAuth application/account or DAV app password. Native password/MFA confirmation and explicit consent grant existing and future selected content; conditional writes and conflict review protect competing edits. Sync is bounded to a selected depth-one folder/calendar and does not mirror provider permissions. Server background synchronization rejects end-to-end encrypted channels; their document links and explicit local calendar exchange remain available. [INTEGRATIONS.md](docs/INTEGRATIONS.md) and [sync limits](docs/DOCUMENTS_CALENDAR.md#cloud-synchronization) describe setup. Webhooks, OTRUST and background sync are disabled by default and require the integration worker.
+**Sync** connects a selected native channel's supported files or calendar events to Google Drive/Calendar, Microsoft OneDrive/SharePoint/Outlook, Nextcloud WebDAV/CalDAV or generic CalDAV. Google and Microsoft support bounded recurring series and supported exceptions; external invitations, personal RSVP and cancellation require a separately reviewed action. Explicit revocable calendar subscription links can disclose busy times or opted-in titles. The customer owns the OAuth application/account or DAV app password. Native password/MFA confirmation and explicit consent grant existing and future selected content; conditional writes and conflict review protect competing edits. Sync is bounded to a selected depth-one folder/calendar and does not mirror provider permissions. Server background synchronization rejects end-to-end encrypted channels; their document links and explicit local calendar exchange remain available. [INTEGRATIONS.md](docs/INTEGRATIONS.md), [calendar delivery](docs/CALENDAR_DELIVERY.md) and [sync limits](docs/DOCUMENTS_CALENDAR.md#cloud-synchronization) describe setup. Webhooks, OTRUST and background sync are disabled by default and require the integration worker.
+
+In an active cross-installation Connect channel, **Work → Shared work** adds encrypted tasks, finite calendar series and Yjs text documents. Verified participants reconstruct these on their own devices from encrypted Matrix history and opaque indexes. Native tools retain their local scope. Missing history or removed device keys can make a shared resource incomplete; [FEDERATED_WORK.md](docs/FEDERATED_WORK.md) describes conflict review, recovery and explicit bounds.
+
+[Native calling](docs/NATIVE_CALLING.md) adds iOS CallKit/PushKit and Android Telecom with LiveKit media. Customers configure their own push and LiveKit services. Admission requires the current signed-in source and channel access, and secure-channel participants explicitly acknowledge that this audio is readable by the SFU. Platform signing and physical-device acceptance remain customer release steps.
+
+[Distribution](docs/DISTRIBUTION.md) provides exact-version container/SDK pipelines, digest-pinned installation metadata, native signing workflows and a separate static website/demo image. A configured workflow is distinct from a published registry artifact or deployed website.
 
 Native installation administrators also have **Integrations → Operations**: private security configuration, operator MFA coverage, upload-storage headroom, stalled queue claims and recent authenticated security actions. The bounded activity log excludes request bodies, query strings, IP addresses, email and credentials; it is a server-observed history under the database administrator's control. Configuration checks do not verify public certificates, provider delivery or backup freshness. See [security operations](docs/SECURITY_OPERATIONS.md).
 
@@ -141,6 +147,7 @@ The Compose frontend also proxies `/api` and `/socket.io`, so its `VITE_API_URL`
 | `OIDC_ENABLED` / `OIDC_ISSUER_URL` | Legacy installation-wide OIDC option. Customer workspace SSO is configured in the app and works independently of these settings. |
 | `WEBHOOKS_ENABLED` | Signed metadata-only deliveries for explicitly granted channels; handled by the default integration worker. |
 | `SYNC_ENABLED` | Opt-in background file/calendar synchronization for selected native channels; default `false`, handled by the integration worker. |
+| `NATIVE_CALLS_ENABLED` | Opt-in platform calling; default `false`, requires configured native push and LiveKit services. |
 | `OTRUST_ENABLED` / `OTRUST_BASE_URL` | Explicit hash-only version timestamps; pending receipt and commitment checks are distinct from independently verified Bitcoin anchoring. |
 | `OPERATIONS_METRICS_TOKEN` | Optional independent read-only metrics credential; all other diagnostics require an installation admin. |
 | `SECURITY_AUDIT_RETENTION_DAYS` | Selected authenticated security activity age window; default 90 days, accepts 7–365. Existing backup copies have separate retention. |
@@ -162,6 +169,11 @@ Account access does not recover encrypted history. Personal accounts linked thro
 ```
 
 - [Product plan and release gates](docs/PRODUCT_PLAN.md)
+- [0.13 features and supported boundaries](docs/PRODUCT_013.md)
+- [Encrypted work across installations](docs/FEDERATED_WORK.md)
+- [External calendar delivery and subscription links](docs/CALENDAR_DELIVERY.md)
+- [Native mobile calls](docs/NATIVE_CALLING.md)
+- [Distribution, signing and static website](docs/DISTRIBUTION.md)
 - [0.12 features and supported boundaries](docs/PRODUCT_012.md)
 - [Personal working day](docs/MY_DAY.md)
 - [Slack archive import](docs/SLACK_IMPORT.md)

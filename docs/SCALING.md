@@ -95,6 +95,29 @@ subscriber fanout, repeated worker event loops and multi-device lease removal.
 Set `VALKEY_SERVER_BIN` to a TLS-enabled Valkey binary to run this integration
 suite. Private proof runs use temporary keys/storage and never pilot services.
 
+Native socket authorization runs as complete worker-thread SQL units, with a
+fresh scoped decision for each recipient. Message and notification writers end
+their read transactions before awaiting fanout. The bounded-pool regressions in
+`backend/tests/test_realtime_pool_contention.py` exercise real one-connection
+waits and message/edit/delete/offline/mention delivery; increasing the pool does
+not substitute for releasing a transaction or keeping SQL off the event loop.
+
+For a disposable installation, run the bounded functional load tool:
+
+```sh
+backend/.venv/bin/python scripts/load-smoke.py \
+  --base-url http://127.0.0.1:8000 --report /tmp/freecollab-load.json
+```
+
+It creates test accounts, a workspace and a file. Defaults are eight members,
+16 real WebSockets, 400 reads, 40 messages and 20 in-flight
+REST requests. The report includes latency percentiles, unique live fanout,
+committed history, exact file bytes, outsider denials and logout revocation.
+`--alternate-api` adds a second correctly configured replica; it does not
+configure shared storage or a broker. Remote test targets require an explicit
+disposable-installation flag. Remove the isolated installation after inspection.
+The tool excludes Matrix/media/provider traffic and does not establish capacity.
+
 `backend/tests/test_valkey_two_apis.py` independently starts two real API
 processes against an actual TLS Valkey instance. It verifies cross-process
 messages, mentions, typing, notifications and multi-device presence; current

@@ -18,8 +18,12 @@ env:
 jobs:
   # Backend tests
   backend-test:
-    name: Backend Tests
+    name: Backend Tests (shard ${{ matrix.shard }}/4)
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     
     services:
       postgres:
@@ -64,13 +68,21 @@ jobs:
           JWT_SECRET: test-secret-key-for-ci
           VALKEY_SERVER_BIN: /usr/bin/redis-server
         run: |
-          python -m pytest tests/ -v --cov=app --cov-report=xml
+          python ../scripts/test-ci-backend-tests.py
+          python ../scripts/ci-backend-tests.py --shard ${{ matrix.shard }} --shards 4 -- -v --cov=app --cov-report=xml:coverage-shard-${{ matrix.shard }}.xml
+
+      - name: Retain shard coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-coverage-shard-${{ matrix.shard }}
+          path: backend/coverage-shard-${{ matrix.shard }}.xml
+          retention-days: 7
 
       - name: Upload coverage
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v5
         with:
-          files: backend/coverage.xml
-          flags: backend
+          files: backend/coverage-shard-${{ matrix.shard }}.xml
+          flags: backend,coverage-shard-${{ matrix.shard }}
 
   # Frontend tests
   frontend-test:
@@ -100,9 +112,16 @@ jobs:
         run: |
           node --test tests/*.test.mjs
           npm run build:widget
+          npm run build:website
           npm ci --prefix ../packages/components
           npm test --prefix ../packages/components
           npm pack ../packages/components --dry-run
+
+      - name: Verify reverse proxy capability privacy
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y nginx
+          python3 frontend/tests/nginx-capability-logging.py --nginx /usr/sbin/nginx --report "$RUNNER_TEMP/nginx-capability-privacy.json"
 
   product-e2e:
     name: Product browser and PostgreSQL workflow
@@ -207,9 +226,11 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/native-client-browser.py
           BACKEND_PYTHON=python python frontend/tests/my-day-browser.py
           BACKEND_PYTHON=python python frontend/tests/calendar-planning-browser.py
+          BACKEND_PYTHON=python python frontend/tests/calendar-delivery-browser.py
           BACKEND_PYTHON=python python frontend/tests/import-library-browser.py
           BACKEND_PYTHON=python python frontend/tests/personal-oauth-browser.py
           BACKEND_PYTHON=python python frontend/tests/native-push-browser.py
+          BACKEND_PYTHON=python python frontend/tests/native-calling-browser.py
           BACKEND_PYTHON=python python frontend/tests/offline-library-browser.py
           python frontend/tests/enterprise-onboarding-browser.py
           python frontend/tests/remote-sync-browser.py
@@ -316,6 +337,10 @@ jobs:
           python packages/components/tests/connect-browser-proof.py --skip-build
       - name: Verify encrypted messages and files across independent installations
         run: BACKEND_PYTHON=python python frontend/tests/connect-federation-browser.py
+      - name: Verify shared calendar dates across browser time zones
+        run: python frontend/tests/federated-work-calendar-ui-browser.py
+      - name: Verify resumable device-encrypted Slack migration
+        run: BACKEND_PYTHON=python python frontend/tests/slack-migration-browser.py
       - name: Retain isolated homeserver diagnostics
         if: always()
         run: docker --host=unix:///var/run/docker.sock logs --timestamps freecollab-secure-ci > /tmp/freecollab-secure-synapse.log 2>&1 || true
@@ -362,3 +387,49 @@ jobs:
           tags: freecollab-frontend:latest
           cache-from: type=gha,scope=frontend
           cache-to: type=gha,scope=frontend,mode=max
+
+      - name: Build independent public website image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/website/Dockerfile
+          push: false
+          load: true
+          tags: freecollab-website:ci
+          cache-from: type=gha,scope=website
+          cache-to: type=gha,scope=website,mode=max
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Install website acceptance browser
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          PY
+
+      - name: Verify built public website and local demo
+        run: |
+          docker run -d --name freecollab-public-ci -p 127.0.0.1:18081:8080 freecollab-website:ci
+          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:18081/healthz
+          python frontend/tests/website-browser.py --base-url http://127.0.0.1:18081 --report "$RUNNER_TEMP/freecollab-website-proof.json"
+
+      - name: Remove isolated website container
+        if: always()
+        run: docker rm -f freecollab-public-ci || true
+
+      - name: Retain website acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: public-website-acceptance
+          path: ${{ runner.temp }}/freecollab-website-proof.*
+          if-no-files-found: ignore
+          retention-days: 7

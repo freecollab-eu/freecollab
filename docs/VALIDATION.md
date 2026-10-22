@@ -1,5 +1,46 @@
 # FreeCollab validation record
 
+## 0.13 mobile calls, external calendars and encrypted shared work — 2026-10-22
+
+[PRODUCT_013.md](PRODUCT_013.md) describes the supported features and boundaries.
+All fixtures used disposable accounts, databases and independently generated keys.
+The retained pilot, its independent keys and the original four services were
+preserved. Railway and the public website were not deployed.
+
+The counts below are executed checks with overlapping regression scopes; they
+must not be added as a unique complete-suite total. The repository's
+[GitHub Actions](https://github.com/freecollab-eu/freecollab/actions/workflows/ci.yml)
+records the status for each published source commit.
+
+| Area | Executed evidence |
+| --- | --- |
+| Backend execution and CI | **425 cases passed**, with no failures/skips, in one independently isolated shard of the current source. Six selector checks and four complete collection runs prove all **2,038 cases in 114 files** are assigned exactly once across four CI jobs; collection is separate from execution. The previous published 0.12 commit passed **1,914 backend cases** in GitHub CI. Unique coverage files and separate PostgreSQL services keep shard results independent. |
+| Client and SDK | **274 frontend Node cases** and **26 SDK cases** passed. TypeScript and main/trusted-embed, widget and independent website production builds passed. |
+| Native calling | **53 combined backend cases**, **11 actual App browser groups**, actual JVM guard/callback/stale-intent checks and **10 real Nginx/TLS gateway groups** passed. Android 0.13/build 1300 compiled with the actual LiveKit SDK and 18 native SDK libraries. The real iOS simulator project compiled successfully with Xcode 16.4 on GitHub; five platform-policy cases passed there. Windows and macOS unsigned desktop artifacts also built. These are not physical-device, customer-signing or live push-delivery acceptance results. |
+| Calendar delivery | **169 backend/provider/sync cases**, **19 Node cases** and **9 actual Chromium/worker/trusted-HTTPS groups** passed. They cover supported recurring Google/Graph series, moved/cancelled exceptions, deliberate invitations, personal provider RSVP, organizer cancellation, source loss before each wire request, partial-effect uncertainty, actual password/MFA recovery confirmation, Busy/title ICS privacy/revocation and Swedish at 320 px. No live customer tenant or recipient email-delivery certification is claimed. |
+| Slack migration | **44 backend cases**, parser/checkpoint/receipt Node regressions and **eight actual Rust/Chromium groups** passed. A genuinely dropped accepted response resumes with exactly two unique messages, one reply and the correct importer/peer thread count. Historical reactions/edits, 15 KiB chunked details, peer-decrypted attachment, encrypted IndexedDB checkpoint, literal Chat disclosure, Swedish at 320 px and removal/new-event denials passed. Fresh sign-ins and ambiguous Matrix devices cannot adopt an old reservation; known accepted receipts are preserved before ordinary pause. Cached plaintext is not a remote-erasure guarantee. |
+| Encrypted shared work | **41 backend cases**, **34 focused client/i18n cases** and **18 actual groups with two independent Synapse homeservers and Rust crypto** passed. These include both-side tasks/calendar/documents, concurrent Yjs, large encrypted fragments, competing task heads and explicit merge, malformed-history isolation, read-only incomplete ancestry, actual React/WorkHub/mobile navigation, opaque wire/SQL indexes and current participant/bilateral revocation. A later two-option date-presentation change passed three real React/Intl checks in America/Los_Angeles; all other crypto/protocol hashes remain identical. |
+| Realtime under contention | **270 focused cases** passed. Seven new real one-connection-pool regressions fail on pinned public 0.12 and pass with the fix. A disposable SQLite load ran **400 reads, 40 writes, 16 actual WebSockets and 640 unique live deliveries** at 20 in-flight REST requests. Exact committed history/file bytes, outsider 403 and post-logout REST 401/live-delivery denial passed. The measured 27.688 seconds and latency percentiles describe that fixture under concurrent test work, not production capacity. No pool enlargement or authorization cache was used. |
+| Distribution and static demo | Nine release-boundary checks, five-workflow actionlint, workflow shell/Python checks and actual Compose digest-pin merges passed. Both app Nginx configurations passed 20 protected raw capability-path variants, with negative controls reproducing the old log leak and unchanged HTTP statuses. **Six real Nginx/static-website browser groups** verify account/socket/embed/native/service-worker404 fences, CSP, local demo reload erasure, untouched account storage, no provider/API requests and English/Swedish at 390/320 px with bundled Manrope. This local website proof mounts the built artifact into actual Nginx; the CI job separately builds and tests the complete website Dockerfile. |
+| Separate review and dependencies | Separate internal checks passed **14 backend/owned-TLS cases**, **16 retry/bootstrap cases**, **two actual JVM checks** and **six shard checks**; these overlap feature results. Actual installed Matrix SDK state-machine checks use explicitly synthetic crypto/HTTP. Final source review covers original-session fences, per-request provider effects, ZIP preflight allocation, device/intent incarnations and encrypted retry epochs. Production npm audits reported zero advisories for frontend, SDK, desktop and mobile; Kotlin/Swift, container OS packages and independent security certification are outside those audits. |
+
+The canonical SDK artifact is `freecollab-components-0.13.0.tgz`, SHA-256
+`a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1`.
+It targets matching 0.13.x APIs and trusted clients. npm publication requires the
+maintainer's registry identity and is separate from building this exact archive.
+The final Android debug APK SHA-256 is
+`b967241827b1a8011304b1615f05236f537d5cc5af2b377563ee85a739e98c7e`.
+It contains no customer's Firebase configuration or release-signing identity.
+
+Reproduce targeted checks using the locked environments and the feature guides:
+[NATIVE_CALLING.md](NATIVE_CALLING.md), [CALENDAR_DELIVERY.md](CALENDAR_DELIVERY.md),
+[FEDERATED_WORK.md](FEDERATED_WORK.md), [SLACK_IMPORT.md](SLACK_IMPORT.md),
+[SCALING.md](SCALING.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
+Private synthetic reports under the environment's `.freecollab/proof-results/`
+are excluded from source publication. Signing/store identities, physical phones,
+live customer providers, public deployment, representative capacity testing and
+an external security audit remain distinct acceptance steps.
+
 ## 0.12 personal work, portable history and installation boundaries — 2026-10-21
 
 [PRODUCT_012.md](PRODUCT_012.md) describes the eight implemented areas and their limits.

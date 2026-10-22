@@ -16,6 +16,7 @@ import secrets
 import sqlite3
 import subprocess
 import sys
+import shutil
 import tempfile
 
 from playwright.sync_api import expect, sync_playwright
@@ -92,7 +93,7 @@ def main():
                 connection.execute("INSERT INTO securechannel(channel_id,matrix_room_id,created_by,status,created_at) VALUES(?,?,?,?,?)",(secure['id'],'!private:embed-admin.example',owner['user_id'],'active',datetime.utcnow().isoformat(' ')))
             apps_path = '/workspaces/' + workspace['id'] + '/embed/applications'
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or '/usr/bin/chromium',headless=True,args=['--no-sandbox'])
+                browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),headless=True,args=['--no-sandbox'])
                 context = browser.new_context(viewport={'width':1440,'height':1080},permissions=['clipboard-read','clipboard-write'],reduced_motion='reduce')
                 page = context.new_page(); page.set_default_timeout(30000); errors=[]; urls=[]
                 page.on('pageerror',lambda error:errors.append(type(error).__name__)); page.on('request',lambda request:urls.append(request.url))

@@ -17,9 +17,9 @@ channel to plaintext to make an integration work.
 | Provider | Configuration | Implemented behavior and limits |
 | --- | --- | --- |
 | Google Drive | Customer OAuth client and selected folder ID | Two-way ordinary file content and metadata. Direct children only. Google Docs, Sheets and Slides export as read-only PDFs; they are not converted back into editable Google documents. Other Google-native formats are refused. |
-| Google Calendar | Customer OAuth client and selected calendar ID | Two-way individual nonrecurring events, all-day dates, supported time zones and a single supported display reminder. Incremental sync tokens and cancelled-event tombstones are handled. Unsupported recurrence or reminder structures fail explicitly instead of being flattened. |
+| Google Calendar | Customer OAuth client and selected calendar ID | Two-way individual events and finite daily, weekly and monthly series with supported moves/cancellations, all-day dates, supported time zones and a single display reminder. Incremental instance changes are folded into their master. Attendee-bearing events are read-only in background sync; reviewed invitations/RSVP use the separate calendar delivery queue. Unsupported rules/reminders fail explicitly instead of being flattened. |
 | Microsoft OneDrive / SharePoint | Customer OAuth client, directory tenant UUID, drive ID and folder ID | Two-way files in the selected drive folder, including delta changes and deletions. SharePoint document libraries use their Graph drive IDs. Direct children only. A preauthorized download URL from Graph is fetched without forwarding the Graph bearer token. |
-| Microsoft Outlook Calendar | Customer OAuth client, directory tenant UUID and calendar ID | Two-way ordinary nonrecurring events through Graph. Times are requested in UTC. Meetings with attendees are read-only to avoid changing scheduling through the simpler channel editor. Recurrence and unsupported body representations are refused. |
+| Microsoft Outlook Calendar | Customer OAuth client, directory tenant UUID and calendar ID | Two-way individual events and supported finite numbered daily/weekly/absolute-monthly series through Graph. Instance pagination, expanded moved exceptions and opaque cancelled-occurrence identities are reconstructed with their original times. Times are requested in UTC while recurrence keeps its supported IANA zone. Attendee-bearing events remain read-only in background sync; reviewed scheduling uses the separate calendar delivery queue. Unsupported rules/body representations are refused. |
 | Nextcloud WebDAV | Exact public HTTPS folder URL, username and app password | Two-way direct child files, conditional writes and deletion tombstones. Subfolders require separate connections. Existing remote paths remain fixed; DAV MOVE/rename is not implemented. |
 | Nextcloud / other CalDAV | Exact public HTTPS calendar collection URL, username and app password | Two-way ordinary single-VEVENT resources, conditional writes, sync tokens where supported and full-scan fallback for expired/unsupported tokens. UTC, IANA zones, all-day dates and a single display reminder are supported. |
 
@@ -36,6 +36,63 @@ editing, provider permission management or recursive directory synchronization.
 Enter the provider's existing resource identifiers and collection URL. The native
 file MIME allowlist also applies to imported files; unsupported formats are not
 silently accepted.
+
+## Google and Microsoft calendar series and scheduling
+
+Calendar provider HTTP requests repeat the current source/revision/lease fence
+at every request boundary, including between a series master write and its
+instance writes. Reviewed delivery additionally checks the original live session
+before each request. A provider request already in flight cannot be recalled;
+later requests stop after a visible revocation and possible partial effects
+remain uncertain rather than automatically replayed.
+
+The supported rule subset matches the native calendar: daily, weekly on the
+starting weekday, or monthly on the starting day; interval 1–30; finite count
+1–366. Unsupported RRULE parts, unbounded/end-date rules, multiple weekdays,
+relative-month rules and unsupported zones fail explicitly. A single calendar
+snapshot has at most 1,000 master/instance records, 20 pages per collection,
+366 occurrences per series, 100 exceptions and a cumulative transport deadline.
+Per-occurrence attendee changes cannot be represented by the native fields and
+are refused, including response overrides that differ from the master roster.
+
+A recurring item carries a composite revision derived from the actual master
+and occurrence ETags, not merely the master ETag. Changing an exception therefore
+invalidates a previously reviewed version even if the provider leaves the master
+ETag unchanged. Master edits use its actual `If-Match`; exception edits use the
+reviewed occurrence's actual `If-Match`. An edit that simultaneously changes an
+existing master baseline and its exceptions must be split into separately
+reviewed actions. Multiple occurrence writes are not a vendor transaction;
+a failure after an earlier write remains an explicit partial/uncertain result.
+Graph cancellation restoration requires a new series because its documented
+API does not restore removed occurrences. Google restoration requires a usable
+current occurrence ETag; cancellation tombstones without one are not rewritten.
+
+Normal synchronization uses Google `sendUpdates=none` and refuses mutation or
+deletion of attendee-bearing events on either provider. External invitations,
+organizer cancellation and the delegated account's own RSVP require the separate
+reviewed delivery queue described in [CALENDAR_DELIVERY.md](CALENDAR_DELIVERY.md).
+Google RSVP patches only the one `self` attendee with `attendeesOmitted=true`;
+Graph RSVP calls `accept`, `tentativelyAccept` or `decline` with
+`sendResponse=true`. The account must be an attendee rather than the organizer.
+These actions never select another attendee's address as the replying identity.
+Provider response metadata alone updates the encrypted sync snapshot without
+appending an identical native content revision or resetting native RSVP state.
+
+New resources use a deterministic Google ID/private sync key or Graph
+`transactionId`. Recovery scans/reads only the selected calendar and never
+resends an invitation. Google incremental instance-only changes refetch and
+reconstruct their master. Graph continuation links must retain the exact
+selected calendar or instance collection path; a Graph-host URL to another
+calendar is rejected before forwarding credentials.
+
+The tests in `backend/tests/test_provider_calendar_013.py` use the actual
+production transport through an owned CONNECT proxy and trusted HTTPS server,
+checking public Host/SNI, independent recurrence expansion across DST,
+conditional conflicts, reconstruction, reviewed scheduling and read-only
+recovery. These are protocol fixtures, not live Google/Microsoft certification.
+Graph action requests include `If-Match`, but vendor documentation does not
+promise atomic conditional semantics for every action endpoint; real tenant
+acceptance and delivery remain operator validation tasks.
 
 ## Prepare the installation
 

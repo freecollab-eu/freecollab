@@ -1,0 +1,207 @@
+name: Versioned container release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Exact reviewed source version, without v
+        required: true
+        type: string
+      publish:
+        description: Publish reviewed version and commit tags to GHCR after successful CI
+        default: false
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: container-release-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  identity:
+    name: Validate exact source release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      version: ${{ steps.identity.outputs.version }}
+      commit: ${{ steps.identity.outputs.commit }}
+      epoch: ${{ steps.epoch.outputs.epoch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Check versions and clean source
+        id: identity
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: python scripts/release.py check --version "$RELEASE_VERSION" --require-clean --github-output "$GITHUB_OUTPUT"
+      - name: Check publication authority and actual completed CI
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          test "$GITHUB_REPOSITORY" = freecollab-eu/freecollab
+          case "$GITHUB_REF" in refs/heads/main|refs/tags/v"$RELEASE_VERSION") ;; *) exit 1;; esac
+          python scripts/release.py check --version "$RELEASE_VERSION" --require-clean --require-ci --repository "$GITHUB_REPOSITORY"
+      - name: Derive source timestamp
+        id: epoch
+        run: echo "epoch=$(git show -s --format=%ct HEAD)" >> "$GITHUB_OUTPUT"
+      - name: Verify release trust boundaries
+        run: python scripts/test-release.py
+
+  images:
+    name: ${{ matrix.component }} OCI image
+    needs: identity
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.publish && 'container-release' || 'container-build' }}
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - component: backend
+            context: backend
+            file: backend/Dockerfile
+          - component: frontend
+            context: frontend
+            file: frontend/Dockerfile
+          - component: website
+            context: frontend
+            file: frontend/website/Dockerfile
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - name: Authenticate the official GHCR publisher
+        if: inputs.publish
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+      - name: Refuse to replace previously published version or commit tags
+        if: inputs.publish
+        env:
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.identity.outputs.commit }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          python scripts/release.py image-absent "ghcr.io/$GITHUB_REPOSITORY-$COMPONENT:v$RELEASE_VERSION"
+          python scripts/release.py image-absent "ghcr.io/$GITHUB_REPOSITORY-$COMPONENT:sha-$RELEASE_COMMIT"
+      - name: Build both supported architectures with SBOM and provenance
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.context }}
+          file: ./${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: ${{ inputs.publish }}
+          outputs: ${{ inputs.publish && 'type=registry' || 'type=oci,dest=/tmp/freecollab-image.oci.tar' }}
+          tags: |
+            ghcr.io/${{ github.repository }}-${{ matrix.component }}:v${{ needs.identity.outputs.version }}
+            ghcr.io/${{ github.repository }}-${{ matrix.component }}:sha-${{ needs.identity.outputs.commit }}
+          labels: |
+            org.opencontainers.image.title=FreeCollab ${{ matrix.component }}
+            org.opencontainers.image.version=${{ needs.identity.outputs.version }}
+            org.opencontainers.image.revision=${{ needs.identity.outputs.commit }}
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.licenses=MIT
+          build-args: |
+            SOURCE_DATE_EPOCH=${{ needs.identity.outputs.epoch }}
+          sbom: true
+          provenance: mode=max
+          cache-from: type=gha,scope=release-${{ matrix.component }}
+          cache-to: type=gha,scope=release-${{ matrix.component }},mode=max
+      - name: Retain exact digest and BuildKit metadata
+        env:
+          IMAGE_DIGEST: ${{ steps.build.outputs.digest }}
+          BUILD_METADATA: ${{ steps.build.outputs.metadata }}
+          COMPONENT: ${{ matrix.component }}
+        run: |
+          mkdir -p release-metadata
+          python - <<'PY'
+          import json,os,pathlib,re
+          digest=os.environ['IMAGE_DIGEST']
+          if not re.fullmatch(r'sha256:[a-f0-9]{64}',digest): raise SystemExit('Missing image digest')
+          root=pathlib.Path('release-metadata')
+          (root/(os.environ['COMPONENT']+'.digest')).write_text(digest+'\n')
+          (root/(os.environ['COMPONENT']+'.buildkit.json')).write_text(json.dumps(json.loads(os.environ['BUILD_METADATA']),indent=2)+'\n')
+          PY
+      - name: Sign the published image digest with GitHub build provenance
+        if: inputs.publish
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/${{ github.repository }}-${{ matrix.component }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freecollab-${{ matrix.component }}-${{ needs.identity.outputs.version }}-metadata
+          path: release-metadata/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        if: '!inputs.publish'
+        with:
+          name: freecollab-${{ matrix.component }}-${{ needs.identity.outputs.version }}-oci
+          path: /tmp/freecollab-image.oci.tar
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 0
+
+  manifest:
+    name: Reviewed installation pins
+    needs: [identity, images]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.identity.outputs.commit }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: freecollab-*-${{ needs.identity.outputs.version }}-metadata
+          path: metadata
+          merge-multiple: true
+      - name: Create exact manifest and digest pins
+        env:
+          RELEASE_VERSION: ${{ needs.identity.outputs.version }}
+          RELEASE_COMMIT: ${{ needs.identity.outputs.commit }}
+          IMAGES_PUBLISHED: ${{ inputs.publish }}
+        run: |
+          mkdir -p release
+          publication=()
+          if [ "$IMAGES_PUBLISHED" = true ]; then publication+=(--published); fi
+          python scripts/release.py containers --version "$RELEASE_VERSION" --commit "$RELEASE_COMMIT" --repository "$GITHUB_REPOSITORY" --backend-digest "$(cat metadata/backend.digest)" --frontend-digest "$(cat metadata/frontend.digest)" --website-digest "$(cat metadata/website.digest)" --output release/release-manifest.json "${publication[@]}"
+          if [ "$IMAGES_PUBLISHED" = true ]; then
+            python scripts/release.py pins release/release-manifest.json --output release/images.env
+          else
+            echo 'OCI archives were built only. Registry installation pins are intentionally withheld until publication succeeds.' > release/NOT-PUBLISHED.txt
+          fi
+          cp metadata/*.buildkit.json release/
+          cd release
+          sha256sum *.json > SHA256SUMS
+      - name: Attest the exact release metadata
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: release/*.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freecollab-container-release-${{ needs.identity.outputs.version }}
+          path: release/
+          if-no-files-found: error

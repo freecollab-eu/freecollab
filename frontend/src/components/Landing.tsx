@@ -9,6 +9,7 @@ interface LandingProps {
   onTryDemo: () => void;
   onExploreDemo: () => void;
   onDocs: () => void;
+  appLabel?: string;
 }
 
 type PreviewChannel = 'general' | 'design' | 'notes';
@@ -33,7 +34,7 @@ const previewFonts: { id: PreviewFont; name: string }[] = [
   { id: 'serif', name: 'Source Serif' },
 ];
 
-export function Landing({ onTryDemo, onExploreDemo, onDocs }: LandingProps) {
+export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingProps) {
   useI18n();
   const [channel, setChannel] = useState<PreviewChannel>('general');
   const [draft, setDraft] = useState('');
@@ -109,7 +110,7 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs }: LandingProps) {
           <button type="button" className="fc-public-text-button fc-public-demo-nav" onClick={onExploreDemo}>{t('Try the demo')}</button>
           <button type="button" className="fc-public-text-button" onClick={onDocs}>{t("Documentation")}</button>
           <a className="fc-public-source-link" href="https://github.com/freecollab-eu/freecollab" target="_blank" rel="noopener noreferrer">{t("Open source ")}<ArrowUpRight size={14} aria-hidden="true" /></a>
-          <button type="button" className="fc-button fc-button-primary fc-public-nav-cta" onClick={onTryDemo}>{t("Open App ")}<ArrowUpRight size={16} aria-hidden="true" /></button>
+          <button type="button" className="fc-button fc-button-primary fc-public-nav-cta" onClick={onTryDemo}>{appLabel || t("Open App ")}<ArrowUpRight size={16} aria-hidden="true" /></button>
         </nav>
       </header>
 
@@ -213,7 +214,7 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs }: LandingProps) {
         <section className="fc-public-cta" aria-labelledby="cta-heading"><div className="fc-public-container"><p className="fc-kicker">{t("THE NEXT CONVERSATION STARTS HERE.")}</p><div><h2 id="cta-heading">{t("Make room")}<br /><em>{t("for your team.")}</em></h2><div className="fc-public-cta-aside"><p>{t('Explore it. Make it yours.')}<br />{t('Build your next shared place.')}</p><button type="button" className="fc-button fc-public-inverse-button" onClick={onExploreDemo}>{t('Explore the demo')}<ArrowUpRight size={19} aria-hidden="true" /></button><a className="fc-public-text-button" href="https://github.com/freecollab-eu/freecollab" target="_blank" rel="noopener noreferrer">{t('Get the source')}<ArrowUpRight size={16} /></a></div></div><div className="fc-public-cta-mark" aria-hidden="true"><Brand showName={false} size="large" /></div></div></section>
       </main>
 
-      <footer className="fc-public-footer fc-public-container"><Brand /><p>{t("Independent software. Shared possibilities.")}</p><div><button type="button" className="fc-public-text-button" onClick={onDocs}>{t("Documentation")}</button><a href="https://github.com/freecollab-eu/freecollab" target="_blank" rel="noopener noreferrer">{t("GitHub ")}<ArrowUpRight size={13} aria-hidden="true" /></a><a href="https://github.com/freecollab-eu/freecollab/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">{t('MIT licence')}</a><span>{t('v0.9 · Open source')}</span></div></footer>
+      <footer className="fc-public-footer fc-public-container"><Brand /><p>{t("Independent software. Shared possibilities.")}</p><div><button type="button" className="fc-public-text-button" onClick={onDocs}>{t("Documentation")}</button><a href="https://github.com/freecollab-eu/freecollab" target="_blank" rel="noopener noreferrer">{t("GitHub ")}<ArrowUpRight size={13} aria-hidden="true" /></a><a href="https://github.com/freecollab-eu/freecollab/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">{t('MIT licence')}</a><span>{t('Open source · MIT')}</span></div></footer>
     </div>
   );
 }

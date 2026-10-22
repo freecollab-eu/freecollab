@@ -14,6 +14,7 @@ const sv: Catalog = {
   'Provider calendar connection': 'Kalenderanslutning hos leverantören',
   'Connect and test first': 'Anslut och testa först',
   'Event to review': 'Händelse att granska',
+  'Choose an event': 'Välj en händelse',
   'Provider action': 'Åtgärd hos leverantören',
   'Publish or update and send invitations': 'Publicera eller uppdatera och skicka inbjudningar',
   'Read provider status and responses': 'Läs leverantörens status och svar',

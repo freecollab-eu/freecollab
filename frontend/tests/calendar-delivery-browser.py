@@ -18,6 +18,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import time
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -62,7 +63,16 @@ def main():
                 'def addresses(host,timeout=5):\n assert host in {"www.googleapis.com","graph.microsoft.com"}\n return ["8.8.8.8"]\n'
                 'remote_transport.pinned.public_addresses=addresses\n')
             launcher = private/'api.py'
-            launcher.write_text(transport+'from app.main import socket_app\nimport uvicorn\nuvicorn.run(socket_app,host="127.0.0.1",port='+str(api_port)+',access_log=False,proxy_headers=False)\n')
+            # Let the delivery panel load before the actual native event read.
+            # This preserves the real response and reproduces a slower catalog.
+            events_requested, events_release = private/'calendar-events-requested', private/'calendar-events-release'
+            launcher.write_text(transport+'from app.main import app,socket_app\nimport asyncio\nfrom pathlib import Path\n'
+                '@app.middleware("http")\nasync def delayed_native_events(request,call_next):\n'
+                ' if request.method=="GET" and request.url.path.startswith("/channels/") and request.url.path.endswith("/integrations/calendar"):\n'
+                '  Path('+repr(str(events_requested))+').touch()\n'
+                '  while not Path('+repr(str(events_release))+').exists(): await asyncio.sleep(.01)\n'
+                ' return await call_next(request)\n'
+                'import uvicorn\nuvicorn.run(socket_app,host="127.0.0.1",port='+str(api_port)+',access_log=False,proxy_headers=False)\n')
             worker = private/'worker.py'
             worker.write_text(transport+'from app import main\nfrom app.database import engine\nfrom app.services.integration_worker import run_once\nprint(run_once(engine,sync_batch=lambda session:0),flush=True)\n')
             vite = p.create_vite(private,base,app_port)
@@ -108,6 +118,22 @@ def main():
                     print('DELIVERY MARKUP '+panel.locator('.fc-calendar-delivery').inner_html(),flush=True)
                     REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.with_suffix('.failure.png')),full_page=True)
                     raise
+                stage='late native event requires a visible explicit keyboard selection'
+                deadline=time.monotonic()+5
+                while not events_requested.exists() and time.monotonic()<deadline:page.wait_for_timeout(50)
+                assert events_requested.exists(),'The actual initial event read did not reach the delay gate'
+                chooser=delivery.get_by_label('Event to review',exact=True)
+                review_button=delivery.get_by_role('button',name='Review calendar action',exact=True)
+                expect(chooser).to_have_value('');expect(chooser.locator('option')).to_have_count(1)
+                expect(chooser.locator('option:checked')).to_have_text('Choose an event');expect(review_button).to_be_disabled()
+                assert all(connection['ready'] for connection in delivery_state()['connections'])
+                events_release.touch()
+                expect(chooser.locator('option[value="'+event['id']+'"]')).to_have_text(fields['title'])
+                expect(chooser).to_have_value('');expect(chooser.locator('option:checked')).to_have_text('Choose an event')
+                expect(review_button).to_be_disabled()
+                chooser.focus();chooser.press('ArrowDown')
+                expect(chooser).to_have_value(event['id']);expect(review_button).to_be_enabled()
+                checks['late_real_native_event_has_truthful_placeholder_and_actual_keyboard_review_selection']=True
                 stage='reviewed Google and Graph invitations, actual queue/worker/TLS'
                 for provider in ['google','microsoft']:
                     delivery.get_by_label('Provider calendar connection',exact=True).select_option(provider)
@@ -198,6 +224,7 @@ def main():
                 page.evaluate('key=>{localStorage.setItem(key,"sv");window.dispatchEvent(new StorageEvent("storage",{key}));}', 'freecollab.language:'+owner['user_id'])
                 expect(page.locator('html')).to_have_attribute('lang','sv')
                 swedish=page.locator('.fc-calendar-delivery');expect(swedish.get_by_role('button',name='Externa kalendrar och prenumerationslänkar',exact=True)).to_be_visible()
+                expect(swedish.get_by_label('Händelse att granska',exact=True).locator('option[value=""]')).to_have_text('Välj en händelse')
                 expect(swedish.get_by_role('list',name='Kvitton för kalenderåtgärder',exact=True)).to_contain_text('Slutförd')
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                 page.screenshot(path=str(REPORT.with_suffix('.sv.png')),full_page=True,mask=[swedish.locator('.fc-calendar-new-link input')])
@@ -210,6 +237,7 @@ def main():
                 if path.exists():print(path.read_text()[-4000:],flush=True)
             raise
         finally:
+            (private/'calendar-events-release').touch()
             p.stop(processes)
             for stream in streams:stream.close()
             fixture.close();patch.undo()

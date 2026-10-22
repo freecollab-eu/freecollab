@@ -158,7 +158,7 @@
 .fc-studio-journey > div { display: flex; gap: .75rem; }
 .fc-studio-journey button { gap: .5rem; padding: .6rem .3rem; border: 0; font-size: 11px; text-align: left; }
 .fc-studio-journey small { color: var(--fc-muted); font-size: 9px; }
-.fc-studio-journey button[aria-current=step] { color: var(--fc-accent); }
+.fc-studio-journey button[aria-pressed=true] { color: var(--fc-accent); background: transparent; }
 .fc-studio-journey svg { flex-shrink: 0; }
 .fc-studio-decision { padding: 1.5rem 0; margin-bottom: 2rem; border-top: 1px solid var(--fc-border); border-bottom: 1px solid var(--fc-border); }
 .fc-studio-decision > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
@@ -195,4 +195,36 @@
   .fc-studio-decision-fields, .fc-studio-decision-record dl { grid-template-columns: 1fr; }
   .fc-studio-decision form > footer, .fc-studio-document-next { align-items: flex-start; flex-direction: column; }
   .fc-studio-decision form > footer button { width: 100%; }
+}
+
+/* Materials open in place; the conversation keeps its DOM, draft and reading position. */
+.fc-studio-conversation-workspace[hidden], .fc-studio-material-stack[hidden], .fc-studio-context-panel[hidden] { display: none !important; }
+.fc-studio-material-stack { display: flex; flex-direction: column; gap: 1.8rem; min-width: 0; }
+.fc-studio-context-panel { min-width: 0; width: 100%; outline-offset: 5px; }
+.fc-studio-context-return { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-bottom: 1.7rem; padding-bottom: .7rem; border-bottom: 1px solid var(--fc-border); }
+.fc-studio-context-return > button { padding-left: 0; }
+.fc-studio-context-return > span { color: var(--fc-muted); font-size: 11px; overflow-wrap: anywhere; }
+.fc-studio-context-panel .fc-showroom-section-heading h2 { font-size: 30px; }
+.fc-studio-context-panel .fc-showroom-section-heading { margin-bottom: 1.3rem; }
+.fc-studio-context-panel .fc-showroom-document textarea { min-height: 280px; }
+.fc-studio-context-panel .fc-studio-decision > header { flex-direction: column; gap: .4rem; }
+.fc-studio-context-panel .fc-studio-decision > header button { padding-left: 0; }
+.fc-studio-context-panel .fc-studio-decision form > footer { flex-direction: column; align-items: flex-start; }
+.fc-studio-brief-actions { border-top: 1px solid var(--fc-border); margin-top: .6rem; padding-top: .35rem; }
+.fc-studio-brief-actions > button { font-size: 11px !important; padding-left: 0; }
+.fc-studio-follow-up { border-top: 1px solid var(--fc-border); padding: 1.2rem 0; }
+.fc-studio-follow-up > p { font-size: 18px; line-height: 1.6; margin: .7rem 0 1rem; white-space: pre-wrap; }
+.fc-studio-follow-up > label { display: flex; align-items: flex-start; gap: .7rem; font-size: 13px; cursor: pointer; }
+.fc-studio-follow-up > label > input { margin-top: .2rem; }
+.fc-studio-follow-up > footer { display: flex; justify-content: space-between; align-items: center; gap: 1rem; margin-top: .5rem; font-size: 11px; color: var(--fc-muted); }
+.fc-studio-follow-up > footer button { font-size: 11px; }
+.fc-studio-focused .fc-studio-scene[data-context-open=true] { display: grid; max-width: none; }
+.fc-studio-focused .fc-studio-scene[data-context-open=true] .fc-studio-materials { display: flex; }
+@media (max-width: 760px) {
+  .fc-studio-scene[data-context-open=true], .fc-studio-focused .fc-studio-scene[data-context-open=true] { display: flex; padding-top: 1rem; }
+  .fc-studio-scene[data-context-open=true] > .fc-studio-conversation { display: none; }
+  .fc-studio-context-panel .fc-showroom-document textarea { min-height: 320px; }
+  .fc-studio-context-return { margin-bottom: 1.3rem; gap: .4rem; }
+  .fc-studio-context-return > span { font-size: 10px; }
+  .fc-studio-context-return > button { font-size: 11px; }
 }

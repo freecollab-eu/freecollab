@@ -18,10 +18,11 @@ import { ExternalMeetingsPanel } from './ExternalMeetingsPanel';
 import { ChannelSyncNotice } from './ChannelSyncNotice';
 import { ChannelApps } from './ChannelApps';
 import { FederatedWorkPanel } from './FederatedWorkPanel';
+import type { WorkHubTab } from '../lib/work-hub-view';
 import '../styles/work-hub.css';
 
-export type WorkHubTab = 'shared-work' | 'tasks' | 'meetings' | 'documents' | 'workflows' | 'data' | 'mobile' | 'feed' | 'copilot' | 'cloud' | 'external-meetings' | 'apps';
-interface Props { workspaceId: string; channel: Channel; onClose: () => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string }
+export type { WorkHubTab } from '../lib/work-hub-view';
+interface Props { workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -37,12 +38,16 @@ const tabs = [
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
 
-export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId }: Props) {
+export function WorkHub({ workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId }: Props) {
   useI18n();
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
   const [contextChecked, setContextChecked] = useState(!channel.secure);
   const visibleTabs = tabs.filter(item => item.id !== 'shared-work' || sharedWork);
+  const selectedView = useRef(onTabChange); selectedView.current = onTabChange;
+  useEffect(() => {
+    if (contextChecked && (tab !== 'shared-work' || sharedWork)) selectedView.current?.(tab);
+  }, [tab, contextChecked, sharedWork]);
   useEffect(() => {
     const token = api.getAccessToken(), abort = new AbortController();
     let live = true;
@@ -75,7 +80,7 @@ export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', d
     return () => window.removeEventListener('freecollab:auth-changed', onClose);
   }, [onClose]);
   useEffect(() => { navigation.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }, [tab]);
-  const select = (next: WorkHubTab) => { if (next === tab || !mayLeaveDocument()) return; if (next === 'meetings') setMeetingOpened(true); setTab(next); };
+  const select = (next: WorkHubTab) => { if (!visibleTabs.some(item => item.id === next) || next === tab || !mayLeaveDocument()) return; if (next === 'meetings') setMeetingOpened(true); setTab(next); };
   const props = { workspaceId, channelId: channel.id, isAdmin: channel.role === 'admin' };
   const actor = api.getCurrentUserId();
   return createPortal(<div className="fc-overlay fc-work-hub-overlay">
@@ -107,7 +112,7 @@ export function WorkHub({ workspaceId, channel, onClose, initialTab = 'tasks', d
         </div>}
         {meetingOpened && <div hidden={tab !== 'meetings'} role="tabpanel" id="work-panel-meetings" aria-labelledby="work-tab-meetings"><MeetingsPanel key={`${actor}:${channel.id}`} {...props} /></div>}
       </div>
-      <footer className="fc-work-hub-footer"><ShieldCheck size={15} /><span>{channel.secure ? t("Messages, tasks and documents use verified device encryption.") : t("Your current channel and workspace permissions apply.")}</span><button type="button" className="fc-button" onClick={close}>{t("Done")}</button></footer>
+      <footer className="fc-work-hub-footer"><ShieldCheck size={15} /><span>{channel.secure ? t("Messages, tasks and documents use verified device encryption.") : t("Your current channel and workspace permissions apply.")}</span><button type="button" className="fc-button" onClick={close}>{t("Back to conversation")}</button></footer>
     </section>
   </div>, document.body);
 }

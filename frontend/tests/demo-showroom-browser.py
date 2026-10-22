@@ -17,11 +17,179 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
-SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 
 def port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1',0));return listener.getsockname()[1]
+
+def natural_flow_checks(browser, app, checks, errors, unexpected):
+    """Exercise context work with actual message, document and task interactions."""
+    images=[]
+    flow=browser.new_context(viewport={'width':1440,'height':1100},reduced_motion='reduce')
+    try:
+        page=flow.new_page();page.set_default_timeout(20000)
+        page.on('pageerror',lambda error:errors.append(str(error)))
+        page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+        page.goto(app,wait_until='networkidle')
+        composer=page.get_by_label('Your demo message',exact=True)
+        transcript=page.get_by_role('log',name='Sample conversation',exact=True)
+        journey=page.get_by_role('navigation',name='Follow the courtyard project',exact=True)
+        context=page.locator('.fc-studio-context-panel')
+        for index in range(8):
+            composer.fill('Reading-place example '+str(index)+'. '+('Keep the detail beside this conversation. '*4))
+            page.get_by_role('button',name='Send demo message',exact=True).click()
+        page.wait_for_function('() => {const node=document.querySelector(".fc-showroom-transcript");return node.scrollHeight-node.clientHeight>300&&node.scrollTop+node.clientHeight>=node.scrollHeight-2}')
+        draft='An unfinished thought stays exactly here. Åäö.'
+        composer.fill(draft)
+        composer.evaluate('(node)=>{window.naturalComposer=node;node.setSelectionRange(3,17)}')
+        transcript.evaluate('(node)=>{window.naturalTranscript=node;node.scrollTop=120}')
+        page.wait_for_function('() => Math.abs(window.naturalTranscript.scrollTop-120)<=1')
+        brief=journey.get_by_role('button',name='The shared brief',exact=True)
+        brief.focus();page.keyboard.press('Enter')
+        expect(context).to_be_visible();expect(context).to_be_focused()
+        expect(page.locator('.fc-studio-conversation')).to_be_visible()
+        expect(brief).to_have_attribute('aria-pressed','true')
+        assert composer.evaluate('(node)=>node===window.naturalComposer&&node.value==="An unfinished thought stays exactly here. Åäö."&&node.selectionStart===3&&node.selectionEnd===17')
+        assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
+        document='## Keep the context\n\nThe conversation and this brief belong together.'
+        context.get_by_label('Edit demo document',exact=True).fill(document)
+        image=REPORT.with_name('demo-natural-brief-desktop.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+        context.get_by_role('button',name='Back to conversation',exact=True).click()
+        expect(context).not_to_be_visible();expect(brief).to_be_focused()
+        expect(page.get_by_label('Edit courtyard brief',exact=True)).to_have_value(document)
+        assert composer.evaluate('(node)=>node===window.naturalComposer&&node.selectionStart===3&&node.selectionEnd===17')
+        assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
+        checks['context_brief_keeps_actual_conversation_composer_dom_draft_selection_reading_and_origin_focus']=True
+
+        brief.focus();page.keyboard.press('Enter')
+        context.get_by_role('button',name='Agree a next step',exact=True).click()
+        expect(context).to_be_focused()
+        task_count=context.get_by_role('checkbox').count()
+        decision='Continue the shared plan without leaving the conversation.'
+        next_step='Bring the annotated courtyard brief'
+        context.get_by_label('Sample decision',exact=True).fill(decision)
+        context.get_by_label('Next step',exact=True).fill(next_step)
+        context.get_by_label('Owner',exact=True).select_option('Elias')
+        context.get_by_role('button',name='View shared brief',exact=True).click()
+        expect(context.get_by_label('Edit demo document',exact=True)).to_have_value(document)
+        journey.get_by_role('button',name='Decision & next step',exact=True).click()
+        expect(context.get_by_label('Sample decision',exact=True)).to_have_value(decision)
+        expect(context.get_by_label('Next step',exact=True)).to_have_value(next_step)
+        expect(context.get_by_label('Owner',exact=True)).to_have_value('Elias')
+        assert context.get_by_role('checkbox').count()==task_count
+        context.get_by_role('button',name='Record sample decision',exact=True).click()
+        expect(context.locator('.fc-studio-decision-record')).to_be_focused()
+        assert context.get_by_role('checkbox').count()==task_count+1
+        image=REPORT.with_name('demo-natural-decision-desktop.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+        context.get_by_role('button',name='Back to conversation',exact=True).click()
+        outcome=page.get_by_role('region',name='Agreed next step',exact=True)
+        expect(outcome).to_be_visible();expect(outcome).to_contain_text(decision);expect(outcome).to_contain_text('Elias')
+        expect(outcome.get_by_role('checkbox',name=next_step,exact=True)).to_have_count(1)
+        outcome.get_by_role('checkbox',name=next_step,exact=True).check()
+        outcome.get_by_role('button',name='View decision',exact=True).click()
+        expect(context.get_by_role('checkbox',name=next_step,exact=True)).to_be_checked()
+        assert context.get_by_role('checkbox').count()==task_count+1
+        context.get_by_role('checkbox',name=next_step,exact=True).uncheck()
+        context.get_by_role('button',name='Back to conversation',exact=True).click()
+        expect(outcome.get_by_role('checkbox',name=next_step,exact=True)).not_to_be_checked()
+        checks['context_decision_draft_survives_brief_switch_and_compact_next_step_updates_the_same_single_task']=True
+
+        for channel in ['design','product']:
+            page.get_by_label('Demo channel',exact=True).select_option(channel)
+            value='An unfinished '+channel+' conversation.'
+            composer.fill(value);composer.evaluate('(node)=>node.setSelectionRange(2,12)')
+            trigger=journey.get_by_role('button',name='Decision & next step',exact=True)
+            trigger.focus();page.keyboard.press('Enter');expect(context).to_be_focused()
+            expect(page.get_by_label('Demo channel',exact=True)).to_have_value(channel)
+            journey.get_by_role('button',name='The conversation',exact=True).click()
+            expect(context).not_to_be_visible();expect(trigger).to_be_focused()
+            expect(page.get_by_label('Demo channel',exact=True)).to_have_value(channel)
+            expect(composer).to_have_value(value)
+            assert composer.evaluate('(node)=>node===window.naturalComposer&&node.selectionStart===2&&node.selectionEnd===12')
+        page.get_by_label('Demo channel',exact=True).select_option('studio')
+        expect(composer).to_have_value(draft)
+        assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
+        checks['context_conversation_return_preserves_design_product_channels_and_channel_scoped_drafts_and_reading']=True
+
+        for name in ['Connections','Appearance']:
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('tab',name=name,exact=True).click()
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('tab',name='Conversation',exact=True).click()
+            expect(transcript).to_be_visible();expect(composer).to_have_value(draft)
+            assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
+            assert composer.evaluate('(node)=>node===window.naturalComposer')
+        brief.focus();page.keyboard.press('Enter');expect(context).to_be_focused();page.keyboard.press('Escape')
+        expect(context).not_to_be_visible();expect(brief).to_be_focused()
+        expect(composer).to_have_value(draft)
+        composer.fill('My own next message follows the latest conversation.')
+        page.get_by_role('button',name='Send demo message',exact=True).click()
+        page.wait_for_function('() => {const node=window.naturalTranscript;return node.scrollTop+node.clientHeight>=node.scrollHeight-2}')
+        expect(composer).to_have_value('')
+        checks['settings_navigation_and_escape_preserve_conversation_dom_reading_then_own_send_follows_latest']=True
+        assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
+    finally:flow.close()
+
+    for width in [390,320]:
+        mobile=browser.new_context(viewport={'width':width,'height':844},reduced_motion='reduce')
+        try:
+            page=mobile.new_page();page.set_default_timeout(20000)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+            page.goto(app,wait_until='networkidle')
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape')
+            page.get_by_label('Demokanal',exact=True).select_option('design')
+            composer=page.get_by_label('Ditt demomeddelande',exact=True)
+            value='Ett oskickat utkast i designkanalen. Behåll markeringen.'
+            composer.fill(value);composer.evaluate('(node)=>{window.naturalMobileComposer=node;node.setSelectionRange(4,15)}')
+            source=page.get_by_role('button',name='Öppna projektbeskrivningen',exact=True)
+            source.scroll_into_view_if_needed();source.focus()
+            position=page.evaluate('({x:window.scrollX,y:window.scrollY})')
+            source.press('Enter')
+            context=page.locator('.fc-studio-context-panel')
+            expect(context).to_be_visible();expect(context).to_be_focused()
+            expect(page.locator('.fc-studio-conversation')).not_to_be_visible()
+            assert composer.evaluate('(node)=>node===window.naturalMobileComposer&&node.value==="Ett oskickat utkast i designkanalen. Behåll markeringen."&&node.selectionStart===4&&node.selectionEnd===15')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            context.get_by_label('Redigera demodokument',exact=True).focus();page.keyboard.press('Escape')
+            expect(context).not_to_be_visible();expect(source).to_be_focused()
+            expect(page.get_by_label('Demokanal',exact=True)).to_have_value('design')
+            expect(composer).to_have_value(value)
+            assert composer.evaluate('(node)=>node===window.naturalMobileComposer&&node.selectionStart===4&&node.selectionEnd===15')
+            page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            source.press('Enter');expect(context).to_be_focused()
+            context.get_by_role('button',name='Bestäm nästa steg',exact=True).click()
+            expect(context.get_by_role('heading',name='Gör nästa steg tydligt.',exact=True)).to_be_visible()
+            context.get_by_label('Exempelbeslut',exact=True).fill('Följ upp designförslaget vid teamets genomgång.')
+            next_step='Ta med designförslaget vid '+str(width)+' pixlar'
+            context.get_by_label('Nästa steg',exact=True).fill(next_step)
+            context.get_by_label('Ansvarig',exact=True).select_option('Nora')
+            context.get_by_role('button',name='Spara exempelbeslut',exact=True).click()
+            expect(context.locator('.fc-studio-decision-record')).to_be_focused()
+            image=REPORT.with_name('demo-natural-context-'+str(width)+'-sv.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            context.get_by_role('button',name='Tillbaka till samtalet',exact=True).click()
+            expect(source).to_be_focused();expect(composer).to_have_value(value)
+            outcome=page.get_by_role('region',name='Överenskommet nästa steg',exact=True)
+            expect(outcome.get_by_role('checkbox',name=next_step,exact=True)).to_have_count(1)
+            outcome.get_by_role('checkbox',name=next_step,exact=True).check()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            image=REPORT.with_name('demo-natural-outcome-'+str(width)+'-sv.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            checks['swedish_'+str(width)+'px_context_escape_and_return_restore_actual_composer_channel_selection_window_scroll_and_focus']=True
+            source.scroll_into_view_if_needed();source.focus();position=page.evaluate('({x:window.scrollX,y:window.scrollY})');source.press('Enter');expect(context).to_be_focused()
+            page.get_by_role('button',name='Verktyg',exact=True).click();page.get_by_role('tab',name='Utseende',exact=True).click()
+            page.get_by_role('button',name='Verktyg',exact=True).click();page.get_by_role('tab',name='Samtal',exact=True).click()
+            expect(composer).to_have_value(value);expect(page.get_by_label('Demokanal',exact=True)).to_have_value('design')
+            page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
+            assert composer.evaluate('(node)=>node===window.naturalMobileComposer&&node.selectionStart===4&&node.selectionEnd===15')
+            source.press('Enter');expect(context).to_be_focused();page.get_by_label('Demokanal',exact=True).select_option('product')
+            expect(context).not_to_be_visible();expect(composer).to_have_value('')
+            page.get_by_label('Demokanal',exact=True).select_option('design')
+            expect(composer).to_have_value(value)
+            page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks['swedish_'+str(width)+'px_open_context_settings_and_channel_roundtrip_keep_original_conversation_window_position']=True
+        finally:mobile.close()
+    return images
 
 def main():
     checks, stage, process = {}, 'private Vite startup', None
@@ -34,7 +202,7 @@ def main():
         for entry, source in [('app', 'main'), ('website', 'website-entry')]:
             (web/(entry+'.html')).write_text('<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" /></head><body><div id="root"></div><script type="module" src="/src/'+source+'.tsx"></script></body></html>')
         (web/'entry.tsx').write_text('''import React from 'react';import{createRoot}from'react-dom/client';import{Demo}from'./src/components/Demo';import{applyLocale}from'./src/i18n';import'@fontsource-variable/inter';import'@fontsource-variable/manrope';import'@fontsource-variable/source-serif-4';import'./src/index.css';window.showroomLocale=applyLocale;window.showroomBack=0;window.showroomOpen=0;createRoot(document.getElementById('root')).render(<React.StrictMode><Demo onBack={()=>window.showroomBack++} onOpenApp={()=>window.showroomOpen++}/></React.StrictMode>);''')
-        launcher=private/'serve.mjs'; launcher.write_text('import{createServer}from'+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';import react from'+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';const server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,hmr:false,watch:{ignored:["**"]},fs:{allow:'+json.dumps([str(private),str(ROOT/'frontend')])+'}}});await server.listen();')
+        launcher=private/'serve.mjs'; launcher.write_text('import{createServer}from'+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';import react from'+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';const server=await createServer({configFile:false,root:'+json.dumps(str(web))+',cacheDir:'+json.dumps(str(private/'vite-cache'))+',plugins:[react()],server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,hmr:false,watch:{ignored:["**"]},fs:{allow:'+json.dumps([str(private),str(ROOT/'frontend')])+'}}});await server.listen();')
         stream=(private/'vite.log').open('w')
         try:
             process=subprocess.Popen(['node',str(launcher)],cwd=ROOT/'frontend',stdout=stream,stderr=stream,start_new_session=True)
@@ -139,11 +307,11 @@ def main():
                 checks['edited_document_markdown_actual_download_and_independent_documents']=True
                 stage='one conversation, the same shared brief, and a real local decision/owned task'
                 journey=page.get_by_role('navigation',name='Follow the courtyard project',exact=True)
-                journey.get_by_role('button',name='01 The conversation',exact=True).click()
+                journey.get_by_role('button',name='The conversation',exact=True).click()
                 expect(page.get_by_label('Edit courtyard brief',exact=True)).to_have_value(edited)
                 journey_brief='## A shared courtyard direction\n\nKeep the doorway open and compare two timber samples.'
                 page.get_by_label('Edit courtyard brief',exact=True).fill(journey_brief)
-                journey.get_by_role('button',name='02 The shared brief',exact=True).click()
+                journey.get_by_role('button',name='The shared brief',exact=True).click()
                 expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
                 page.get_by_role('button',name='Agree a next step',exact=True).click()
                 task_count=page.get_by_role('checkbox').count()
@@ -153,7 +321,7 @@ def main():
                 page.get_by_label('Next step',exact=True).fill(next_step)
                 page.get_by_label('Owner',exact=True).select_option('Noor')
                 page.get_by_role('button',name='Record sample decision',exact=True).click()
-                expect(page.get_by_text(decision,exact=True)).to_be_visible()
+                expect(page.locator('.fc-studio-context-panel').get_by_text(decision,exact=True)).to_be_visible()
                 expect(page.get_by_text('Recorded in this demo',exact=True)).to_be_visible()
                 assert page.locator('.fc-studio-decision script').count()==0
                 follow_up=page.get_by_role('checkbox',name=next_step,exact=True)
@@ -174,9 +342,9 @@ def main():
                 assert page.get_by_role('checkbox').count()==task_count+1
                 page.get_by_role('button',name='View shared brief',exact=True).click()
                 expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
-                journey.get_by_role('button',name='03 Decision & next step',exact=True).click()
+                journey.get_by_role('button',name='Decision & next step',exact=True).click()
                 expect(page.get_by_role('checkbox',name=revised_step,exact=True)).to_be_visible()
-                expect(journey.get_by_role('button',name='03 Decision & next step',exact=True)).to_have_attribute('aria-current','step')
+                expect(journey.get_by_role('button',name='Decision & next step',exact=True)).to_have_attribute('aria-pressed','true')
                 checks['same_shared_brief_local_decision_owned_task_revision_and_completion']=True
                 stage='Microsoft and Google preparation only'
                 section('Connections')
@@ -307,8 +475,12 @@ def main():
                     finally:routed.close()
                 assert not errors,errors
                 assert not unexpected,unexpected
+                stage='natural context, reading, draft, focus, channel and compact outcome continuity'
+                natural_images=natural_flow_checks(browser,app,checks,errors,unexpected)
+                assert not errors,errors
+                assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)],'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images,'source_sha256':source_hashes},indent=2)+'\n')
             print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
         except Exception:
             print('Failed stage: '+stage)
@@ -319,5 +491,10 @@ def main():
                 try:process.wait(timeout=8)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
             stream.close()
+    assert process is not None and process.poll() is not None and not private.exists()
+    final_hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCE}
+    assert final_hashes==source_hashes,'Bound demo source changed during the proof; repeat after source freeze.'
+    result=json.loads(REPORT.read_text());result['source_unchanged_after_run']=True;result['cleanup']='Own Vite process exited; private source snapshot/cache/browser contexts removed; no API/database/container fixture or builds used.'
+    REPORT.write_text(json.dumps(result,indent=2)+'\n')
 
 if __name__=='__main__':main()

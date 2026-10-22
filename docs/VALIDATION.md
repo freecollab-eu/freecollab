@@ -1,5 +1,47 @@
 # FreeCollab validation record
 
+## Conversation continuity — 2026-10-22
+
+The demo opens its existing brief and decision in context beside the mounted
+conversation. Mobile returns to the original source with its draft, selection,
+channel and reading position retained, including detours through settings or
+another channel. The agreed next step is also actionable beside the discussion.
+The authenticated client's generic Work action resumes the last selected tool
+within the current account session, workspace and channel. Explicit resource
+links retain precedence; closed tools are unmounted and existing unsaved-change,
+focus and secure-channel eligibility guards remain.
+
+Executed local validation has overlapping scopes:
+
+- **300 frontend Node cases passed**, including six new bounded navigation-memory
+  cases for scope, credential/encryption changes, explicit clearing and eviction.
+  TypeScript and production application/trusted-embed, website and widget builds
+  passed.
+- **Nine actual App/API/SQLite/Vite browser groups passed**: stable conversation
+  DOM/draft/caret/reading position, return focus, channel-specific tool choices,
+  explicit resource navigation, workspace/account/credential isolation, reload
+  reset, real pending-document close/tab guards and Swedish at 320 px.
+- **22 actual demo Chromium groups passed**, retaining all previous 14 and adding
+  eight continuity groups. These cover the same mounted composer, brief/decision
+  drafts, the compact task's shared identity, channel retention, Escape/focus,
+  own-message following and Swedish 320/390 px return positions, including
+  context-to-settings and context-to-channel detours. API/provider isolation,
+  routing, reset, personal appearance and literal user content remain checked.
+- The new self-contained downloadable preview passed **27 actual Chromium groups
+  on its exact ZIP-extracted HTML**, served by an isolated loopback HTTP fixture.
+  It made no external/API requests or worker/private-content storage operations.
+  The managed browser blocks `file://`, so direct file-URL execution is not
+  claimed by this increment's preview proof.
+- Separate read-only source reviews cleared the bounded tool memory, explicit
+  navigation precedence and unchanged authority/unsaved/focus guards. A discovered
+  mobile detour return-position gap was fixed and included in the browser checks.
+
+All browser fixtures used their own source snapshots, accounts, databases and
+ephemeral keys; their own services and contexts were removed. No live customer
+identity/provider acceptance, new Docker installation, release or Railway
+deployment is claimed by this increment. The published commit's own GitHub Actions
+run remains authoritative for its complete PostgreSQL/product and real-crypto CI.
+
 ## Language preference acknowledgement fixture — 2026-10-22
 
 Language selection updates the catalog immediately while its real preference PUT

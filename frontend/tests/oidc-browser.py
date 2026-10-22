@@ -227,6 +227,8 @@ with tempfile.TemporaryDirectory(prefix='freecollab-oidc-browser-') as directory
                 second = api(api_base, 'POST', '/auth/mfa/verify', {'challenge_token': challenge['challenge_token'], 'code': codes.pop(0)})
                 stage = 'open mobile account settings'
                 page.set_viewport_size({'width': 320, 'height': 760})
+                # Wait for the responsive sidebar's asynchronous close before opening it.
+                expect(page.get_by_role('button', name='Toggle channels', exact=True)).to_have_attribute('aria-expanded', 'false')
                 panel = account(page)
                 stage = 'open SSO removal form'
                 panel.get_by_role('button', name='Remove Organization SSO sign-in connection', exact=True).click()

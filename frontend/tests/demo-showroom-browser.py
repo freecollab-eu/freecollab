@@ -23,6 +23,25 @@ def port():
     with socket.socket() as listener:
         listener.bind(('127.0.0.1',0));return listener.getsockname()[1]
 
+def same_turn_context_reading_check(page, composer, transcript, brief, context, draft):
+    """A scroll and the real context click can precede the native scroll event."""
+    composer.fill('A real new message establishes following the latest conversation.')
+    page.get_by_role('button',name='Send demo message',exact=True).click()
+    page.wait_for_function('() => {const n=document.querySelector(".fc-showroom-transcript");return n.scrollTop+n.clientHeight>=n.scrollHeight-2}')
+    composer.fill(draft);composer.evaluate('(node)=>node.setSelectionRange(3,17)')
+    transcript.evaluate('(node)=>{window.naturalRaceTranscript=node}')
+    # Both operations intentionally share one native event turn. No scroll handler,
+    # React state, API response or product implementation is replaced or delayed.
+    brief.evaluate('''button=>{const node=window.naturalRaceTranscript;window.naturalRaceBefore={height:node.scrollHeight,client:node.clientHeight,width:node.clientWidth};node.scrollTop=120;button.click()}''')
+    expect(context).to_be_visible();expect(context).to_be_focused()
+    assert transcript.evaluate('(node)=>node===window.naturalRaceTranscript&&Math.abs(node.scrollTop-120)<=1')
+    assert transcript.evaluate('(node)=>node.scrollHeight===window.naturalRaceBefore.height&&node.clientHeight===window.naturalRaceBefore.client&&node.clientWidth===window.naturalRaceBefore.width')
+    expect(composer).to_have_value(draft)
+    assert composer.evaluate('(node)=>node.selectionStart===3&&node.selectionEnd===17')
+    context.get_by_role('button',name='Back to conversation',exact=True).click()
+    expect(context).not_to_be_visible();expect(brief).to_be_focused()
+    assert transcript.evaluate('(node)=>node===window.naturalRaceTranscript&&Math.abs(node.scrollTop-120)<=1')
+
 def natural_flow_checks(browser, app, checks, errors, unexpected):
     """Exercise context work with actual message, document and task interactions."""
     images=[]
@@ -61,6 +80,9 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
         assert composer.evaluate('(node)=>node===window.naturalComposer&&node.selectionStart===3&&node.selectionEnd===17')
         assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
         checks['context_brief_keeps_actual_conversation_composer_dom_draft_selection_reading_and_origin_focus']=True
+
+        same_turn_context_reading_check(page,composer,transcript,brief,context,draft)
+        checks['same_turn_native_scroll_and_real_context_click_preserve_reading_without_waiting_for_scroll_event']=True
 
         brief.focus();page.keyboard.press('Enter')
         context.get_by_role('button',name='Agree a next step',exact=True).click()

@@ -21,15 +21,27 @@ Executed local validation has overlapping scopes:
   DOM/draft/caret/reading position, return focus, channel-specific tool choices,
   explicit resource navigation, workspace/account/credential isolation, reload
   reset, real pending-document close/tab guards and Swedish at 320 px.
-- **22 actual demo Chromium groups passed**, retaining all previous 14 and adding
-  eight continuity groups. These cover the same mounted composer, brief/decision
+- **23 actual demo Chromium groups passed**, retaining all previous 14 and adding
+  nine continuity groups. These cover the same mounted composer, brief/decision
   drafts, the compact task's shared identity, channel retention, Escape/focus,
   own-message following and Swedish 320/390 px return positions, including
   context-to-settings and context-to-channel detours. API/provider isolation,
   routing, reset, personal appearance and literal user content remain checked.
-- The new self-contained downloadable preview passed **27 actual Chromium groups
+  The complete product CI found a scroll-event race: opening material before the
+  queued scroll event could restore an older following position. Navigation now
+  snapshots reading synchronously before changing surfaces. The new regression
+  sets the actual scroll position and clicks the actual brief control in the same
+  JavaScript turn: it fails on the preceding source, passes with the fix and
+  verifies unchanged transcript identity and dimensions, draft and selection.
+  Original keyboard checks and one-pixel reading assertions remain unchanged.
+- The new self-contained downloadable preview passed **28 actual Chromium groups
   on its exact ZIP-extracted HTML**, served by an isolated loopback HTTP fixture.
-  It made no external/API requests or worker/private-content storage operations.
+  All previous 27 groups remain, with the same-turn reading regression added.
+  It made no external/API requests or workers and retained no storage entries.
+  A separate supplement installed method counters before app startup: its named
+  interactions made zero observed Storage/IndexedDB/service-worker registration
+  calls, and real operations on an isolated control page verified the Storage
+  and IndexedDB counters. Uninstrumented storage surfaces are outside that scope.
   The managed browser blocks `file://`, so direct file-URL execution is not
   claimed by this increment's preview proof.
 - Separate read-only source reviews cleared the bounded tool memory, explicit

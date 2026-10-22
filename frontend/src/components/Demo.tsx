@@ -63,7 +63,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   const done = state.tasks.filter(row => row.done).length;
   const decisionValue = decisionText ?? state.decision?.text ?? t(demoDecisionExample.text);
   const nextStepValue = nextStep ?? state.decision?.nextStep ?? t(demoDecisionExample.nextStep);
-  useEffect(() => { rememberConversationPosition(); setSection(destination?.section ?? 'chat'); setProvider(destination?.provider ?? 'microsoft'); setContextView(null); contextOrigin.current = null; navigationRevision.current++; }, [destination?.section, destination?.provider]);
+  useEffect(() => { rememberReading(); rememberConversationPosition(); setSection(destination?.section ?? 'chat'); setProvider(destination?.provider ?? 'microsoft'); setContextView(null); contextOrigin.current = null; navigationRevision.current++; }, [destination?.section, destination?.provider]);
   useEffect(() => () => { navigationRevision.current++; }, []);
   useLayoutEffect(() => {
     const node = transcript.current;
@@ -94,6 +94,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
     afterNavigation(() => { const position = conversationPosition.current[next]; window.scrollTo(position?.x ?? 0, position?.y ?? 0); });
   }
   function choose(next: DemoSection, focus = false) {
+    rememberReading();
     rememberConversationPosition();
     setSection(next); setContextView(null); contextOrigin.current = null; setNotice('');
     afterNavigation(() => {
@@ -102,6 +103,8 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
     });
   }
   function openContext(next: 'documents' | 'projects', source: HTMLElement) {
+    // Scroll events may still be queued when navigation starts in the same frame.
+    rememberReading();
     if (!contextOrigin.current) {
       const position = section === 'chat' ? { x: window.scrollX, y: window.scrollY } : conversationPosition.current[channel] ?? { x: 0, y: 0 };
       contextOrigin.current = { element: source, ...position };
@@ -113,6 +116,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
     });
   }
   function returnToConversation() {
+    rememberReading();
     rememberConversationPosition();
     const origin = contextOrigin.current;
     setSection('chat'); setContextView(null); contextOrigin.current = null; setNotice('');

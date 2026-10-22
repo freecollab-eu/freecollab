@@ -100,6 +100,7 @@ jobs:
         run: |
           node --test tests/*.test.mjs
           npm run build:widget
+          npm run build:website
           npm ci --prefix ../packages/components
           npm test --prefix ../packages/components
           npm pack ../packages/components --dry-run
@@ -207,9 +208,11 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/native-client-browser.py
           BACKEND_PYTHON=python python frontend/tests/my-day-browser.py
           BACKEND_PYTHON=python python frontend/tests/calendar-planning-browser.py
+          BACKEND_PYTHON=python python frontend/tests/calendar-delivery-browser.py
           BACKEND_PYTHON=python python frontend/tests/import-library-browser.py
           BACKEND_PYTHON=python python frontend/tests/personal-oauth-browser.py
           BACKEND_PYTHON=python python frontend/tests/native-push-browser.py
+          BACKEND_PYTHON=python python frontend/tests/native-calling-browser.py
           BACKEND_PYTHON=python python frontend/tests/offline-library-browser.py
           python frontend/tests/enterprise-onboarding-browser.py
           python frontend/tests/remote-sync-browser.py
@@ -316,6 +319,8 @@ jobs:
           python packages/components/tests/connect-browser-proof.py --skip-build
       - name: Verify encrypted messages and files across independent installations
         run: BACKEND_PYTHON=python python frontend/tests/connect-federation-browser.py
+      - name: Verify resumable device-encrypted Slack migration
+        run: BACKEND_PYTHON=python python frontend/tests/slack-migration-browser.py
       - name: Retain isolated homeserver diagnostics
         if: always()
         run: docker --host=unix:///var/run/docker.sock logs --timestamps freecollab-secure-ci > /tmp/freecollab-secure-synapse.log 2>&1 || true

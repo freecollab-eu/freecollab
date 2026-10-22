@@ -33,15 +33,16 @@ expanded by the originating calendar first. Export expands supported series into
 at most 1,000 independent events, preserving their actual instants and overrides;
 it does not establish external invitations or ongoing synchronization. Existing
 Google/Outlook compose links copy the selected event's initial dates, so use ICS
-for complete recurring exports. Existing remote sync continues to handle single
-provider events; local series fail closed as unsupported instead of being
-silently flattened or sent as provider meeting invitations.
+for complete recurring exports. Google/Microsoft remote sync also maps supported
+finite series and exceptions without sending invitations. Explicit reviewed
+provider invitations, account RSVP and revocable native ICS subscriptions have
+their own controls; see [CALENDAR_DELIVERY.md](CALENDAR_DELIVERY.md).
 
 ## Invitations and responses
 
 The event organizer or a current channel administrator explicitly selects up to
 50 active current channel members under **Attendees & responses**. No address
-book lookup or external email invitations occur. Invitation membership, person
+book lookup or external email invitations occur from these internal controls. Invitation membership, person
 identifiers, response and revision are server metadata in both channel modes;
 titles, dates and descriptions remain encrypted in secure channels.
 

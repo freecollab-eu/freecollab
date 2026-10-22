@@ -33,7 +33,7 @@ MAX_PARTICIPANTS = 24
 CALL_SECONDS = 2 * 60 * 60
 SIGNAL_SECONDS = 5 * 60
 AUTHORITY_CLAIMS = ("sub", "iat", "exp", "av", "amr", "sso_workspace_id", "sso_provider_revision",
-                    "native_client_id", "embed_application_id", "jti")
+                    "native_client_id", "embed_application_id", "jti", "native_call_device_id", "native_call_session_id")
 
 
 def bind_participant_authority(session, participant, claims, *, transport):
@@ -96,6 +96,10 @@ def participant_valid(session, participant, meeting):
         claims = participant_claims(session, participant)
         if claims is None:
             return False
+        if "native_call_device_id" in claims or "native_call_session_id" in claims:
+            from .native_calls import participant_link_live
+            if not participant_link_live(session, participant, claims):
+                return False
         if not bind_scope_for_hash(session, participant.auth_token_hash, participant.user_id, claims=claims):
             return False
         require_channel_member(session, meeting.channel_id, participant.user_id)

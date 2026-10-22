@@ -4,6 +4,7 @@ import { CalendarDays, Download, History, Loader2, Pencil, Plus, RefreshCw, Tras
 import { api } from '../lib/api';
 import { documentCalendarApi, type CalendarRecord } from '../lib/document-calendar-api';
 import { calendarComposeUrl, calendarWallInput, exportCalendar, importCalendar, validateCalendar, zonedInstant, type CalendarFields } from '../lib/calendar';
+import { CalendarDeliveryPanel } from './CalendarDeliveryPanel';
 import { CalendarAvailabilityFinder, CalendarEventPlanning } from './CalendarPlanning';
 import { ChannelSyncNotice } from './ChannelSyncNotice';
 import '../styles/integration-content.css';
@@ -148,6 +149,7 @@ export function CalendarPanel({ channelId, isAdmin = false }: Props) {
     <div className="fc-integration-calendar-toolbar"><button type="button" className="fc-button" disabled={!!busy} onClick={() => { setEditor(blank()); setError(''); setNotice(''); setPendingImport(null); }}><Plus size={15} />{t("Add calendar event")}</button><button type="button" className="fc-button" disabled={!!busy || loading || unreadable} onClick={() => fileInput.current?.click()}><Upload size={15} />{t("Import ICS")}</button><button type="button" className="fc-button" disabled={!!busy || loading || unreadable || !rows.length} onClick={exportAll}><Download size={15} />{t("Export ICS")}</button><input ref={fileInput} type="file" accept=".ics,text/calendar" aria-label={t("Import ICS file")} hidden tabIndex={-1} onChange={event => void readFile(event.target.files?.[0])} /></div>
     <p className="fc-integration-content-caption">{t("Import copies individual events without sending invitations. Bounded daily, weekly and monthly series can be imported; other recurrence rules must be expanded first. Exporting or opening an external calendar shares its event details with the destination you choose.")}</p>
     <CalendarAvailabilityFinder channelId={channelId} rows={rows} />
+    {isAdmin && !rows.some(row => row.content_mode === 'matrix') && <CalendarDeliveryPanel channelId={channelId} rows={rows} />}
     {unreadable && <p className="fc-integration-content-caption">{t("Unlock encrypted events before importing or exporting the complete calendar.")}</p>}
     {progress && <p className="fc-integration-content-loading" role="status"><Loader2 size={16} className="fc-integration-spinner" />{progress}</p>}
     {pendingImport && <section className="fc-integration-calendar-import" aria-label={t("Calendar import preview")}><h4>{t(pendingImport.length === 1 ? 'Review {count} calendar event' : 'Review {count} calendar events', { count: pendingImport.length })}</h4><p className="fc-integration-content-caption">{t("These events will be added to this channel. Existing imported UIDs are skipped.")}</p><ol>{pendingImport.map(item => <li key={item.id}>{item.fields.title} · {dateLabel(item.fields)}</li>)}</ol><button type="button" className="fc-button" disabled={!!busy} onClick={() => setPendingImport(null)}>{t("Cancel import")}</button><button type="button" className="fc-button fc-button-primary" disabled={!!busy} onClick={() => void addImported()}>{t("Add ")}{pendingImport.length} {t(" events to channel")}</button></section>}

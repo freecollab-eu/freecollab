@@ -530,23 +530,28 @@ async def create_notification(
     if not notification_visible(session, notification, user_id):
         return None
     session.add(notification)
+    session.flush()
+    payload = {
+        "id": notification.id,
+        "type": notification.type,
+        "actor_id": notification.actor_id,
+        "title": notification.title,
+        "body": notification.body,
+        "action_url": notification.action_url,
+        "entity_type": notification.entity_type,
+        "entity_id": notification.entity_id,
+        "read": notification.read,
+        "created_at": notification.created_at.isoformat(),
+    }
+    # Defaults are generated on the model/flush. Detach this durable return
+    # value before commit expires ORM state; refreshing it would retain a new
+    # connection while socket authorization waits for that same bounded pool.
+    session.expunge(notification)
     session.commit()
-    session.refresh(notification)
-    
-    # Send real-time notification
+
+    # Send real-time notification without retaining a SQL transaction.
     try:
-        await send_to_user(user_id, "notification", {
-            "id": notification.id,
-            "type": notification.type,
-            "actor_id": notification.actor_id,
-            "title": notification.title,
-            "body": notification.body,
-            "action_url": notification.action_url,
-            "entity_type": notification.entity_type,
-            "entity_id": notification.entity_id,
-            "read": notification.read,
-            "created_at": notification.created_at.isoformat(),
-        })
+        await send_to_user(user_id, "notification", payload)
     except Exception:
         # The inbox is already durable. A socket outage must not make clients
         # retry a successfully committed message and create duplicate content.

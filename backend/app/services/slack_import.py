@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import stat
+import struct
 from pathlib import PurePosixPath
 from uuid import uuid4
 import zipfile
@@ -21,22 +22,22 @@ from ..models.channel import Channel, ChannelMember
 from ..models.file import File
 from ..models.file_version import FileDocument, FileVersion
 from ..models.message import Message
-from ..models.slack_import import SlackImport, SlackImportMessage
+from ..models.slack_import import SlackImport, SlackImportMessage, SlackImportDetail
 from ..models.user import User
 from ..models.workspace import WorkspaceChannel, WorkspaceMember
 from .account_security import seal_private, unseal_private
-from .crypto import encrypt_message
+from .crypto import encrypt_message, decrypt_message
 from .enterprise_governance import enforce_native_content, enforce_native_file
 from .request_guard import recheck_actor
 from .sso_scope import require_unrestricted
 from .storage import storage_service
 from .workspaces import lock_workspace, require_workspace_admin, require_workspace_member
 
-MAX_ARCHIVE = 10 * 1024 * 1024
-MAX_EXPANDED = 50 * 1024 * 1024
-MAX_MESSAGES = 10000
-MAX_ENTRIES = 2500
-MAX_CHANNELS = 100
+MAX_ARCHIVE = 50 * 1024 * 1024
+MAX_EXPANDED = 100 * 1024 * 1024
+MAX_MESSAGES = 100000
+MAX_ENTRIES = 10000
+MAX_CHANNELS = 1000
 MAX_JSON = 8 * 1024 * 1024
 ID = re.compile(r"^[A-Z][A-Z0-9]{0,31}$")
 TIMESTAMP = re.compile(r"^[0-9]{1,12}\.[0-9]{1,6}$")
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 
 class Confirm(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    channel_ids: list[str] = Field(min_length=1, max_length=25)
+    channel_ids: list[str] = Field(min_length=1, max_length=100)
     user_mapping: dict[str, str] = Field(default_factory=dict, max_length=250)
     channel_prefix: str = Field(default="slack-", min_length=1, max_length=30, pattern=r"^[\w -]+$")
     acknowledge_native_archive: bool
@@ -73,12 +74,97 @@ def stamp(value):
         bad("Slack message timestamp is outside the supported range")
 
 
+def historical_details(row, labels):
+    """Retain export statements without manufacturing current-user actions."""
+    def person(identifier):
+        if not isinstance(identifier, str) or not identifier or len(identifier) > 80: bad("Invalid historical author")
+        return {"id": identifier, "name": labels.get(identifier, identifier)}
+    author = person(row.get("user") or row.get("bot_id") or "unknown")
+    edited = row.get("edited")
+    edited_at = None
+    if edited is not None:
+        if not isinstance(edited, dict): bad("Invalid Slack edit metadata")
+        edited_at = edited.get("ts"); stamp(edited_at)
+    history = row.get("edit_history", row.get("history", []))
+    if not isinstance(history, list) or len(history) > 25: bad("Historical edits exceed the per-message bound")
+    if row.get("previous_message") is not None:
+        history = [*history, row["previous_message"]]
+    revisions, seen = [], set()
+    for previous in history:
+        if not isinstance(previous, dict): bad("Invalid historical revision")
+        text = previous.get("text", "")
+        ts = previous.get("edited", {}).get("ts") if isinstance(previous.get("edited"), dict) else None
+        ts = ts or previous.get("ts")
+        stamp(ts)
+        if not isinstance(text, str) or len(text) > 18000: bad("Historical revision is too large")
+        identity = (ts, text)
+        if identity in seen: continue
+        seen.add(identity)
+        revisions.append({"timestamp": ts, "text": text, "author": person(previous.get("user") or author["id"])})
+    if len(revisions) > 25: bad("Historical edits exceed the per-message bound")
+    reactions = row.get("reactions", [])
+    if not isinstance(reactions, list) or len(reactions) > 100: bad("Historical reactions exceed the per-message bound")
+    parsed, names = [], set()
+    for reaction in reactions:
+        if not isinstance(reaction, dict): bad("Invalid historical reaction")
+        name, users, count = reaction.get("name"), reaction.get("users", []), reaction.get("count")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_+\-]{1,100}", name) or name in names: bad("Invalid or duplicate historical reaction")
+        if not isinstance(users, list) or len(users) > 5000 or len(set(users)) != len(users): bad("Invalid historical reactors")
+        people = [person(identifier) for identifier in users]
+        if not isinstance(count, int) or isinstance(count, bool) or count < len(people) or count > 1000000: bad("Invalid historical reaction count")
+        names.add(name); parsed.append({"name": name, "count": count, "users": people})
+    result = {"version": 1, "source": "slack", "source_timestamp": row["ts"], "current_text": row.get("text", ""), "author": author,
+              "edited_at": edited_at, "history": sorted(revisions, key=lambda item: Decimal(item["timestamp"])), "reactions": parsed}
+    if len(json.dumps(result, ensure_ascii=False).encode()) > 128 * 1024: bad("Historical message metadata exceeds 128 KB")
+    return result
+
+
+def bounded_zip_directory(raw):
+    """Scan actual directory records before ZipFile can allocate ZipInfo objects."""
+    if len(raw) < 22: bad("Invalid ZIP directory")
+    floor = max(0, len(raw) - 65557)
+    at = len(raw)
+    end = -1
+    while at > floor:
+        at = raw.rfind(b"PK\x05\x06", floor, at)
+        if at < 0: break
+        if at + 22 <= len(raw) and at + 22 + struct.unpack_from("<H", raw, at + 20)[0] == len(raw):
+            end = at; break
+    if end < 0: bad("Invalid ZIP end record")
+    disk, directory_disk, disk_count, count, size, start = struct.unpack_from("<4H2I", raw, end + 4)
+    if disk or directory_disk or disk_count != count or count == 0xffff or start == 0xffffffff or size == 0xffffffff:
+        bad("Split and ZIP64 archives are unsupported")
+    if not count or count > MAX_ENTRIES or start + size != end: bad("Slack archive exceeds the directory bound")
+    cursor, actual = start, 0
+    while cursor < end:
+        if actual >= MAX_ENTRIES or cursor + 46 > end or raw[cursor:cursor+4] != b"PK\x01\x02":
+            bad("Slack archive exceeds the directory bound")
+        name, extra, comment, entry_disk = struct.unpack_from("<4H", raw, cursor + 28)
+        compressed, expanded = struct.unpack_from("<2I", raw, cursor + 20)
+        local = struct.unpack_from("<I", raw, cursor + 42)[0]
+        next_record = cursor + 46 + name + extra + comment
+        if entry_disk or 0xffffffff in {compressed, expanded, local} or next_record > end:
+            bad("Invalid, split or ZIP64 directory entry")
+        field, fields_end = cursor + 46 + name, cursor + 46 + name + extra
+        while field < fields_end:
+            if field + 4 > fields_end: bad("Invalid ZIP extra field")
+            kind, length = struct.unpack_from("<2H", raw, field)
+            if kind in {1, 0x9901} or field + 4 + length > fields_end: bad("ZIP64 and encrypted extra fields are unsupported")
+            field += 4 + length
+        actual += 1; cursor = next_record
+    if cursor != end or actual != count: bad("ZIP directory count does not match its records")
+    # Remove an optional ZIP comment before ZipFile's own backward EOCD search.
+    # Otherwise a fake later EOCD signature in that comment could select another
+    # directory after this preflight. Entry/data offsets and original digest stay intact.
+    return raw if end + 22 == len(raw) else raw[:end+20] + b"\x00\x00"
+
+
 class Archive:
     def __init__(self, raw):
         if not raw or len(raw) > MAX_ARCHIVE:
-            raise HTTPException(413, "Slack ZIP exceeds 10 MB")
+            raise HTTPException(413, "Slack ZIP exceeds 50 MB")
         try:
-            self.zip = zipfile.ZipFile(io.BytesIO(raw))
+            self.zip = zipfile.ZipFile(io.BytesIO(bounded_zip_directory(raw)))
             entries = self.zip.infolist()
             if not entries or len(entries) > MAX_ENTRIES:
                 bad("Slack archive exceeds the entry bound")
@@ -87,7 +173,7 @@ class Archive:
             for info in entries:
                 path = PurePosixPath(info.filename)
                 mode = info.external_attr >> 16
-                if (not info.filename or "\\" in info.filename or path.is_absolute()
+                if (not info.filename or re.search(r"[\x00-\x1f\x7f]", info.orig_filename) or "\\" in info.filename or path.is_absolute()
                         or any(part in {".", ".."} for part in info.filename.split("/"))
                         or len(info.filename) > 512 or len(path.parts) > 5
                         or info.flag_bits & 1 or stat.S_ISLNK(mode)
@@ -131,18 +217,34 @@ class Archive:
                     bad("Invalid Slack channel roster")
                 self.channels[identifier] = {"id": identifier, "name": name, "members": members}
                 records = []
-                seen = set()
+                seen = {}
                 for path in sorted(self.entries):
                     if not re.fullmatch(re.escape(name) + r"/\d{4}-\d{2}-\d{2}\.json", path): continue
                     rows = self.read_json(path)
                     if not isinstance(rows, list): bad()
                     for row in rows:
                         if not isinstance(row, dict): bad()
-                        # Membership/edit system events cannot become impersonated messages.
+                        # Edit envelopes retain historical snapshots, never impersonated live edits.
+                        changed = row.get("type") == "message" and row.get("subtype") == "message_changed"
+                        if changed:
+                            envelope = row
+                            row = envelope.get("message")
+                            if not isinstance(row, dict): bad("Invalid Slack edit envelope")
+                            row = {**row, "type": "message"}
+                            previous = envelope.get("previous_message")
+                            if previous is not None:
+                                if not isinstance(previous, dict) or previous.get("ts") != row.get("ts"): bad("Slack edit targets another message")
+                                row["previous_message"] = previous
                         if row.get("type") != "message" or row.get("subtype") not in {None, "bot_message", "file_share", "thread_broadcast"}: continue
                         ts = row.get("ts"); stamp(ts)
-                        if ts in seen: bad("Duplicate Slack message timestamp")
-                        seen.add(ts)
+                        old = seen.get(ts)
+                        if old:
+                            if not changed: bad("Duplicate Slack message timestamp")
+                            old_history = [{"ts": item["timestamp"], "text": item["text"], "user": item["author"]["id"]} for item in old["details"]["history"]]
+                            old_history.append({"ts": old["details"]["edited_at"] or ts, "text": old["text"], "user": old["author"]})
+                            row["edit_history"] = [*old_history, *row.get("edit_history", [])]
+                            row.setdefault("thread_ts", old["parent"])
+                            records.remove(old)
                         text = row.get("text", "")
                         if not isinstance(text, str) or len(text) > 18000: bad("Slack message is too large")
                         author = row.get("user") or row.get("bot_id") or "unknown"
@@ -168,14 +270,15 @@ class Archive:
                                 bundled.append({"path": path, "name": filename, "mime": mime})
                                 self.file_count += 1
                                 referenced_bytes += self.entries[path].file_size
-                                if self.file_count > 200 or referenced_bytes > MAX_EXPANDED:
-                                    bad("Archive exceeds 200 file references or 50 MB of referenced files")
+                                if self.file_count > 2000 or referenced_bytes > MAX_EXPANDED:
+                                    bad("Archive exceeds 2,000 file references or 100 MB of referenced files")
                             else: missing += 1; self.missing_files += 1
                         if not text.strip() and not files: continue
-                        records.append({"ts": ts, "text": text, "author": author, "parent": parent,
-                                        "files": bundled, "missing": missing})
-                        count += 1
-                        if count > MAX_MESSAGES: bad("Slack archive exceeds 10,000 messages")
+                        record = {"ts": ts, "text": text, "author": author, "parent": parent,
+                                  "files": bundled, "missing": missing, "details": historical_details(row, self.labels)}
+                        records.append(record); seen[ts] = record
+                        count += 0 if old else 1
+                        if count > MAX_MESSAGES: bad("Slack archive exceeds 100,000 messages")
                 by_timestamp = {entry["ts"]: entry for entry in records}
                 for entry in records:
                     parent = entry["parent"]
@@ -183,7 +286,7 @@ class Archive:
                         # Slack roots may carry their own thread_ts. Replies
                         # cannot become parents of nested or cyclic threads.
                         root = by_timestamp[parent]
-                        if root["parent"] not in {None, parent}:
+                        if root["parent"] not in {None, parent} or Decimal(parent) > Decimal(entry["ts"]):
                             bad("Slack thread replies must refer to a root message")
                 self.messages[identifier] = sorted(records, key=lambda r: Decimal(r["ts"]))
             # Two Slack channels must not alias the same message directory.
@@ -212,7 +315,7 @@ class Archive:
                              "message_count": len(self.messages[c["id"]])} for c in self.channels.values()],
                 "users": [{"id": uid, "name": name} for uid, name in self.labels.items()],
                 "bundled_files": self.file_count, "missing_files": self.missing_files,
-                "native_archive": True, "remote_fetches": False}
+                "native_archive": True, "remote_fetches": False, "resumable": True, "limits": {"archive_bytes": MAX_ARCHIVE, "expanded_bytes": MAX_EXPANDED, "messages": MAX_MESSAGES, "batch_messages": 250}}
 
 
 def authorize(session, workspace_id, user_id, *, locked=False):
@@ -229,14 +332,20 @@ def create_preview(session, workspace_id, actor_id, raw):
     archive = Archive(raw)
     digest = hashlib.sha256(raw).hexdigest()
     old = session.exec(select(SlackImport).where(SlackImport.workspace_id == workspace_id, SlackImport.archive_digest == digest)).first()
+    if old and old.status != "completed":
+        pending = session.exec(select(SlackImport.id).where(SlackImport.actor_id == actor_id, SlackImport.id != old.id, SlackImport.encrypted_archive != "", SlackImport.expires_at > datetime.utcnow(), SlackImport.status.in_(["preview", "in_progress"]))).all()
+        if len(pending) >= 3: raise HTTPException(429, "Finish or discard an existing archive before another upload")
     if old:
         if old.actor_id != actor_id: raise HTTPException(409, "This archive already belongs to another import")
         if old.status == "completed": return {"id": old.id, "status": old.status, "result": json.loads(old.result_json)}
-        old.status = "preview"
+        if old.status == "paused": old.status = "in_progress"
+        elif old.status != "in_progress": old.status = "preview"
         old.encrypted_archive = seal_private(base64.b64encode(raw).decode(), "slack-archive", old.id)
         old.expires_at = datetime.utcnow() + timedelta(hours=1)
         session.add(old)
-        return {"id": old.id, "status": old.status, **archive.preview()}
+        return {"id": old.id, "status": old.status, **archive.preview(), **({"progress": resume_status(old)} if old.status == "in_progress" else {})}
+    pending = session.exec(select(SlackImport.id).where(SlackImport.actor_id == actor_id, SlackImport.encrypted_archive != "", SlackImport.expires_at > datetime.utcnow(), SlackImport.status.in_(["preview", "in_progress"]))).all()
+    if len(pending) >= 3: raise HTTPException(429, "Finish or discard an existing archive before another upload")
     row = SlackImport(workspace_id=workspace_id, actor_id=actor_id, archive_digest=digest,
                       encrypted_archive="", expires_at=datetime.utcnow()+timedelta(hours=1))
     row.encrypted_archive = seal_private(base64.b64encode(raw).decode(), "slack-archive", row.id)
@@ -245,10 +354,12 @@ def create_preview(session, workspace_id, actor_id, raw):
 
 
 def expire_previews(session, limit=10):
-    rows = session.exec(select(SlackImport).where(SlackImport.status == "preview", SlackImport.expires_at <= datetime.utcnow())
+    rows = session.exec(select(SlackImport).where(SlackImport.status.in_(["preview", "in_progress"]), SlackImport.expires_at <= datetime.utcnow())
                         .limit(min(max(limit, 1), 25)).with_for_update()).all()
     for row in rows:
-        row.encrypted_archive, row.status = "", "expired"
+        was_started = row.status == "in_progress"
+        row.encrypted_archive, row.status = "", "paused" if was_started else "expired"
+        if not was_started: row.result_json = None
         session.add(row)
     session.commit()
     return len(rows)
@@ -260,11 +371,63 @@ def close_account_resources(session, user_id):
     rows = session.exec(select(SlackImport).where(SlackImport.actor_id == user_id)).all()
     for row in rows:
         row.encrypted_archive = ""
-        if row.status != "completed": row.status = "discarded"
+        if row.status != "completed":
+            row.status = "discarded"
+            row.result_json = None
         session.add(row)
     session.flush()
     session.execute(delete(SlackImport).where(SlackImport.actor_id == user_id,
         SlackImport.id.not_in(referenced)))
+
+
+def write_native_batch(session, archive, cid, actor_id, channel_id, import_id, messages, result, blobs):
+    identities = {entry["ts"]: uuid4().hex for entry in messages}
+    rows = {}
+    # Insert parent rows first so foreign keys remain valid on PostgreSQL.
+    for entry in messages:
+        label = archive.labels.get(entry["author"], entry["author"])
+        text = "[Imported from Slack · " + label + " · " + entry["ts"] + "]\n" + entry["text"]
+        if entry["missing"]: text += "\n[" + str(entry["missing"]) + " original attachment(s) unavailable in this archive]"
+        enforce_native_content(session, channel_id, actor_id, text + "\n" + json.dumps(entry["details"], ensure_ascii=False))
+        message = Message(id=identities[entry["ts"]], channel_id=channel_id, author_id=actor_id,
+            content=encrypt_message(text, channel_id), encrypted=True, created_at=stamp(entry["ts"]),
+            edited_at=stamp(entry["details"]["edited_at"]) if entry["details"]["edited_at"] else None)
+        session.add(message); session.flush(); rows[entry["ts"]] = message
+        session.add(SlackImportMessage(message_id=message.id, import_id=import_id, source_channel=cid, source_timestamp=entry["ts"]))
+        session.add(SlackImportDetail(message_id=message.id, encrypted_details=encrypt_message(json.dumps(entry["details"], ensure_ascii=False), channel_id)))
+        result["messages"] += 1; result["missing_files"] += entry["missing"]
+        for file in entry["files"]:
+            from ..api.files import safe_filename
+            content = archive.read(file["path"])
+            filename = safe_filename(file["name"])
+            enforce_native_file(session, channel_id, actor_id, filename, file["mime"], content)
+            file_id = uuid4().hex
+            # An object store may accept bytes but lose its response.
+            # Track this fresh ID before I/O so rollback can erase that
+            # uncertain write. A conditional collision is not our blob.
+            blobs.append(file_id)
+            try:
+                location = storage_service.save_file_sync(file_id, content)
+            except FileExistsError:
+                blobs.pop()
+                raise
+            record = File(id=file_id, channel_id=channel_id, uploader_id=actor_id, filename=filename,
+                content_type=file["mime"], size=len(content), storage_path=location, encrypted=False, created_at=stamp(entry["ts"]))
+            session.add(record); session.flush()
+            session.add(FileDocument(id=file_id, channel_id=channel_id, owner_id=actor_id, current_file_id=file_id)); session.flush()
+            session.add(FileVersion(file_id=file_id, document_id=file_id, number=1))
+            result["files"] += 1
+    for entry in messages:
+        parent = entry["parent"]
+        if parent and parent != entry["ts"]:
+            root = rows.get(parent)
+            if root is None:
+                link = session.exec(select(SlackImportMessage).join(Message, Message.id == SlackImportMessage.message_id).where(SlackImportMessage.import_id == import_id,
+                    SlackImportMessage.source_channel == cid, SlackImportMessage.source_timestamp == parent, Message.channel_id == channel_id)).first()
+                root = session.get(Message, link.message_id) if link else None
+            if root:
+                rows[entry["ts"]].parent_id = root.id
+                root.thread_count += 1
 
 
 def import_archive(session, workspace_id, actor_id, identifier, data):
@@ -305,46 +468,7 @@ def import_archive(session, workspace_id, actor_id, identifier, data):
             for uid in members:
                 session.add(ChannelMember(channel_id=channel_id, user_id=uid, role="admin" if uid == actor_id else "member"))
             session.flush()
-            messages = archive.messages[cid]
-            identities = {entry["ts"]: uuid4().hex for entry in messages}
-            rows = {}
-            # Insert parent rows first so foreign keys remain valid on PostgreSQL.
-            for entry in messages:
-                label = archive.labels.get(entry["author"], entry["author"])
-                text = "[Imported from Slack · " + label + " · " + entry["ts"] + "]\n" + entry["text"]
-                if entry["missing"]: text += "\n[" + str(entry["missing"]) + " original attachment(s) unavailable in this archive]"
-                enforce_native_content(session, channel_id, actor_id, text)
-                message = Message(id=identities[entry["ts"]], channel_id=channel_id, author_id=actor_id,
-                    content=encrypt_message(text, channel_id), encrypted=True, created_at=stamp(entry["ts"]))
-                session.add(message); session.flush(); rows[entry["ts"]] = message
-                session.add(SlackImportMessage(message_id=message.id, import_id=row.id, source_channel=cid, source_timestamp=entry["ts"]))
-                result["messages"] += 1; result["missing_files"] += entry["missing"]
-                for file in entry["files"]:
-                    from ..api.files import safe_filename
-                    content = archive.read(file["path"])
-                    filename = safe_filename(file["name"])
-                    enforce_native_file(session, channel_id, actor_id, filename, file["mime"], content)
-                    file_id = uuid4().hex
-                    # An object store may accept bytes but lose its response.
-                    # Track this fresh ID before I/O so rollback can erase that
-                    # uncertain write. A conditional collision is not our blob.
-                    blobs.append(file_id)
-                    try:
-                        location = storage_service.save_file_sync(file_id, content)
-                    except FileExistsError:
-                        blobs.pop()
-                        raise
-                    record = File(id=file_id, channel_id=channel_id, uploader_id=actor_id, filename=filename,
-                        content_type=file["mime"], size=len(content), storage_path=location, encrypted=False, created_at=stamp(entry["ts"]))
-                    session.add(record); session.flush()
-                    session.add(FileDocument(id=file_id, channel_id=channel_id, owner_id=actor_id, current_file_id=file_id)); session.flush()
-                    session.add(FileVersion(file_id=file_id, document_id=file_id, number=1))
-                    result["files"] += 1
-            for entry in messages:
-                parent = entry["parent"]
-                if parent and parent != entry["ts"] and parent in rows:
-                    rows[entry["ts"]].parent_id = rows[parent].id
-                    rows[parent].thread_count += 1
+            write_native_batch(session, archive, cid, actor_id, channel_id, row.id, archive.messages[cid], result, blobs)
             result["channels"].append({"id": channel_id, "name": channel.name, "source_id": cid})
         session.flush()
         # Repeat signed authority after file I/O. No webhook, mention, workflow
@@ -369,3 +493,204 @@ def import_archive(session, workspace_id, actor_id, identifier, data):
                     # bytes, provider response bodies or archive credentials.
                     logger.error("Slack import rollback could not erase owned blob %s; operator reconciliation required", file_id)
         raise
+
+
+class ResumeStep(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    expected_sequence: int = Field(ge=0, le=1000000)
+
+
+class SecureReserve(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    archive_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    options_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    member_ids: list[str] = Field(default_factory=list, max_length=100)
+
+
+def _job(session, workspace_id, actor_id, identifier):
+    authorize(session, workspace_id, actor_id, locked=True)
+    row = session.get(SlackImport, identifier, populate_existing=True)
+    if not row or row.workspace_id != workspace_id or row.actor_id != actor_id:
+        raise HTTPException(404, "Slack import not found")
+    return row
+
+
+def _mapping(session, workspace_id, user_ids):
+    for uid in set(user_ids):
+        member = require_workspace_member(session, workspace_id, uid)
+        person = session.get(User, uid, populate_existing=True)
+        if member.role == "guest" or not person or person.is_blocked:
+            raise HTTPException(422, "Map only active non-guest workspace members")
+
+
+def _state(row):
+    value = json.loads(row.result_json)
+    return json.loads(unseal_private(value["private_state"], "slack-resume", row.id)), value["result"]
+
+
+def _save_state(row, state, result):
+    row.result_json = json.dumps({"private_state": seal_private(json.dumps(state, separators=(",", ":")), "slack-resume", row.id),
+                                 "result": result}, separators=(",", ":"))
+
+
+def resume_status(row):
+    if row.status == "completed":
+        result = json.loads(row.result_json)
+        return {"id": row.id, "status": row.status, "sequence": None, "result": result}
+    if row.status not in {"in_progress", "paused"}:
+        return {"id": row.id, "status": row.status, "sequence": 0}
+    state, result = _state(row)
+    return {"id": row.id, "status": row.status, "sequence": state["sequence"], "result": result,
+            "processed": result["messages"], "total": state["total"], "channel_index": state["channel_index"],
+            "source_digest": row.archive_digest, "request_digest": row.request_digest}
+
+
+def begin_resume(session, workspace_id, actor_id, identifier, data):
+    row = _job(session, workspace_id, actor_id, identifier)
+    digest = hashlib.sha256(json.dumps(data.model_dump(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if row.status in {"in_progress", "paused", "completed"}:
+        if row.request_digest != digest: raise HTTPException(409, "This migration already has different reviewed choices")
+        return resume_status(row)
+    if row.status != "preview" or row.expires_at <= datetime.utcnow():
+        raise HTTPException(409, "Upload this exact archive again to continue")
+    if not data.acknowledge_native_archive or len(set(data.channel_ids)) != len(data.channel_ids):
+        raise HTTPException(422, "Review native storage and choose unique channels")
+    archive = Archive(base64.b64decode(unseal_private(row.encrypted_archive, "slack-archive", row.id), validate=True))
+    if not set(data.channel_ids) <= archive.channels.keys() or not data.user_mapping.keys() <= archive.labels.keys():
+        raise HTTPException(422, "Choose channels and users from this archive")
+    _mapping(session, workspace_id, data.user_mapping.values())
+    state = {"options": data.model_dump(), "sequence": 0, "channel_index": 0, "message_offset": 0,
+             "total": sum(len(archive.messages[cid]) for cid in data.channel_ids)}
+    result = {"channels": [], "messages": 0, "files": 0, "missing_files": 0}
+    row.status, row.request_digest = "in_progress", digest
+    _save_state(row, state, result); session.add(row); session.commit()
+    return resume_status(row)
+
+
+def resume_batch(session, workspace_id, actor_id, identifier, expected_sequence):
+    row = _job(session, workspace_id, actor_id, identifier)
+    if row.status == "completed": return resume_status(row)
+    if row.status != "in_progress" or row.expires_at <= datetime.utcnow():
+        raise HTTPException(409, "Upload this exact archive again to continue")
+    state, result = _state(row)
+    if expected_sequence < state["sequence"]: return resume_status(row)  # lost acknowledgement: never replay a committed batch
+    if expected_sequence != state["sequence"]: raise HTTPException(409, "Refresh migration progress before continuing")
+    options = Confirm.model_validate(state["options"])
+    _mapping(session, workspace_id, options.user_mapping.values())
+    archive = Archive(base64.b64decode(unseal_private(row.encrypted_archive, "slack-archive", row.id), validate=True))
+    cid = options.channel_ids[state["channel_index"]]
+    source = archive.channels[cid]
+    channel = None
+    prior = next((item for item in result["channels"] if item["source_id"] == cid), None)
+    if prior:
+        from .access import lock_channel_writes
+        lock_channel_writes(session, prior["id"])
+        channel = session.get(Channel, prior["id"], populate_existing=True)
+        member = session.get(ChannelMember, (prior["id"], actor_id), populate_existing=True)
+        from ..models.secure_channel import SecureChannel
+        mapping = session.get(WorkspaceChannel, prior["id"])
+        if not channel or not mapping or mapping.workspace_id != workspace_id or not member or member.role != "admin" or session.get(SecureChannel, prior["id"]):
+            raise HTTPException(409, "The destination channel changed; this migration is paused")
+        expected_members = {actor_id} | {options.user_mapping[uid] for uid in source["members"] if uid in options.user_mapping}
+        current_members = set(session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == channel.id)).all())
+        if current_members != expected_members: raise HTTPException(409, "Review the changed destination membership before continuing")
+    else:
+        channel = Channel(id=uuid4().hex, name=(options.channel_prefix + source["name"])[:100], type="group")
+        session.add(channel); session.flush()
+        session.add(WorkspaceChannel(channel_id=channel.id, workspace_id=workspace_id)); session.flush()
+        members = {actor_id} | {options.user_mapping[uid] for uid in source["members"] if uid in options.user_mapping}
+        for uid in members: session.add(ChannelMember(channel_id=channel.id, user_id=uid, role="admin" if uid == actor_id else "member"))
+        session.flush(); result["channels"].append({"id": channel.id, "name": channel.name, "source_id": cid})
+    blobs = []
+    try:
+        messages = archive.messages[cid][state["message_offset"]:state["message_offset"]+250]
+        write_native_batch(session, archive, cid, actor_id, channel.id, row.id, messages, result, blobs)
+        state["message_offset"] += len(messages)
+        if state["message_offset"] >= len(archive.messages[cid]):
+            state["channel_index"] += 1; state["message_offset"] = 0
+        state["sequence"] += 1
+        session.flush(); session.expire_all(); authorize(session, workspace_id, actor_id)
+        _mapping(session, workspace_id, options.user_mapping.values())
+        row = session.get(SlackImport, identifier)
+        if state["channel_index"] == len(options.channel_ids):
+            row.status, row.encrypted_archive = "completed", ""
+            row.result_json = json.dumps(result, separators=(",", ":"))
+        else:
+            row.expires_at = datetime.utcnow() + timedelta(hours=1)
+            _save_state(row, state, result)
+        session.add(row); session.commit()
+        return resume_status(row)
+    except BaseException:
+        try: session.rollback()
+        finally:
+            for file_id in blobs:
+                try: storage_service.delete_file_sync(file_id)
+                except Exception: logger.error("Slack import rollback could not erase owned blob %s; operator reconciliation required", file_id)
+        raise
+
+
+def reserve_secure(session, workspace_id, actor_id, data):
+    """Only opaque archive/source commitments reach this secure-import API."""
+    authorize(session, workspace_id, actor_id, locked=True)
+    from ..config import settings
+    if not settings.matrix_enabled: raise HTTPException(409, "Enable encrypted messaging before a secure migration")
+    if len(set(data.member_ids)) != len(data.member_ids): raise HTTPException(422, "Choose unique current members")
+    _mapping(session, workspace_id, data.member_ids)
+    digest = "secure:" + data.archive_digest
+    row = session.exec(select(SlackImport).where(SlackImport.workspace_id == workspace_id, SlackImport.archive_digest == digest)).first()
+    if row:
+        if row.actor_id != actor_id: raise HTTPException(409, "This secure migration belongs to another administrator")
+        if row.request_digest != data.options_digest or row.status != "secure": raise HTTPException(409, "Secure migration choices changed; use the original reviewed archive and mapping")
+        state = json.loads(row.result_json)
+    else:
+        pending = session.exec(select(SlackImport.id).where(SlackImport.actor_id == actor_id, SlackImport.status == "secure")).all()
+        if len(pending) >= 10: raise HTTPException(429, "Finish or discard an existing secure migration first")
+        row = SlackImport(workspace_id=workspace_id, actor_id=actor_id, archive_digest=digest, encrypted_archive="", status="secure",
+                          request_digest=data.options_digest, expires_at=datetime.utcnow()+timedelta(days=7))
+        state = {"channels": []}
+        session.add(row); session.flush()
+    current = next((item for item in state["channels"] if item["source_digest"] == data.source_digest), None)
+    if current:
+        from .access import lock_channel_writes
+        lock_channel_writes(session, current["id"])
+        channel = session.get(Channel, current["id"])
+        member = session.get(ChannelMember, (current["id"], actor_id), populate_existing=True)
+        mapping = session.get(WorkspaceChannel, current["id"])
+        members = set(session.exec(select(ChannelMember.user_id).where(ChannelMember.channel_id == current["id"])).all())
+        if not channel or not mapping or mapping.workspace_id != workspace_id or not member or member.role != "admin" or members != set(data.member_ids) | {actor_id}:
+            raise HTTPException(409, "The secure migration destination or membership changed")
+        return {"id": row.id, "channel_id": channel.id}
+    if len(state["channels"]) >= 100: raise HTTPException(422, "A secure migration supports at most 100 selected channels")
+    channel = Channel(id=uuid4().hex, name="Encrypted channel", type="group")
+    session.add(channel); session.flush(); session.add(WorkspaceChannel(channel_id=channel.id, workspace_id=workspace_id)); session.flush()
+    for uid in set(data.member_ids) | {actor_id}: session.add(ChannelMember(channel_id=channel.id, user_id=uid, role="admin" if uid == actor_id else "member"))
+    state["channels"].append({"source_digest": data.source_digest, "id": channel.id})
+    row.result_json = json.dumps(state, separators=(",", ":")); session.add(row); session.commit()
+    return {"id": row.id, "channel_id": channel.id}
+
+
+def historical_message(session, channel_id, message_id, user_id):
+    from .access import require_channel_member
+    from .chat_notifications import require_native_channel
+    require_channel_member(session, channel_id, user_id)
+    require_native_channel(session, channel_id)
+    message = session.get(Message, message_id)
+    if not message or message.channel_id != channel_id or message.deleted: raise HTTPException(404, "Historical message not found")
+    detail = session.get(SlackImportDetail, message_id)
+    return json.loads(decrypt_message(detail.encrypted_details, channel_id)) if detail else None
+
+
+class SecureComplete(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    archive_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    options_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def complete_secure(session, workspace_id, actor_id, identifier, data):
+    row = _job(session, workspace_id, actor_id, identifier)
+    if row.status not in {"secure", "secure_completed"} or row.request_digest != data.options_digest or row.archive_digest != "secure:" + data.archive_digest:
+        raise HTTPException(409, "Secure migration confirmation does not match its reviewed choices")
+    row.status = "secure_completed"
+    session.add(row); session.commit()
+    return {"completed": True}

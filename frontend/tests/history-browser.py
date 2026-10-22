@@ -1,8 +1,10 @@
 """Real UI full-history/search/mentions verification using disposable local accounts."""
 import json, os, uuid
+from pathlib import Path
 from urllib.request import Request, urlopen
 from playwright.sync_api import sync_playwright, expect
 BASE=os.getenv('CHAT_BASE_URL','http://127.0.0.1:3000').rstrip('/')
+PROOF_DIR=Path(os.getenv('FREECOLLAB_PROOF_DIR',str(Path(__file__).resolve().parents[2].parent / '.freecollab')))
 RUN=uuid.uuid4().hex[:10]
 PASSWORD='History-browser-local-password!'
 def api(method,path,token=None,data=None):
@@ -62,7 +64,7 @@ with sync_playwright() as p:
     expect(dialog.locator('.fc-history-result')).to_have_count(1,timeout=60000)
     api('DELETE','/messages/'+old['id'],a['access_token'])
     expect(dialog.locator('.fc-history-result')).to_have_count(0,timeout=20000)
-    page.screenshot(path='/workspace/.freecollab/product-history-search.png')
+    page.screenshot(path=str(PROOF_DIR / 'product-history-search.png'))
     page.get_by_role('button',name='Close history search',exact=True).click()
     assert not errors,errors
     print('PASS: deleted history disappears from local search without storing plaintext',flush=True)

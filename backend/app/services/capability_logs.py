@@ -1,9 +1,17 @@
-"""Keep Office bearer capabilities out of the default application access log."""
+"""Keep bearer capabilities and OAuth handoffs out of application access logs."""
 import logging
 import re
 
-_CAPABILITY = re.compile(r"(/(?:api/)?office-edit/)[^\s\"']*")
-_OAUTH_CALLBACK = re.compile(r"(/(?:api/)?personal-oauth/callback)\?[^\s\"']*")
+def _url_literal(value):
+    # ASGI routing decodes URL octets; Uvicorn may log the original raw path.
+    # Match both representations without decoding untrusted text into log lines.
+    return ''.join('(?:' + re.escape(char) + '|%' + format(ord(char), '02x') + ')' for char in value)
+
+
+_PREFIX = _url_literal('/') + '(?:' + _url_literal('api/') + ')?'
+_CAPABILITY = re.compile('(' + _PREFIX + _url_literal('office-edit/') + r')[^\s\"\']*', re.IGNORECASE)
+_OAUTH_CALLBACK = re.compile('(' + _PREFIX + _url_literal('personal-oauth/callback') + r')(?:\?|%3f)[^\s\"\']*', re.IGNORECASE)
+_CALENDAR_SUBSCRIPTION = re.compile('(' + _PREFIX + _url_literal('calendar/subscriptions/') + r')[^\s\"\']*', re.IGNORECASE)
 
 
 class CapabilityLogFilter(logging.Filter):
@@ -11,7 +19,10 @@ class CapabilityLogFilter(logging.Filter):
         # Preserve Uvicorn's five structured args: AccessFormatter unpacks them.
         # The ASGI scope and routing path are never changed.
         def redact(value):
-            return _OAUTH_CALLBACK.sub(r"\1?[redacted]", _CAPABILITY.sub(r"\1[redacted]", value)) if isinstance(value, str) else value
+            if not isinstance(value, str):
+                return value
+            value = _CALENDAR_SUBSCRIPTION.sub(r"\1[redacted]", value)
+            return _OAUTH_CALLBACK.sub(r"\1?[redacted]", _CAPABILITY.sub(r"\1[redacted]", value))
         record.msg = redact(record.msg)
         if isinstance(record.args, tuple):
             record.args = tuple(redact(value) for value in record.args)

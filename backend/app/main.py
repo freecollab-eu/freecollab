@@ -35,8 +35,10 @@ from .api import native_clients, native_push
 from .api import slack_import, integration_library
 from .api import connect_federation
 from .api import calendar_planning
+from .api import calendar_delivery
 from .api import my_day
 from .api import personal_oauth
+from .services.native_calls import configured as native_call_configuration
 from .models import workspace_crypto_grant  # Register additive tables before init_db.
 from .realtime.socket import sio, start_realtime_broker, stop_realtime_broker, realtime_broker_ready
 
@@ -60,7 +62,7 @@ async def lifespan(app):
         await stop_realtime_broker()
 
 
-app = FastAPI(title="FreeCollab", version="0.12.0", lifespan=lifespan)
+app = FastAPI(title="FreeCollab", version="0.13.0", lifespan=lifespan)
 
 # CORS
 app.add_middleware(
@@ -137,6 +139,7 @@ app.include_router(integration_library.router)
 app.include_router(connect_federation.router)
 app.include_router(native_push.router)
 app.include_router(calendar_planning.router)
+app.include_router(calendar_delivery.router)
 app.include_router(my_day.router)
 app.include_router(personal_oauth.router)
 if settings.enable_experimental_features:
@@ -153,7 +156,7 @@ socket_app = socketio.ASGIApp(sio, app)
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "version": "0.12.0"}
+    return {"status": "ok", "version": "0.13.0"}
 
 
 @app.get("/ready")
@@ -175,7 +178,7 @@ def ready():
 @app.get("/capabilities")
 def capabilities():
     return {
-        "version": "0.12.0",
+        "version": "0.13.0",
         "experimental_features": settings.enable_experimental_features,
         "demo_ai": settings.enable_demo_ai,
         "max_file_size": files.MAX_FILE_SIZE,
@@ -183,11 +186,13 @@ def capabilities():
         "invitations": True,
         "workspaces": True,
         "my_day": True,
-        "slack_import": "reviewed-native-archive",
+        "slack_import": "resumable-native-or-trusted-device-e2ee-archive",
         "integration_library": "instance-reviewed-declarative-versions",
         "personal_provider_oauth": ["google", "microsoft"],
         "calendar_recurrence": True,
-        "calendar_invitations": "internal-current-channel-members",
+        "calendar_invitations": "internal-members-and-reviewed-external-provider-delivery",
+        "calendar_provider_delivery": settings.sync_enabled,
+        "calendar_subscriptions": "explicit-revocable-native-channel-capability",
         "native_push": native_push.service.configuration(),
         "encrypted_offline_library": "opt-in-same-sign-in-device-storage",
         "direct_messages": True,
@@ -223,7 +228,7 @@ def capabilities():
         "data_controls": settings.data_controls_enabled,
         "push_notifications": settings.push_enabled,
         "native_push_notifications": settings.native_push_enabled,
-        "native_background_calls": "notification_then_explicit_foreground_join",
+        "native_background_calls": native_call_configuration(),
         "account_security": True,
         "secure_messaging": settings.matrix_enabled,
         "message_encryption": "hybrid" if settings.matrix_enabled else "server-side",

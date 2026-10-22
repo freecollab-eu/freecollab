@@ -1,0 +1,9 @@
+services:
+  website:
+    image: ${FREECOLLAB_WEBSITE_IMAGE:?Generate images.env from a verified published release manifest}
+    pull_policy: always
+    environment:
+      PORT: '8080'
+    ports:
+      - "127.0.0.1:${WEBSITE_PORT:-8081}:8080"
+    restart: unless-stopped

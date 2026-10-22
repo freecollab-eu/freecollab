@@ -99,29 +99,29 @@ async def send_message(
     channel = session.get(Channel, channel_id)
     await process_message_mentions(message, channel, user, session, mention_ids=mention_ids)
 
-    # Broadcast to channel
-    await broadcast_to_channel(
-        channel_id,
-        "message",
-        {
-            "id": message.id,
-            "channel_id": channel_id,
-            "author_id": user.id,
-            "content": data.content,  # Send plaintext to authorized clients
-            "created_at": message.created_at.isoformat(),
-            "encrypted": True,
-            "parent_id": message.parent_id,
-            "thread_count": message.thread_count,
-            "mentions": mention_ids,
-        },
-    )
-
-    return {
+    payload = {
+        "id": message.id,
+        "channel_id": channel_id,
+        "author_id": user.id,
+        "content": data.content,  # Send plaintext to authorized clients
+        "created_at": message.created_at.isoformat(),
+        "encrypted": True,
+        "parent_id": message.parent_id,
+        "thread_count": message.thread_count,
+        "mentions": mention_ids,
+    }
+    result = {
         **message.model_dump(),
         "content": data.content,
         "mentions": mention_ids,
         "policy_warnings": warnings,
     }
+    # Notification checks and expired ORM attributes can reopen a read
+    # transaction after the mutation commits. Release it before fanout needs
+    # independent, current recipient authorization connections.
+    session.commit()
+    await broadcast_to_channel(channel_id, "message", payload)
+    return result
 
 
 @router.get("/channels/{channel_id}")
@@ -229,25 +229,17 @@ async def edit_message(
     channel = session.get(Channel, message.channel_id)
     await process_message_mentions(message, channel, user, session, mention_ids=mention_ids)
 
-    # Broadcast edit
-    await broadcast_to_channel(
-        message.channel_id,
-        "message_edited",
-        {
-            "id": message.id,
-            "content": data.content,
-            "edited_at": message.edited_at.isoformat(),
-            "mentions": mention_ids,
-        },
-    )
-
-    return {
+    channel_id = message.channel_id
+    payload = {
         "id": message.id,
         "content": data.content,
         "edited_at": message.edited_at.isoformat(),
         "mentions": mention_ids,
-        "policy_warnings": warnings,
     }
+    result = {**payload, "policy_warnings": warnings}
+    session.commit()
+    await broadcast_to_channel(channel_id, "message_edited", payload)
+    return result
 
 
 @router.delete("/{message_id}")
@@ -278,15 +270,9 @@ async def delete_message(
     message.edited_at = datetime.utcnow()
     message.mentions = "[]"
     record_message_change(session, message, "deleted")
+    channel_id = message.channel_id
+    payload = {"id": message.id}
     session.commit()
-
-    # Broadcast deletion
-    await broadcast_to_channel(
-        message.channel_id,
-        "message_deleted",
-        {
-            "id": message.id,
-        },
-    )
+    await broadcast_to_channel(channel_id, "message_deleted", payload)
 
     return {"deleted": True, "id": message_id}

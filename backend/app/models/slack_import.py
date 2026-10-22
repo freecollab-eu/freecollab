@@ -24,3 +24,9 @@ class SlackImportMessage(SQLModel, table=True):
     import_id: str = Field(foreign_key="slackimport.id", index=True)
     source_channel: str
     source_timestamp: str
+
+
+class SlackImportDetail(SQLModel, table=True):
+    """Historical export facts; never impersonated current reactions or edits."""
+    message_id: str = Field(primary_key=True, foreign_key="message.id")
+    encrypted_details: str

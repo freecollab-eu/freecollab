@@ -1,5 +1,8 @@
 # Customer-owned native mobile notifications
 
+> Standard alerts described here remain independent of the opt-in native media lifecycle. FreeCollab 0.13 adds customer-owned CallKit/PushKit and Android Telecom calling; see [NATIVE_CALLING.md](NATIVE_CALLING.md) for configuration, explicit consent, the SFU encryption boundary and platform verification limits. Standard notification payloads still do not authorize media admission.
+
+
 Open **Mobile → Native mobile notifications** in a linked Android or iOS app.
 The user explicitly enables device alerts and can separately opt into alerts when
 a channel call starts. The OS permission and a short-lived delivered challenge
@@ -128,8 +131,10 @@ meeting controls, and leaves camera/microphone off until the user chooses to joi
 
 Normal APNs/FCM alert delivery depends on platform permission, battery/network
 policy and provider acceptance. Android force-stop and iOS notification settings
-can prevent delivery. There is no PushKit/CallKit, full-screen intent, automatic
-answering, background media service or guaranteed ringing while terminated. An
+can prevent delivery. Standard alerts do not use PushKit/CallKit, full-screen
+intent or a background media service. The separate opt-in
+[NATIVE_CALLING.md](NATIVE_CALLING.md) feature supplies OS calling with native
+LiveKit audio after explicit Answer; neither path guarantees ringing. An
 already-delivered generic OS alert can remain after later server revocation;
 its reference grants no access and fails current resolution.
 

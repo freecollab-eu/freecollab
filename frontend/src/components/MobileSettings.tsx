@@ -4,6 +4,7 @@ import { Bell, Download, Loader2, RefreshCw, ShieldCheck, Smartphone, Trash2, Wi
 import { api, type Channel } from '../lib/api';
 import { OfflineLibrary } from './OfflineLibrary';
 import { NativePushSettings } from './NativePushSettings';
+import { NativeCallingSettings } from './NativeCalling';
 import { disablePush, installApplication, mobileCapabilities, mobileDrafts, mobileOutbox, subscribePush, type QueuedMessage, type PrivateDraft } from '../mobile';
 import '../styles/mobile.css';
 
@@ -68,6 +69,7 @@ export function MobileSettings({ channel }: { channel?: Channel }) {
     </section>
     <OfflineLibrary channel={channel} />
     <NativePushSettings />
+    <NativeCallingSettings channel={channel} />
     <section className="fc-account-section"><div className="fc-account-section-heading"><h3>{t("Private activity notifications")}</h3><Bell size={20} /></div>
       <p className="fc-account-muted">{t("Device notifications say only that new FreeCollab activity is available. Message text, names, channel titles and recovery keys never enter push payloads. Access is checked again before delivery.")}</p>
       {!configured && <p className="fc-account-muted">{t("The installation operator needs to configure Web Push before this browser can enable it.")}</p>}

@@ -8,6 +8,8 @@ from sqlmodel import Session,select
 
 from app.api import native_clients,native_push
 from app.models.native_push import NativePushDevice,NativePushDelivery
+from app.models.native_calls import NativeCallDevice,NativeCallConsent,NativeCallSession
+from app.models.sfu import SFURoom,SFUParticipant
 from app.models.notification import Notification
 from app.models.user import User
 from app.services import native_push as service
@@ -37,6 +39,18 @@ def test_account_closure_erases_native_capabilities_before_notifications_with_fo
         for name in ['owner','peer']:
             session.add(NativePushDelivery(id='delivery-'+name,device_id='device-'+name,source_key='notice:'+name,
                 channel_id='native',notification_id='notice-'+name,expires_at=datetime.utcnow()+timedelta(hours=1)))
+        session.add(SFURoom(id='native-room',channel_id='native',host_user_id='peer',expires_at=datetime.utcnow()+timedelta(hours=1),max_participants=20,provisioned=True));session.flush()
+        for name in ['owner','peer']:
+            session.add(NativeCallDevice(id='call-device-'+name,user_id=name,push_device_id='device-'+name,
+                source_hash='source-'+name,push_confirmed_at=datetime.utcnow(),encrypted_claims='PRIVATE CALL CLAIMS '+name,
+                credential_hash='call-hash-'+name,platform='android',encrypted_voip_token='PRIVATE VOIP TOKEN '+name,expires_at=datetime.utcnow()+timedelta(hours=1)))
+            session.add(SFUParticipant(id='native-participant-'+name,meeting_id='native-room',user_id=name,name=name,
+                auth_token_hash='source-'+name,auth_version=0,expires_at=datetime.utcnow()+timedelta(hours=1)))
+        session.flush()
+        for name in ['owner','peer']:
+            session.add(NativeCallConsent(device_id='call-device-'+name,channel_id='native',matrix_room_id='!fixture:example.test',expires_at=datetime.utcnow()+timedelta(hours=1)))
+            session.add(NativeCallSession(id='native-session-'+name,device_id='call-device-'+name,participant_id='native-participant-'+name,
+                room_id='native-room',channel_id='native',client_call_id='client-'+name,expires_at=datetime.utcnow()+timedelta(hours=1)))
         # A malformed legacy cross-reference must not block deleting the user's
         # own notification, or cause the other user's capability to be erased.
         session.add(NativePushDelivery(id='cross-reference',device_id='device-peer',source_key='cross-notice',
@@ -54,6 +68,12 @@ def test_account_closure_erases_native_capabilities_before_notifications_with_fo
         assert session.get(NativePushDevice,'device-peer') is not None
         assert session.get(NativePushDelivery,'delivery-peer') is not None
         assert session.get(User,'owner').is_blocked
+        assert session.get(NativeCallDevice,'call-device-owner') is None
+        assert session.get(NativeCallSession,'native-session-owner') is None
+        assert session.get(NativeCallConsent,('call-device-owner','native')) is None
+        assert session.get(SFUParticipant,'native-participant-owner').state in {'left','removed'}
+        assert session.get(NativeCallDevice,'call-device-peer') is not None
+        assert session.get(NativeCallSession,'native-session-peer') is not None
 
 
 def test_concurrent_native_registration_cannot_survive_account_closure(controls,monkeypatch):

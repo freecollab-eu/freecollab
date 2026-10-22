@@ -79,6 +79,7 @@ class Settings(BaseSettings):
     push_vapid_private_key: SecretStr | None = None
     push_vapid_subject: str = ""
     native_push_enabled: bool = False
+    native_calls_enabled: bool = False
     native_push_fcm_project_id: str = ""
     native_push_fcm_service_account: SecretStr | None = None
     native_push_apns_team_id: str = ""

@@ -43,7 +43,7 @@ def _presence_valid(row):
 def _local_presence(user_id):
     row=presence_store.get(user_id,{"status":"offline","last_seen":None})
     if "sessions" not in row:return row
-    valid=[value for value in row["sessions"].values() if _presence_valid(value)]
+    valid=[value for value in list(row["sessions"].values()) if _presence_valid(value)]
     if not valid:return {"status":"offline","last_seen":row.get("last_seen")}
     latest=max(valid,key=lambda value:value["changed_at"])
     return {"status":latest["status"],"last_seen":latest["last_seen"]}
@@ -127,11 +127,26 @@ async def _active_user(sid):
     except KeyError:
         return None
     token = saved.get("token")
-    if not isinstance(token, str):
+    if not isinstance(token, str) or not isinstance(saved.get("user_id"), str):
         return None
+    return await asyncio.to_thread(_token_user_id, token, saved.get("user_id"))
+
+
+def _token_user_id(token, expected_user_id=None):
+    # A pool checkout may wait for a REST request to finish. Keep the complete
+    # SQL unit in one worker, so that wait never prevents event-loop cleanup.
     with Session(engine) as session:
         user = active_user_for_token(token, session)
-        return user.id if user and user.id == saved.get("user_id") else None
+        return user.id if user and (expected_user_id is None or user.id == expected_user_id) else None
+
+
+def _member_in_session(session, user_id, channel_id):
+    if not isinstance(user_id,str) or not isinstance(channel_id,str) or not channel_id or len(channel_id)>128:return False
+    return bool(
+        session.get(Channel, channel_id)
+        and session.get(ChannelMember, (channel_id, user_id))
+        and workspace_allows_channel(session, channel_id, user_id)
+    )
 
 
 def _is_member(user_id, channel_id, token=None):
@@ -141,19 +156,24 @@ def _is_member(user_id, channel_id, token=None):
             actor = active_user_for_token(token, session)
             if actor is None or actor.id != user_id:
                 return False
-        return bool(
-            session.get(Channel, channel_id)
-            and session.get(ChannelMember, (channel_id, user_id))
-            and workspace_allows_channel(session, channel_id, user_id)
-        )
+        return _member_in_session(session, user_id, channel_id)
+
+
+def _channel_user_id(saved, channel_id):
+    token, user_id = saved.get("token"), saved.get("user_id")
+    if not isinstance(token, str) or not isinstance(user_id, str):return None
+    # Bind the token's current source/workspace scope in the same session as
+    # membership checks. No ORM object or session escapes this worker.
+    return user_id if _is_member(user_id, channel_id, token) else None
 
 
 async def _authorize_channel(sid, data):
     channel_id = _channel_id(data)
-    user_id = await _active_user(sid)
-    saved = await sio.get_session(sid) if user_id else {}
-    if not channel_id or not user_id or not _is_member(user_id, channel_id, saved.get("token")):
-        return None
+    if not channel_id:return None
+    try:saved = await sio.get_session(sid)
+    except KeyError:return None
+    user_id = await asyncio.to_thread(_channel_user_id, saved, channel_id)
+    if not user_id:return None
     return user_id, channel_id
 
 
@@ -162,11 +182,9 @@ async def connect(sid, environ, auth):
     token = auth.get("token") if isinstance(auth, dict) else None
     if not isinstance(token, str) or not token:
         raise socketio.exceptions.ConnectionRefusedError("Invalid token")
-    with Session(engine) as session:
-        user = active_user_for_token(token, session)
-        if not user:
-            raise socketio.exceptions.ConnectionRefusedError("Invalid user")
-        user_id = user.id
+    user_id = await asyncio.to_thread(_token_user_id, token)
+    if not user_id:
+        raise socketio.exceptions.ConnectionRefusedError("Invalid user")
 
     await sio.save_session(sid, {"user_id": user_id, "token": token})
     metadata=_presence_metadata(user_id,token)
@@ -196,7 +214,7 @@ async def disconnect(sid):
             with suppress(HTTPException):await shared.remove_presence(sid,user_id)
             try:presence=await asyncio.to_thread(shared.runtime.presence,user_id,_presence_valid)
             except HTTPException:return
-        else:presence=_local_presence(user_id)
+        else:presence=await asyncio.to_thread(_local_presence,user_id)
         row.update(status=presence["status"],last_seen=datetime.utcnow().isoformat(),sid=next(iter(row.get("sessions",{})),None))
         await broadcast_presence(user_id,{"user_id":user_id,**presence})
 
@@ -225,12 +243,16 @@ async def _typing_event(sid, data, event):
         return {"error": "Channel access denied"}
     user_id, channel_id = authorized
     try:
-        with Session(engine) as session:
-            require_direct_message_writable(session, channel_id, user_id)
+        await asyncio.to_thread(_require_writable, channel_id, user_id)
     except HTTPException:
         return {"error": "Messaging is unavailable for this conversation"}
     await broadcast_to_channel(channel_id,event,{"user_id":user_id,"channel_id":channel_id},skip_sid=sid)
     return {"ok": True}
+
+
+def _require_writable(channel_id, user_id):
+    with Session(engine) as session:
+        require_direct_message_writable(session, channel_id, user_id)
 
 
 @sio.event
@@ -281,9 +303,7 @@ async def _prune_channel(channel_id):
     # Recheck recipients, including clients whose membership/account changed
     # after joining. A prior successful join is not a perpetual authorization.
     for sid, _ in list(sio.manager.get_participants("/", channel_id)):
-        user_id = await _active_user(sid)
-        saved = await sio.get_session(sid) if user_id else {}
-        if not user_id or not _is_member(user_id, channel_id, saved.get("token")):
+        if not await _authorize_channel(sid, channel_id):
             await sio.leave_room(sid, channel_id)
 
 
@@ -292,9 +312,7 @@ async def broadcast_to_channel(channel_id: str, event: str, data: dict, *, local
     if shared and not local_only:await _publish(shared,"channel",channel_id,event,data,skip=skip_sid)
     for sid,_ in list(sio.manager.get_participants("/",channel_id)):
         if sid==skip_sid:continue
-        user_id=await _active_user(sid)
-        saved=await sio.get_session(sid) if user_id else {}
-        if not user_id or not _is_member(user_id,channel_id,saved.get("token")):
+        if not await _authorize_channel(sid,channel_id):
             await sio.leave_room(sid,channel_id)
         else:await sio.emit(event,data,room=sid)
 
@@ -321,6 +339,20 @@ def _scoped_delivery_allowed(session, user_id, event, data):
     return False
 
 
+def _user_delivery_allowed(saved, user_id, event, data):
+    with Session(engine) as session:
+        actor = active_user_for_token(saved.get("token"), session)
+        if actor is None or actor.id != user_id or saved.get("user_id") != user_id:
+            return None
+        scoped = current_workspace_scope(session) is not None
+        if (event in {"notification","presence"} or scoped) and not _scoped_delivery_allowed(session,user_id,event,data):return False
+        # Identifier-only revocation signals still reach an authenticated
+        # account after membership removal. Content delivery needs membership.
+        if event=="channel_removed" and set(data)-{"channel_id","workspace_id"}:return False
+        if data.get("channel_id") and event!="channel_removed" and not _member_in_session(session,user_id,data["channel_id"]):return False
+        return True
+
+
 async def send_to_user(user_id: str, event: str, data: dict, *, local_only=False):
     """Authorize each browser; one account may have differently scoped logins."""
     room = f"user:{user_id}"
@@ -333,23 +365,17 @@ async def send_to_user(user_id: str, event: str, data: dict, *, local_only=False
             await sio.leave_room(sid, room)
             continue
         try:
-            with Session(engine) as session:
-                actor = active_user_for_token(saved.get("token"), session)
-                if actor is None or actor.id != user_id or saved.get("user_id") != user_id:
-                    await sio.leave_room(sid, room)
-                    continue
-                scoped = current_workspace_scope(session) is not None
-                if (event in {"notification","presence"} or scoped) and not _scoped_delivery_allowed(session,user_id,event,data):continue
-                # Revocation signals contain only identifiers and must reach a
-                # still-authenticated account after its membership was removed.
-                if event=="channel_removed" and set(data)-{"channel_id","workspace_id"}:continue
-                if data.get("channel_id") and event!="channel_removed" and not _is_member(user_id,data["channel_id"],saved.get("token")):continue
+            allowed = await asyncio.to_thread(_user_delivery_allowed, saved, user_id, event, data)
         except HTTPException:
             if event == "presence":
                 # One denied browser does not suppress a sibling with a valid
                 # workspace sign-in. Every socket still needs its own check.
                 continue
             raise
+        if allowed is None:
+            await sio.leave_room(sid, room)
+            continue
+        if not allowed:continue
         # Never emit to the room as a fallback when there are zero recipients.
         await sio.emit(event,data,room=sid)
 

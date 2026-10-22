@@ -209,5 +209,7 @@ async def offline_message(channel_id: str, data: OfflineMessageInput, user=Depen
         raise HTTPException(409, "Queued message changed concurrently; retry the same identifier") from None
     await process_message_mentions(message, session.get(Channel, channel_id), current, session, mention_ids=mention_ids)
     result = {**message_data(message), "client_id": data.client_id, "replayed": False, "policy_warnings": warnings}
-    await broadcast_to_channel(channel_id, "message", {**result, "created_at": message.created_at.isoformat()})
+    payload = {**result, "created_at": message.created_at.isoformat()}
+    session.commit()
+    await broadcast_to_channel(channel_id, "message", payload)
     return result

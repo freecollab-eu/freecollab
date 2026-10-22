@@ -5,7 +5,7 @@ const DATABASE = 'freecollab-mobile-v1';
 // An embedded session never borrows, purges or persists the standalone app's drafts.
 const transient = new Map<string, { owner: string; kind: Kind; id: string; value: unknown }>();
 if (typeof window !== 'undefined') window.addEventListener('freecollab:auth-changed', () => { if (api.isMemorySession()) transient.clear(); });
-export type Kind = 'draft' | 'outbox' | 'offline-channel' | 'offline-file' | 'attachment-outbox';
+export type Kind = 'draft' | 'outbox' | 'offline-channel' | 'offline-file' | 'attachment-outbox' | 'slack-import';
 interface CipherRecord { id: string; owner: string; kind: Kind; iv: Uint8Array<ArrayBuffer>; ciphertext: ArrayBuffer }
 export interface Owner { user: string; token: string }
 

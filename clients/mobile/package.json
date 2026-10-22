@@ -1,6 +1,6 @@
 {
   "name": "@freecollab/mobile",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "private": true,
   "description": "Customer-owned FreeCollab Android and iOS clients",
   "author": "Kris Ledel",
@@ -19,5 +19,7 @@
     "@capacitor/android": "8.5.3",
     "@capacitor/ios": "8.5.3"
   },
-  "devDependencies": { "@capacitor/cli": "8.5.3" }
+  "devDependencies": {
+    "@capacitor/cli": "8.5.3"
+  }
 }

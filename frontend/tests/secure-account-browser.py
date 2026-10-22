@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import struct
 import time
+from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -20,6 +21,7 @@ from playwright.sync_api import expect, sync_playwright
 
 
 BASE = os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
+PROOF_DIR = Path(os.getenv('FREECOLLAB_PROOF_DIR', str(Path(__file__).resolve().parents[2].parent / '.freecollab')))
 PASSWORD = 'Secure-account-browser!2026'
 RUN = uuid.uuid4().hex[:12]
 
@@ -228,7 +230,7 @@ with sync_playwright() as p:
         assert not errors, errors
         print('Encrypted account UI passed: canonical encrypted DM, recovery setup/lock/unlock, fingerprint verification, archive/block, lost-device revocation with fresh password and MFA, linked-session revocation and current-device sign-out at 320px.')
     except Exception:
-        pages[0].screenshot(path='/workspace/.freecollab/secure-account-failure.png', mask=[pages[0].locator('.fc-secure-generated-key > code, #secure-revoke-code, #auth-code')])
+        pages[0].screenshot(path=str(PROOF_DIR / 'secure-account-failure.png'), mask=[pages[0].locator('.fc-secure-generated-key > code, #secure-revoke-code, #auth-code')])
         raise
     finally:
         for context in contexts:

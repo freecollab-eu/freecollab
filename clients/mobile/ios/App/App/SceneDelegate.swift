@@ -26,6 +26,7 @@ class FreeCollabBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(FreeCollabNativePlugin())
         bridge?.registerPluginInstance(FreeCollabPushPlugin())
+        bridge?.registerPluginInstance(FreeCollabCallingPlugin())
         if let runtime = bridge as? CapacitorBridge, let view = webView {
             // Capacitor's JS export is main-frame-only, but an iframe can still
             // address a WK message handler directly. Guard the actual native edge.
@@ -261,6 +262,7 @@ public class FreeCollabPushPlugin: CAPPlugin, CAPBridgedPlugin {
         DispatchQueue.main.async { [weak self] in
             guard let self = self, self.installation() else { call.reject("The installation changed."); return }
             self.pending?.reject("Native registration cancelled."); self.pending = nil
+            FreeCollabCallManager.shared.disable()
             UIApplication.shared.unregisterForRemoteNotifications()
             UNUserNotificationCenter.current().removeAllDeliveredNotifications()
             UserDefaults.standard.removeObject(forKey: FreeCollabPushStore.key); call.resolve()

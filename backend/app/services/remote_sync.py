@@ -332,11 +332,26 @@ def frozen_connection(connection):
 
 def _provider_call(session, connection, secret, function, *args, **kwargs):
     from . import remote_providers as providers
-    try:
+    expected_id, expected_revision, expected_lease = connection.id, connection.revision, connection.lease_token
+    effects = {'accepted': False}
+    def accepted():
+        effects['accepted'] = True
+    def invoke():
+        if connection.kind == 'calendar' and connection.provider in {'google', 'microsoft'}:
+            from .provider_calendar import authority_guard
+            with authority_guard(lambda: _current(session, expected_id, expected_revision, expected_lease,
+                    lock=function in (providers.write_item, providers.delete_item)), accepted):
+                return function(connection.provider, connection.kind, _provider_config(connection, secret), secret, *args, **kwargs)
         return function(connection.provider, connection.kind, _provider_config(connection, secret), secret, *args, **kwargs)
+    try:
+        return invoke()
     except providers.ProviderError as error:
         if getattr(error, "status", None) != 401 or not secret.get("refresh_token"):
             raise
+        if effects['accepted']:
+            raise providers.ProviderError('partial_effect') from None
+        if connection.kind == 'calendar':
+            _current(session, expected_id, expected_revision, expected_lease)
         token = providers.refresh_tokens(connection.provider, _provider_config(connection, secret), secret["refresh_token"])
         secret.update(token)
         # Refresh tokens may rotate. Persist them before another network call,
@@ -351,7 +366,7 @@ def _provider_call(session, connection, secret, function, *args, **kwargs):
         session.commit()
         if function in (providers.write_item, providers.delete_item):
             _current(session, current.id, expected_revision, lease, lock=True)
-        return function(connection.provider, connection.kind, _provider_config(connection, secret), secret, *args, **kwargs)
+        return invoke()
 
 
 def _sync_item(session, connection_id, revision, lease, item_id, secret):
@@ -407,6 +422,18 @@ def _sync_item(session, connection_id, revision, lease, item_id, secret):
         current_local = local_item(session, connection, item.local_id)
         if (current_local.get("fingerprint") if current_local else None) != (local.get("fingerprint") if local else None):
             _conflict(session, connection, item, "local_changed_during_read", current_local, remote)
+            return
+        # Provider attendee responses and instance revision metadata do not alter
+        # native immutable content or invalidate its local RSVP/version reviews.
+        if (connection.kind == "calendar" and current_local and not remote.get("deleted")
+                and not current_local.get("deleted")
+                and CalendarFields.model_validate(current_local["fields"]).model_dump(mode="json")
+                == CalendarFields.model_validate(value["fields"]).model_dump(mode="json")):
+            _complete_item(session, item, current_local, remote)
+            activity(session, connection, "sync.metadata_updated", item_id=item.id)
+            save_credentials(connection, secret)
+            session.add(connection)
+            session.commit()
             return
         path = None
         try:

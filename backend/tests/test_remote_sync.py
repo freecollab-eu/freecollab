@@ -25,6 +25,7 @@ from app.models.secure_channel import SecureChannel
 from app.models.session import ActiveSession
 from app.models.user import User
 from app.models.workspace import Workspace, WorkspaceChannel, WorkspaceMember
+from app.models.workflow import WorkflowDefinition  # Register event-hook tables before isolated fixture create_all.
 from app.models.workspace_oidc import WorkspaceOIDCProvider, WorkspaceOIDCSession
 from app.services import remote_providers as providers
 from app.services import remote_sync as sync
@@ -274,6 +275,24 @@ def test_calendar_two_way_revisions_and_remote_tombstones_are_encrypted(team):
     assert team.client.get('/channels/room/integrations/calendar', headers=team.headers['member']).json() == []
     history = team.client.get(f'/channels/room/integrations/calendar/{item["id"]}/revisions', headers=team.headers['member']).json()
     assert len(history) == 3 and history[0]['deleted'] is True
+
+
+def test_calendar_provider_rsvp_metadata_preserves_immutable_native_revision(team):
+    team.remote.add(fields=EVENT, read_only=True)
+    connection = create(team, 'calendar'); activate(team, connection); assert cycle(team, connection) == 1
+    before = team.client.get('/channels/room/integrations/calendar', headers=team.headers['member']).json()[0]
+    team.remote.counter += 1
+    team.remote.items['remote-file'].update(etag=f'"remote-{team.remote.counter}"',
+        attendees=[{'email': 'guest@example.com', 'response': 'accepted'}])
+    assert cycle(team, connection) == 1
+    after = team.client.get('/channels/room/integrations/calendar', headers=team.headers['member']).json()[0]
+    assert after == before
+    with Session(team.engine) as session:
+        assert len(session.exec(select(IntegrationContentRevision)).all()) == 1
+        item = session.exec(select(RemoteSyncItem)).one()
+        assert item.base_remote_etag == team.remote.items['remote-file']['etag']
+        assert sync._remote_snapshot(item)['attendees'][0]['response'] == 'accepted'
+    assert not team.remote.writes
 
 
 @pytest.mark.parametrize('revocation', ['blocked', 'workspace', 'channel', 'secure'])

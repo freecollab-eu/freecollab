@@ -143,9 +143,7 @@ def _cursor(value):
     return value
 
 
-def _calendar_fields(raw, provider):
-    if raw.get("recurrence") or raw.get("recurringEventId") or raw.get("type") in {"seriesMaster", "occurrence", "exception"}:
-        raise ProviderError("unsupported_recurrence")
+def _plain_calendar_fields(raw, provider):
     if provider == "google":
         start, end = raw.get("start", {}), raw.get("end", {})
         all_day = bool(start.get("date"))
@@ -179,18 +177,14 @@ def _calendar_fields(raw, provider):
         raise ProviderError("unsupported_resource") from None
 
 
+def _calendar_fields(raw, provider):
+    from .provider_calendar import fields_from_master
+    return fields_from_master(provider, raw)
+
+
 def _calendar_item(row, provider):
-    identity = row.get("id")
-    _id(identity)
-    deleted = row.get("status") == "cancelled" or "@removed" in row
-    result = {"id": identity, "etag": row.get("etag") if provider == "google" else row.get("@odata.etag"), "name": row.get("summary", row.get("subject", "Calendar event")),
-              "mime_type": "text/calendar", "deleted": deleted, "read_only": False}
-    if deleted: return result
-    result["fields"] = _calendar_fields(row, provider)
-    result["remote_key"] = row.get("extendedProperties", {}).get("private", {}).get("freecollabSyncKey") if provider == "google" else row.get("transactionId")
-    if provider == "microsoft" and row.get("attendees"): result["read_only"] = True
-    if not _valid_etag(result["etag"]): raise ProviderError("precondition_unavailable")
-    return result
+    from .provider_calendar import item_from_master
+    return item_from_master(provider, row)
 
 
 def _file_item(row, provider):
@@ -251,6 +245,9 @@ def snapshot(provider, kind, config, credentials, cursor=None):
     if provider in {"nextcloud", "caldav"}:
         from .remote_dav import snapshot as dav_snapshot
         return dav_snapshot(kind, config, _dav_credentials(credentials), cursor)
+    if kind == "calendar":
+        from .provider_calendar import calendar_snapshot
+        return calendar_snapshot(provider, config, credentials, cursor)
     incremental = cursor is not None
     values, next_cursor, pages = [], None, 0
     if provider == "google" and kind == "files":
@@ -306,11 +303,9 @@ def read_item(provider, kind, config, credentials, item):
         from .remote_dav import read_item as dav_read
         return dav_read(kind, config, _dav_credentials(credentials), item)
     if kind == "calendar":
-        url = (GOOGLE_CALENDAR + "/calendars/" + _id(config["calendar_id"]) + "/events/" + _id(item["id"]) if provider == "google"
-               else GRAPH + "/me/calendars/" + _id(config["calendar_id"]) + "/events/" + _id(item["id"]))
-        raw, _ = _json("GET", url, credentials, headers={"Prefer": 'outlook.timezone="UTC", outlook.body-content-type="text"'} if provider == "microsoft" else None)
-        mapped = _calendar_item(raw, provider)
-        return {"fields": mapped["fields"], "etag": mapped["etag"]}
+        from .provider_calendar import calendar_read
+        mapped = calendar_read(provider, config, credentials, item["id"])
+        return {"fields": mapped["fields"], "etag": mapped["etag"], "attendees": mapped.get("attendees", [])}
     if provider == "google":
         raw, mapped, actual_etag = _google_file(config, credentials, item["id"])
         suffix = "/export?" + urlencode({"mimeType": mapped["mime_type"]}) if mapped["export"] else "?alt=media"
@@ -340,11 +335,9 @@ def read_item(provider, kind, config, credentials, item):
     return {"bytes": response.body, "etag": mapped["etag"], "mime_type": mapped["mime_type"]}
 
 
-def _calendar_write(resource, provider):
+def _plain_calendar_write(resource, provider):
     try: fields = CalendarFields(**{key: resource[key] for key in CalendarFields.model_fields if key in resource}).model_dump()
     except (ValueError, TypeError): raise ProviderError("invalid_resource") from None
-    if fields.get("recurrence") or fields.get("exceptions"):
-        raise ProviderError("unsupported_recurrence")
     if provider == "google":
         start = {"date": fields["starts_at"]} if fields["all_day"] else {"dateTime": fields["starts_at"], "timeZone": fields["timezone"]}
         end = {"date": fields["ends_at"]} if fields["all_day"] else {"dateTime": fields["ends_at"], "timeZone": fields["timezone"]}
@@ -357,6 +350,11 @@ def _calendar_write(resource, provider):
             "start": {"dateTime": value(fields["starts_at"]), "timeZone": "UTC"}, "end": {"dateTime": value(fields["ends_at"]), "timeZone": "UTC"},
             "isAllDay": fields["all_day"], "isReminderOn": fields["reminder_minutes"] is not None,
             **({"reminderMinutesBeforeStart": fields["reminder_minutes"]} if fields["reminder_minutes"] is not None else {})}
+
+
+def _calendar_write(resource, provider):
+    from .provider_calendar import master_body
+    return master_body(provider, resource)
 
 
 def _valid_etag(value):
@@ -378,28 +376,12 @@ def _remote_key(resource):
 
 def write_item(provider, kind, config, credentials, resource, remote_id=None, expected_etag=None):
     config = validate_config(provider, kind, config)
-    if kind == "calendar" and (resource.get("recurrence") or resource.get("exceptions")):
-        raise ProviderError("unsupported_recurrence")
     if provider in {"nextcloud", "caldav"}:
         from .remote_dav import write_item as dav_write
         return dav_write(kind, config, _dav_credentials(credentials), resource, remote_id, expected_etag)
     if kind == "calendar":
-        body = _calendar_write(resource, provider)
-        key = _remote_key(resource) if remote_id is None else None
-        base = GOOGLE_CALENDAR + "/calendars/" + _id(config["calendar_id"]) + "/events" if provider == "google" else GRAPH + "/me/calendars/" + _id(config["calendar_id"]) + "/events"
-        if provider == "google":
-            if remote_id is None:
-                body.update(id=hashlib.sha256(key.encode()).hexdigest(), extendedProperties={"private": {"freecollabSyncKey": key}})
-            suffix = "?sendUpdates=none"
-        else:
-            if remote_id is None: body["transactionId"] = key
-            else:
-                current, _ = _json("GET", base + "/" + _id(remote_id), credentials, headers={"Prefer": 'outlook.timezone="UTC", outlook.body-content-type="text"'})
-                if current.get("attendees"): raise ProviderError("read_only_resource")
-            suffix = ""
-        raw, _ = _json("PATCH" if remote_id else "POST", base + ("/" + _id(remote_id) if remote_id else "") + suffix,
-                       credentials, body=body, headers=_precondition(expected_etag) if remote_id else {"If-None-Match": "*"})
-        return _calendar_item(raw, provider)
+        from .provider_calendar import calendar_write
+        return calendar_write(provider, config, credentials, resource, remote_id, expected_etag)
     content = resource.get("bytes")
     if not isinstance(content, bytes) or len(content) > transport.MAX_BYTES: raise ProviderError("invalid_resource")
     name, mime = resource.get("name"), resource.get("mime_type", "application/octet-stream")
@@ -447,6 +429,9 @@ def delete_item(provider, kind, config, credentials, remote_id, expected_etag=No
     if provider in {"nextcloud", "caldav"}:
         from .remote_dav import delete_item as dav_delete
         return dav_delete(kind, config, _dav_credentials(credentials), remote_id, expected_etag)
+    if kind == "calendar":
+        from .provider_calendar import calendar_delete
+        return calendar_delete(provider, config, credentials, remote_id, expected_etag)
     headers = {} if provider == "google" and kind == "files" else _precondition(expected_etag)
     if kind == "files":
         if provider == "google":

@@ -1,6 +1,6 @@
 # SDK release and distribution
 
-The source release builds `@freecollab/components@0.12.0`. Building or packing
+The source release builds `@freecollab/components@0.13.0`. Building or packing
 does not publish to npm, create a GitHub release, tag a repository or deploy an
 application. This SDK is pre-1.0 and uses the npm `next` distribution tag.
 
@@ -18,7 +18,7 @@ checks their declaration files, packs only the public allowlist and verifies
 npm's SHA-1/SHA-512 against the exact resulting bytes. It writes:
 
 ```text
-artifacts/freecollab-components-0.12.0.tgz
+artifacts/freecollab-components-0.13.0.tgz
 artifacts/release-manifest.json
 artifacts/SHA256SUMS
 ```
@@ -41,11 +41,11 @@ toolchain and dependency lock when reproducing a reviewed archive.
 Install the reviewed artifact in the host application:
 
 ```sh
-npm install --save-exact /path/to/freecollab-components-0.12.0.tgz
+npm install --save-exact /path/to/freecollab-components-0.13.0.tgz
 ```
 
 Once that exact version has actually been published, the corresponding registry
-installation is `npm install --save-exact @freecollab/components@0.12.0`. That
+installation is `npm install --save-exact @freecollab/components@0.13.0`. That
 command is a future registry option, not evidence of publication. The package's
 Yjs runtime dependency is resolved by the host bundler; React is optional.
 
@@ -62,17 +62,21 @@ input is required. Publication additionally requires all of the following:
 3. The package's npm **Settings → Trusted Publisher** authorizes GitHub Actions:
    organization `freecollab-eu`, repository `freecollab`, workflow filename
    `sdk-release.yml` (filename only), with direct `npm publish` allowed. This
-   workflow does not use a GitHub environment name.
+   workflow uses environment `npm-release`; configure that exact environment in
+   the trusted publisher and review its GitHub maintainer protections.
 4. The maintainer invokes the workflow with `publish: true` for the reviewed
    package version. npm must accept that identity and version.
 
-The publication job receives only `contents: read` and `id-token: write`; it
+The publication job receives `contents: read`, `actions: read` and `id-token: write`; it
 downloads the artifact from the same run, checks its exact identity and hashes,
 and publishes those bytes with provenance to `next`. It does not rebuild the
 package, create commits, add coauthors, tag source or require an npm token in
 GitHub secrets. Node 24 supplies the recent npm CLI required for OIDC publishing.
 The ordinary test/pack job has no OIDC permission. The workflow cannot publish
-from another repository or branch.
+from another repository or branch. Before downloading the packed artifact it
+requires a successful completed `ci.yml` run for the exact source commit, and
+matching API/package/platform versions in a clean checkout. The checks are shared
+with [the container and native distribution system](DISTRIBUTION.md).
 
 See npm's current [trusted publishing instructions](https://docs.npmjs.com/trusted-publishers/)
 for account setup, allowed actions and any initial-package requirements. A local
@@ -95,7 +99,7 @@ bundler. The legacy floating-widget IIFE remains a separate integration.
 
 ## Upgrade rules
 
-- Keep the SDK, backend and trusted embedded client on the same `0.12.x` release
+- Keep the SDK, backend and trusted embedded client on the same `0.13.x` release
   line. Check deployment health and current server capabilities before rollout.
 - Patch releases preserve documented APIs; fixes may reject insecure or obsolete
   behavior. A pre-1.0 minor release can change APIs and needs migration notes.

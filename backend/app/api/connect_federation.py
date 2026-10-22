@@ -6,7 +6,7 @@ import secrets
 from urllib.parse import quote
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlmodel import select
 from sqlalchemy import update
@@ -19,6 +19,8 @@ from ..models.secure_channel import SecureChannel
 from ..models.user import User
 from ..models.workspace import WorkspaceChannel, WorkspaceMember
 from ..services import connect_federation as federation
+from ..services import federated_work
+from ..models.federated_work import FederatedWorkPointer
 from ..services.auth import get_current_user
 from ..services.workspaces import require_workspace_admin, lock_workspace
 from ..services.request_guard import recheck_actor
@@ -46,6 +48,10 @@ class Acceptance(Strict):
 
 class Member(Strict):
     user_id: str = Field(min_length=1, max_length=128)
+
+
+class WorkPointer(Strict):
+    matrix_event_id: str = Field(min_length=2, max_length=1024)
 
 
 def data(session, connection):
@@ -191,6 +197,13 @@ def handle_wire(session, operation, peer, payload):
             "name": session.get(Channel, connection.channel_id).name,
             "room_id": binding.matrix_room_id, "operator": operator,
             "expires_at": connection.invitation_expires_at.isoformat()}
+    if operation == "work-index":
+        if set(payload) != {"connection_id", "after", "limit"} or not isinstance(payload["connection_id"], str):
+            raise HTTPException(422, "Invalid encrypted work index request")
+        connection = session.get(FederatedConnection, payload["connection_id"])
+        if not connection or connection.peer_origin != peer:
+            raise HTTPException(404, "Federated connection not found")
+        return federated_work.page(session, connection, payload["after"], payload["limit"])
     if set(payload) != {"connection_id"} or not isinstance(payload["connection_id"], str):
         raise HTTPException(422, "Invalid federation connection request")
     connection = session.get(FederatedConnection, payload["connection_id"])
@@ -210,7 +223,7 @@ def handle_wire(session, operation, peer, payload):
 
 @router.post("/wire/{operation}")
 async def wire(operation: str, request: Request, response: Response, session=Depends(get_session)):
-    if operation not in {"accept", "roster", "revoke"}:
+    if operation not in {"accept", "roster", "revoke", "work-index"}:
         raise HTTPException(404, "Unsupported federation operation")
     raw = bytearray()
     async for block in request.stream():
@@ -385,3 +398,70 @@ def revoke(workspace_id: str, connection_id: str, user=Depends(get_current_user)
     except HTTPException:
         pending = True
     return {**data(session, connection), "remote_cleanup_pending": pending}
+
+
+@router.get("/channels/{channel_id}/work-context")
+def work_context(channel_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    connection, binding = federated_work.require_connection(session, channel_id, user.id)
+    federation.local_roster(session, connection, provision=True)
+    remote = federation.remote_snapshot(session, connection)
+    session.expire_all()
+    recheck_actor(session, user.id)
+    connection, binding = federated_work.require_connection(session, channel_id, user.id)
+    local = federation.local_roster(session, connection)
+    from ..models.secure_channel import MatrixAccount
+    account = session.get(MatrixAccount, user.id)
+    if not account or not account.provisioned:
+        raise HTTPException(409, "Start this device's encrypted messaging before opening shared work")
+    return {"protocol": "freecollab-federated-work/1", "connection_id": connection.id,
+        "channel_id": channel_id, "workspace_id": connection.workspace_id, "room_id": binding.matrix_room_id,
+        "matrix_user_id": account.matrix_user_id, "local_server": account.matrix_user_id.split(":", 1)[1],
+        "peer_server": federation.peer_server_for_channel(session, channel_id),
+        "members": [{"matrix_user_id": member["matrix_user_id"], "name": member["name"]}
+            for member in local["members"] + remote["members"]],
+        "limits": {"index_events_per_installation": federated_work.MAX_POINTERS,
+            "page_size": federated_work.PAGE_SIZE, "max_document_state_bytes": 512 * 1024}}
+
+
+@router.get("/channels/{channel_id}/work-index")
+def work_index(channel_id: str, local_after: int = Query(default=0, ge=0, le=2**63 - 1),
+               remote_after: int = Query(default=0, ge=0, le=2**63 - 1),
+               user=Depends(get_current_user), session=Depends(get_session)):
+    connection, _ = federated_work.require_connection(session, channel_id, user.id)
+    remote = federation.call_peer(session, connection.peer_origin, "work-index", {
+        "connection_id": connection.id, "after": remote_after, "limit": federated_work.PAGE_SIZE})
+    remote = federated_work.validate_remote_page(remote, connection, remote_after)
+    session.expire_all()
+    recheck_actor(session, user.id)
+    connection, _ = federated_work.require_connection(session, channel_id, user.id)
+    return {"connection_id": connection.id,
+        "local": federated_work.page(session, connection, local_after), "remote": remote}
+
+
+@router.post("/channels/{channel_id}/work-index", status_code=201)
+def publish_work_pointer(channel_id: str, body: WorkPointer,
+                         user=Depends(get_current_user), session=Depends(get_session)):
+    connection, _ = federated_work.require_connection(session, channel_id, user.id)
+    from ..services.matrix_bridge import validate_secure_event
+    event = validate_secure_event(session, channel_id, body.matrix_event_id, user.id)
+    from ..services.access import lock_channel_writes
+    lock_channel_writes(session, channel_id)
+    session.expire_all()
+    recheck_actor(session, user.id)
+    connection, _ = federated_work.require_connection(session, channel_id, user.id)
+    existing = session.exec(select(FederatedWorkPointer).where(
+        FederatedWorkPointer.connection_id == connection.id,
+        FederatedWorkPointer.matrix_event_id == body.matrix_event_id)).first()
+    if existing:
+        if existing.published_by != user.id or existing.matrix_user_id != event.get("sender"):
+            raise HTTPException(403, "Only the original event sender may retry its work pointer")
+        return {"sequence": existing.sequence, "matrix_event_id": existing.matrix_event_id}
+    quota = session.exec(select(FederatedWorkPointer.sequence).where(
+        FederatedWorkPointer.connection_id == connection.id).limit(federated_work.MAX_POINTERS)).all()
+    if len(quota) >= federated_work.MAX_POINTERS:
+        raise HTTPException(409, "This installation's encrypted work index reached its supported event limit")
+    row = FederatedWorkPointer(connection_id=connection.id, matrix_event_id=body.matrix_event_id,
+        matrix_user_id=event["sender"], published_by=user.id)
+    session.add(row)
+    session.commit()
+    return {"sequence": row.sequence, "matrix_event_id": row.matrix_event_id}

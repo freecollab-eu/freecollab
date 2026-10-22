@@ -1,5 +1,23 @@
 # FreeCollab validation record
 
+## Language preference acknowledgement fixture — 2026-10-22
+
+Language selection updates the catalog immediately while its real preference PUT
+is pending. The browser proof could read the old server preference before that
+write completed. It now waits up to ten seconds for the existing saved-status
+message before the same authoritative server GET. Every immediate composer DOM,
+draft, selection, user-content and HTML-language assertion remains before the
+wait. No product behavior changed.
+
+A private gate before the real PUT handler deterministically reproduced the
+original old-value assertion failure. Releasing that same request passed the
+corrected proof; withholding it produced the expected bounded saved-status
+timeout and retained the old server value. Both the complete canonical language
+script and the controlled successful run passed **all 16 groups**, overlapping
+scopes. These include persistence without local cache, stale responses, separate
+account queues, English/Swedish and mobile controls. The final published commit's
+own CI records its complete workflow status.
+
 ## In-flight file cancellation fixture — 2026-10-22
 
 The file queue permits cancellation before an upload is dispatched. The browser

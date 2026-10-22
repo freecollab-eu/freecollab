@@ -117,15 +117,20 @@ with sync_playwright() as p:
         print('PASS: local image preview revokes blob URLs; PDF canvas renders and paginates with local worker', flush=True)
 
         held = []; retry_keys = []; upload_path = '**/api/files/channels/' + channel_id
+        page.evaluate('window.__filesProofHeldPostCount = 0')
         def hold(route):
             if route.request.method == 'POST':
                 retry_keys.append(route.request.headers.get('idempotency-key')); held.append(route)
+                page.evaluate('(count) => { window.__filesProofHeldPostCount = count; }', len(held))
             else:
                 route.fallback()
         page.route(upload_path, hold)
         cancel_name = f'cancel-{RUN}.txt'
         page.get_by_label('Choose a file', exact=True).set_input_files({'name': cancel_name, 'mimeType': 'text/plain', 'buffer': b'cancel then retry'})
         expect(page.get_by_role('button', name='Cancel upload ' + cancel_name, exact=True)).to_be_visible()
+        # Cancel is also valid while queued. This proof requires an in-flight
+        # request so its retry compares two actual idempotency headers.
+        page.wait_for_function('() => window.__filesProofHeldPostCount === 1', timeout=10000)
         page.get_by_role('button', name='Cancel upload ' + cancel_name, exact=True).click()
         queue_row = page.locator('.fc-upload-item').filter(has_text=cancel_name)
         expect(queue_row).to_contain_text('Cancelled locally')
@@ -143,6 +148,8 @@ with sync_playwright() as p:
         page.route(upload_path, retry)
         page.get_by_role('button', name='Retry upload ' + cancel_name, exact=True).click()
         expect(page.get_by_role('button', name='Download ' + cancel_name, exact=True)).to_be_visible()
+        assert len(retry_keys) == 2
+        assert all(retry_keys)
         assert retry_keys[0] == retry_keys[1]
         page.unroute(upload_path, retry)
         print('PASS: cancel does not claim delivery; safe retry uses the same upload identity', flush=True)

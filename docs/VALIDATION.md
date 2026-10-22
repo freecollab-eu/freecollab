@@ -1,5 +1,24 @@
 # FreeCollab validation record
 
+## In-flight file cancellation fixture — 2026-10-22
+
+The file queue permits cancellation before an upload is dispatched. The browser
+fixture could select that valid state, then assume it had captured two upload
+requests when checking a retry. It now waits for its first actually intercepted
+POST before cancelling and requires exactly two nonempty, identical idempotency
+keys. No product, authorization or delivery behavior changed.
+
+A controlled real-ChannelFiles proof reproduced the old queued-cancel assumption
+and its indexing failure, then verified the corrected in-flight scenario. A
+zero-arrival negative control produced a bounded Playwright timeout. The complete
+canonical file browser script also passed **all seven groups** without private
+code injections: exact downloads, immutable versions, image/PDF previews,
+cancellation/retry, lost-acknowledgement deduplication, search, mobile layout and
+logout cleanup. Separate read-only review checked the actual request gating and
+preserved assertions. The earlier candidate's four backend shards, frontend,
+cryptography and Android/iOS jobs passed; its product workflow stopped at this
+fixture. The final commit's own CI remains the complete workflow record.
+
 ## SCIM simultaneous first-load follow-up — 2026-10-22
 
 Opening SCIM settings fetches status and mappings concurrently. Both can create

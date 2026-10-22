@@ -8,6 +8,7 @@ used: the email worker delivers only into the private local fixture directory.
 
 CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/integrations-browser.py
 """
+from ui_navigation import open_chat_tool, reveal_chat_tool
 from datetime import datetime, timezone
 import base64
 import hashlib
@@ -99,8 +100,7 @@ def login(page, base, user):
         page.get_by_label('Authentication or recovery code', exact=True).fill(user['codes'].pop(0))
         page.get_by_role('button', name='Verify and sign in', exact=True).click()
     expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-    if not page.get_by_role('button', name='Account settings', exact=True).is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
+    reveal_chat_tool(page, 'Account settings')
     expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible(timeout=90000)
 
 
@@ -158,7 +158,7 @@ const server=await createServer({configFile:false,root:process.cwd(),plugins:[re
                 page.on('pageerror', lambda failure: errors.append(str(failure)))
                 try:
                     login(page, app_base, owner)
-                    page.get_by_role('button', name='Integrations', exact=True).click()
+                    open_chat_tool(page, 'Integrations')
                     panel = page.get_by_role('dialog', name='Integrations', exact=True)
                     expect(panel.get_by_role('heading', name='A few useful connections.', exact=True)).to_be_visible()
                     panel.get_by_role('button', name='Webhooks', exact=True).click()
@@ -252,7 +252,7 @@ const server=await createServer({configFile:false,root:process.cwd(),plugins:[re
                     member_context.add_init_script('localStorage.setItem(' + json.dumps('freecollab.workspace:' + member['user_id']) + ',' + json.dumps(workspace['id']) + ');')
                     member_page = member_context.new_page()
                     login(member_page, app_base, member)
-                    member_page.get_by_role('button', name='Integrations', exact=True).click()
+                    open_chat_tool(member_page, 'Integrations')
                     member_panel = member_page.get_by_role('dialog', name='Integrations', exact=True)
                     expect(member_panel.get_by_role('heading', name='A few useful connections.', exact=True)).to_be_visible()
                     assert member_panel.get_by_role('button', name='Webhooks', exact=True).count() == 0

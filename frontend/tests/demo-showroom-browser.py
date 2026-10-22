@@ -17,7 +17,7 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json'
-SOURCE = ['frontend/src/components/Demo.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Demo.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 
 def port():
     with socket.socket() as listener:
@@ -49,9 +49,42 @@ def main():
                 page.on('pageerror',lambda error:errors.append(str(error)))
                 page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
                 page.goto(app,wait_until='networkidle')
+                def tools():
+                    toggle=page.get_by_role('button',name='Tools',exact=True)
+                    if not toggle.count():toggle=page.get_by_role('button',name='Verktyg',exact=True)
+                    if toggle.get_attribute('aria-expanded')!='true':toggle.click()
+                def section(name):
+                    tools();page.get_by_role('tab',name=name,exact=True).click()
+                def reset_menu():
+                    tools();toggle=page.get_by_role('button',name='Reset demo',exact=True)
+                    if not toggle.count():toggle=page.get_by_role('button',name='Återställ demo',exact=True)
+                    toggle.click()
                 stage='public guest showroom and literal local message'
-                expect(page.get_by_role('heading',name='A calmer place to work together.',exact=True)).to_be_visible()
-                expect(page.get_by_text('Interactive demo · sample data',exact=True)).to_be_visible()
+                expect(page.get_by_role('heading',name='Shall we open up to the courtyard?',exact=True)).to_be_visible()
+                expect(page.get_by_text('Sample workspace · fictional people · changes stay in this tab',exact=True)).to_be_visible()
+                expect(page.get_by_role('img',name='A sunlit brick courtyard with trees, an open doorway and a shared table',exact=True)).to_be_visible()
+                stage='real focus and accessible bounded personal layout'
+                materials=page.locator('.fc-studio-materials')
+                page.get_by_role('button',name='Focus',exact=True).click();expect(materials).not_to_be_visible()
+                expect(page.get_by_role('log',name='Sample conversation')).to_be_visible()
+                page.get_by_role('button',name='Leave focus',exact=True).click();expect(materials).to_be_visible()
+                page.get_by_role('button',name='Arrange',exact=True).click()
+                earlier=page.get_by_role('button',name='Move Shared brief earlier',exact=True)
+                earlier.focus();page.keyboard.press('Enter')
+                assert materials.locator('[data-material]').evaluate_all('(items)=>items.map(item=>item.dataset.material)')==['brief','courtyard']
+                page.get_by_role('button',name='Pin Courtyard image',exact=True).click()
+                expect(page.get_by_role('button',name='Pin Courtyard image',exact=True)).to_have_attribute('aria-pressed','true')
+                assert materials.locator('[data-material]').first.get_attribute('data-material')=='courtyard'
+                page.get_by_label('Material position',exact=True).select_option('left')
+                expect(page.locator('.fc-studio-scene')).to_have_attribute('data-material-position','left')
+                page.get_by_role('button',name='Reset layout',exact=True).click()
+                expect(page.locator('.fc-studio-scene')).to_have_attribute('data-material-position','right')
+                expect(page.get_by_role('button',name='Pin Courtyard image',exact=True)).to_have_attribute('aria-pressed','false')
+                page.get_by_role('button',name='Close layout controls',exact=True).click()
+                page.get_by_label('Edit courtyard brief',exact=True).fill('## Shared edit from the conversation')
+                section('Documents');expect(page.get_by_label('Edit demo document',exact=True)).to_have_value('## Shared edit from the conversation')
+                section('Conversation')
+                checks['real_focus_reorder_pin_position_reset_and_shared_document']=True
                 initial=page.get_by_role('log',name='Sample conversation').locator('article').count()
                 text='Local note <img src="https://invalid.example/tracker">'
                 page.get_by_label('Your demo message',exact=True).fill(text);page.get_by_role('button',name='Send demo message',exact=True).click()
@@ -65,7 +98,7 @@ def main():
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_be_visible()
                 checks['guest_literal_channel_scoped_memory_chat_no_bot']=True
                 stage='actual project checkbox/add/filter'
-                page.get_by_role('tab',name='Projects',exact=True).click()
+                section('Projects')
                 box=page.get_by_role('checkbox',name='Review the courtyard materials',exact=True);box.check();expect(box).to_be_checked()
                 page.get_by_label('New demo task',exact=True).fill('My new courtyard step');page.get_by_role('button',name='Add task',exact=True).click()
                 expect(page.get_by_role('checkbox',name='My new courtyard step',exact=True)).to_be_visible()
@@ -73,7 +106,7 @@ def main():
                 page.get_by_role('button',name='All tasks',exact=True).click()
                 checks['actual_project_add_toggle_and_filter']=True
                 stage='actual edited Markdown file download'
-                page.get_by_role('tab',name='Documents',exact=True).click()
+                section('Documents')
                 edited='## My courtyard idea\n\nLocal **edited text**, preserved exactly.'
                 page.get_by_label('Edit demo document',exact=True).fill(edited)
                 with page.expect_download() as downloaded:page.get_by_role('button',name='Download Markdown',exact=True).click()
@@ -83,54 +116,74 @@ def main():
                 page.get_by_role('button',name='Project brief',exact=True).click();expect(page.get_by_label('Edit demo document')).to_have_value(edited)
                 checks['edited_document_markdown_actual_download_and_independent_documents']=True
                 stage='Microsoft and Google preparation only'
-                page.get_by_role('tab',name='Connections',exact=True).click()
+                section('Connections')
                 for provider in ['Microsoft 365','Google Workspace']:
                     page.get_by_role('button',name=provider+' Preparation guide',exact=True).click()
                     if provider=='Microsoft 365': expect(page.get_by_text('Files.ReadWrite.All · offline_access (files) / Calendars.ReadWrite · offline_access (calendar)',exact=True)).to_be_visible()
-                    for box in page.get_by_role('checkbox').all():box.check()
+                    for box in page.get_by_role('checkbox').all():
+                        expect(box).not_to_be_checked();box.check()
                     expect(page.get_by_text('Checking a box changes this example checklist only. No account is connected, authorized or tested here.',exact=True)).to_be_visible()
                     expect(page.get_by_label('Example callback — replace with your installation’s exact address',exact=True)).to_have_value('https://your-freecollab.example/api/sync/oauth/callback')
                 checks['both_provider_guides_no_fake_authorization_or_connectivity']=True
                 stage='appearance scoped to showroom; keyboard tabs'
                 root_style=page.evaluate('document.documentElement.getAttribute("style")')
-                page.get_by_role('tab',name='Appearance',exact=True).click()
+                section('Appearance')
                 page.get_by_role('button',name='Fjord Cool stone & ocean',exact=True).click()
                 page.get_by_label('Demo typeface',exact=True).select_option('manrope')
                 assert page.locator('.fc-showroom').evaluate('(element)=>getComputedStyle(element).getPropertyValue("--fc-accent-original").trim()')=='#365f79'
                 assert page.evaluate('document.documentElement.getAttribute("style")')==root_style
                 assert page.locator('.fc-showroom').evaluate('(element)=>getComputedStyle(element).fontFamily').startswith('"Manrope Variable"')
-                page.get_by_role('tab',name='Appearance',exact=True).focus();page.keyboard.press('Home')
+                tools();page.get_by_role('tab',name='Appearance',exact=True).focus();page.keyboard.press('Home')
                 expect(page.get_by_role('tab',name='Conversation',exact=True)).to_be_focused()
                 expect(page.get_by_role('tab',name='Conversation',exact=True)).to_have_attribute('aria-selected','true')
                 checks['appearance_scoped_without_account_mutation_and_keyboard_tabs']=True
+                page.keyboard.press('Escape')
                 REPORT.parent.mkdir(parents=True,exist_ok=True)
                 desktop=REPORT.with_name('demo-showroom-desktop.png');page.screenshot(path=str(desktop),full_page=True)
                 stage='reset focus trap and all local data cleared'
-                page.get_by_role('button',name='Reset demo',exact=True).click()
+                page.get_by_role('button',name='Arrange',exact=True).click()
+                page.get_by_role('button',name='Pin Shared brief',exact=True).click()
+                page.get_by_label('Material position',exact=True).select_option('left')
+                page.get_by_role('button',name='Close layout controls',exact=True).click()
+                page.get_by_role('button',name='Focus',exact=True).click()
+                reset_menu()
                 dialog=page.get_by_role('alertdialog');expect(dialog).to_be_visible()
                 page.keyboard.press('Shift+Tab');assert page.evaluate('document.querySelector("[role=alertdialog]").contains(document.activeElement)')
                 page.keyboard.press('Escape');expect(dialog).to_have_count(0)
-                page.get_by_role('button',name='Reset demo',exact=True).click();page.get_by_role('button',name='Reset this demo',exact=True).click()
+                reset_menu();page.get_by_role('button',name='Reset this demo',exact=True).click()
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_have_count(0)
-                page.get_by_role('tab',name='Projects',exact=True).click();expect(page.get_by_role('checkbox',name='My new courtyard step',exact=True)).to_have_count(0)
+                expect(page.locator('.fc-studio-materials')).to_be_visible()
+                expect(page.locator('.fc-studio-scene')).to_have_attribute('data-material-position','right')
+                assert page.locator('.fc-studio-pinned').count()==0
+                assert page.locator('.fc-showroom').evaluate('(element)=>getComputedStyle(element).getPropertyValue("--fc-accent-original").trim()')=='#ee593f'
+                section('Connections')
+                for provider in ['Microsoft 365','Google Workspace']:
+                    page.get_by_role('button',name=provider+' Preparation guide',exact=True).click()
+                    for box in page.get_by_role('checkbox').all():expect(box).not_to_be_checked()
+                section('Projects');expect(page.get_by_role('checkbox',name='My new courtyard step',exact=True)).to_have_count(0)
                 expect(page.get_by_role('checkbox',name='Review the courtyard materials',exact=True)).not_to_be_checked()
-                page.get_by_role('tab',name='Documents',exact=True).click();assert page.get_by_label('Edit demo document').input_value()!=edited
-                checks['focus_trapped_reset_clears_messages_tasks_documents_and_appearance']=True
-                page.get_by_role('tab',name='Conversation',exact=True).click();page.screenshot(path=str(desktop),full_page=True)
+                section('Documents');assert page.get_by_label('Edit demo document').input_value()!=edited
+                checks['focus_trapped_reset_clears_messages_tasks_documents_checklists_theme_and_layout']=True
+                section('Conversation');page.screenshot(path=str(desktop),full_page=True)
                 stage='Swedish and 320 px every section'
-                page.evaluate('window.showroomLocale("sv")');page.set_viewport_size({'width':320,'height':800})
-                expect(page.get_by_role('heading',name='En lugnare plats att arbeta tillsammans.',exact=True)).to_be_visible()
-                for section in ['Samtal','Projekt','Dokument','Anslutningar','Utseende']:
-                    page.get_by_role('tab',name=section,exact=True).click()
-                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),section+' horizontal overflow'
+                tools();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape');page.set_viewport_size({'width':390,'height':844})
+                expect(page.get_by_role('heading',name='Ska vi öppna upp mot gården?',exact=True)).to_be_visible()
+                assert page.evaluate('document.documentElement.lang')=='en', 'demo language mutated app language'
+                for width in [390,320]:
+                    page.set_viewport_size({'width':width,'height':844})
+                    for name in ['Samtal','Projekt','Dokument','Anslutningar','Utseende']:
+                        section(name)
+                        assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),name+' horizontal overflow at '+str(width)
+                section('Samtal')
                 mobile=REPORT.with_name('demo-showroom-mobile.png');page.screenshot(path=str(mobile),full_page=True)
-                page.get_by_role('button',name='Återställ demo',exact=True).click();expect(page.get_by_role('alertdialog')).to_be_visible();page.keyboard.press('Escape')
-                page.get_by_role('tab',name='Samtal',exact=True).click();page.get_by_label('Ditt demomeddelande',exact=True).fill('Ett lokalt meddelande');page.get_by_role('button',name='Skicka demomeddelande',exact=True).click()
+                reset_menu();expect(page.get_by_role('alertdialog')).to_be_visible();page.keyboard.press('Escape')
+                section('Samtal');page.get_by_label('Ditt demomeddelande',exact=True).fill('Ett lokalt meddelande');page.get_by_role('button',name='Skicka demomeddelande',exact=True).click()
                 page.reload(wait_until='networkidle');expect(page.get_by_text('Ett lokalt meddelande',exact=True)).to_have_count(0)
-                checks['swedish_all_sections_320px_and_reload_discards_demo_data']=True
-                page.get_by_role('button',name='Back to FreeCollab',exact=True).click();page.get_by_role('button',name='Open the app',exact=True).click()
+                checks['scoped_swedish_all_sections_390_320px_and_reload_discards_demo_data']=True
+                page.get_by_role('button',name='Back to FreeCollab',exact=True).click();tools();page.get_by_role('button',name='Open the app',exact=True).click()
                 assert page.evaluate('window.showroomBack')==1 and page.evaluate('window.showroomOpen')==1
                 assert page.evaluate('localStorage.length')==0
+                assert page.evaluate('sessionStorage.length')==0
                 assert not errors,errors
                 assert not unexpected,unexpected
                 checks['explicit_exit_callbacks_no_storage_api_provider_or_browser_errors']=True

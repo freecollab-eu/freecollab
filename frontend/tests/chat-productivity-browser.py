@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Private real-app proof: group DMs, durable sends, reminders and device queues."""
+from ui_navigation import choose_chat_channel, open_chat_tool, reveal_message_actions
 import base64
 from datetime import datetime, timedelta
 import importlib.util
@@ -66,7 +67,7 @@ def main():
                 page.on('request',lambda request:requests.append(request.url))
                 p.login(page,app,owner,workspace)
                 stage = 'actual group conversation creation'
-                page.get_by_role('button',name='Direct messages',exact=True).click()
+                open_chat_tool(page, 'Direct messages')
                 direct = page.get_by_role('dialog',name='Direct messages',exact=True)
                 direct.get_by_role('button',name='New group conversation',exact=True).click()
                 for peer in peers:
@@ -76,7 +77,7 @@ def main():
                 group = p.api(base,'GET','/group-conversations?workspace_id='+workspace['id'],owner)[0]
                 assert len(group['participants']) == 3
                 checks['actual_group_picker_creates_private_three_person_conversation'] = True
-                page.get_by_role('button',name='Thoughtful work',exact=False).first.click()
+                choose_chat_channel(page, 'Thoughtful work')
                 composer = page.get_by_role('textbox',name='Message #Thoughtful work',exact=True)
                 stage = 'actual scheduled send and encrypted database record'
                 composer.fill(text)
@@ -96,7 +97,7 @@ def main():
                 checks['durable_worker_send_updates_real_connected_chat_without_redis'] = True
                 checks['scheduled_body_encrypted_and_only_session_digest_metadata_persisted'] = True
                 stage = 'personal reminder and real notification target opening'
-                message.hover(); message.get_by_role('button',name='Remind me about this message',exact=True).click()
+                reveal_message_actions(message); message.get_by_role('button',name='Remind me about this message',exact=True).click()
                 panel.get_by_role('button',name='Remind me',exact=True).click()
                 expect(panel.get_by_text('Reminder saved.',exact=True)).to_be_visible()
                 panel.get_by_role('button',name='Close scheduling',exact=True).click()
@@ -111,8 +112,8 @@ def main():
                 assert any('/reminders/'+reminder_id+'/target' in request for request in requests)
                 checks['generic_personal_reminder_notification_opens_reauthorized_exact_message'] = True
                 stage = 'private saved completion persists'
-                message.hover(); message.get_by_role('button',name='Save message',exact=True).click()
-                page.get_by_role('button',name='Saved items and decisions',exact=True).click()
+                reveal_message_actions(message); message.get_by_role('button',name='Save message',exact=True).click()
+                open_chat_tool(page, 'Saved items and decisions')
                 notebook = page.get_by_role('dialog',name='Channel notebook',exact=True)
                 notebook.get_by_role('button',name='Saved',exact=True).click()
                 notebook.get_by_role('button',name='Mark complete',exact=True).click()

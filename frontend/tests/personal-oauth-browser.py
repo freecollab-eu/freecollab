@@ -6,6 +6,7 @@ launcher supplies bounded synthetic provider responses; the browser's provider
 consent navigation is explicitly intercepted. Independent backend tests exercise
 the real verified HTTPS/CONNECT transport. No customer/vendor credential is used.
 """
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import json
@@ -130,14 +131,14 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(page).to_have_url(origin+'/',timeout=60000)
                 assert page.evaluate('([a,b,c])=>![...Object.values(localStorage),...Object.values(sessionStorage)].some(v=>v.includes(a)||v.includes(b)||v.includes(c))',[ACCESS,REFRESH,CLIENT_SECRET])
                 checks['provider_navigation_pkce_one_use_callback_and_token_free_browser_storage']=True
-                page.get_by_role('button',name='Integrations',exact=True).click()
+                open_chat_tool(page, 'Integrations')
                 dialog=page.get_by_role('dialog',name='Integrations',exact=True)
                 dialog.get_by_role('button',name='Provider accounts',exact=True).click()
                 panel=dialog.get_by_role('region',name='Provider accounts',exact=True)
                 expect(panel.locator('.fc-oauth-grants article').get_by_text('My design search',exact=True)).to_be_visible()
                 expect(panel.locator('.fc-oauth-grants article').get_by_text('Connected',exact=True)).to_be_visible()
                 dialog.get_by_role('button',name='Done',exact=True).click()
-                page.get_by_role('button',name='Search all history',exact=True).click()
+                open_chat_tool(page, 'Search all history')
                 search=page.get_by_role('dialog',name='Search all history',exact=True)
                 search.locator('.fc-enterprise-search>summary').click()
                 search.get_by_label('Provider query',exact=True).fill('design')
@@ -147,7 +148,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 search.get_by_role('button',name='Close history search',exact=True).click()
                 f.api(base,'PUT','/preferences/language',owner,{'locale':'sv'})
                 page.reload(wait_until='domcontentloaded');expect(page.locator('.fc-chat')).to_be_visible()
-                page.get_by_role('button',name='Integrationer',exact=True).click()
+                open_chat_tool(page, 'Integrationer')
                 dialog=page.get_by_role('dialog',name='Integrationer',exact=True)
                 dialog.get_by_role('button',name='Leverantörskonton',exact=True).click()
                 panel=dialog.get_by_role('region',name='Leverantörskonton',exact=True)
@@ -160,7 +161,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 checks['saved_swedish_and_320px_customer_account_layout']=True
                 dialog.get_by_role('button',name='Klart',exact=True).click()
                 page.set_viewport_size({'width':1440,'height':1100})
-                page.get_by_role('button',name='Sök i all historik',exact=True).click()
+                open_chat_tool(page, 'Sök i all historik')
                 search=page.get_by_role('dialog',name='Sök i all historik',exact=True)
                 search.locator('.fc-enterprise-search>summary').click()
                 search.get_by_label('Sökfråga till leverantören',exact=True).fill('design')

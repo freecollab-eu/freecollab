@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Actual Slack UI, two Rust devices, encrypted provenance/media and resumable ACK loss."""
+from ui_navigation import choose_chat_channel, open_chat_tool
 import base64, hashlib, importlib.util, io, json, os, secrets, shutil, sqlite3, subprocess, tempfile, time, zipfile
 from pathlib import Path
 import yaml
@@ -68,7 +69,7 @@ def main():
         if attempt==2 or not any(row['failure']=='net::ERR_NETWORK_CHANGED' for row in failed[first_failure:]):raise
         navigation_retries+=1;print('Retrying initial page after disposable Docker network change',flush=True)
       page.evaluate('args=>localStorage.setItem(...args)',['freecollab.workspace:'+user['user_id'],workspace['id']]);page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(f.PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click();page.wait_for_function('id=>localStorage.getItem("freecollab_user_id")===id',arg=user['user_id'])
-     pages[0].get_by_role('button',name='Integrations',exact=True).click();dialog=pages[0].get_by_role('dialog',name='Integrations',exact=True)
+     open_chat_tool(pages[0], 'Integrations');dialog=pages[0].get_by_role('dialog',name='Integrations',exact=True)
      for page in pages:browser_json(page,"async()=>{window.secure=await(await import('/src/lib/secure-client.ts')).getSecureMessaging();await secure.ensureSession();return true}")
      stage='actual local-only encrypted ZIP preview';print(stage,flush=True)
      posts=[];pages[0].on('request',lambda req:posts.append({'path':req.url.split(origin)[-1],'body':req.post_data_buffer or b''}) if req.method in ['POST','PUT'] else None)
@@ -114,7 +115,7 @@ def main():
      checks['accepted_response_loss_resume_exactly_once_no_native_plaintext_or_zip_upload']=True
      state=pages[0].evaluate('''()=>new Promise((resolve,reject)=>{const request=indexedDB.open('freecollab-mobile-v1');request.onsuccess=()=>{const db=request.result;const result=db.transaction('vault').objectStore('vault').getAll();result.onsuccess=()=>{resolve(result.result.filter(v=>v.kind==='slack-import').map(v=>({kind:v.kind,hasCiphertext:v.ciphertext instanceof ArrayBuffer,hasPlainValue:'value' in v})));db.close()};result.onerror=reject};request.onerror=reject})''');assert state and all(v['hasCiphertext'] and not v['hasPlainValue'] for v in state)
      checks['resumable_checkpoint_real_indexeddb_ciphertext']=True
-     dialog.get_by_role('button',name='Done',exact=True).click();pages[0].get_by_role('button',name='slack-history',exact=False).click()
+     dialog.get_by_role('button',name='Done',exact=True).click();choose_chat_channel(pages[0], 'slack-history')
      expect(pages[0].locator('.fc-chat-thread-link').first).to_contain_text('1 reply')
      disclosure=pages[0].locator('.fc-chat-message .fc-slack-history').first;disclosure.locator('summary').first.click();expect(disclosure.get_by_label('Historical Slack reactions',exact=True)).to_contain_text('thumbsup');expect(disclosure.get_by_label('Exported edit history',exact=True)).to_contain_text('Earlier source revision')
      checks['actual_chat_historical_badges_and_browsable_edit_disclosure']=True

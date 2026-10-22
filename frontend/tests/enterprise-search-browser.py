@@ -3,6 +3,7 @@
 
 Runs only private processes with temporary storage and keys, never pilot services.
 """
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import json
@@ -72,7 +73,7 @@ def main():
                 page.goto(app,wait_until='domcontentloaded');page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+actor['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click()
                 page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
-                page.get_by_role('button',name='Search all history',exact=True).click()
+                open_chat_tool(page, 'Search all history')
                 dialog=page.get_by_role('dialog',name='Search all history');expect(dialog.get_by_text('Loading full history',exact=False)).to_have_count(0,timeout=60000)
                 query=dialog.get_by_role('textbox',name='Search messages',exact=True)
                 stage='local document task feed file facets'

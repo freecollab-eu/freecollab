@@ -4,6 +4,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/files-br
 CHAT_BASE_URL defaults to http://127.0.0.1:3000; FILE_API_URL defaults to the Vite
 /api proxy. To test a separate disposable API, set FILE_API_URL to its origin.
 """
+from ui_navigation import open_chat_tool
 import base64
 import json
 import os
@@ -72,8 +73,8 @@ with sync_playwright() as p:
         if API != BASE + '/api':
             page.route('**/api/**', lambda route: route.fulfill(response=route.fetch(url=API + route.request.url.split('/api', 1)[1])))
         page.goto(BASE, wait_until='domcontentloaded', timeout=90000)
-        expect(page.get_by_placeholder('Message #' + channel['name'])).to_be_visible(timeout=90000)
-        page.get_by_role('button', name='Channel files', exact=True).click()
+        expect(page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)).to_be_visible(timeout=90000)
+        open_chat_tool(page, 'Channel files')
         text = f'file-{RUN}.txt'; png = f'image-{RUN}.png'; pdf = f'reference-{RUN}.pdf'
         png_bytes = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0e8AAAAASUVORK5CYII=')
         page.get_by_label('Choose a file', exact=True).set_input_files([
@@ -172,7 +173,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Close channel panel', exact=True).click()
         decision_title = 'Searchable decision ' + RUN
         decision = api('POST', '/channels/' + channel_id + '/decisions', auth['access_token'], {'title': decision_title, 'content': 'Decision reasoning ' + RUN, 'status': 'accepted'})
-        page.get_by_role('button', name='Search all history', exact=True).click()
+        open_chat_tool(page, 'Search all history')
         search = page.get_by_role('dialog', name='Search all history', exact=True)
         expect(search.get_by_text('Loading full history', exact=False)).to_have_count(0, timeout=90000)
         search.get_by_label('Search content type', exact=True).select_option('files')
@@ -198,7 +199,7 @@ with sync_playwright() as p:
         expect(page.locator('#decision-' + decision['id'])).to_be_focused()
         page.get_by_role('button', name='Close channel notebook', exact=True).click()
         print('PASS: latest-filename search, file type filter, result download/preview, decision text search and jump to focused decision', flush=True)
-        page.get_by_role('button', name='Channel files', exact=True).click()
+        open_chat_tool(page, 'Channel files')
         page.set_viewport_size({'width': 390, 'height': 844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         page.get_by_role('button', name='Preview ' + png, exact=True).click()

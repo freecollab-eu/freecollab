@@ -4,6 +4,7 @@ Requires the normal Vite client (CHAT_BASE_URL, default3000), Chromium and
 backend test dependencies. Starts/stops only its own loopback API/provider and
 private temporary DB/keys/files. No real timestamp, user content or email is sent.
 """
+from ui_navigation import open_chat_tool
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 import hashlib
@@ -119,10 +120,10 @@ with tempfile.TemporaryDirectory(prefix='freecollab-proof-browser-') as folder:
             page.route('**/api/**', lambda route: route.fulfill(response=route.fetch(url=API + route.request.url.split('/api', 1)[1])))
             page.goto(BASE, wait_until='domcontentloaded', timeout=90000)
             try:
-                expect(page.get_by_placeholder('Message #Version proofs')).to_be_visible(timeout=90000)
+                expect(page.get_by_role('textbox', name='Message #Version proofs', exact=True)).to_be_visible(timeout=90000)
             except Exception:
                 raise AssertionError('Proof fixture app failed to render: ' + '; '.join(errors)) from None
-            page.get_by_role('button', name='Channel files', exact=True).click()
+            open_chat_tool(page, 'Channel files')
             row = page.locator('.fc-file-row').filter(has=page.get_by_text('revised.txt', exact=True))
             row.get_by_role('button', name='Timestamp proof', exact=True).click()
             panel = row.get_by_label('Timestamp proof for this file version', exact=True)
@@ -159,7 +160,7 @@ with tempfile.TemporaryDirectory(prefix='freecollab-proof-browser-') as folder:
             print('PASS immutable old-version proof isolation and320px layout', flush=True)
             page.get_by_role('button', name='Close channel panel', exact=True).click()
             page.set_viewport_size({'width': 1440, 'height': 1000})
-            page.get_by_role('button', name='Saved items and decisions', exact=True).click()
+            open_chat_tool(page, 'Saved items and decisions')
             notebook = page.get_by_role('dialog', name='Channel notebook', exact=True)
             notebook.get_by_role('button', name='Decisions', exact=True).click()
             card = notebook.locator('.fc-decision-card').filter(has=page.get_by_role('heading', name='A deliberate decision', exact=True))

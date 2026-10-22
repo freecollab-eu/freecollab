@@ -1,5 +1,5 @@
 import { t, useI18n, currentLocale } from '../i18n';
-import { Fragment, useState, useEffect, useLayoutEffect, useRef, useCallback } from 'react';
+import { Fragment, useState, useEffect, useLayoutEffect, useRef } from 'react';
 import { api, APIError, Channel, Message, Reaction } from '../lib/api';
 import { getSocket, disconnectSocket } from '../lib/socket';
 import {
@@ -32,6 +32,8 @@ import {
   ClipboardCheck,
   Clock,
   Bell,
+  ChevronDown,
+  ScanLine,
 } from 'lucide-react';
 import { TypingIndicator, useTypingEmitter } from './TypingIndicator';
 import { PresenceIndicator } from './PresenceIndicator';
@@ -60,6 +62,7 @@ import { MobileSettings, MobileStatus } from './MobileSettings';
 import { mobileDrafts, mobileOutbox } from '../mobile';
 import { offlineLibrary } from '../mobile/library';
 import { useModalFocus } from '../lib/useModalFocus';
+import { ChatSharedMaterial } from './ChatSharedMaterial';
 import '../styles/chat.css';
 
 interface ChatProps {
@@ -83,7 +86,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [newMessage, setNewMessage] = useState('');
   const [showNewChannel, setShowNewChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
-  const [sidebarOpen, setSidebarOpen] = useState(() => window.matchMedia('(min-width: 768px)').matches);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
+  const [materialChannelId, setMaterialChannelId] = useState<string | null>(null);
+  const [roomArrangements, setRoomArrangements] = useState<Record<string, 'left' | 'right'>>({});
   const [loading, setLoading] = useState(true);
   const [channelError, setChannelError] = useState('');
   const [messageError, setMessageError] = useState('');
@@ -125,6 +131,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   // New feature states
   const [reactions, setReactions] = useState<Record<string, Reaction[]>>({});
   const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
+  const [messageActionsOpen, setMessageActionsOpen] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
@@ -161,6 +168,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const mobileDialogRef = useRef<HTMLDivElement>(null);
   const mobileToolsRef = useRef<HTMLDivElement>(null);
   const mobileToolsTrigger = useRef<HTMLButtonElement>(null);
+  const channelDialogRef = useRef<HTMLDivElement>(null);
   const closeMobileTools = (restoreFocus = false) => {
     setMobileToolsOpen(false);
     if (restoreFocus) mobileToolsTrigger.current?.focus({ preventScroll: true });
@@ -176,7 +184,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const createDialogRef = useRef<HTMLDivElement>(null);
   const threadDialogRef = useRef<HTMLElement>(null);
-  const sidebarRef = useCallback((element: HTMLElement | null) => { if (element) element.inert = !sidebarOpen; }, [sidebarOpen]);
+  useModalFocus(channelDialogRef, () => setSidebarOpen(false), sidebarOpen);
   useModalFocus(mobileDialogRef, () => setMobileOpen(false), mobileOpen);
   useModalFocus(createDialogRef, () => setShowNewChannel(false), showNewChannel);
   useModalFocus(threadDialogRef, () => setThreadMessage(null), !!threadMessage);
@@ -192,6 +200,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useEffect(() => {
     setActiveChannel(null); setChannels([]); setMessages([]); setHistoryOpen(false); setIntegrationsOpen(false); setWorkHubOpen(false); setCollaborationTab(null); setLaunchOpen(false); setFeedbackOpen(false); setIntegrationEntry(null);
     draftsRef.current = {};
+    setRoomArrangements({}); setMaterialChannelId(null);
     if (workspace) { setLoading(true); void loadChannels(); } else setLoading(workspacesLoading);
   }, [workspace?.id]);
 
@@ -308,13 +317,6 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: channel.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
   }, [channels, workspace?.id, loading]);
 
-  useEffect(() => {
-    const media = window.matchMedia('(min-width: 768px)');
-    const resize = () => { setSidebarOpen(media.matches); if (media.matches) setMobileToolsOpen(false); };
-    media.addEventListener('change', resize);
-    return () => media.removeEventListener('change', resize);
-  }, []);
-
   useEffect(() => { setMobileToolsOpen(false); setProductivity(null); }, [activeChannel?.id, workspace?.id]);
   useEffect(()=>{
     if(!activeChannel||activeChannel.secure)return;
@@ -370,19 +372,20 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       if (mentionOpen) setMentionOpen(false);
       else if (showNewChannel) setShowNewChannel(false);
       else if (showReactionPicker) setShowReactionPicker(null);
+      else if (messageActionsOpen) setMessageActionsOpen(null);
       else if (showNotifications) setShowNotifications(false);
       else if (threadMessage) setThreadMessage(null);
       else if (toolPanel) setToolPanel(null);
-      else if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false);
+      else if (sidebarOpen) setSidebarOpen(false);
     };
     document.addEventListener('keydown', dismiss);
     return () => document.removeEventListener('keydown', dismiss);
-  }, [commandOpen, showNewChannel, showReactionPicker, showNotifications, threadMessage, toolPanel, mentionOpen]);
+  }, [commandOpen, showNewChannel, showReactionPicker, showNotifications, threadMessage, toolPanel, mentionOpen, sidebarOpen, messageActionsOpen]);
 
   useEffect(() => {
     const openCommands = (event: KeyboardEvent) => {
       if (event.isComposing || event.keyCode === 229 || composingRef.current || !(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== 'k') return;
-      if (document.querySelector('[aria-modal="true"]') && !commandOpen) return;
+      if (document.querySelector('[aria-modal="true"]:not(.fc-chat-channel-layer)') && !commandOpen) return;
       event.preventDefault();
       setCommandOpen((open) => !open);
     };
@@ -414,7 +417,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     setThreadMessage(null);
     setThreadReplies([]);
     setEditingMessage(null);
-    setShowReactionPicker(null);
+    setShowReactionPicker(null); setMessageActionsOpen(null);
     setMessageError(''); setEncryptionLocked(false); setActionError(''); setToolPanel(null);
     setMemberNames({});
     setNewMessage(activeChannel ? draftsRef.current[activeChannel.id] || '' : '');
@@ -529,7 +532,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (nearBottomRef.current) scrollToLatest('auto');
   };
 
-  useLayoutEffect(resizeComposer, [newMessage, activeChannel?.id]);
+  useLayoutEffect(resizeComposer, [newMessage, activeChannel?.id, focusMode]);
 
   useEffect(() => {
     const input = inputRef.current;
@@ -912,7 +915,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   const handleCreateChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newChannelName.trim() || creating) return;
+    if (embeddedChannelId || !newChannelName.trim() || creating) return;
     setCreating(true); setCreateError('');
     try {
       const title = newChannelName;
@@ -926,15 +929,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       setActiveChannel(channel);
       setNewChannelName('');
       setShowNewChannel(false);
-      if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false);
+      setSidebarOpen(false);
     } catch (err) {
       setCreateError(err instanceof Error ? err.message : 'Could not create channel. Please try again.');
     } finally { setCreating(false); }
   };
 
   const selectChannel = (channel: Channel) => {
+    if (embeddedChannelId && channel.id !== embeddedChannelId) return;
     setActiveChannel(channel);
-    if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false);
+    setSidebarOpen(false);
   };
 
   const jumpToMessage = (messageId: string) => {
@@ -955,9 +959,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const runCommand = (action: CommandAction) => {
-    if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false);
+    setSidebarOpen(false);
     if (action === 'appearance') { openAppearance(); return; }
-    if (action === 'create') { setCreateError(''); setShowNewChannel(true); return; }
+    if (action === 'create') { if (!embeddedChannelId) { setCreateError(''); setShowNewChannel(true); } return; }
     if (activeChannel && (action === 'members' || action === 'files')) {
       setThreadMessage(null);
       setToolPanel(action);
@@ -997,6 +1001,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     return value.toLocaleDateString(currentLocale(), { weekday: 'long', month: 'long', day: 'numeric', ...(value.getFullYear() !== today.getFullYear() ? { year: 'numeric' } : {}) });
   };
   const timeLabel = (date: string) => new Date(date).toLocaleTimeString(currentLocale(), { hour: '2-digit', minute: '2-digit' });
+  const spaciousRoom = messages.length > 0 && messages.length <= 12 && !hasOlder;
+  const leadMessageId = spaciousRoom ? messages.find(message => !message.deleted && !message.locked && message.content.trim().length > 0 && message.content.length <= 160 && message.content.split('\n').length <= 3 && !message.content.startsWith('[Imported from Slack · '))?.id : undefined;
+  const avatarTone = (userId: string) => `fc-chat-avatar-tone-${Array.from(userId).reduce((sum, letter) => sum + letter.charCodeAt(0), 0) % 4}`;
 
   if (loading) {
     return (
@@ -1008,18 +1015,19 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   }
 
   return (
-    <div key="chat-shell" className="fc-chat">
-      {sidebarOpen && <button className="fc-chat-scrim" aria-label={t("Close channels")} onClick={() => setSidebarOpen(false)} />}
-      <aside className={`fc-chat-sidebar ${sidebarOpen ? 'is-open' : ''}`} aria-label={t("Workspace channels")} aria-hidden={!sidebarOpen} ref={sidebarRef}>
+    <div key="chat-shell" className={`fc-chat ${focusMode ? 'is-focus-mode' : ''} ${spaciousRoom ? 'is-spacious-room' : ''} ${activeChannel && roomArrangements[activeChannel.id] === 'left' ? 'has-material-left' : ''}`}>
+      {sidebarOpen && <div ref={channelDialogRef} id="chat-channel-drawer" className="fc-chat-channel-layer" role="dialog" aria-modal="true" aria-label={t("Workspace channels")} tabIndex={-1}>
+      <div className="fc-chat-scrim" aria-hidden="true" onMouseDown={() => setSidebarOpen(false)} />
+      <aside className="fc-chat-sidebar is-open" aria-label={t("Workspace channels")}>
         <div className="fc-chat-sidebar-inner">
           <div className="fc-chat-identity">
-            <Brand size="medium" className="fc-chat-wordmark" />
-            <span className="fc-kicker">{t("Your shared workspace")}</span><WorkspaceSwitcher />
+            <div className="fc-chat-drawer-heading"><Brand size="medium" className="fc-chat-wordmark" /><button type="button" className="fc-icon-button" data-autofocus aria-label={t("Close channels")} onClick={() => setSidebarOpen(false)}><X size={20} /></button></div>
+            <span className="fc-kicker">{workspace?.name || t("Your shared workspace")}</span>
           </div>
           <button type="button" onClick={() => setCommandOpen(true)} className="fc-chat-switcher" aria-label={t("Quick switcher")} aria-haspopup="dialog"><Search size={16} /><span>{t("Search & switch")}</span><kbd className="fc-shortcut">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : t("Ctrl")} {t(" K")}</kbd></button>
 
           <button type="button" onClick={() => setHistoryOpen(true)} className="fc-chat-text-button fc-chat-history-button"><Search size={15} />{t("Search all history")}</button>
-          {!embeddedChannelId && <button type="button" onClick={() => { setMyDayOpen(true); if (window.matchMedia('(max-width: 767px)').matches) setSidebarOpen(false); }} className="fc-chat-text-button fc-chat-history-button"><ClipboardCheck size={15} />{t('My day')}</button>}
+          {!embeddedChannelId && <button type="button" onClick={() => { setMyDayOpen(true); setSidebarOpen(false); }} className="fc-chat-text-button fc-chat-history-button"><ClipboardCheck size={15} />{t('My day')}</button>}
           <button type="button" onClick={openDirectMessages} className="fc-chat-text-button fc-chat-history-button"><MessageCircle size={15} />{t("Direct messages")}</button>
           <button type="button" onClick={() => { setIntegrationEntry(null); setIntegrationsOpen(true); }} className="fc-chat-text-button fc-chat-history-button" aria-label={t("Integrations")}><Plug size={15} />{t("Integrations")}</button>
           {workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <button type="button" onClick={() => setLaunchOpen(true)} className="fc-chat-text-button fc-chat-history-button" aria-label={t('Get started')}><Compass size={15} />{t('Get started')}</button>}
@@ -1027,7 +1035,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           <nav className="fc-chat-channel-nav" aria-label={t("Channels")}>
             <div className="fc-chat-section-label">
               <span className="fc-kicker">{t("Channels")}</span>
-              <button type="button" onClick={() => { setCreateError(''); setShowNewChannel(true); }} aria-label={t("Create channel")} className="fc-icon-button"><Plus size={17} /></button>
+              {!embeddedChannelId && <button type="button" onClick={() => { setCreateError(''); setShowNewChannel(true); }} aria-label={t("Create channel")} className="fc-icon-button"><Plus size={17} /></button>}
             </div>
             <div className="fc-chat-channel-list">
               {channels.map((channel) => (
@@ -1061,30 +1069,31 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           </footer>
         </div>
       </aside>
+      </div>}
 
       <main className="fc-chat-main">
         <header className="fc-chat-topbar">
           <div className="fc-chat-channel-heading">
-            <button type="button" onClick={() => setSidebarOpen(!sidebarOpen)} aria-label={t("Toggle channels")} aria-expanded={sidebarOpen} className="fc-icon-button fc-chat-sidebar-toggle">{sidebarOpen ? <X size={20} /> : <Menu size={20} />}</button>
-            <div className="fc-chat-topbar-channel">{activeChannel ? <><Hash size={18} aria-hidden="true" /><strong>{activeChannel.name || t("Unnamed Channel")}</strong></> : <strong>{t("Your workspace")}</strong>}</div>
-            {activeChannel && <button type="button" className="fc-chat-security" onClick={() => openSecureSettings(activeChannel.secure ? activeChannel.id : undefined)}><Lock size={12} />{activeChannel.secure ? t("End-to-end encrypted") : t("Server-encrypted messages")}</button>}
+            <Brand size="medium" className="fc-chat-topbar-brand" />
+            {!embeddedChannelId && <WorkspaceSwitcher />}
+            <button type="button" onClick={() => { closeMobileTools(); setSidebarOpen(true); }} aria-label={t("Toggle channels")} aria-haspopup="dialog" aria-controls="chat-channel-drawer" aria-expanded={sidebarOpen} className="fc-chat-topbar-channel fc-chat-sidebar-toggle">{activeChannel ? <>{['direct', 'group_direct'].includes(activeChannel.type) ? <MessageCircle size={17} aria-hidden="true" /> : <Hash size={17} aria-hidden="true" />}<strong>{activeChannel.name || t("Unnamed Channel")}</strong></> : <><Menu size={18} /><strong>{t("Channels")}</strong></>}<ChevronDown size={14} aria-hidden="true" /></button>
           </div>
           <div className="fc-chat-topbar-actions">
-            <MobileStatus onOpen={() => setMobileOpen(true)} />
-            <button type="button" className="fc-chat-topbar-action fc-chat-secondary-action" aria-label={t("Mobile and offline settings")} onClick={() => setMobileOpen(true)}><Smartphone size={17} /><span>{t("Mobile")}</span></button>
-            {activeChannel && <>
-              <button type="button" aria-label={t("Open workspace tools")} className="fc-chat-topbar-action" onClick={() => { setWorkHubInitialTab('tasks'); setWorkHubOpen(true); setToolPanel(null); setThreadMessage(null); }}><Layers size={17} /><span>{t("Work")}</span></button>
-              <button type="button" aria-label={t("Saved items and decisions")} className="fc-chat-topbar-action fc-chat-secondary-action" onClick={() => { setCollaborationTab("pins"); setDecisionSource(undefined); setToolPanel(null); setThreadMessage(null); }}><Check size={17} /><span>{t("Saved")}</span></button>
-              <button type="button" aria-label={t("Channel members")} aria-pressed={toolPanel === 'members'} onClick={() => { setThreadMessage(null); setToolPanel((current) => current === 'members' ? null : 'members'); }} className="fc-chat-topbar-action fc-chat-secondary-action"><Users size={17} /><span>{t("Members")}</span></button>
-              <button type="button" aria-label={t("Channel files")} aria-pressed={toolPanel === 'files'} onClick={() => { setThreadMessage(null); setToolPanel((current) => current === 'files' ? null : 'files'); }} className="fc-chat-topbar-action fc-chat-secondary-action"><Paperclip size={17} /><span>{t("Files")}</span></button>
-            </>}
+            <button type="button" className="fc-chat-topbar-action fc-chat-search-action" aria-label={t("Search all history")} onClick={() => setHistoryOpen(true)}><Search size={19} /></button>
+            {activeChannel && <button type="button" aria-label={t("Open workspace tools")} className="fc-chat-topbar-action fc-chat-work-action" onClick={() => { setWorkHubInitialTab('tasks'); setWorkHubOpen(true); setToolPanel(null); setThreadMessage(null); }}><Layers size={17} /><span>{t("Work")}</span></button>}
             <div ref={mobileToolsRef} className="fc-chat-mobile-tools" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeMobileTools(); }} onKeyDown={event => {
               if (event.key === 'Escape' && mobileToolsOpen) { event.preventDefault(); event.stopPropagation(); closeMobileTools(true); }
             }}>
               <button ref={mobileToolsTrigger} type="button" className="fc-chat-topbar-action" aria-label={t('More channel tools')} title={t('More channel tools')} aria-expanded={mobileToolsOpen} aria-controls="mobile-channel-tools" onClick={() => setMobileToolsOpen(open => !open)} onKeyDown={event => {
                 if (event.key === 'ArrowDown') { event.preventDefault(); setMobileToolsOpen(true); requestAnimationFrame(() => mobileToolsRef.current?.querySelector<HTMLButtonElement>('.fc-chat-mobile-tool')?.focus()); }
               }}><MoreHorizontal size={20} aria-hidden="true" /></button>
-              {mobileToolsOpen && <div id="mobile-channel-tools" className="fc-chat-mobile-tools-popover" role="group" aria-label={t('More channel tools')}>
+              {mobileToolsOpen && <div id="mobile-channel-tools" className="fc-chat-mobile-tools-popover" role="group" aria-label={t('More channel tools')} onKeyDown={event => {
+                if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+                const buttons = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button:not(:disabled)'));
+                const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+                event.preventDefault();
+                buttons[event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length]?.focus();
+              }}>
                 <MobileStatus onOpen={() => openMobileTool(() => setMobileOpen(true))} />
                 <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setMobileOpen(true))}><Smartphone size={17} /><span>{t('Mobile and offline settings')}</span></button>
                 {!embeddedChannelId && <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setMyDayOpen(true))}><ClipboardCheck size={17} /><span>{t('My day')}</span></button>}
@@ -1092,42 +1101,63 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                   <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setCollaborationTab('pins'); setDecisionSource(undefined); setToolPanel(null); setThreadMessage(null); })}><Check size={17} /><span>{t('Saved items and decisions')}</span></button>
                   <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setThreadMessage(null); setToolPanel(current => current === 'members' ? null : 'members'); })}><Users size={17} /><span>{t('Channel members')}</span></button>
                   <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setThreadMessage(null); setToolPanel(current => current === 'files' ? null : 'files'); })}><Paperclip size={17} /><span>{t('Channel files')}</span></button>
+                  <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => openSecureSettings(activeChannel.secure ? activeChannel.id : undefined))}><Lock size={17} /><span>{activeChannel.secure ? t('End-to-end encrypted') : t('Server-encrypted messages')}</span></button>
+                  <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => void loadMessages(activeChannel.id))}><RefreshCw size={17} /><span>{t('Refresh messages')}</span></button>
                 </>}
+                {activeChannel && materialChannelId === activeChannel.id && spaciousRoom && !focusMode && <div className="fc-chat-room-arrangement" role="group" aria-label={t('Arrange your room')}>
+                  <p>{t('Arrange your room')}<span>{t('Your view in this session')}</span></p>
+                  <button type="button" className="fc-chat-mobile-tool" aria-pressed={roomArrangements[activeChannel.id] === 'left'} onClick={() => setRoomArrangements(current => ({ ...current, [activeChannel.id]: 'left' }))}>{t('Shared material on the left')}</button>
+                  <button type="button" className="fc-chat-mobile-tool" aria-pressed={roomArrangements[activeChannel.id] !== 'left'} onClick={() => setRoomArrangements(current => ({ ...current, [activeChannel.id]: 'right' }))}>{t('Shared material on the right')}</button>
+                  <button type="button" className="fc-chat-mobile-tool" onClick={() => setRoomArrangements(current => { const next = { ...current }; delete next[activeChannel.id]; return next; })}>{t('Reset room arrangement')}</button>
+                </div>}
+                <div className="fc-chat-tools-divider" />
+                <button type="button" className="fc-chat-mobile-tool fc-chat-mobile-search-tool" onClick={() => openMobileTool(() => setHistoryOpen(true))}><Search size={17} /><span>{t('Search all history')}</span></button>
+                <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setCommandOpen(true))}><Search size={17} /><span>{t('Quick switcher')}</span></button>
+                <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(openDirectMessages)}><MessageCircle size={17} /><span>{t('Direct messages')}</span></button>
+                <button type="button" className="fc-chat-mobile-tool" aria-label={t('Integrations')} onClick={() => openMobileTool(() => { setIntegrationEntry(null); setIntegrationsOpen(true); })}><Plug size={17} /><span>{t('Integrations')}</span></button>
+                {workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <button type="button" className="fc-chat-mobile-tool" aria-label={t('Get started')} onClick={() => openMobileTool(() => setLaunchOpen(true))}><Compass size={17} /><span>{t('Get started')}</span></button>}
+                {workspace && <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => setFeedbackOpen(true))}><ClipboardCheck size={17} /><span>{t('Workspace feedback')}</span></button>}
+                <div className="fc-chat-tools-divider" />
+                <button type="button" className="fc-chat-mobile-tool" aria-label={t('Account settings')} onClick={() => openMobileTool(openAccount)}><Users size={17} /><span>{t('Account settings')}</span></button>
+                <button type="button" className="fc-chat-mobile-tool" aria-label={t('Appearance settings')} onClick={() => openMobileTool(openAppearance)}><Palette size={17} /><span>{t('Appearance')}</span></button>
+                {onAdmin && <button type="button" className="fc-chat-mobile-tool" aria-label={t('Administration')} onClick={() => openMobileTool(onAdmin)}><Settings size={17} /><span>{t('Admin')}</span></button>}
+                <button type="button" className="fc-chat-mobile-tool" aria-label={t('Sign out')} disabled={loggingOut} onClick={() => openMobileTool(() => void handleLogout())}><LogOut size={17} /><span>{t('Sign out')}</span></button>
               </div>}
             </div>
             <div className="fc-chat-notifications"><NotificationBell onClick={() => setShowNotifications(!showNotifications)} />{showNotifications && <div className="fc-chat-notification-popover"><NotificationCenter onOpenMessage={openHistoryMessage} onClose={() => setShowNotifications(false)} /></div>}</div>
+            <button type="button" className="fc-chat-account-trigger fc-chat-avatar fc-chat-avatar-self" aria-label={t('Your account')} title={t('Account settings')} onClick={openAccount}>{currentUserId ? avatarInitial(currentUserId) : t('Y')}</button>
           </div>
         </header>
 
-        <div className="fc-chat-connection" role="status" data-connected={connection === 'Connected'}><span className="fc-chat-connection-dot" /><span>{connection === 'Connected' ? t("Live connection") : connection}</span>{activeChannel && <button type="button" onClick={() => void loadMessages(activeChannel.id)}><RefreshCw size={11} /><span>{t("Refresh messages")}</span></button>}</div>
+        {connection !== 'Connected' && <div className="fc-chat-connection" role="status" data-connected="false"><span className="fc-chat-connection-dot" /><span>{connection}</span>{activeChannel && <button type="button" onClick={() => void loadMessages(activeChannel.id)}><RefreshCw size={11} /><span>{t("Refresh messages")}</span></button>}</div>}
 
         <div className="fc-chat-timeline-wrap"><div ref={timelineRef} onScroll={handleTimelineScroll} onWheel={() => { followingLatestRef.current = false; }} onTouchStart={() => { followingLatestRef.current = false; }} onPointerDown={() => { followingLatestRef.current = false; }} className="fc-chat-timeline" aria-label={t("Channel messages")}>
           <div className="fc-chat-timeline-inner">
-            {activeChannel && <div className={`fc-chat-intro ${messages.length > 0 ? 'has-messages' : ''}`}><span className="fc-kicker">{t("A space for conversation")}</span><h1>{activeChannel.name || t("Your channel")}<span>.</span></h1><p>{t("Ideas, updates, and everything in between.")}</p></div>}
+            {activeChannel && messages.length === 0 && <div className="fc-chat-intro"><span className="fc-kicker">{t("A space for conversation")}</span><h1>{activeChannel.name || t("Your channel")}<span>.</span></h1><p>{t("Ideas, updates, and everything in between.")}</p></div>}
             {messageError && <div role="alert" className="fc-alert">{messageError}{encryptionLocked ? <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && openSecureSettings(activeChannel.id)}>{t("Unlock encrypted messaging")}</button> : <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && void loadMessages(activeChannel.id)}>{t("Retry messages")}</button>}</div>}
             {messagesLoading && messages.length === 0 && <div className="fc-chat-history-loading" role="status"><span className="fc-chat-loader" /><span>{t("Loading your conversation…")}</span></div>}
             {hasOlder && <button type="button" className="fc-button fc-chat-load-older" disabled={loadingOlder} onClick={() => void loadOlderMessages()}>{loadingOlder ? t("Loading older messages…") : t("Load older messages")}</button>}
-            {activeChannel ? messages.length > 0 ? <div className="fc-chat-message-list">
+            {activeChannel ? messages.length > 0 ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
               {messages.map((msg, index) => (
                 <Fragment key={msg.id}>
                   {(index === 0 || dateKey(messages[index - 1].created_at) !== dateKey(msg.created_at)) && <div className="fc-chat-date"><span>{dateLabel(msg.created_at)}</span></div>}
-                  <article id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
-                    <div className="fc-chat-message-avatar"><div className={`fc-chat-avatar ${msg.author_id === currentUserId ? 'fc-chat-avatar-self' : ''}`}>{avatarInitial(msg.author_id)}</div><div className="fc-chat-presence"><PresenceIndicator userId={msg.author_id} size="sm" /></div></div>
+                  <article id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${msg.id === leadMessageId ? 'is-lead' : ''} ${messageActionsOpen === msg.id ? 'has-open-actions' : ''} ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
+                    <div className="fc-chat-message-avatar"><div className={`fc-chat-avatar ${avatarTone(msg.author_id)} ${msg.author_id === currentUserId ? 'fc-chat-avatar-self' : ''}`}>{avatarInitial(msg.author_id)}</div><div className="fc-chat-presence"><PresenceIndicator userId={msg.author_id} size="sm" /></div></div>
                     <div className="fc-chat-message-body">
                       {editingMessage === msg.id ? <div className="fc-chat-edit"><textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setEditingMessage(null); } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void handleEditMessage(msg.id); } }} aria-label={t("Edit message")} maxLength={10000} rows={2} className="fc-input" autoFocus /><button type="button" onClick={() => handleEditMessage(msg.id)} className="fc-icon-button" aria-label={t("Save edit")}><Check size={17} /></button><button type="button" onClick={() => setEditingMessage(null)} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button></div> : <>
-                        <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}</div>
+                        <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}{!msg.deleted && !msg.locked && <button type="button" className="fc-chat-message-menu" aria-label={t("More message actions")} aria-expanded={messageActionsOpen === msg.id} aria-controls={`message-actions-${msg.id}`} onClick={() => setMessageActionsOpen(current => current === msg.id ? null : msg.id)}><MoreHorizontal size={17} /></button>}</div>
                         <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}>{msg.content}</p>
                         {!msg.deleted && !msg.locked && msg.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${activeChannel.id}:${msg.id}`} channelId={activeChannel.id} messageId={msg.id} secure={!!activeChannel.secure} />}
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div className="fc-chat-message-actions"><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => { setDecisionSource(message); setCollaborationTab("decisions"); setToolPanel(null); }} /><button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => { setDecisionSource(message); setCollaborationTab("decisions"); setToolPanel(null); }} /><button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
                   </article>
                 </Fragment>
               ))}
-            </div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p><button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button></div>}
+            </div>{spaciousRoom && !focusMode && !messageError && <ChatSharedMaterial key={`${workspace?.id}:${activeChannel.id}:${currentUserId}`} channel={activeChannel} workspaceId={workspace?.id} onAvailabilityChange={available => { if (activeChannelRef.current !== activeChannel.id) return; setMaterialChannelId(available ? activeChannel.id : null); if (available && nearBottomRef.current) requestAnimationFrame(() => { if (activeChannelRef.current === activeChannel.id && nearBottomRef.current) scrollToLatest('auto'); }); }} onOpenFiles={() => { setToolPanel('files'); setThreadMessage(null); }} />}</div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p>{!embeddedChannelId && <button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button>}</div>}
           </div>
         </div>{pendingMessages > 0 && <div className="fc-chat-latest-wrap" role="status"><button type="button" className="fc-chat-latest" aria-label={t("Jump to latest messages")} onClick={() => scrollToLatest()}><ArrowDown size={15} /><span>{pendingMessages} {t(" new ")}{pendingMessages === 1 ? t("message") : t("messages")}</span><span>{t("Jump to latest")}</span></button></div>}</div>
 
@@ -1137,8 +1167,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           {policyNotice && <p role="status" className="fc-alert">{t('Shared content matched an organization policy. Review it before sharing further.')}<button type="button" className="fc-icon-button" aria-label={t('Dismiss policy notice')} onClick={()=>setPolicyNotice(false)}><X size={14}/></button></p>}
           {mobileNotice && <p role="status" className="fc-chat-muted">{mobileNotice}</p>}
           {mentionOpen && <div className="fc-chat-mention-picker" role="listbox" aria-label={t("Mention a teammate")}>{Object.entries(memberNames).filter(([id,name]) => id !== currentUserId && name.toLocaleLowerCase().includes((/(?:^|\s)@([^@\n]*)$/.exec(newMessage)?.[1] || "").toLocaleLowerCase())).slice(0,8).map(([id,name]) => <button type="button" role="option" aria-selected={selectedMentions.includes(id)} key={id} onClick={() => { const value = newMessage.replace(/(?:^|\s)@[^@\n]*$/, match => (match.startsWith(" ") ? " " : "") + "@" + name + " "); setNewMessage(value); persistDraft(activeChannel.id, value, !!activeChannel.secure); setSelectedMentions(old => [...new Set([...old,id])]); setMentionOpen(false); inputRef.current?.focus(); }}>{name}</button>)}</div>}
-          <form onSubmit={handleSendMessage} className="fc-chat-composer"><textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} rows={1} data-modal-return-focus maxLength={10000} aria-label={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} aria-describedby="message-composer-hint" placeholder={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} /><button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending} className="fc-button fc-button-primary"><span>{sending ? t("Sending…") : t("Send")}</span><Send size={15} /></button></form>
-          <button type="button" className="fc-chat-text-button" disabled={sending} onClick={() => setProductivity({draft:newMessage,mentions:selectedMentions})}><Clock size={14}/>{t("Schedule & reminders")}</button><div id="message-composer-hint" className="fc-chat-composer-hint"><span>{t("Enter to send ")}<span aria-hidden="true">·</span> {t(" Shift + Enter for a new line")}</span><span>{newMessage.length >= 9000 ? `${newMessage.length.toLocaleString(currentLocale())} / 10,000` : t("A thought worth sharing?")}</span></div>
+          <div className="fc-chat-composer-row"><form onSubmit={handleSendMessage} className="fc-chat-composer"><button type="button" className="fc-icon-button fc-chat-attach" aria-label={t('Add or open shared files')} title={t('Channel files')} onClick={() => { setThreadMessage(null); setToolPanel('files'); }}><Paperclip size={21} /></button><textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }} rows={1} data-modal-return-focus maxLength={10000} aria-label={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} aria-describedby="message-composer-hint" placeholder={t('What are you thinking?')} /><button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending} className="fc-button fc-button-primary" title={sending ? t('Sending…') : t('Send message')}><span>{sending ? t("Sending…") : t("Send")}</span><Send size={19} /></button></form><button type="button" className="fc-chat-focus-toggle" aria-label={t('Focus mode')} aria-pressed={focusMode} title={t('A quieter reading layout. All messages stay visible.')} onClick={() => setFocusMode(value => !value)}><ScanLine size={17} /><span>{t('Focus')}</span></button></div>
+          <div className="fc-chat-composer-footer"><button type="button" className="fc-chat-text-button" disabled={sending} onClick={() => setProductivity({draft:newMessage,mentions:selectedMentions})}><Clock size={14}/>{t("Schedule & reminders")}</button><div id="message-composer-hint" className="fc-chat-composer-hint"><span>{t("Enter to send ")}<span aria-hidden="true">·</span> {t(" Shift + Enter for a new line")}</span><span>{newMessage.length >= 9000 ? `${newMessage.length.toLocaleString(currentLocale())} / 10,000` : ''}</span></div></div>
         </div>}
       </main>
 

@@ -5,6 +5,7 @@ This exercises React/HTTP boundaries; it does not run CallKit/Telecom/media.
 
 No live Firebase/Apple credential, signed device or background delivery is claimed.
 """
+from ui_navigation import open_chat_tool
 import base64
 import hashlib
 import importlib.util
@@ -100,7 +101,7 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 assert page.evaluate('window.__nativeRegistrations')==0
                 checks.append('actual native UI makes no permission/registration request before explicit opt-in')
                 stage='device opt-in'
-                page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                open_chat_tool(page, 'Mobile and offline settings')
                 dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                 expect(dialog.get_by_role('button',name='Enable on this mobile device',exact=True)).to_be_enabled()
                 dialog.get_by_role('checkbox',name='Also alert me when a channel call starts',exact=True).check()
@@ -168,7 +169,7 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 p.api(base,'PUT','/preferences/language',child,{'locale':'sv'})
                 page.reload(wait_until='domcontentloaded')
                 page.get_by_role('button',name='Fler kanalverktyg',exact=True).click()
-                page.get_by_role('button',name='Inställningar för mobil och offline',exact=True).click()
+                open_chat_tool(page, 'Inställningar för mobil och offline')
                 expect(page.get_by_role('heading',name='Mobilnotiser i appen',exact=True)).to_be_visible()
                 checks.append('actual mobile notification UI respects Swedish account language')
                 expect(page.get_by_role('heading',name='Mobila ljudsamtal',exact=True)).to_be_visible()

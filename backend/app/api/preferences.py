@@ -27,9 +27,9 @@ class AppearancePreferences(BaseModel):
 
     version: Literal[1] = 1
     mode: Mode = "light"
-    accent_color: HexColor = "#36594c"
-    background_color: HexColor = "#f6f5f1"
-    dark_background_color: HexColor = "#151b18"
+    accent_color: HexColor = "#ee593f"
+    background_color: HexColor = "#f1eee8"
+    dark_background_color: HexColor = "#252321"
     font_family: FontFamily = "inter"
     font_size: FontSize = "medium"
     density: Density = "comfortable"

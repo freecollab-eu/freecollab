@@ -5,6 +5,7 @@ Uses the real App, native accounts, live API and private SQLite database. Only
 its temporary launcher delays real responses / toggles operator flags; no draft
 or readiness response is fabricated. All secrets and processes are disposable.
 """
+from ui_navigation import open_chat_tool
 import base64
 import hashlib
 import json
@@ -185,7 +186,7 @@ def login(page, origin, owner, email, workspace):
     page.get_by_label('Email',exact=True).fill(email)
     page.get_by_label('Password',exact=True).fill(PASSWORD)
     page.get_by_role('button',name='Sign In',exact=True).click()
-    page.get_by_role('button',name='Integrations',exact=True).click()
+    open_chat_tool(page, 'Integrations')
     dialog=page.get_by_role('dialog',name='Integrations',exact=True)
     dialog.get_by_role('button',name='Connection setup',exact=True).click()
     expect(dialog.locator('.fc-connection-setup')).to_be_visible()
@@ -511,12 +512,12 @@ def browser_journey(page, context, base, origin, private, owner, outsider, works
     recipe(center,'files.google',first);step(center,'prepare')
     screenshot(page,REPORT.parent/'connection-setup-guide-desktop.png',1440,1100)
     dialog.get_by_role('button',name='Done',exact=True).click()
-    page.get_by_role('button',name='Account settings',exact=True).click()
+    open_chat_tool(page, 'Account settings')
     page.get_by_label('Language',exact=True).select_option('sv')
     expect(page.locator('html')).to_have_attribute('lang','sv')
     expect(page.locator('.fc-language-status')).to_have_text('Språket har sparats.')
     page.locator('.fc-account-panel .fc-account-header button').click()
-    page.get_by_role('button',name='Integrationer',exact=True).click()
+    open_chat_tool(page, 'Integrationer')
     dialog=page.get_by_role('dialog',name='Integrationer',exact=True)
     dialog.get_by_role('button',name='Anslutningsguide',exact=True).click()
     center=dialog.locator('.fc-connection-setup')

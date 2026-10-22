@@ -41,12 +41,12 @@ def login(page, user, channel):
     page.get_by_label('Email', exact=True).fill(user['email'])
     page.get_by_label('Password', exact=True).fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
-    expect(page.get_by_placeholder('Message #' + channel['name'])).to_be_visible(timeout=90000)
+    expect(page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)).to_be_visible(timeout=90000)
     page.evaluate('() => document.fonts.ready')
 
 
 def composer(page, channel):
-    return page.get_by_placeholder('Message #' + channel['name'])
+    return page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)
 
 
 def send(channel, user, content):
@@ -237,6 +237,7 @@ with sync_playwright() as p:
         wait_bottom(page)
         own_message = api('GET', '/messages/channels/' + studio['id'], alice)[0]
         wait_read(page, studio, alice, own_message)
+        page.get_by_role('button', name='More channel tools', exact=True).click()
         page.get_by_role('button', name='Channel files', exact=True).click()
         files = page.get_by_role('dialog', name='Channel files', exact=True)
         expect(files).to_be_visible()
@@ -361,7 +362,12 @@ with sync_playwright() as p:
             ('Notifications', 'Notifications', 'Close notifications'),
         ):
             trigger = page.get_by_role('button', name=trigger_name, exact=True)
-            trigger.click()
+            if not trigger.is_visible():
+                trigger = page.get_by_role('button', name='More channel tools', exact=True)
+                trigger.click()
+                page.get_by_role('button', name=trigger_name, exact=True).click()
+            else:
+                trigger.click()
             panel = page.get_by_role('dialog', name=dialog_name, exact=True)
             expect(panel.get_by_role('button', name=close_name, exact=True)).to_be_focused()
             assert_modal(page, panel, entry)

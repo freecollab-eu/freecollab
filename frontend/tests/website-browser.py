@@ -82,19 +82,22 @@ def main():
         expect(page.locator('.fc-public')).to_be_visible()
         expect(page.locator('.fc-public-nav-cta')).to_have_text('Explore demo')
         page.locator('.fc-public-nav-cta').click()
-        expect(page.get_by_role('heading', name='A calmer place to work together.', exact=True)).to_be_visible()
-        expect(page.get_by_text('Interactive demo · sample data', exact=True)).to_be_visible()
+        expect(page.get_by_role('heading', name='Shall we open up to the courtyard?', exact=True)).to_be_visible()
+        expect(page.get_by_text('Sample workspace · fictional people · changes stay in this tab', exact=True)).to_be_visible()
         message = 'A local website proof <img src="https://invalid.example/tracker">'
         page.get_by_label('Your demo message', exact=True).fill(message)
         page.get_by_role('button', name='Send demo message', exact=True).click()
         expect(page.get_by_role('log').get_by_text(message, exact=True)).to_be_visible()
         assert page.get_by_role('log').locator('img').count() == 0
+        page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Projects', exact=True).click()
         page.get_by_label('New demo task', exact=True).fill('Website-only task')
         page.get_by_role('button', name='Add task', exact=True).click()
         expect(page.get_by_role('checkbox', name='Website-only task', exact=True)).to_be_visible()
+        page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Documents', exact=True).click()
         page.get_by_label('Edit demo document', exact=True).fill('Website-only document')
+        page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Appearance', exact=True).click()
         page.get_by_label('Demo typeface', exact=True).select_option('manrope')
         page.evaluate('document.fonts.ready')
@@ -103,8 +106,10 @@ def main():
         checks['actual_local_demo_messages_tasks_documents_and_customer_typeface'] = True
         page.reload(wait_until='networkidle')
         expect(page.get_by_role('log').get_by_text(message, exact=True)).to_have_count(0)
+        page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Projects', exact=True).click()
         expect(page.get_by_role('checkbox', name='Website-only task', exact=True)).to_have_count(0)
+        page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Documents', exact=True).click()
         assert page.get_by_label('Edit demo document').input_value() != 'Website-only document'
         checks['demo_mutations_disappear_on_reload'] = True

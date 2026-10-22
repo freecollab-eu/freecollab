@@ -4,6 +4,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/account-
 Set CHAT_BASE_URL and ACCOUNT_MAIL_PATH for an isolated development server.
 Never target a customer database. No passwords, tokens or recovery codes are printed.
 """
+from ui_navigation import close_channels, open_chat_tool, reveal_chat_tool
 import base64
 import hashlib
 import hmac
@@ -70,6 +71,7 @@ def fit(page, dialog):
 
 
 def workspace_menu(page):
+    close_channels(page)
     page.get_by_role('button', name=re.compile('^Switch workspace')).click()
     return page.get_by_role('menu', name='Your workspaces', exact=True)
 
@@ -109,8 +111,9 @@ with sync_playwright() as p:
     page.on('pageerror', lambda error: errors.append(str(error)))
     try:
         login(page, alice)
+        reveal_chat_tool(page, 'Account settings')
         expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible()
-        page.get_by_role('button', name='Account settings', exact=True).click()
+        open_chat_tool(page, 'Account settings')
         account = page.get_by_role('dialog', name='Account settings', exact=True)
         fit(page, account)
         expect(account.get_by_text(alice['email'], exact=True)).to_be_visible()
@@ -144,15 +147,17 @@ with sync_playwright() as p:
         guest.set_default_timeout(30000)
         login(guest, bob)
         open_sidebar(guest)
+        reveal_chat_tool(guest, 'Account settings')
         expect(guest.get_by_role('button', name='Account settings', exact=True)).to_be_visible()
         guest.goto(invitation, wait_until='domcontentloaded')
         guest.get_by_role('button', name='Join workspace', exact=True).click()
         open_sidebar(guest)
+        close_channels(guest)
         expect(guest.get_by_role('button', name=re.compile('^Switch workspace, Studio North'))).to_be_visible()
         assert guest.evaluate('document.documentElement.scrollWidth <= innerWidth'), 'Invitation mobile overflow'
         guest_context.close()
 
-        page.get_by_role('button', name='Account settings', exact=True).click()
+        open_chat_tool(page, 'Account settings')
         account = page.get_by_role('dialog', name='Account settings', exact=True)
         account.get_by_role('button', name='Sessions', exact=True).click()
         expect(account.get_by_text('Current', exact=True)).to_be_visible()
@@ -180,8 +185,9 @@ with sync_playwright() as p:
         mfa.get_by_label('Authentication or recovery code', exact=True).fill(recovery_codes[0])
         mfa.get_by_role('button', name='Verify and sign in', exact=True).click()
         open_sidebar(mfa)
+        reveal_chat_tool(mfa, 'Account settings')
         expect(mfa.get_by_role('button', name='Account settings', exact=True)).to_be_visible()
-        mfa.get_by_role('button', name='Account settings', exact=True).click()
+        open_chat_tool(mfa, 'Account settings')
         mobile_account = mfa.get_by_role('dialog', name='Account settings', exact=True)
         fit(mfa, mobile_account)
         mobile_account.get_by_role('button', name='Security', exact=True).click()

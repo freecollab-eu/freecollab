@@ -6,6 +6,7 @@ replaces only the remote transport for one exact synthetic HTTPS origin and two
 exact collection paths; production destination validation is never weakened.
 Run: CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/remote-sync-browser.py
 """
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -322,7 +323,7 @@ def main():
                     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
                     page.get_by_label('Email', exact=True).fill(owner['email']); page.get_by_label('Password', exact=True).fill(PASSWORD)
                     page.get_by_role('button', name='Sign In', exact=True).click()
-                    page.get_by_role('button', name='Integrations', exact=True).click()
+                    open_chat_tool(page, 'Integrations')
                     panel = page.get_by_role('dialog', name='Integrations', exact=True); panel.get_by_role('button', name='Sync', exact=True).click()
                     create_connection(panel, fixture, channel, 'files', 'Studio files')
                     create_connection(panel, fixture, channel, 'calendar', 'Studio calendar')

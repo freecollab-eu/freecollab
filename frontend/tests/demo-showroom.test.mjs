@@ -46,3 +46,32 @@ test('empty and oversized interactions are bounded and cannot mutate the example
   for (let index = 0; index < 150; index++) full = demoReducer(full, { type: 'message', channel: 'studio', text: 'bounded', time: '12:00' });
   assert.equal(full.messages.studio.length, 100);
 });
+
+test('the courtyard opening is an actual sample conversation with shared project context', () => {
+  const state = createDemoState();
+  assert.equal(state.messages.studio[0].text, 'Shall we open up to the courtyard?');
+  assert.equal(state.messages.studio[1].text, 'Yes. Then the light reaches all the way in.');
+  assert.equal(state.messages.studio[2].author, 'Elias');
+  assert.match(state.documents[0].source, /courtyard/);
+});
+
+test('personal layout is bounded, can be reordered and pinned, and resets independently of work', () => {
+  const initial = createDemoState();
+  assert.equal(demoReducer(initial, { type: 'layout_move', id: 'courtyard', direction: -1 }), initial);
+  let state = demoReducer(initial, { type: 'message', channel: 'studio', text: 'Keep this note', time: '12:00' });
+  state = demoReducer(state, { type: 'layout_move', id: 'brief', direction: -1 });
+  assert.deepEqual(Array.from(state.layout.order), ['brief', 'courtyard']);
+  state = demoReducer(state, { type: 'layout_pin', id: 'brief' });
+  assert.deepEqual(Array.from(state.layout.pinned), ['brief']);
+  state = demoReducer(state, { type: 'layout_side', side: 'left' });
+  state = demoReducer(state, { type: 'focus' });
+  assert.equal(state.layout.focus, true); assert.equal(state.layout.side, 'left');
+  const layoutReset = demoReducer(state, { type: 'layout_reset' });
+  assert.deepEqual(Array.from(layoutReset.layout.order), ['courtyard', 'brief']);
+  assert.equal(layoutReset.layout.focus, false); assert.equal(layoutReset.layout.side, 'right');
+  assert.equal(layoutReset.layout.pinned.length, 0);
+  assert.equal(layoutReset.messages.studio.at(-1).text, 'Keep this note');
+  const reset = demoReducer(state, { type: 'reset' });
+  assert.equal(reset.messages.studio.length, 3); assert.equal(reset.layout.focus, false);
+  assert.equal(reset.layout.pinned.length, 0); assert.equal(reset.layout.side, 'right');
+});

@@ -4,6 +4,7 @@
 No real users, provider credentials, remote writes, email or deployment. All
 fixture accounts, keys, SQLite data, files and child services are temporary.
 """
+from ui_navigation import close_channels, open_channels, open_chat_tool
 import base64
 import importlib.util
 import json
@@ -66,8 +67,9 @@ def main():
                 try:
                     stage = 'native administrator opens the real Chat launch entry'
                     p.login(page, app_base, owner, workspace)
+                    open_channels(page)
                     expect(page.locator('.fc-chat-launch-card')).to_be_visible()
-                    page.get_by_role('button', name='Get started', exact=True).click()
+                    open_chat_tool(page, 'Get started')
                     guide = page.get_by_role('dialog', name='Workspace launch guide', exact=True)
                     expect(guide.get_by_role('heading', name='Give your workspace an identity', exact=True)).to_be_visible()
                     assert not p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], owner)
@@ -177,7 +179,9 @@ def main():
                     stage = 'first-message encrypted-at-rest persisted row'
                     assert len(rows) == 1 and 'Vårt första riktiga samtal börjar här.' not in rows[0][0]
                     stage = 'established workspace no longer receives the first-start suggestion'
+                    open_channels(page)
                     expect(page.locator('.fc-chat-launch-card')).to_have_count(0)
+                    close_channels(page)
                     results['actual_first_message_encrypted_at_rest_and_established_workspace_not_nagged'] = True
 
                     stage = 'ordinary teammate has no admin launch entry'
@@ -185,8 +189,12 @@ def main():
                     try:
                         other = other_context.new_page(); other.set_default_timeout(30000)
                         p.login(other, app_base, teammate, accepted)
+                        other.get_by_role('button', name='More channel tools', exact=True).click()
                         expect(other.get_by_role('button', name='Get started', exact=True)).to_have_count(0)
+                        other.keyboard.press('Escape')
+                        open_channels(other)
                         expect(other.locator('.fc-chat-launch-card')).to_have_count(0)
+                        close_channels(other)
                     finally:
                         other_context.close()
                     assert not page_errors

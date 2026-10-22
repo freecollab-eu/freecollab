@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real visual builder, file trigger, worker restart/reminder, approval and task proof."""
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime, timedelta
 import importlib.util
@@ -114,7 +115,7 @@ def main():
 
                     stage = 'actual file picker queues metadata without enabled webhooks'
                     panel.get_by_role('button', name='Close workspace tools', exact=True).click()
-                    page.get_by_role('button', name='Channel files', exact=True).click()
+                    open_chat_tool(page, 'Channel files')
                     files = page.get_by_role('dialog', name='Channel files', exact=True)
                     with page.expect_response(lambda response: urlsplit(response.url).path == '/api/files/channels/' + channel['id'] and response.request.method == 'POST') as uploaded:
                         page.get_by_label('Choose a file', exact=True).set_input_files({'name': 'Review.txt', 'mimeType': 'text/plain', 'buffer': b'Private review attachment'})

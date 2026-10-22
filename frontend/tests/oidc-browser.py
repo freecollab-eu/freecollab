@@ -5,6 +5,7 @@ Run: CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/oid
 Starts only ephemeral loopback API/Vite/IdP services and a private test database.
 No real provider credentials, messages or external emails are sent or logged.
 """
+from ui_navigation import chat_ready, open_chat_tool, reveal_chat_tool
 import base64
 from datetime import datetime
 import json
@@ -75,9 +76,8 @@ def token_from(page):
 
 
 def authenticated(page):
-    page.wait_for_selector('[aria-label="Account settings"]', state='attached', timeout=60000)
-    if not page.get_by_role('button', name='Account settings', exact=True).is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
+    chat_ready(page, timeout=60000)
+    reveal_chat_tool(page, 'Account settings')
     expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible(timeout=60000)
     assert '#sso' not in page.url and 'access_token=' not in page.url
     assert token_from(page)
@@ -103,18 +103,14 @@ def sso_login(page, codes=None):
 
 def account(page):
     authenticated(page)
-    if page.viewport_size['width'] < 768:
-        toggle = page.get_by_role('button', name='Toggle channels', exact=True)
-        if toggle.get_attribute('aria-expanded') == 'false':
-            toggle.click()
-    page.get_by_role('button', name='Account settings', exact=True).click()
+    open_chat_tool(page, 'Account settings')
     panel = page.get_by_role('dialog', name='Account settings', exact=True)
     expect(panel.get_by_role('heading', name='Single sign-on', exact=True)).to_be_visible(timeout=30000)
     return panel
 
 
 def sign_out_to_auth(page):
-    page.get_by_role('button', name='Sign out', exact=True).click()
+    open_chat_tool(page, 'Sign out')
     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
 
 

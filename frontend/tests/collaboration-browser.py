@@ -1,4 +1,5 @@
 """Exercise saved items, decisions, watched threads and settings on disposable local services."""
+from ui_navigation import open_chat_tool, reveal_message_actions
 import json
 import os
 import uuid
@@ -45,7 +46,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Sign In', exact=True).click()
         row = page.locator('#message-' + message['id'])
         expect(row).to_be_visible(timeout=90000)
-        row.hover()
+        reveal_message_actions(row)
         row.get_by_role('button', name='Save message', exact=True).click()
         expect(row.get_by_role('button', name='Remove saved message', exact=True)).to_have_attribute('aria-pressed', 'true')
         row.get_by_role('button', name='Pin message', exact=True).click()
@@ -53,7 +54,7 @@ with sync_playwright() as p:
         page.reload(wait_until='domcontentloaded')
         expect(row.get_by_role('button', name='Remove saved message', exact=True)).to_have_attribute('aria-pressed', 'true')
         expect(row.get_by_role('button', name='Unpin message', exact=True)).to_have_attribute('aria-pressed', 'true')
-        page.get_by_role('button', name='Saved items and decisions', exact=True).click()
+        open_chat_tool(page, 'Saved items and decisions')
         panel = page.get_by_role('dialog', name='Channel notebook', exact=True)
         expect(panel.get_by_text(message['content'], exact=True)).to_be_visible()
         panel.get_by_role('button', name='Saved', exact=True).click()
@@ -87,7 +88,7 @@ with sync_playwright() as p:
         page.screenshot(path='/tmp/freecollab-collaboration-mobile.png', full_page=True)
         page.keyboard.press('Escape')
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        row.hover()
+        reveal_message_actions(row)
         row.get_by_role('button', name='Reply in thread', exact=True).click()
         thread = page.get_by_role('dialog', name='Thread', exact=True)
         expect(thread.get_by_role('button', name='Watching thread', exact=True)).to_have_attribute('aria-pressed', 'true')

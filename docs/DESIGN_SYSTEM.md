@@ -1,6 +1,16 @@
 # Design and interaction guide
 
-FreeCollab's reference client pairs warm neutral surfaces and generous spacing with a shared four-leaf mark. Sign-in, the chat sidebar and the appearance preview use the same `Brand` component. Personal colors, typography, spacing and corners remain account choices; the shared identity does not override them.
+FreeCollab's reference client uses an open editorial room: warm stone, an ink foreground, a vermilion accent and the person's selected typeface. Conversation content sets the visual hierarchy. Sign-in, the room topbar and the appearance preview use the same four-leaf `Brand` component. Personal colors, typography, spacing and corners remain account choices.
+
+## Rooms and focus
+
+The topbar keeps the workspace and channel available without a permanent sidebar. **Toggle channels** opens a modal channel drawer on desktop and mobile. It supports keyboard navigation, Escape and focus restoration. **More channel tools** holds the existing search, files, members, integrations, personal settings and account actions. **Open workspace tools** remains directly available for tasks, documents and other work.
+
+Short conversations can give a genuine message more typographic emphasis and show a real shared file beside the conversation. Long conversations retain a compact reading layout. **Focus** gives the conversation a narrower reading measure while keeping every message available. When shared material is available, its left/right arrangement can be changed and reset from the tools menu. This arrangement is personal to the current session and channel; appearance preferences have their separate account-backed persistence.
+
+Mobile uses one reading column. Message actions open from a labelled **More message actions** control. Real rooms use the member identity supplied by the API, with initials when no photograph is available. The public sample uses clearly fictional people and artwork.
+
+The public demo exposes its existing five sections through **Tools**. Its **Arrange** controls can pin, order and position the sample courtyard image and editable brief; **Focus** concentrates on the conversation. These sample changes stay in the current tab and reset on reload or confirmed reset. They do not change another person's layout or connect external services.
 
 ## Appearance
 
@@ -10,7 +20,7 @@ Frontend surfaces use the `--fc-*` CSS variables derived in `frontend/src/lib/ap
 
 ## Search and switching
 
-**Search & switch** or **Cmd/Ctrl+K** opens the quick switcher. It searches channels already available to the signed-in person, actions and loaded top-level messages in the selected channel. The initial message load is the latest 50. Deleted messages and thread replies are excluded from message suggestions. No full-history search endpoint or cross-channel message search is implemented.
+**Search & switch**, **Quick switcher** in the tools menu or **Cmd/Ctrl+K** opens the quick switcher. It searches channels already available to the signed-in person, actions and loaded top-level messages in the selected channel. The initial message load is the latest 50. Deleted messages and thread replies are excluded from message suggestions. **Search all history** is a separate tool for the authorized history-search flow.
 
 Channel names match across case, accents and extra spaces. Prefix a query with `#` to restrict results to channels. **↑/↓** selects a result, **Enter** activates it and **Escape** closes the switcher. A message result scrolls to that loaded message. Actions open Appearance, create a channel or open the selected channel's Files/Members panel; channel-specific actions are absent when no channel is selected.
 

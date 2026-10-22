@@ -3,6 +3,8 @@ import { ArrowDown, ArrowRight, ArrowUpRight, Check, CheckSquare, ChevronDown, F
 import { Brand } from './Brand';
 import { LanguagePicker, t, useI18n } from '../i18n';
 import { buildAppearanceTokens, DEFAULT_APPEARANCE, PRESETS } from '../lib/appearance';
+import courtyardImage from '../assets/open-studio/courtyard.png';
+import portraitImage from '../assets/open-studio/portraits.png';
 import '../styles/public.css';
 
 interface LandingProps {
@@ -14,16 +16,17 @@ interface LandingProps {
 
 type PreviewChannel = 'general' | 'design' | 'notes';
 type PreviewFont = 'inter' | 'manrope' | 'serif';
-type PreviewMessage = { name: string; initials: string; text: string; time: string; own?: boolean; file?: boolean };
+type PreviewMessage = { name: string; initials: string; text: string; time: string; portrait?: number; own?: boolean; file?: boolean };
 
 const sampleMessages: Record<PreviewChannel, PreviewMessage[]> = {
   general: [
-    { name: 'Maja Lind', initials: 'ML', text: 'Friday’s review is on. Let’s keep the ideas and decisions here.', time: '09:41' },
-    { name: 'Leo Berg', initials: 'LB', text: 'The first draft is ready. A few notes for us to work through together.', time: '09:43', file: true },
+    { name: 'Maja Lind', initials: 'ML', portrait: 0, text: 'Shall we open up towards the courtyard?', time: '10:39' },
+    { name: 'Noor Berg', initials: 'NB', portrait: 1, text: 'Yes. Then the light reaches all the way in.', time: '10:42' },
+    { name: 'Elias Holm', initials: 'EH', portrait: 2, text: 'I’ve shared the new sketch here.', time: '10:45', file: true },
   ],
   design: [
-    { name: 'Astrid Holm', initials: 'AH', text: 'For the next draft: clearer type and a little more breathing room.', time: '10:12' },
-    { name: 'Maja Lind', initials: 'ML', text: 'Agreed. Let’s bring one direction to Friday’s review.', time: '10:15' },
+    { name: 'Nora Ek', initials: 'NE', portrait: 3, text: 'Warm materials. A little more space to gather.', time: '10:51' },
+    { name: 'Maja Lind', initials: 'ML', portrait: 0, text: 'Agreed. Let’s bring one direction to Friday’s review.', time: '10:56' },
   ],
   notes: [],
 };
@@ -50,7 +53,7 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingP
 
   // These preferences belong only to the sample; the visitor's appearance is untouched.
   const previewStyle = useMemo(() => {
-    const tokens: Record<string, string> = {};
+    const tokens: Record<string, string> = { '--fc-preview-portraits': `url("${portraitImage}")` };
     const selectedPalette = PRESETS.find(item => item.id === palette);
     if (selectedPalette) {
       const mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
@@ -110,56 +113,48 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingP
           <button type="button" className="fc-public-text-button fc-public-demo-nav" onClick={onExploreDemo}>{t('Try the demo')}</button>
           <button type="button" className="fc-public-text-button" onClick={onDocs}>{t("Documentation")}</button>
           <a className="fc-public-source-link" href="https://github.com/freecollab-eu/freecollab" target="_blank" rel="noopener noreferrer">{t("Open source ")}<ArrowUpRight size={14} aria-hidden="true" /></a>
-          <button type="button" className="fc-button fc-button-primary fc-public-nav-cta" onClick={onTryDemo}>{appLabel || t("Open App ")}<ArrowUpRight size={16} aria-hidden="true" /></button>
+          <button type="button" className="fc-button fc-button-primary fc-public-nav-cta" onClick={onTryDemo}>{appLabel ? t(appLabel) : t("Open App ")}<ArrowUpRight size={16} aria-hidden="true" /></button>
         </nav>
       </header>
 
       <main>
         <section className="fc-public-hero fc-public-container" aria-labelledby="public-heading">
           <div className="fc-public-hero-copy">
+            <div className="fc-public-hero-heading">
             <p className="fc-kicker fc-public-eyebrow"><span aria-hidden="true" /> {t('OPEN SOURCE. OPEN POSSIBILITIES.')}</p>
             <h1 id="public-heading">{t('Good work.')}<br /><em>{t('Your terms.')}</em></h1>
+            <div className="fc-public-principles"><span>{t("SELF-HOSTED")}</span><span>{t("OPEN SOURCE")}</span><span>{t("PERSONALLY YOURS")}</span></div>
+            </div>
+            <div className="fc-public-hero-details">
             <p className="fc-public-hero-description">{t('Conversations, documents, projects and the people behind them. One considered workspace. Open source, and hosted where you choose.')}</p>
             <div className="fc-public-hero-actions">
               <button type="button" className="fc-button fc-button-primary" onClick={onExploreDemo}>{t('Explore the demo')}<ArrowUpRight size={18} aria-hidden="true" /></button>
               <button type="button" className="fc-public-text-button" onClick={onDocs}>{t("Set up your own ")}<ArrowRight size={16} aria-hidden="true" /></button>
             </div>
-            <div className="fc-public-principles"><span>{t("SELF-HOSTED")}</span><span>{t("OPEN SOURCE")}</span><span>{t("PERSONALLY YOURS")}</span></div>
             <p className="fc-public-hero-note">{t('No signup for the demo. MIT licensed. No per-seat software fee.')}</p>
+            </div>
           </div>
 
           <div className="fc-public-preview-wrap">
             <div className="fc-public-preview-overline"><span>{t("01 / A SHARED PLACE")}</span><span>{t("TRY IT BELOW ")}<ArrowDown size={10} aria-hidden="true" /></span></div>
             <div className="fc-preview" style={previewStyle} aria-label={t("Interactive sample workspace")}>
               <div className="fc-preview-titlebar">
-                <div><Brand size="small" showName={false} /><span>{t("Studio North")}<span className="fc-preview-workspace-kind">{t("SAMPLE WORKSPACE")}</span></span></div>
+                <div className="fc-preview-studio-identity"><Brand size="small" /><span className="fc-preview-workspace-name">Nord Studio</span><label className="fc-preview-channel-picker"><Hash size={14} aria-hidden="true" /><span className="fc-public-sr-only">{t('Sample channels')}</span><select aria-label={t('Sample channels')} value={channel} onChange={event => { setChannel(event.target.value as PreviewChannel); setDraft(''); setExpandedFile(null); }}><option value="general">{t('Courtyard')}</option><option value="design">{t('Design')}</option><option value="notes">{t('Notes')}</option></select><ChevronDown size={12} aria-hidden="true" /></label></div>
                 <button type="button" className="fc-preview-icon-button" onClick={resetPreview} aria-label={t("Reset sample conversation")} title={t("Reset sample conversation")}><RotateCcw size={15} /></button>
               </div>
               <div className="fc-preview-layout">
-                <aside className="fc-preview-sidebar" aria-label={t("Sample channels")}>
-                  <span className="fc-preview-section-label">{t("WORKSPACE")}</span>
-                  <div className="fc-preview-channel-label">{t("Channels")}<span>03</span></div>
-                  <div className="fc-preview-channels">
-                    {(['general', 'design', 'notes'] as const).map(item => (
-                      <button type="button" key={item} aria-pressed={channel === item} onClick={() => { setChannel(item); setDraft(''); setExpandedFile(null); }} className={channel === item ? 'is-active' : ''}><Hash size={14} aria-hidden="true" />{item}{channel === item && <span className="fc-preview-channel-dot" aria-hidden="true" />}</button>
-                    ))}
-                  </div>
-                  <div className="fc-preview-members"><span className="fc-preview-section-label">{t("SAMPLE MEMBERS")}</span><div><span>{t("ML")}</span><span>{t("LB")}</span><span>{t("AH")}</span></div><p>{t("Three perspectives.")}<br />{t("One project.")}</p></div>
-                  <div className="fc-preview-sidebar-footer"><Brand size="small" showName={false} /><span>{t("A little more together.")}</span></div>
-                </aside>
                 <div className="fc-preview-conversation">
-                  <div className="fc-preview-channel-heading"><div><Hash size={17} aria-hidden="true" /><strong>{channel}</strong></div><span><Users size={14} aria-hidden="true" />3</span></div>
                   <div className="fc-preview-messages" ref={messagesRef} aria-live="polite" aria-relevant="additions">
-                    {messages.length > 0 ? <div className="fc-preview-date"><span />{t("MONDAY, AT THE STUDIO")}<span /></div> : <div className="fc-preview-empty"><FileText size={30} strokeWidth={1.2} aria-hidden="true" /><h3>{t("No sample notes yet.")}</h3><p>{t("A useful link. A small idea.")}<br />{t("Leave something here for later.")}</p><button type="button" onClick={() => { setDraft('An idea for our next review: '); composerRef.current?.focus(); }}>{t("Write the first note ")}<ArrowRight size={12} aria-hidden="true" /></button></div>}
+                    {messages.length === 0 && <div className="fc-preview-empty"><FileText size={30} strokeWidth={1.2} aria-hidden="true" /><h3>{t("No sample notes yet.")}</h3><p>{t("A useful link. A small idea.")}<br />{t("Leave something here for later.")}</p><button type="button" onClick={() => { setDraft(t('An idea for our next review: ')); composerRef.current?.focus(); }}>{t("Write the first note ")}<ArrowRight size={12} aria-hidden="true" /></button></div>}
                     {messages.map((message, index) => {
                       const fileKey = `${channel}-${index}`;
                       return (
-                        <article className={`fc-preview-message${message.own ? ' is-own' : ''}`} key={fileKey}>
-                          <span className={`fc-preview-avatar fc-preview-avatar-${index % 3}`} aria-hidden="true">{message.initials}</span>
+                        <article className={`fc-preview-message${message.own ? ' is-own' : ''}${channel === 'general' && index === 0 ? ' is-lead' : ''}`} key={fileKey}>
+                          <span className={`fc-preview-avatar${message.portrait !== undefined ? ` fc-preview-portrait fc-preview-portrait-${message.portrait}` : ''}`} aria-hidden="true">{message.portrait === undefined ? t('You').slice(0, 1) : ''}</span>
                           <div className="fc-preview-message-content">
                             <div className="fc-preview-message-meta"><strong>{message.own ? t("You") : message.name}</strong><time>{message.time === "Now" ? t("Now") : message.time}</time></div>
                             <p>{message.own ? message.text : t(message.text)}</p>
-                            {message.file && <><button type="button" className="fc-preview-file" aria-label={t("Read sample project notes")} aria-expanded={expandedFile === fileKey} onClick={() => setExpandedFile(expandedFile === fileKey ? null : fileKey)}><FileText size={23} strokeWidth={1.4} aria-hidden="true" /><span><strong>{t("Friday review.md")}</strong><span>{t("Sample document · Read notes")}</span></span><ChevronDown size={12} aria-hidden="true" /></button>{expandedFile === fileKey && <div className="fc-preview-file-excerpt"><strong>{t("For Friday’s review")}</strong><p>{t("01. Choose our first direction.")}<br />{t("02. Bring one question to discuss.")}<br />{t("03. Keep the decisions in #general.")}</p></div>}</>}
+                            {message.file && <><button type="button" className="fc-preview-file" aria-label={t("Read sample project notes")} aria-expanded={expandedFile === fileKey} onClick={() => setExpandedFile(expandedFile === fileKey ? null : fileKey)}><FileText size={21} strokeWidth={1.4} aria-hidden="true" /><span><strong>{t("Courtyard notes.md")}</strong><span>{t("Sample document · Read notes")}</span></span><ChevronDown size={12} aria-hidden="true" /></button>{expandedFile === fileKey && <div className="fc-preview-file-excerpt"><strong>{t("For the courtyard review")}</strong><p>{t("01. Make room for the light.")}<br />{t("02. Bring the material samples.")}<br />{t("03. Keep the next step in one place.")}</p></div>}</>}
                             {channel === 'general' && index === 0 && <button type="button" className={`fc-preview-reaction${liked ? ' is-active' : ''}`} aria-label={t("Like Maja's sample message")} aria-pressed={liked} onClick={() => setLiked(value => !value)}><Check size={11} strokeWidth={1.5} aria-hidden="true" />{liked ? '2' : '1'}</button>}
                           </div>
                         </article>
@@ -167,11 +162,13 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingP
                     })}
                   </div>
                   <form className="fc-preview-composer" onSubmit={sendSampleMessage}>
-                    <input ref={composerRef} aria-label={t("Write a sample message")} placeholder={t("Message #{value0}", { value0: String(channel) })} value={draft} onChange={event => setDraft(event.target.value)} maxLength={500} />
+                    <input ref={composerRef} aria-label={t("Write a sample message")} placeholder={t('What’s on your mind?')} value={draft} onChange={event => setDraft(event.target.value)} maxLength={500} />
                     <button type="submit" aria-label={t("Send sample message")} disabled={!draft.trim()}><Send size={16} aria-hidden="true" /></button>
                   </form>
                 </div>
+                <figure className="fc-preview-material"><span className="fc-preview-material-note">{t('More room for conversation.')}<ArrowDown size={28} strokeWidth={1} aria-hidden="true" /></span><img src={courtyardImage} alt={t('A sunlit brick courtyard with space to gather.')} width={1122} height={1402} decoding="async" /><figcaption><span>{t('Courtyard, version 04')}</span><span>{t('Sample material · shared by Elias')}</span></figcaption></figure>
               </div>
+              <div className="fc-preview-studio-footer"><div className="fc-preview-team" aria-hidden="true">{[0, 1, 2, 3].map(index => <span className={`fc-preview-portrait fc-preview-portrait-${index}`} key={index} />)}</div><span>{t('Four perspectives. One shared place.')}</span><span className="fc-preview-local-label">{t('Sample data · no account needed')}</span></div>
             </div>
             <div className="fc-public-preview-personalize">
               <div><span>{t("YOUR OWN PERSPECTIVE")}</span><p>{t("Try a color. Find your type.")}</p></div>

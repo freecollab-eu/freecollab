@@ -11,12 +11,13 @@ export interface AppearancePreferences {
 }
 
 export const DEFAULT_APPEARANCE: AppearancePreferences = {
-  version: 1, mode: 'light', accent_color: '#36594c', background_color: '#f6f5f1',
-  dark_background_color: '#151b18', font_family: 'inter', font_size: 'medium',
+  version: 1, mode: 'light', accent_color: '#ee593f', background_color: '#f1eee8',
+  dark_background_color: '#252321', font_family: 'inter', font_size: 'medium',
   density: 'comfortable', corner_style: 'soft',
 }
 
 export const PRESETS = [
+  { id: 'studio', name: 'Studio', description: 'Warm stone & vermilion', accent_color: '#ee593f', background_color: '#f1eee8', dark_background_color: '#252321' },
   { id: 'linen', name: 'Linen', description: 'Warm linen & forest', accent_color: '#36594c', background_color: '#f6f5f1', dark_background_color: '#151b18' },
   { id: 'fjord', name: 'Fjord', description: 'Cool stone & ocean', accent_color: '#365f79', background_color: '#f1f4f5', dark_background_color: '#141c22' },
   { id: 'clay', name: 'Clay', description: 'Soft sand & terracotta', accent_color: '#955a43', background_color: '#f8f3ed', dark_background_color: '#231b17' },
@@ -91,8 +92,8 @@ export function buildAppearanceTokens(preferences: AppearancePreferences, resolv
   const mode = prefs.mode === 'system' ? resolvedMode : prefs.mode
   const bg = mode === 'dark' ? prefs.dark_background_color : prefs.background_color
   const lightCanvas = contrastRatio('#000000', bg) >= contrastRatio('#ffffff', bg)
-  const surface = blend(bg, lightCanvas ? '#ffffff' : '#000000', lightCanvas ? .76 : .18)
-  const sidebar = blend(bg, lightCanvas ? '#ffffff' : '#000000', .13)
+  const surface = blend(bg, lightCanvas ? '#ffffff' : '#000000', lightCanvas ? .42 : .18)
+  const sidebar = blend(bg, lightCanvas ? '#ffffff' : '#000000', .06)
   const backgrounds = [bg, surface, sidebar]
   const initialAccent = accessibleColor(prefs.accent_color, backgrounds)
   let accentSoft = blend(surface, initialAccent, .085)
@@ -100,10 +101,11 @@ export function buildAppearanceTokens(preferences: AppearancePreferences, resolv
   // supports colors at the exact black/white contrast crossover.
   if (lightCanvas ? luminance(accentSoft) < luminance(bg) : luminance(accentSoft) > luminance(bg)) accentSoft = blend(surface, bg, .5)
   backgrounds.push(accentSoft)
-  const text = accessibleColor(lightCanvas ? '#25372e' : '#edf1ed', backgrounds, 7)
-  const muted = accessibleColor(lightCanvas ? '#6b746d' : '#a5b1a8', backgrounds)
+  const text = accessibleColor(lightCanvas ? '#252321' : '#f1eee8', backgrounds, 7)
+  const muted = accessibleColor(lightCanvas ? '#68625c' : '#bdb6af', backgrounds)
   const accent = accessibleColor(prefs.accent_color, backgrounds)
   const onAccent = contrastRatio('#ffffff', accent) >= contrastRatio('#000000', accent) ? '#ffffff' : '#000000'
+  const onOriginalAccent = contrastRatio('#ffffff', prefs.accent_color) >= contrastRatio('#000000', prefs.accent_color) ? '#ffffff' : '#000000'
   const fonts = {
     inter: '"Inter Variable", Inter, sans-serif',
     manrope: '"Manrope Variable", Manrope, sans-serif',
@@ -114,14 +116,15 @@ export function buildAppearanceTokens(preferences: AppearancePreferences, resolv
     '--fc-bg': bg, '--fc-surface': surface, '--fc-sidebar': sidebar,
     '--fc-text': text, '--fc-muted': muted, '--fc-border': blend(surface, text, .17),
     '--fc-accent': accent, '--fc-accent-original': prefs.accent_color,
+    '--fc-on-accent-original': onOriginalAccent,
     '--fc-accent-soft': accentSoft, '--fc-on-accent': onAccent,
     '--fc-danger': accessibleColor(lightCanvas ? '#a53c32' : '#f19489', backgrounds),
     '--fc-success': accessibleColor(lightCanvas ? '#36594c' : '#8fb69b', backgrounds),
     '--fc-font': fonts[prefs.font_family],
-    '--fc-heading-font': prefs.font_family === 'inter' ? fonts.serif : fonts[prefs.font_family],
-    '--fc-message-size': { small: '.875rem', medium: '.9375rem', large: '1.125rem' }[prefs.font_size],
-    '--fc-body-size': { small: '.8125rem', medium: '.875rem', large: '1rem' }[prefs.font_size],
-    '--fc-radius': { soft: '12px', rounded: '22px', square: '2px' }[prefs.corner_style],
+    '--fc-heading-font': fonts[prefs.font_family],
+    '--fc-message-size': { small: '.9375rem', medium: '1rem', large: '1.125rem' }[prefs.font_size],
+    '--fc-body-size': { small: '.875rem', medium: '.9375rem', large: '1.0625rem' }[prefs.font_size],
+    '--fc-radius': { soft: '8px', rounded: '22px', square: '2px' }[prefs.corner_style],
     '--fc-space': prefs.density === 'compact' ? '.82' : '1',
   }
 }

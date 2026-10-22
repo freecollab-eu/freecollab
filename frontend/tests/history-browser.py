@@ -1,4 +1,5 @@
 """Real UI full-history/search/mentions verification using disposable local accounts."""
+from ui_navigation import open_chat_tool
 import json, os, uuid
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -26,13 +27,13 @@ with sync_playwright() as p:
     errors=[]; page.on('pageerror',lambda error:errors.append(str(error)))
     page.goto(BASE)
     page.evaluate('''({auth,workspace})=>{localStorage.setItem('freecollab_token',auth.access_token);localStorage.setItem('freecollab_user_id',auth.user_id);localStorage.setItem('freecollab.workspace:'+auth.user_id,workspace)}''',{'auth':a,'workspace':w['id']})
-    page.reload(); expect(page.get_by_placeholder('Message #'+c['name'])).to_be_visible()
+    page.reload(); expect(page.get_by_role('textbox', name='Message #'+c['name'], exact=True)).to_be_visible()
     expect(page.get_by_text('Historical entry 120 '+RUN,exact=True)).to_be_visible()
     expect(page.get_by_text(old['content'],exact=True)).to_have_count(0)
     page.get_by_role('button',name='Load older messages',exact=True).click()
     expect(page.get_by_text(old['content'],exact=True)).to_be_visible()
     print('PASS: cursor pagination loads history beyond the initial page',flush=True)
-    page.get_by_role('button',name='Search all history',exact=True).click()
+    open_chat_tool(page, 'Search all history')
     dialog=page.get_by_role('dialog',name='Search all history')
     expect(dialog.get_by_text('Loading full history',exact=False)).to_have_count(0,timeout=60000)
     dialog.get_by_role('textbox',name='Search messages',exact=True).fill('Oldest searchable needle')
@@ -47,7 +48,7 @@ with sync_playwright() as p:
     expect(page.locator('#message-'+old['id'])).to_contain_text(updated)
     expect(page.locator('#message-'+old['id'])).to_be_focused()
     print('PASS: complete local search, edits synchronized and jump to older context',flush=True)
-    composer=page.get_by_placeholder('Message #'+c['name'])
+    composer=page.get_by_role('textbox', name='Message #'+c['name'], exact=True)
     composer.fill('@History')
     page.get_by_role('option',name='HistoryBob',exact=True).click()
     composer.press('End'); composer.press('Space'); composer.press('H'); composer.press('i')
@@ -58,7 +59,7 @@ with sync_playwright() as p:
     mentions=api('GET','/mentions/me',b['access_token'])
     assert any(item['id']==latest['id'] for item in mentions)
     print('PASS: mention picker sends member IDs and recipient inbox receives mention',flush=True)
-    page.get_by_role('button',name='Search all history',exact=True).click()
+    open_chat_tool(page, 'Search all history')
     dialog=page.get_by_role('dialog',name='Search all history')
     dialog.get_by_role('textbox',name='Search messages',exact=True).fill(updated)
     expect(dialog.locator('.fc-history-result')).to_have_count(1,timeout=60000)

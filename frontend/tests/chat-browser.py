@@ -4,6 +4,7 @@ Requires Python Playwright and system Chromium; CHAT_BASE_URL and CHROMIUM_PATH
 can override local defaults. Creates unique local accounts/channels, never uses
 production credentials. Verifies the actual React UI in two browser contexts.
 """
+from ui_navigation import close_channels, open_channels
 import json
 import os
 import re
@@ -43,15 +44,20 @@ def login(page, user):
     page.locator('input[type=email]').fill(user['email'])
     page.locator('input[type=password]').fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
-    expect(page.get_by_placeholder('Message #' + shared['name'])).to_be_visible(timeout=90000)
+    expect(page.get_by_role('textbox', name='Message #' + shared['name'], exact=True)).to_be_visible(timeout=90000)
     expect(page.get_by_text('Shared history ' + RUN, exact=True)).to_be_visible(timeout=90000)
 
 
 def write(page, channel, text):
-    composer = page.get_by_placeholder('Message #' + channel['name'])
+    composer = page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)
     composer.fill(text)
     composer.press('Enter')
     expect(composer).to_have_value('')
+
+
+def choose_channel(page, channel):
+    page.get_by_role('button', name='Toggle channels', exact=True).click()
+    page.get_by_role('navigation', name='Channels', exact=True).get_by_role('button').filter(has=page.get_by_text(channel['name'], exact=True)).click()
 
 
 alice, bob = register('BrowserAlice'), register('BrowserBob')
@@ -91,10 +97,12 @@ with sync_playwright() as p:
     expect(bob_page.get_by_text(bob_text, exact=True)).to_have_count(1)
     print('PASS: persisted history after reload', flush=True)
 
-    alice_page.get_by_role('button').filter(has=alice_page.get_by_text(private['name'], exact=True)).click()
+    choose_channel(alice_page, private)
     expect(alice_page.get_by_text('Private history ' + RUN, exact=True)).to_be_visible()
     expect(alice_page.get_by_text(alice_text, exact=True)).to_have_count(0)
-    expect(bob_page.get_by_role('button').filter(has=bob_page.get_by_text(private['name'], exact=True))).to_have_count(0)
+    bob_channels = open_channels(bob_page)
+    expect(bob_channels.get_by_role('button').filter(has=bob_page.get_by_text(private['name'], exact=True))).to_have_count(0)
+    close_channels(bob_page)
     private_text = 'Alice private message ' + RUN
     write(alice_page, private, private_text)
     expect(alice_page.get_by_text(private_text, exact=True)).to_have_count(1)
@@ -103,7 +111,7 @@ with sync_playwright() as p:
     write(bob_page, shared, while_away)
     expect(bob_page.get_by_text(while_away, exact=True)).to_be_visible()
     expect(alice_page.get_by_text(while_away, exact=True)).to_have_count(0)
-    alice_page.get_by_role('button').filter(has=alice_page.get_by_text(shared['name'], exact=True)).click()
+    choose_channel(alice_page, shared)
     expect(alice_page.get_by_text(while_away, exact=True)).to_be_visible()
     expect(alice_page.get_by_text(private_text, exact=True)).to_have_count(0)
     final_text = 'Realtime after channel switch ' + RUN

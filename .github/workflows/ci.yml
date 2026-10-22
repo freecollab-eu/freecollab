@@ -209,6 +209,7 @@ jobs:
           python frontend/tests/widget-browser.py
           python frontend/tests/appearance-browser.py
           python frontend/tests/elite-browser.py
+          python frontend/tests/open-studio-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
           python frontend/tests/account-race-browser.py

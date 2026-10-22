@@ -157,7 +157,7 @@ def make_host(web, api_base, app_base, host_origin, identity, application, chann
 
 
 def open_devices(frame):
-    frame.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+    helpers.navigation.open_chat_tool(frame, 'End-to-end encrypted')
     dialog = frame.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
     dialog.get_by_role('button', name='Channel devices', exact=True).click()
     expect(dialog.locator('.fc-secure-fingerprint code')).to_be_visible(timeout=90000)
@@ -344,7 +344,7 @@ def main():
                 assert request(api_base, '/_matrix/client/v3/sync?timeout=0', token=matrix_tokens['beta'])[0] == 401
                 assert peer_socket.call('join', {'channel_id':channel_id}, timeout=10).get('error')
                 if frames[1].locator('[data-embed-state="ready"]').count():
-                    frames[1].get_by_role('button', name='Refresh messages', exact=True).click()
+                    helpers.navigation.open_chat_tool(frames[1], 'Refresh messages')
                 expect(frames[1].locator('[data-embed-state="signed-out"]')).to_be_visible(timeout=45000)
                 expect(frames[1].locator('.fc-chat')).to_have_count(0)
                 checks['recipient_revoke_denies_existing_child_renewal_matrix_and_socket_and_clears_private_dom'] = True

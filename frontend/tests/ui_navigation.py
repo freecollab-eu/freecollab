@@ -9,6 +9,7 @@ import re
 
 _MORE_TOOLS = re.compile(r'^(More channel tools|Fler kanalverktyg)$')
 _CHANNEL_TOGGLE = re.compile(r'^(Toggle channels|Visa eller dölj kanaler)$')
+_CLOSE_CHANNELS = re.compile(r'^(Close channels|Stäng kanaler)$')
 _CHANNELS = re.compile(r'^(Channels|Kanaler)$')
 _MESSAGE_ACTIONS = re.compile(r'^(More message actions|Fler meddelandeåtgärder)$')
 
@@ -22,7 +23,7 @@ def chat_ready(page, timeout=90000):
 def reveal_chat_tool(page, name, timeout=90000):
     """Reveal a named Chat tool through More when its direct control is hidden."""
     chat_ready(page, timeout)
-    # The drawer is modal. Close it through its keyboard contract before using
+    # The drawer is modal. Close it through its visible control before using
     # the main toolbar, so the caller gets a visible return target after a panel.
     close_channels(page)
     target = page.get_by_role('button', name=name, exact=True)
@@ -48,7 +49,7 @@ def open_channels(page, timeout=90000):
 def close_channels(page):
     navigation = page.get_by_role('navigation', name=_CHANNELS)
     if navigation.is_visible():
-        page.keyboard.press('Escape')
+        page.get_by_role('button', name=_CLOSE_CHANNELS).click()
         navigation.wait_for(state='hidden')
 
 

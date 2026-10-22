@@ -45,6 +45,13 @@ PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') 
 sys.path.insert(0, str(ROOT / 'backend'))
 from tests.oidc_mock import LocalProvider
 
+# Package proofs are also loaded by absolute path from other harnesses. Resolve
+# their frontend helper dependency explicitly, without relying on cwd/sys.path.
+_NAVIGATION_SPEC = importlib.util.spec_from_file_location('ui_navigation', ROOT / 'frontend/tests/ui_navigation.py')
+navigation = importlib.util.module_from_spec(_NAVIGATION_SPEC)
+sys.modules[_NAVIGATION_SPEC.name] = navigation
+_NAVIGATION_SPEC.loader.exec_module(navigation)
+
 
 def load_sso_helpers():
     spec = importlib.util.spec_from_file_location('embed_sso_fixture', ROOT / 'frontend/tests/customer-sso-browser.py')
@@ -442,7 +449,7 @@ def main():
                         # second implementation is injected into the product.
                         dialogs = []
                         for target in (frame, peer_frame):
-                            target.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+                            navigation.open_chat_tool(target, 'End-to-end encrypted')
                             dialog = target.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
                             expect(dialog.get_by_role('button', name='Channel devices', exact=True)).to_be_visible(timeout=90000)
                             dialog.get_by_role('button', name='Channel devices', exact=True).click()
@@ -512,7 +519,7 @@ def main():
                         checks['matrix_wire_encrypted_no_plaintext_native_fallback_or_parent_bridge'] = True
                         # A separate recovery key, rather than the SSO session,
                         # is still required to recover encrypted history.
-                        frame.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+                        navigation.open_chat_tool(frame, 'End-to-end encrypted')
                         dialog = frame.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
                         dialog.get_by_role('button', name='Recovery', exact=True).click()
                         dialog.get_by_role('button', name='Set up encrypted history recovery', exact=True).click()
@@ -538,7 +545,7 @@ def main():
                         assert children[-1]['token'] == before
                         assert children[-1]['expires_at'] > previous_expiry
                         assert http(api_base, '/auth/me', token=before)['id'] == tokens['alpha']['user_id']
-                        frame.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+                        navigation.open_chat_tool(frame, 'End-to-end encrypted')
                         dialog = frame.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
                         dialog.get_by_role('button', name='Channel devices', exact=True).click()
                         expect(dialog.locator('.fc-secure-fingerprint code')).to_be_visible(timeout=90000)
@@ -578,7 +585,7 @@ def main():
                     admin.get_by_label('Password', exact=True).fill('Owned-fixture-password!2026')
                     admin.get_by_role('button', name='Sign In', exact=True).click()
                     expect(admin.locator('.fc-chat')).to_be_visible(timeout=90000)
-                    admin.get_by_role('button', name='Integrations', exact=True).click()
+                    navigation.open_chat_tool(admin, 'Integrations')
                     settings = admin.get_by_role('dialog', name='Integrations', exact=True)
                     settings.get_by_role('button', name='Embedding', exact=True).click()
                     application_settings = settings.get_by_role('region', name='Embedded applications', exact=True)
@@ -602,7 +609,7 @@ def main():
                     application_settings.get_by_role('button', name='Save application', exact=True).click()
                     expect(application_settings.get_by_text('Application disabled. Its embedding grants and sessions are no longer valid.', exact=True)).to_be_visible()
                     if frame.locator('[data-embed-state="ready"]').count():
-                        frame.get_by_role('button', name='Refresh messages', exact=True).click()
+                        navigation.open_chat_tool(frame, 'Refresh messages')
                     expect(frame.locator('[data-embed-state="signed-out"]')).to_be_visible(timeout=45000)
                     expect(frame.locator('.fc-chat')).to_have_count(0)
                     assert http(api_base, '/auth/me', token=tokens['alpha']['access_token'])['id'] == tokens['alpha']['user_id']

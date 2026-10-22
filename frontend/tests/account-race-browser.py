@@ -6,6 +6,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/account-
 import json
 import os
 import re
+import time
 import uuid
 from urllib.request import Request, urlopen
 
@@ -29,6 +30,15 @@ def api(method, path, user=None, data=None):
 def register(name):
     email = f'{name.lower()}-{RUN}@example.com'
     return {**api('POST', '/auth/register', data={'name': name, 'email': email, 'password': PASSWORD}), 'email': email}
+
+
+def wait_for_held_route(page, routes, description):
+    deadline = time.monotonic() + 30
+    while not routes and time.monotonic() < deadline:
+        # Dispatch browser events while the prerequisite fetch finishes.
+        page.wait_for_timeout(20)
+    assert routes, f'Timed out waiting for held {description} request'
+    return routes[0]
 
 
 alice, bob = register('RaceAlice'), register('RaceBob')
@@ -68,9 +78,9 @@ with sync_playwright() as p:
         page.route('**/api/account/security', delay_security)
         page.get_by_role('button', name='Account settings', exact=True).click()
         expect(page.get_by_text('Loading your account…', exact=True)).to_be_visible()
-        assert held_security
+        security_route = wait_for_held_route(page, held_security, 'account security')
         page.evaluate(SWITCH_ACCOUNT, {'session': bob, 'workspace': bob_workspace['id']})
-        held_security[0].fulfill(status=200, json=alice_security)
+        security_route.fulfill(status=200, json=alice_security)
         expect(page.get_by_role('dialog', name='Account settings', exact=True)).to_have_count(0)
         expect(page.get_by_role('button', name=re.compile('^Switch workspace, Bob private'))).to_be_visible()
         page.get_by_role('button', name='Account settings', exact=True).click()
@@ -103,11 +113,10 @@ with sync_playwright() as p:
         manager.get_by_label('Workspace name', exact=True).fill('Alice pending ' + RUN)
         manager.get_by_role('button', name='Create workspace', exact=True).click()
         expect(manager.get_by_role('button', name='Create workspace', exact=True)).to_be_disabled()
-        page.wait_for_timeout(100)
-        assert held_workspaces
+        workspace_route = wait_for_held_route(page, held_workspaces, 'workspace list')
         alice_workspaces = api('GET', '/workspaces', alice)
         page.evaluate(SWITCH_ACCOUNT, {'session': bob})
-        held_workspaces[0].fulfill(status=200, json=alice_workspaces)
+        workspace_route.fulfill(status=200, json=alice_workspaces)
         expect(page.get_by_role('dialog', name='Workspace settings', exact=True)).to_have_count(0)
         expect(page.get_by_role('button', name=re.compile('^Switch workspace, Bob private'))).to_be_visible()
         page.get_by_role('button', name=re.compile('^Switch workspace')).click()
@@ -126,9 +135,9 @@ with sync_playwright() as p:
             login_page.get_by_label('Password', exact=True).fill(PASSWORD)
             login_page.get_by_role('button', name='Sign In', exact=True).click()
             expect(login_page.get_by_role('button', name='Sign In', exact=True)).to_be_disabled()
-            assert pending_login
+            login_route = wait_for_held_route(login_page, pending_login, 'login')
             login_page.evaluate(SWITCH_ACCOUNT, {'session': bob, 'workspace': bob_workspace['id']})
-            pending_login[0].fulfill(status=200, json=alice)
+            login_route.fulfill(status=200, json=alice)
             expect(login_page.get_by_role('button', name=re.compile('^Switch workspace, Bob private'))).to_be_visible()
             assert login_page.evaluate('localStorage.getItem("freecollab_user_id")') == bob['user_id']
         finally:

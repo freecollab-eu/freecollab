@@ -198,6 +198,7 @@ def _mappings(session, directory, actor_id):
 @admin_router.get("/mappings")
 def mappings(workspace_id: str, response: Response, user=Depends(get_current_user), session=Depends(get_session)):
     _admin_read(session, workspace_id, user)
+    lock_workspace(session, workspace_id)
     directory = _directory(session, workspace_id, user.id)
     session.commit()
     response.headers["Cache-Control"] = "no-store"

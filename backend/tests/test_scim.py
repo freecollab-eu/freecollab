@@ -1,11 +1,13 @@
 """SCIM2 tenant authority, lifecycle, groups, concurrency versions and credential isolation."""
 import base64
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
+from threading import Event
 from unittest.mock import Mock
 
 import pytest
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -128,6 +130,93 @@ def test_hash_only_credentials_rotate_revoke_and_cannot_authenticate_native_api(
     assert client.get(d["base"] + "/Users", headers=headers(d["token"])).status_code == 200
     assert client.post("/workspaces/a/scim/disable", headers=headers(d["native"]["owner-a"]), json={"password": PASSWORD}).status_code == 200
     assert client.get(d["base"] + "/Users", headers=headers(d["token"])).status_code == 401
+
+
+def test_simultaneous_first_status_and_mappings_share_one_inactive_directory(directory, monkeypatch):
+    d = directory
+    workspace_id = "first-scim-load"
+    status_path = f"/workspaces/{workspace_id}/scim"
+    mappings_path = status_path + "/mappings"
+    with Session(d["engine"]) as session:
+        session.add(Workspace(id=workspace_id, name="Unconfigured directory"))
+        session.flush()
+        session.add(WorkspaceMember(workspace_id=workspace_id, user_id="owner-a", role="owner"))
+        session.commit()
+        previous = session.get(SCIMDirectory, "a")
+        previous_credential = previous.token_hash, previous.token_version, previous.enabled
+
+    status_missing, mappings_entered, status_finished = Event(), Event(), Event()
+    session_ids, observed_directories = {}, {}
+    real_get, real_lock = Session.get, scim.lock_workspace
+
+    def sessions(request: Request):
+        with Session(d["engine"]) as session:
+            session.info["first_scim_route"] = request.url.path
+            session_ids[request.url.path] = id(session)
+            yield session
+
+    def gated_lock(session, target):
+        if target == workspace_id and session.info.get("first_scim_route") == mappings_path:
+            # The fixed request reaches its real lock before reading the row.
+            mappings_entered.set()
+        return real_lock(session, target)
+
+    def gated_get(session, model, key, *args, **kwargs):
+        row = real_get(session, model, key, *args, **kwargs)
+        if model is SCIMDirectory and key == workspace_id:
+            path = session.info.get("first_scim_route")
+            observed_directories[path] = row.directory_id if row else None
+            if path == status_path and row is None:
+                # Status holds its real write lock and has really read no row.
+                status_missing.set()
+                assert mappings_entered.wait(10), "Mappings did not enter initialization"
+            elif path == mappings_path and row is None:
+                # The old route reads before locking. Preserve that real None
+                # until status commits, reproducing its duplicate INSERT.
+                mappings_entered.set()
+                assert status_finished.wait(10), "Status did not finish initialization"
+        return row
+
+    monkeypatch.setitem(d["client"].app.dependency_overrides, get_session, sessions)
+    monkeypatch.setattr(scim, "lock_workspace", gated_lock)
+    monkeypatch.setattr(Session, "get", gated_get)
+
+    def read_status():
+        try:
+            with TestClient(d["client"].app) as client:
+                return client.get(status_path, headers=headers(d["native"]["owner-a"]))
+        finally:
+            status_finished.set()
+
+    def read_mappings():
+        with TestClient(d["client"].app) as client:
+            return client.get(mappings_path, headers=headers(d["native"]["owner-a"]))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        status_request = pool.submit(read_status)
+        assert status_missing.wait(10), "Status did not reach its missing-row read"
+        mappings_request = pool.submit(read_mappings)
+        status = status_request.result(timeout=20)
+        mappings = mappings_request.result(timeout=20)
+
+    assert status.status_code == 200, status.text
+    assert mappings.status_code == 200, mappings.text
+    assert session_ids[status_path] != session_ids[mappings_path]
+    assert observed_directories[status_path] is None
+    assert observed_directories[mappings_path] == status.json()["directory_id"]
+    assert not status.json()["configured"] and not status.json()["enabled"]
+    assert mappings.json() == {"default_role": "member", "mappings": [], "groups": [], "channels": []}
+    assert status.headers["cache-control"] == mappings.headers["cache-control"] == "no-store"
+    with Session(d["engine"]) as session:
+        rows = session.exec(select(SCIMDirectory).where(SCIMDirectory.workspace_id == workspace_id)).all()
+        assert len(rows) == 1 and rows[0].directory_id == status.json()["directory_id"]
+        assert rows[0].token_hash is None and rows[0].token_issued_by is None
+        assert rows[0].token_version == 0 and not rows[0].enabled
+        previous = session.get(SCIMDirectory, "a")
+        assert (previous.token_hash, previous.token_version, previous.enabled) == previous_credential
+        assert session.get(Workspace, workspace_id).name == "Unconfigured directory"
+        assert session.get(WorkspaceMember, (workspace_id, "owner-a")).role == "owner"
+        assert not session.exec(select(SCIMAudit).where(SCIMAudit.workspace_id == workspace_id)).all()
 
 
 def test_admin_controls_require_native_workspace_role_password_and_mfa(directory, monkeypatch):

@@ -1,8 +1,38 @@
 # FreeCollab validation record
 
+## SCIM simultaneous first-load follow-up — 2026-10-22
+
+Opening SCIM settings fetches status and mappings concurrently. Both can create
+the first inactive directory, but the mappings read lacked the workspace lock
+already used by status and the three administrative write paths. The complete
+product workflow on `ac1b3a70fee6bf7fa8cbb8bbf65e8cc38e79b429` exposed a duplicate
+primary-key insert. The mappings read now takes that same lock before get/create;
+authorization, reauthentication, token defaults and commit boundaries are unchanged.
+
+A deterministic regression uses two real HTTP clients and separate SQL sessions.
+It fails on the old application with the actual SQLite uniqueness conflict and
+passes with the one-line fix. Both reads return the same single inactive
+directory; existing credentials, workspace membership and audit state remain
+unchanged. The complete SCIM, workforce-security and workforce-onboarding test
+files passed **46/46 cases**, without skips or failures. The unchanged
+connection-setup browser proof then passed **all 17
+groups**, including SCIM, current-authority/reauthentication/revocation controls,
+English/Swedish and 320/390 px, with no external provider calls. Separate read-only
+review verified the final diff and the before/after/browser evidence.
+
+The application client, website and deployment configuration are unchanged from
+the Open Studio candidate below. Its offline preview therefore uses the same
+reviewed source files. The Docker installation rehearsal below ran that candidate;
+this follow-up changes only SCIM initialization and its regression test. The
+earlier candidate passed all four backend CI shards, frontend, real cryptography
+and Android/iOS compatibility; its product workflow failed at the SCIM race.
+The final published commit's own GitHub Actions run records its complete CI status.
+No release or public deployment is claimed.
+
 ## Open Studio first conversation and launch rehearsal — 2026-10-22
 
-This untagged `design/open-studio` increment retains the approved open-room
+This untagged `design/open-studio` increment at
+`ac1b3a70fee6bf7fa8cbb8bbf65e8cc38e79b429` retains the approved open-room
 design and makes its first team conversation explicit. The public demo connects
 a conversation to its same editable brief, a decision and one assigned next step.
 Microsoft and Google cards open their own preparation guide directly. Customer

@@ -1,0 +1,23 @@
+# Compose >=2.24.4. Merge with the exact release's docker-compose.yml only.
+# These variables contain verified local Docker CONFIG IDs, not registry pins.
+services:
+  frontend:
+    image: ${FREECOLLAB_FRONTEND_IMAGE:?Verify/import the OCI archive and use its local config ID}
+    build: !reset null
+    pull_policy: never
+  backend:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Verify/import the OCI archive and use its local config ID}
+    build: !reset null
+    pull_policy: never
+  integration-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Verify/import the OCI archive and use its local config ID}
+    pull_policy: never
+  mail-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Verify/import the OCI archive and use its local config ID}
+    pull_policy: never
+  sfu-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Verify/import the OCI archive and use its local config ID}
+    pull_policy: never
+  db:
+    image: ${FREECOLLAB_POSTGRES_IMAGE:?Preload PostgreSQL15 and set its verified local config ID}
+    pull_policy: never

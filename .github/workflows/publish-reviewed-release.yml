@@ -1,0 +1,55 @@
+name: Publish reviewed FreeCollab 0.13.0
+
+on:
+  push:
+    branches: [release-0.13.0-publication]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: freecollab-reviewed-release-0.13.0
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'freecollab-eu/freecollab' && github.ref == 'refs/heads/release-0.13.0-publication' && github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Check out the reviewed publication branch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: ${{ github.sha }}
+          path: publication
+          persist-credentials: false
+      - name: Check out the unchanged annotated product tag
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          ref: v0.13.0
+          fetch-depth: 0
+          path: product
+          persist-credentials: false
+      - name: Validate every local input without network or mutation
+        run: >-
+          python3 publication/scripts/publish-release.py
+          --publication-root publication --product-root product --check-local
+      - name: Publish the existing draft only after all reviewed gates pass
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 publication/scripts/publish-release.py
+          --publication-root publication --product-root product
+          --work-root "$RUNNER_TEMP/freecollab-release-publication-013"
+          --publish-reviewed-draft
+      - name: Retain sanitized publication evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: freecollab-reviewed-publication-0.13.0
+          path: ${{ runner.temp }}/freecollab-release-publication-013/publication-result.json
+          if-no-files-found: ignore
+          retention-days: 30

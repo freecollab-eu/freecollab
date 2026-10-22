@@ -1,0 +1,535 @@
+{
+  "buildx.build.provenance/linux/amd64": {
+    "builder": {
+      "id": "https://github.com/freecollab-eu/freecollab/actions/runs/39748780136/attempts/1"
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+        }
+      },
+      {
+        "uri": "pkg:docker/docker/dockerfile@1",
+        "digest": {
+          "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+        }
+      },
+      {
+        "uri": "pkg:docker/python@3.11-slim?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "cce12316475d7d56d605f76e1d811d0dc4e7227f2d4afd29951521264f504ff8"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "entryPoint": "Dockerfile"
+      },
+      "parameters": {
+        "frontend": "gateway.v0",
+        "args": {
+          "build-arg:SOURCE_DATE_EPOCH": "1792657346",
+          "cmdline": "docker/dockerfile:1",
+          "label:org.opencontainers.image.licenses": "MIT",
+          "label:org.opencontainers.image.revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+          "label:org.opencontainers.image.source": "https://github.com/freecollab-eu/freecollab",
+          "label:org.opencontainers.image.title": "FreeCollab backend",
+          "label:org.opencontainers.image.version": "0.13.0",
+          "source": "docker/dockerfile:1"
+        },
+        "secrets": [
+          {
+            "id": "proxy_ca",
+            "optional": true
+          }
+        ],
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {
+            "path": "Dockerfile"
+          },
+          "request": {
+            "args": {
+              "build-arg:SOURCE_DATE_EPOCH": "1792657346",
+              "label:org.opencontainers.image.licenses": "MIT",
+              "label:org.opencontainers.image.revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+              "label:org.opencontainers.image.source": "https://github.com/freecollab-eu/freecollab",
+              "label:org.opencontainers.image.title": "FreeCollab backend",
+              "label:org.opencontainers.image.version": "0.13.0",
+              "vcs:localdir:context": "backend",
+              "vcs:localdir:dockerfile": "backend",
+              "vcs:revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+              "vcs:source": "https://github.com/freecollab-eu/freecollab"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      },
+      "environment": {
+        "github_actor": "krisledel",
+        "github_actor_id": "7365849",
+        "github_event_name": "workflow_dispatch",
+        "github_event_payload": {
+          "inputs": {
+            "publish": "false",
+            "version": "0.13.0"
+          },
+          "organization": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/252331810?v=4",
+            "description": null,
+            "events_url": "https://api.github.com/orgs/freecollab-eu/events",
+            "hooks_url": "https://api.github.com/orgs/freecollab-eu/hooks",
+            "id": 252331810,
+            "issues_url": "https://api.github.com/orgs/freecollab-eu/issues",
+            "login": "freecollab-eu",
+            "members_url": "https://api.github.com/orgs/freecollab-eu/members{/member}",
+            "node_id": "O_kgDODwpHIg",
+            "public_members_url": "https://api.github.com/orgs/freecollab-eu/public_members{/member}",
+            "repos_url": "https://api.github.com/orgs/freecollab-eu/repos",
+            "url": "https://api.github.com/orgs/freecollab-eu"
+          },
+          "ref": "refs/heads/main",
+          "repository": {
+            "allow_forking": true,
+            "archive_url": "https://api.github.com/repos/freecollab-eu/freecollab/{archive_format}{/ref}",
+            "archived": false,
+            "assignees_url": "https://api.github.com/repos/freecollab-eu/freecollab/assignees{/user}",
+            "blobs_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/blobs{/sha}",
+            "branches_url": "https://api.github.com/repos/freecollab-eu/freecollab/branches{/branch}",
+            "clone_url": "https://github.com/freecollab-eu/freecollab.git",
+            "collaborators_url": "https://api.github.com/repos/freecollab-eu/freecollab/collaborators{/collaborator}",
+            "comments_url": "https://api.github.com/repos/freecollab-eu/freecollab/comments{/number}",
+            "commits_url": "https://api.github.com/repos/freecollab-eu/freecollab/commits{/sha}",
+            "compare_url": "https://api.github.com/repos/freecollab-eu/freecollab/compare/{base}...{head}",
+            "contents_url": "https://api.github.com/repos/freecollab-eu/freecollab/contents/{+path}",
+            "contributors_url": "https://api.github.com/repos/freecollab-eu/freecollab/contributors",
+            "created_at": "2026-10-21T16:10:25Z",
+            "custom_properties": {},
+            "default_branch": "main",
+            "deployments_url": "https://api.github.com/repos/freecollab-eu/freecollab/deployments",
+            "description": null,
+            "disabled": false,
+            "downloads_url": "https://api.github.com/repos/freecollab-eu/freecollab/downloads",
+            "events_url": "https://api.github.com/repos/freecollab-eu/freecollab/events",
+            "fork": false,
+            "forks": 0,
+            "forks_count": 0,
+            "forks_url": "https://api.github.com/repos/freecollab-eu/freecollab/forks",
+            "full_name": "freecollab-eu/freecollab",
+            "git_commits_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/commits{/sha}",
+            "git_refs_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/refs{/sha}",
+            "git_tags_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/tags{/sha}",
+            "git_url": "git://github.com/freecollab-eu/freecollab.git",
+            "has_discussions": false,
+            "has_downloads": false,
+            "has_issues": true,
+            "has_pages": false,
+            "has_projects": true,
+            "has_pull_requests": true,
+            "has_wiki": true,
+            "homepage": null,
+            "hooks_url": "https://api.github.com/repos/freecollab-eu/freecollab/hooks",
+            "html_url": "https://github.com/freecollab-eu/freecollab",
+            "id": 1428624207,
+            "is_template": false,
+            "issue_comment_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues/comments{/number}",
+            "issue_events_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues/events{/number}",
+            "issues_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues{/number}",
+            "keys_url": "https://api.github.com/repos/freecollab-eu/freecollab/keys{/key_id}",
+            "labels_url": "https://api.github.com/repos/freecollab-eu/freecollab/labels{/name}",
+            "language": "Python",
+            "languages_url": "https://api.github.com/repos/freecollab-eu/freecollab/languages",
+            "license": {
+              "key": "mit",
+              "name": "MIT License",
+              "node_id": "MDc6TGljZW5zZTEz",
+              "spdx_id": "MIT",
+              "url": "https://api.github.com/licenses/mit"
+            },
+            "merges_url": "https://api.github.com/repos/freecollab-eu/freecollab/merges",
+            "milestones_url": "https://api.github.com/repos/freecollab-eu/freecollab/milestones{/number}",
+            "mirror_url": null,
+            "name": "freecollab",
+            "node_id": "R_kgDOVScTTw",
+            "notifications_url": "https://api.github.com/repos/freecollab-eu/freecollab/notifications{?since,all,participating}",
+            "open_issues": 0,
+            "open_issues_count": 0,
+            "owner": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/252331810?v=4",
+              "events_url": "https://api.github.com/users/freecollab-eu/events{/privacy}",
+              "followers_url": "https://api.github.com/users/freecollab-eu/followers",
+              "following_url": "https://api.github.com/users/freecollab-eu/following{/other_user}",
+              "gists_url": "https://api.github.com/users/freecollab-eu/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/freecollab-eu",
+              "id": 252331810,
+              "login": "freecollab-eu",
+              "node_id": "O_kgDODwpHIg",
+              "organizations_url": "https://api.github.com/users/freecollab-eu/orgs",
+              "received_events_url": "https://api.github.com/users/freecollab-eu/received_events",
+              "repos_url": "https://api.github.com/users/freecollab-eu/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/freecollab-eu/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/freecollab-eu/subscriptions",
+              "type": "Organization",
+              "url": "https://api.github.com/users/freecollab-eu",
+              "user_view_type": "public"
+            },
+            "private": false,
+            "pull_request_creation_policy": "all",
+            "pulls_url": "https://api.github.com/repos/freecollab-eu/freecollab/pulls{/number}",
+            "pushed_at": "2026-10-22T08:33:59Z",
+            "releases_url": "https://api.github.com/repos/freecollab-eu/freecollab/releases{/id}",
+            "size": 3991,
+            "ssh_url": "git@github.com:freecollab-eu/freecollab.git",
+            "stargazers_count": 0,
+            "stargazers_url": "https://api.github.com/repos/freecollab-eu/freecollab/stargazers",
+            "statuses_url": "https://api.github.com/repos/freecollab-eu/freecollab/statuses/{sha}",
+            "subscribers_url": "https://api.github.com/repos/freecollab-eu/freecollab/subscribers",
+            "subscription_url": "https://api.github.com/repos/freecollab-eu/freecollab/subscription",
+            "svn_url": "https://github.com/freecollab-eu/freecollab",
+            "tags_url": "https://api.github.com/repos/freecollab-eu/freecollab/tags",
+            "teams_url": "https://api.github.com/repos/freecollab-eu/freecollab/teams",
+            "topics": [],
+            "trees_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/trees{/sha}",
+            "updated_at": "2026-10-22T08:34:02Z",
+            "url": "https://api.github.com/repos/freecollab-eu/freecollab",
+            "visibility": "public",
+            "watchers": 0,
+            "watchers_count": 0,
+            "web_commit_signoff_required": false
+          },
+          "sender": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/7365849?v=4",
+            "events_url": "https://api.github.com/users/krisledel/events{/privacy}",
+            "followers_url": "https://api.github.com/users/krisledel/followers",
+            "following_url": "https://api.github.com/users/krisledel/following{/other_user}",
+            "gists_url": "https://api.github.com/users/krisledel/gists{/gist_id}",
+            "gravatar_id": "",
+            "html_url": "https://github.com/krisledel",
+            "id": 7365849,
+            "login": "krisledel",
+            "node_id": "MDQ6VXNlcjczNjU4NDk=",
+            "organizations_url": "https://api.github.com/users/krisledel/orgs",
+            "received_events_url": "https://api.github.com/users/krisledel/received_events",
+            "repos_url": "https://api.github.com/users/krisledel/repos",
+            "site_admin": false,
+            "starred_url": "https://api.github.com/users/krisledel/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/krisledel/subscriptions",
+            "type": "User",
+            "url": "https://api.github.com/users/krisledel",
+            "user_view_type": "public"
+          },
+          "workflow": ".github/workflows/release-containers.yml"
+        },
+        "github_job": "images",
+        "github_ref": "refs/heads/main",
+        "github_ref_name": "main",
+        "github_ref_protected": "false",
+        "github_ref_type": "branch",
+        "github_repository": "freecollab-eu/freecollab",
+        "github_repository_id": "1428624207",
+        "github_repository_owner": "freecollab-eu",
+        "github_repository_owner_id": "252331810",
+        "github_run_attempt": "1",
+        "github_run_id": "39748780136",
+        "github_run_number": "3",
+        "github_runner_arch": "X64",
+        "github_runner_environment": "github-hosted",
+        "github_runner_image_os": "ubuntu24",
+        "github_runner_image_version": "20261018.339.1",
+        "github_runner_name": "GitHub Actions 1000000107",
+        "github_runner_os": "Linux",
+        "github_runner_tracking_id": "github_4c60c3d1-7731-45e9-8606-d178926754ae",
+        "github_server_url": "https://github.com",
+        "github_triggering_actor": "krisledel",
+        "github_workflow": "Versioned container release",
+        "github_workflow_ref": "freecollab-eu/freecollab/.github/workflows/release-containers.yml@refs/heads/main",
+        "github_workflow_sha": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+        "platform": "linux/amd64"
+      }
+    }
+  },
+  "buildx.build.provenance/linux/arm64": {
+    "builder": {
+      "id": "https://github.com/freecollab-eu/freecollab/actions/runs/39748780136/attempts/1"
+    },
+    "buildType": "https://mobyproject.org/buildkit@v1",
+    "materials": [
+      {
+        "uri": "pkg:docker/docker/buildkit-syft-scanner@stable-1?platform=linux%2Famd64",
+        "digest": {
+          "sha256": "ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+        }
+      },
+      {
+        "uri": "pkg:docker/docker/dockerfile@1",
+        "digest": {
+          "sha256": "4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e"
+        }
+      },
+      {
+        "uri": "pkg:docker/python@3.11-slim?platform=linux%2Farm64",
+        "digest": {
+          "sha256": "cce12316475d7d56d605f76e1d811d0dc4e7227f2d4afd29951521264f504ff8"
+        }
+      }
+    ],
+    "invocation": {
+      "configSource": {
+        "entryPoint": "Dockerfile"
+      },
+      "parameters": {
+        "frontend": "gateway.v0",
+        "args": {
+          "build-arg:SOURCE_DATE_EPOCH": "1792657346",
+          "cmdline": "docker/dockerfile:1",
+          "label:org.opencontainers.image.licenses": "MIT",
+          "label:org.opencontainers.image.revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+          "label:org.opencontainers.image.source": "https://github.com/freecollab-eu/freecollab",
+          "label:org.opencontainers.image.title": "FreeCollab backend",
+          "label:org.opencontainers.image.version": "0.13.0",
+          "source": "docker/dockerfile:1"
+        },
+        "secrets": [
+          {
+            "id": "proxy_ca",
+            "optional": true
+          }
+        ],
+        "locals": [
+          {
+            "name": "context"
+          },
+          {
+            "name": "dockerfile"
+          }
+        ],
+        "root": {
+          "configSource": {
+            "path": "Dockerfile"
+          },
+          "request": {
+            "args": {
+              "build-arg:SOURCE_DATE_EPOCH": "1792657346",
+              "label:org.opencontainers.image.licenses": "MIT",
+              "label:org.opencontainers.image.revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+              "label:org.opencontainers.image.source": "https://github.com/freecollab-eu/freecollab",
+              "label:org.opencontainers.image.title": "FreeCollab backend",
+              "label:org.opencontainers.image.version": "0.13.0",
+              "vcs:localdir:context": "backend",
+              "vcs:localdir:dockerfile": "backend",
+              "vcs:revision": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+              "vcs:source": "https://github.com/freecollab-eu/freecollab"
+            }
+          }
+        },
+        "compatibilityVersion": 30
+      },
+      "environment": {
+        "github_actor": "krisledel",
+        "github_actor_id": "7365849",
+        "github_event_name": "workflow_dispatch",
+        "github_event_payload": {
+          "inputs": {
+            "publish": "false",
+            "version": "0.13.0"
+          },
+          "organization": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/252331810?v=4",
+            "description": null,
+            "events_url": "https://api.github.com/orgs/freecollab-eu/events",
+            "hooks_url": "https://api.github.com/orgs/freecollab-eu/hooks",
+            "id": 252331810,
+            "issues_url": "https://api.github.com/orgs/freecollab-eu/issues",
+            "login": "freecollab-eu",
+            "members_url": "https://api.github.com/orgs/freecollab-eu/members{/member}",
+            "node_id": "O_kgDODwpHIg",
+            "public_members_url": "https://api.github.com/orgs/freecollab-eu/public_members{/member}",
+            "repos_url": "https://api.github.com/orgs/freecollab-eu/repos",
+            "url": "https://api.github.com/orgs/freecollab-eu"
+          },
+          "ref": "refs/heads/main",
+          "repository": {
+            "allow_forking": true,
+            "archive_url": "https://api.github.com/repos/freecollab-eu/freecollab/{archive_format}{/ref}",
+            "archived": false,
+            "assignees_url": "https://api.github.com/repos/freecollab-eu/freecollab/assignees{/user}",
+            "blobs_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/blobs{/sha}",
+            "branches_url": "https://api.github.com/repos/freecollab-eu/freecollab/branches{/branch}",
+            "clone_url": "https://github.com/freecollab-eu/freecollab.git",
+            "collaborators_url": "https://api.github.com/repos/freecollab-eu/freecollab/collaborators{/collaborator}",
+            "comments_url": "https://api.github.com/repos/freecollab-eu/freecollab/comments{/number}",
+            "commits_url": "https://api.github.com/repos/freecollab-eu/freecollab/commits{/sha}",
+            "compare_url": "https://api.github.com/repos/freecollab-eu/freecollab/compare/{base}...{head}",
+            "contents_url": "https://api.github.com/repos/freecollab-eu/freecollab/contents/{+path}",
+            "contributors_url": "https://api.github.com/repos/freecollab-eu/freecollab/contributors",
+            "created_at": "2026-10-21T16:10:25Z",
+            "custom_properties": {},
+            "default_branch": "main",
+            "deployments_url": "https://api.github.com/repos/freecollab-eu/freecollab/deployments",
+            "description": null,
+            "disabled": false,
+            "downloads_url": "https://api.github.com/repos/freecollab-eu/freecollab/downloads",
+            "events_url": "https://api.github.com/repos/freecollab-eu/freecollab/events",
+            "fork": false,
+            "forks": 0,
+            "forks_count": 0,
+            "forks_url": "https://api.github.com/repos/freecollab-eu/freecollab/forks",
+            "full_name": "freecollab-eu/freecollab",
+            "git_commits_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/commits{/sha}",
+            "git_refs_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/refs{/sha}",
+            "git_tags_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/tags{/sha}",
+            "git_url": "git://github.com/freecollab-eu/freecollab.git",
+            "has_discussions": false,
+            "has_downloads": false,
+            "has_issues": true,
+            "has_pages": false,
+            "has_projects": true,
+            "has_pull_requests": true,
+            "has_wiki": true,
+            "homepage": null,
+            "hooks_url": "https://api.github.com/repos/freecollab-eu/freecollab/hooks",
+            "html_url": "https://github.com/freecollab-eu/freecollab",
+            "id": 1428624207,
+            "is_template": false,
+            "issue_comment_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues/comments{/number}",
+            "issue_events_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues/events{/number}",
+            "issues_url": "https://api.github.com/repos/freecollab-eu/freecollab/issues{/number}",
+            "keys_url": "https://api.github.com/repos/freecollab-eu/freecollab/keys{/key_id}",
+            "labels_url": "https://api.github.com/repos/freecollab-eu/freecollab/labels{/name}",
+            "language": "Python",
+            "languages_url": "https://api.github.com/repos/freecollab-eu/freecollab/languages",
+            "license": {
+              "key": "mit",
+              "name": "MIT License",
+              "node_id": "MDc6TGljZW5zZTEz",
+              "spdx_id": "MIT",
+              "url": "https://api.github.com/licenses/mit"
+            },
+            "merges_url": "https://api.github.com/repos/freecollab-eu/freecollab/merges",
+            "milestones_url": "https://api.github.com/repos/freecollab-eu/freecollab/milestones{/number}",
+            "mirror_url": null,
+            "name": "freecollab",
+            "node_id": "R_kgDOVScTTw",
+            "notifications_url": "https://api.github.com/repos/freecollab-eu/freecollab/notifications{?since,all,participating}",
+            "open_issues": 0,
+            "open_issues_count": 0,
+            "owner": {
+              "avatar_url": "https://avatars.githubusercontent.com/u/252331810?v=4",
+              "events_url": "https://api.github.com/users/freecollab-eu/events{/privacy}",
+              "followers_url": "https://api.github.com/users/freecollab-eu/followers",
+              "following_url": "https://api.github.com/users/freecollab-eu/following{/other_user}",
+              "gists_url": "https://api.github.com/users/freecollab-eu/gists{/gist_id}",
+              "gravatar_id": "",
+              "html_url": "https://github.com/freecollab-eu",
+              "id": 252331810,
+              "login": "freecollab-eu",
+              "node_id": "O_kgDODwpHIg",
+              "organizations_url": "https://api.github.com/users/freecollab-eu/orgs",
+              "received_events_url": "https://api.github.com/users/freecollab-eu/received_events",
+              "repos_url": "https://api.github.com/users/freecollab-eu/repos",
+              "site_admin": false,
+              "starred_url": "https://api.github.com/users/freecollab-eu/starred{/owner}{/repo}",
+              "subscriptions_url": "https://api.github.com/users/freecollab-eu/subscriptions",
+              "type": "Organization",
+              "url": "https://api.github.com/users/freecollab-eu",
+              "user_view_type": "public"
+            },
+            "private": false,
+            "pull_request_creation_policy": "all",
+            "pulls_url": "https://api.github.com/repos/freecollab-eu/freecollab/pulls{/number}",
+            "pushed_at": "2026-10-22T08:33:59Z",
+            "releases_url": "https://api.github.com/repos/freecollab-eu/freecollab/releases{/id}",
+            "size": 3991,
+            "ssh_url": "git@github.com:freecollab-eu/freecollab.git",
+            "stargazers_count": 0,
+            "stargazers_url": "https://api.github.com/repos/freecollab-eu/freecollab/stargazers",
+            "statuses_url": "https://api.github.com/repos/freecollab-eu/freecollab/statuses/{sha}",
+            "subscribers_url": "https://api.github.com/repos/freecollab-eu/freecollab/subscribers",
+            "subscription_url": "https://api.github.com/repos/freecollab-eu/freecollab/subscription",
+            "svn_url": "https://github.com/freecollab-eu/freecollab",
+            "tags_url": "https://api.github.com/repos/freecollab-eu/freecollab/tags",
+            "teams_url": "https://api.github.com/repos/freecollab-eu/freecollab/teams",
+            "topics": [],
+            "trees_url": "https://api.github.com/repos/freecollab-eu/freecollab/git/trees{/sha}",
+            "updated_at": "2026-10-22T08:34:02Z",
+            "url": "https://api.github.com/repos/freecollab-eu/freecollab",
+            "visibility": "public",
+            "watchers": 0,
+            "watchers_count": 0,
+            "web_commit_signoff_required": false
+          },
+          "sender": {
+            "avatar_url": "https://avatars.githubusercontent.com/u/7365849?v=4",
+            "events_url": "https://api.github.com/users/krisledel/events{/privacy}",
+            "followers_url": "https://api.github.com/users/krisledel/followers",
+            "following_url": "https://api.github.com/users/krisledel/following{/other_user}",
+            "gists_url": "https://api.github.com/users/krisledel/gists{/gist_id}",
+            "gravatar_id": "",
+            "html_url": "https://github.com/krisledel",
+            "id": 7365849,
+            "login": "krisledel",
+            "node_id": "MDQ6VXNlcjczNjU4NDk=",
+            "organizations_url": "https://api.github.com/users/krisledel/orgs",
+            "received_events_url": "https://api.github.com/users/krisledel/received_events",
+            "repos_url": "https://api.github.com/users/krisledel/repos",
+            "site_admin": false,
+            "starred_url": "https://api.github.com/users/krisledel/starred{/owner}{/repo}",
+            "subscriptions_url": "https://api.github.com/users/krisledel/subscriptions",
+            "type": "User",
+            "url": "https://api.github.com/users/krisledel",
+            "user_view_type": "public"
+          },
+          "workflow": ".github/workflows/release-containers.yml"
+        },
+        "github_job": "images",
+        "github_ref": "refs/heads/main",
+        "github_ref_name": "main",
+        "github_ref_protected": "false",
+        "github_ref_type": "branch",
+        "github_repository": "freecollab-eu/freecollab",
+        "github_repository_id": "1428624207",
+        "github_repository_owner": "freecollab-eu",
+        "github_repository_owner_id": "252331810",
+        "github_run_attempt": "1",
+        "github_run_id": "39748780136",
+        "github_run_number": "3",
+        "github_runner_arch": "X64",
+        "github_runner_environment": "github-hosted",
+        "github_runner_image_os": "ubuntu24",
+        "github_runner_image_version": "20261018.339.1",
+        "github_runner_name": "GitHub Actions 1000000107",
+        "github_runner_os": "Linux",
+        "github_runner_tracking_id": "github_4c60c3d1-7731-45e9-8606-d178926754ae",
+        "github_server_url": "https://github.com",
+        "github_triggering_actor": "krisledel",
+        "github_workflow": "Versioned container release",
+        "github_workflow_ref": "freecollab-eu/freecollab/.github/workflows/release-containers.yml@refs/heads/main",
+        "github_workflow_sha": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+        "platform": "linux/amd64"
+      }
+    }
+  },
+  "buildx.build.ref": "builder-58d93c2a-5b5a-49d7-9429-7fba6011f42a/builder-58d93c2a-5b5a-49d7-9429-7fba6011f42a0/zkykvzvl5p0718okltfa169zs",
+  "containerimage.descriptor": {
+    "mediaType": "application/vnd.oci.image.index.v1+json",
+    "digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+    "size": 1611,
+    "annotations": {
+      "org.opencontainers.image.created": "2026-10-22T08:22:26Z"
+    }
+  },
+  "containerimage.digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+  "image.name": "ghcr.io/freecollab-eu/freecollab-backend:v0.13.0,ghcr.io/freecollab-eu/freecollab-backend:sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4"
+}

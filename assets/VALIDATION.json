@@ -1,0 +1,1042 @@
+{
+  "schema_version": 1,
+  "product": "FreeCollab",
+  "version": "0.13.0",
+  "status": "validated",
+  "source": {
+    "repository": "https://github.com/freecollab-eu/freecollab",
+    "commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "url": "https://github.com/freecollab-eu/freecollab/tree/0927e8e258819250d63e27cf0b514e09227960e9",
+    "published": true,
+    "remote_main": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "clean_local_commit": true,
+    "reviewed_source_files": 1030,
+    "commit_identity_scope": "All ten commits in the product history through release source 0927e8e258819250d63e27cf0b514e09227960e9 have Kris Ledel as author and committer, with no coauthor trailers. Separate preview and publication branches do not change this tagged product history.",
+    "runtime_build_equivalence_to_successful_build_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+    "source_equivalence_review_sha256": "2f11a4e3f54588e77e06ee3347e9808320cdac14d7c2d7ee7d332d0cce2b7230",
+    "tag": {
+      "name": "v0.13.0",
+      "object": "b375be7dcbb4b3766f3b9903e159bc843f8477bd",
+      "target_commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+      "tagger": "Kris Ledel",
+      "annotated": true,
+      "pushed": true
+    }
+  },
+  "release_notes": [
+    {
+      "area": "Native mobile calls",
+      "delivered": "iOS CallKit/PushKit and Android Telecom/foreground calling with LiveKit, explicit answer, original-session/device authority and revocable heartbeat leases.",
+      "boundary": "Secure-channel call consent explicitly discloses SFU-readable audio; audio is not Matrix end-to-end encrypted."
+    },
+    {
+      "area": "Google and Microsoft calendars",
+      "delivered": "Supported finite recurring series and exceptions, reviewed invitations, attendee responses and organizer cancellation; expiring revocable Busy-first calendar subscriptions.",
+      "boundary": "Encrypted-channel content is excluded from server-readable provider delivery; uncertain partial provider effects are not automatically replayed."
+    },
+    {
+      "area": "Encrypted shared work",
+      "delivered": "Cross-installation encrypted tasks, calendar series and Yjs text documents; explicit competing-revision merge and isolated malformed-history handling.",
+      "boundary": "Servers exchange opaque event pointers; missing ancestry is read-only and unavailable keys or peers can prevent recovery."
+    },
+    {
+      "area": "Slack migration",
+      "delivered": "Bounded ZIP review and resumable native batches; client-local encrypted messages, threads, attachments and labelled historical edits/reactions. Original-session/device reservations and accepted-receipt recovery prevent unsafe adoption and duplicate local replies.",
+      "boundary": "Encrypted migration does not upload the ZIP to the backend. Missing original storage, keys or pending-transaction evidence can require reconciliation."
+    },
+    {
+      "area": "Realtime reliability",
+      "delivered": "Fresh per-source and recipient authorization uses worker-owned SQL sessions; committed DTOs release transactions before socket fanout.",
+      "boundary": "Bounded contention/load evidence is functional regression evidence, not a production scale guarantee."
+    },
+    {
+      "area": "Distribution and static demo",
+      "delivered": "Versioned image/SDK release tooling, immutable installation metadata and customer-owned native signing preparation; an independent static website with an account-free local demo.",
+      "boundary": "Prepared workflows and locally tested builds do not mean images, npm packages, stores or the public website have been published or deployed."
+    }
+  ],
+  "validation_rules": {
+    "executed_scopes_overlap": true,
+    "sum_is_not_a_unique_suite_total": true,
+    "collection_is_not_execution": true,
+    "internal_review_is_not_external_audit": true
+  },
+  "completed_local_checks": {
+    "backend": {
+      "isolated_shard": 3,
+      "database": "PostgreSQL",
+      "passed": 425,
+      "failed": 0,
+      "skipped": 0,
+      "seconds": 405.55,
+      "coverage_generated": true,
+      "scope": "Completed local PostgreSQL shard with the 425 final semantic cases. Later parameter display-ID-only changes preserve inputs/assertions; their three proof and five update rejection cases separately passed. This is not a completed full GitHub suite."
+    },
+    "collection_only": {
+      "cases": 2038,
+      "files": 114,
+      "shards": 4,
+      "assignment": "Final union of 2038 cases is exhaustive and pairwise disjoint across four shards; six selector checks passed. Collection is not execution. Display IDs changed only; all inputs and assertions remain identical.",
+      "shard_case_counts": [
+        557,
+        532,
+        425,
+        524
+      ],
+      "all_nodeids_sha256": "66daec0d417ce2f8777a536e87c25f6fc85110fbde9e6dc450e2f4c6c687c885",
+      "max_displayed_nodeid_bytes": 246
+    },
+    "client_and_sdk": {
+      "frontend_node_passed": 274,
+      "sdk_cases_passed": 26,
+      "typescript": "passed",
+      "production_builds_passed": [
+        "main application",
+        "trusted embed",
+        "widget",
+        "independent website"
+      ],
+      "frontend_node_failed": 0,
+      "frontend_node_skipped": 0,
+      "frontend_node_source_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "frontend_node_log_sha256": "bd9710eba409458203272298a6799a32b9514ebe5c5cfac754eed72766d03cf2"
+    },
+    "native_calling": {
+      "backend_passed": 53,
+      "actual_app_browser_groups_passed": 11,
+      "real_nginx_tls_gateway_groups_passed": 10,
+      "android_debug_sdk_build": "passed with LiveKit SDK",
+      "scope": "Browser OS bridges are synthetic; JVM policy and gateway checks do not exercise physical phone media or background OS delivery.",
+      "local_swift_policy_skipped": 1,
+      "mobile_policy_node_cases_passed": 4,
+      "of_which_actual_jvm_execution_cases": 2
+    },
+    "calendar_delivery": {
+      "backend_provider_sync_passed": 169,
+      "node_passed": 19,
+      "actual_browser_worker_tls_groups_passed": 10,
+      "scope": "The final real UI proof retains all nine worker/provider/TLS/consent/subscription groups and adds delayed-event native-keyboard selection. The 169 backend/provider cases and 19 Node cases retain their feature-baseline execution scope; those backend sources are unchanged. Owned Google/Graph HTTPS fixtures do not establish live customer-tenant acceptance.",
+      "actual_browser_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "original_browser_groups_retained": 9
+    },
+    "slack_migration": {
+      "backend_passed": 44,
+      "actual_rust_browser_groups_passed": 8,
+      "acceptance": "Dropped accepted response resumed with two unique messages, one reply and correct importer/peer thread counts; encrypted attachments, historical details, private checkpoints and removal/new-event denials passed.",
+      "scope": "Disposable homeserver used an explicitly raised test-only event budget; no production throttling claim."
+    },
+    "encrypted_shared_work": {
+      "backend_passed": 41,
+      "focused_client_i18n_passed": 34,
+      "actual_two_homeserver_rust_groups_passed": 18,
+      "separate_react_intl_date_cases_passed": 3,
+      "scope": "Both-side work, Yjs concurrency, conflicts, fragments, opaque indexes and revocation. A later date-presentation-only change received separate Los Angeles/DST UI checks; protocol sources were unchanged."
+    },
+    "realtime": {
+      "focused_cases_passed": 270,
+      "new_pool_regressions_passed": 7,
+      "baseline_regressions_failed_as_expected": 7,
+      "bounded_live_run": {
+        "reads": 400,
+        "writes": 40,
+        "rest_concurrency": 20,
+        "websockets": 16,
+        "unique_deliveries": 640,
+        "verified_file_bytes": 65536
+      },
+      "authority_negatives": "Outsider denial and post-logout REST/live-delivery denial passed.",
+      "scope": "Disposable SQLite/native-chat fixture; no authorization cache or pool enlargement, capacity certification or wide-area/provider/media claim."
+    },
+    "distribution_and_demo": {
+      "release_boundary_cases_passed": 9,
+      "actionlint_workflows_passed": 5,
+      "compose_immutable_pin_merge": "passed with synthetic public digests",
+      "nginx_capability_path_variants_passed": 20,
+      "real_static_nginx_browser_groups_passed": 6,
+      "scope": "Static website headers, route fences, demo reload erasure, account-storage isolation and narrow English/Swedish layouts passed. This local proof served built assets in Nginx. Completed multi-architecture build-only artifacts and the production rehearsal have their own separately recorded evidence.",
+      "standalone_offline_actual_browser_groups_passed": 12,
+      "final_ci_built_website_browser_groups_passed": 6
+    },
+    "additional_internal_review": {
+      "backend_owned_tls_passed": 14,
+      "retry_bootstrap_node_passed": 16,
+      "actual_jvm_passed": 2,
+      "shard_selector_passed": 6,
+      "slack_source_origin_api_passed": 2,
+      "slack_receipt_node_passed": 14,
+      "actual_matrix_event_receipt_cases_passed": 4,
+      "scope": "Overlapping targeted internal checks. Matrix SDK state-machine/receipt checks use synthetic crypto/transport and do not replace actual Rust browser evidence."
+    },
+    "account_request_races": {
+      "actual_chromium": "passed",
+      "delayed_auth_me_responses": 15,
+      "delay_ms": 800,
+      "scope": "Fresh final harness proof; production authentication/client runtime unchanged."
+    },
+    "production_rehearsal": {
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "passed_groups": 13,
+      "runtime_identical_to_final_source": false,
+      "topology": {
+        "environment": "Shared host; functional smoke",
+        "cpu_count": 4,
+        "memory_gib": 32,
+        "api_processes": 1,
+        "database": "PostgreSQL",
+        "worker": "Default worker",
+        "broker": "None"
+      },
+      "bounded_live_run": {
+        "reads": 400,
+        "writes": 40,
+        "websockets": 16,
+        "unique_deliveries": 640,
+        "verified_file_bytes": 65536,
+        "measured_seconds": 13.421,
+        "measured_rest_requests_per_second": 33.01,
+        "read_p95_ms": 680.94,
+        "write_p95_ms": 3536.28
+      },
+      "checks": [
+        "Production settings, PostgreSQL, Nginx, non-root API and default worker readiness",
+        "Built static assets and desktop/narrow native client UI",
+        "Current user signatures, logout, membership and workspace SSO revision fences",
+        "Exactly-once worker delivery and revoked-source cancellation",
+        "New 0.13 calendar subscription and encrypted Slack historical details/idempotency",
+        "Bounded REST/file/WebSocket delivery and outsider/post-logout denial",
+        "Authenticated backup seal and exact payload, wrong-key and tamper rejection",
+        "Authenticated cold restore retains new 0.13 data, ciphertext/files/membership and independent revocations",
+        "Existing restore target and corrupt archive rejected before target creation"
+      ],
+      "cleanup": "Owned rehearsal/restore resources and private backup material removed; the original four healthy services preserved.",
+      "limits": "Local installation/backup/restore functional smoke under the stated shared-host topology. Excludes Matrix cryptography, media, external providers and wide-area networks; not a production capacity or availability guarantee and not a public deployment.",
+      "backend_storage_and_native_wrapper_sources_unchanged": true,
+      "final_frontend_delta": "Two calendar UI files changed after this rehearsal. Final UI production build and actual calendar/SDK browser proofs are separate; the historical production rehearsal is not relabelled as a final-UI deployment."
+    },
+    "parameter_display_ids": {
+      "proof_rejections_passed": 3,
+      "update_rejections_passed": 5,
+      "inputs_and_assertions": "Identical; independent whole-file AST comparison changes only ids keywords.",
+      "scope": "Eight distinct rejection cases passed across two targeted runs. Explicit short IDs avoid multi-megabyte synthetic payloads in verbose case-ID lines; no generic failure-log scrubbing or cancelled-CI root cause is claimed."
+    },
+    "product_browser_tail": {
+      "distinct_scripts_verified": 41,
+      "original_batch_passed": 34,
+      "patched_harness_reruns_passed": 6,
+      "unchanged_meetings_turn_rerun_passed": 1,
+      "scope": "Per-script results across the original batch and targeted reruns, not one clean invocation of all 41 scripts. No product runtime changed. TURN was exercised in a managed UDP test environment; this does not assert that default CI establishes the same UDP path."
+    },
+    "final_ci_test_source_review": {
+      "reviewed_ci_test_files": 12,
+      "review_sha256": "4f9be7d8cce18aba42c771a75a71092cf3c3e410a04db71cc27e6bd373622e13",
+      "actionlint_version": "1.7.7",
+      "workflows_linted": 5,
+      "changed_python_files_compiled": 11,
+      "full_file_ast_equivalence_checks_passed": 2,
+      "scope": "This historical 14-file report retains 13 unchanged hashes. Its CI entry is superseded by the startup-retry review; the separate account-race/OIDC reviews cover two more paths. Unique final coverage remains sixteen sources: fourteen CI/test files and two UI files. No old workflow hash is claimed current.",
+      "previous_nine_file_review_sha256": "e0e4c86af76aabed9814976295d25d27a919f3b97e8a13f85440defd983c2c15",
+      "scoped_files": 14,
+      "sha256": "4f9be7d8cce18aba42c771a75a71092cf3c3e410a04db71cc27e6bd373622e13",
+      "reviewed_files": 14,
+      "reviewed_ui_files": 2,
+      "separately_reviewed_account_race_files": 1,
+      "original_assertion_expectation_ast_preservation_checks_passed": 3,
+      "minimal_calendar_product_file_delta_checks_passed": 2,
+      "separately_reviewed_oidc_mobile_files": 1,
+      "superseding_ci_workflow_review_sha256": "56c2d72c461b84ce031baf86579c5323448d1b193ebb619a1ae7f48e225ff500",
+      "current_effective_unique_source_files_with_supplements": 16
+    },
+    "offline_network_emulation_correction": {
+      "commit": "a332d421f269dde91097a76fd89e30cc677a1f78",
+      "chromium_major": 151,
+      "independent_internal_actual_browser_root_cause_reports": 2,
+      "reproduced_observation": "After actual service-worker/CacheStorage reload, navigator.onLine changed from false to true while real fetch still failed with TypeError. Identity, original token, controller, nonextractable AES-GCM key and encrypted rows remained intact.",
+      "correction": "Use native CDP Network.overrideNetworkState after actual reload while Playwright retains real offline traffic blocking. Assert offline navigator state, actual service-worker control and real failed fetch; restore native protocol and traffic state on reconnect. No navigator property patch or product runtime change.",
+      "actual_browser_groups_passed": {
+        "offline_library": 12,
+        "mobile_offline": 12
+      },
+      "source_sha256": {
+        "frontend/tests/offline-library-browser.py": "6a85b7c3d166b9f393287ff2f042d6ce506d4d4120b53d3fd0f50e3050180815",
+        "frontend/tests/mobile-offline-browser.py": "29738c7459458ce8b49cda422e672e25d34c96d623a4152baae704a45778e2fd"
+      },
+      "additional_negative": "An actual failed authority fetch while online hides retained history without purging encrypted copies; current access works again after the route is restored.",
+      "scope": "Both actual Chromium151 flows passed on the reviewed frozen hashes. Independent AST checks preserve every original assert/Playwright expectation and original result group. This addresses browser test emulation; it does not certify physical-network, phone or OS behavior or establish a complete new CI pass."
+    },
+    "calendar_selection_correction": {
+      "commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "product_files": 2,
+      "harness_files": 1,
+      "actual_chromium": "151.0.7922.34",
+      "groups_passed": 10,
+      "original_groups_preserved": 9,
+      "native_keyboard_regression": true,
+      "production_app_and_trusted_embed_build": "passed",
+      "frontend_dist_files": 75,
+      "frontend_dist_sha256": "4e91035685ef1acda36d0b4d0492952c0b38fe3e8ce8bf34c8024186c714efa0",
+      "scope": "Owned real API response delayed until panel loads, then released unchanged. The truthful localized empty option permits ordinary ArrowDown selection. Consent and authority gates are preserved."
+    },
+    "oidc_mobile_responsive_readiness_correction": {
+      "source_file": "frontend/tests/oidc-browser.py",
+      "reviewed_harness_sha256": "b6927a2038e14be7ce5e867003d8ed65ae76b383218fd9a0aa66b10d0793f5fa",
+      "independent_review_sha256": "610dfdee7240fc5ad94a85c7b81b93ee47f96a57d22abf5b56c86b3cdb45cc12",
+      "actual_chromium_major": 151,
+      "actual_browser_groups_passed": 12,
+      "all_original_authentication_assertions_and_groups_retained": true,
+      "product_runtime_edits": false,
+      "scope": "One comment and one Playwright expectation after 320px resize wait for the actual sidebar aria-expanded=false before unchanged account navigation. Baseline trace proves the stale visibility interleaving; no property mocks, sleeps, retries or relaxed authority. The earlier fourteen-file review plus separate account-race review retain their own scopes; this is one additional test-file review.",
+      "final_source_commit": "0927e8e258819250d63e27cf0b514e09227960e9"
+    },
+    "website_startup_retry_review": {
+      "review_sha256": "56c2d72c461b84ce031baf86579c5323448d1b193ebb619a1ae7f48e225ff500",
+      "reviewed_ci_sha256": "1b926c659c5757a419e671d473e237922f4753ebd0cf228c3c55c28ab59d2b26",
+      "workflows_linted": 5,
+      "owned_actual_tcp_cases_passed": 3,
+      "all_original_website_acceptance_commands_and_assertions_unchanged": true,
+      "product_runtime_edits": false,
+      "scope": "Supplement to the earlier CI-source review; earlier workflow hashes remain historical. Exact final-source CI must actually execute and pass the built-website six-group browser proof. A successful health retry alone is not website acceptance.",
+      "final_source_commit": "0927e8e258819250d63e27cf0b514e09227960e9"
+    }
+  },
+  "final_packed_sdk": {
+    "filename": "freecollab-components-0.13.0.tgz",
+    "sha256": "a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1",
+    "compatibility": "Matching 0.13.x API and trusted-client deployments",
+    "trusted_embed_actual_oidc_matrix_groups_passed": 21,
+    "same_installation_bilateral_connect_groups_passed": 13,
+    "scope": "The exact packed artifact and built trusted client were exercised. Same-installation Connect identity fixtures used current signed SSO sessions; independent-homeserver federation is covered separately. Registry publication is separate.",
+    "build_commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+    "final_local_pack_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+    "final_actual_runtime_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+    "frontend_dist_files": 75,
+    "frontend_dist_sha256": "4e91035685ef1acda36d0b4d0492952c0b38fe3e8ce8bf34c8024186c714efa0",
+    "checked_source_files": 511,
+    "source_hashes_match_final_git_blobs": true,
+    "source_and_assets_stable_during_both_proofs": true,
+    "final_github_build_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+    "final_github_build_run_id": 39748787738,
+    "downloaded_final_github_package_verified": true,
+    "compatible_final_source_commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "final_source_runtime_build_equivalence_review_sha256": "2f11a4e3f54588e77e06ee3347e9808320cdac14d7c2d7ee7d332d0cce2b7230"
+  },
+  "completed_github_checks": [
+    {
+      "run_id": 39735001623,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39735001623",
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "Android debug APK",
+          "conclusion": "success"
+        },
+        {
+          "name": "iOS simulator build",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop",
+          "conclusion": "skipped"
+        }
+      ],
+      "scope": "Historical baseline Android debug and unsigned iOS simulator compilation. Native wrapper/build sources are unchanged, but the final web UI has a separate two-file calendar fix. No customer signing, store delivery or physical-device acceptance."
+    },
+    {
+      "run_id": 39735408616,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39735408616",
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "status": "completed",
+      "conclusion": "success",
+      "publication": "skipped; build-only",
+      "artifact": {
+        "id": 12406791797,
+        "name": "freecollab-sdk-0.13.0",
+        "archive_bytes": 37277,
+        "archive_sha256": "548c3da49c7e3cb814df266dc9c2a6de3186791e6ebda258d3f153d799250c12",
+        "package_bytes": 36013,
+        "package_sha256": "a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1",
+        "release_manifest_sha256": "fcaec10e5341d1a1481ac692316c75c4bc2843598785070045f6fe6203ac6e3c"
+      },
+      "scope": "Historical build-only SDK artifact. Downloaded package bytes exactly match the canonical browser-tested package; SDK source is unchanged. Final web UI was rebuilt and separately exercised. No npm publication or registry availability claim."
+    },
+    {
+      "run_id": 39735118774,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39735118774",
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "Android debug APK",
+          "conclusion": "success"
+        },
+        {
+          "name": "iOS simulator build",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (ubuntu-latest)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (windows-latest)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (macos-latest)",
+          "conclusion": "success"
+        }
+      ],
+      "scope": "Historical all-five unsigned/debug platform build, including the Linux installed GUI fixture. Native wrapper/build sources are unchanged; final UI and new-source native builds retain separate identities. Customer signing, stores and physical-device acceptance are separate."
+    },
+    {
+      "run_id": 39735584630,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39735584630",
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "status": "completed",
+      "conclusion": "success",
+      "platforms": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "components": {
+        "backend": {
+          "image_digest": "sha256:675cf6f3b1092a73433ddfd836cd9a4e9817574cae919d89d901946a10202bec",
+          "artifact_id": 12407695437,
+          "artifact_bytes": 223327394,
+          "artifact_archive_sha256": "61830da3d44e4af3693a8a849f8a7974d645e1564e2409e67721ba03a4bc84e7"
+        },
+        "frontend": {
+          "image_digest": "sha256:ecf14735ccd4085c027e8757877928bc9203075a856dc58f82ba1fa743ae3b7a",
+          "artifact_id": 12407368900,
+          "artifact_bytes": 81909922,
+          "artifact_archive_sha256": "17c5c0d47fa2ef7a0eeb06bb2c6a9695c4d4193e2ee3555163369799cdff5d2d"
+        },
+        "website": {
+          "image_digest": "sha256:8f18bb35e4e40ec0e67c965c8471f003a2c23e94bd32c6b8ade6b3025b8ddc76",
+          "artifact_id": 12407307433,
+          "artifact_bytes": 60510370,
+          "artifact_archive_sha256": "5753f94b9ad60c8718afab25cc4c38d3801947610b0e1d405c051d53dc9f46c0"
+        }
+      },
+      "release_metadata": {
+        "artifact_id": 12407676093,
+        "artifact_archive_sha256": "96224cca7cc61d9e7f1a55cbad8c904e552f39019d9305460d6ea3493a8d1e9e",
+        "manifest_sha256": "eea9f5855de78165ea8035bcb5a8344cf867aad00a21cfa71d3a0e7c9def0db0",
+        "publication": "local-oci",
+        "not_published_marker": true,
+        "registry_installation_pins_issued": false
+      },
+      "scope": "Historical three-component multi-architecture OCI build with SBOM/provenance and metadata. Small metadata artifacts were downloaded and checked; the large OCI digests here are GitHub metadata, not independent downloads. These images precede the calendar UI fix and are not final release assets or registry publication."
+    },
+    {
+      "run_id": 39744227213,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39744227213",
+      "commit": "a332d421f269dde91097a76fd89e30cc677a1f78",
+      "status": "completed",
+      "conclusion": "success",
+      "publication": "local-oci; historical build only",
+      "components": 3,
+      "architectures": [
+        "linux/amd64",
+        "linux/arm64"
+      ],
+      "signed_json_subject_hashes_verified": 4,
+      "archive_stored_blobs_verified": 96,
+      "scope": "Exact source/workflow/hosted-runner GitHub attestation verified, with referenced blobs/layers/labels/SBOM/provenance. These historical images precede the real calendar UI fix and are not final release assets."
+    },
+    {
+      "run_id": 39748787738,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39748787738",
+      "commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "status": "completed",
+      "conclusion": "success",
+      "sdk_cases_passed": 26,
+      "publication": "skipped; build-only",
+      "artifact": {
+        "id": 12412227471,
+        "reported_artifact_archive_sha256": "3e869472b62354de8e9d323f8b3082858d4eded43b6539ff7f56f50fe5eccdea",
+        "package_bytes": 36013,
+        "package_sha256": "a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1",
+        "package_verified_after_download": true,
+        "checks": {
+          "sha256_matches": true,
+          "sha1_matches": true,
+          "sha512_integrity_matches": true,
+          "size_exact": true,
+          "canonical_hash_exact": true,
+          "manifest_file_list_exact": true,
+          "public_modes_all_644": true
+        }
+      },
+      "scope": "Final published source SDK build. The downloaded tarball matches canonical SHA256, manifest SHA1/SHA512 integrity, exact size/file list and public644 modes. This is the same package used in final Embed21/Connect13 actual browser proofs. npm publication was skipped."
+    },
+    {
+      "run_id": 39748783801,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39748783801",
+      "commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "status": "completed",
+      "conclusion": "success",
+      "jobs": [
+        {
+          "name": "iOS simulator build",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (windows-latest)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (ubuntu-latest)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Desktop (macos-latest)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Android debug APK",
+          "conclusion": "success"
+        }
+      ],
+      "platform_node_cases_passed_each": 5,
+      "linux_actual_installed_electron_checks_passed": 14,
+      "linux_os_sandbox_exercised": true,
+      "artifacts": [
+        {
+          "id": 12413096270,
+          "name": "freecollab-desktop-macOS",
+          "archive_bytes": 238704361,
+          "reported_archive_digest": "sha256:6cef63601e9dfe2d6bb1924c557dbc5d077add4c6dcc015a7b5fe3300febefe4"
+        },
+        {
+          "id": 12412966040,
+          "name": "freecollab-desktop-Windows",
+          "archive_bytes": 112189051,
+          "reported_archive_digest": "sha256:85a964259cb60b9bfabfc29bddfd76d9ef53327b941576a6aa657ebec0e25ee3"
+        },
+        {
+          "id": 12412766521,
+          "name": "freecollab-desktop-Linux",
+          "archive_bytes": 226164658,
+          "reported_archive_digest": "sha256:82df8dabf65ba36ee64db3ae0515816c1e2313714552cfdd47d65a020e8c53d5"
+        },
+        {
+          "id": 12412398176,
+          "name": "freecollab-ios-simulator",
+          "archive_bytes": 23368875,
+          "reported_archive_digest": "sha256:1518856aec1b9bf41950c8634e82746eab1fb1f541b2270275ef802f9a15b52a"
+        },
+        {
+          "id": 12411839298,
+          "name": "freecollab-android-debug",
+          "archive_bytes": 34211129,
+          "reported_archive_digest": "sha256:1922a960ebae392de1f57b44cbc7b73c552d3980ea67b5bad50e7c701ad28b44"
+        }
+      ],
+      "artifact_digest_scope": "Native archive digests are GitHub artifact metadata, not independent download/rehash verification.",
+      "scope": "All five exact-source platform builds passed: Android debug, unsigned iOS simulator and unsigned Linux/Windows/macOS packages. The installed Linux GUI and sandbox were exercised. Mac/Windows GUI runtime, physical phones, customer signing/store acceptance and live deployed UI were not verified by these builds."
+    },
+    {
+      "run_id": 39748780136,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39748780136",
+      "commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "status": "completed",
+      "conclusion": "success",
+      "publication": "local-oci; not published",
+      "components": {
+        "backend": {
+          "archive": "freecollab-backend-0.13.0.oci.tar",
+          "archive_sha256": "sha256:503a5ce4b209ef6bbf603050533cb543499bba532909a8b6925414d3707e2307",
+          "archive_bytes": 223328256,
+          "oci_index_digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+          "all_blob_count": 28,
+          "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+          "architectures": [
+            "linux/amd64",
+            "linux/arm64"
+          ]
+        },
+        "frontend": {
+          "archive": "freecollab-frontend-0.13.0.oci.tar",
+          "archive_sha256": "sha256:3d34b22362bbb25e915c3c7505ff85a91db8bb4aa45f950bfadbfccc4111a585",
+          "archive_bytes": 81910272,
+          "oci_index_digest": "sha256:01474c439179cf78609d0f2032dcda1f093f7642eaa00cc4ac9a26b8c3a25588",
+          "all_blob_count": 34,
+          "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+          "architectures": [
+            "linux/amd64",
+            "linux/arm64"
+          ]
+        },
+        "website": {
+          "archive": "freecollab-website-0.13.0.oci.tar",
+          "archive_sha256": "sha256:fdac01932adb464b6120ffa7ce344659ee76d61f693611285878159671a638a8",
+          "archive_bytes": 60510208,
+          "oci_index_digest": "sha256:fffdaf90f07f472fdee660e7d2b2020884c0e436a98a57649b89ba57692285fb",
+          "all_blob_count": 34,
+          "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+          "architectures": [
+            "linux/amd64",
+            "linux/arm64"
+          ]
+        }
+      },
+      "signed_json_subject_hashes_verified": 4,
+      "archive_stored_blobs_verified": 96,
+      "github_repository_workflow_exact_source_and_hosted_runner_attestation_verified": true,
+      "on_disk_attestation_reverified_with_independently_verified_trust_roots": true,
+      "release_manifest_sha256": "dbbbd03e016d49f51adbe81886f77d9a60643645af89815fb80c282cc8a640ae",
+      "archive_verification_sha256": "2f4dc138b3487e622e4d2aa02f31c59b0e3016460f1b2f52938b90458d6a3640",
+      "prepared_public_asset_count": 17,
+      "docker_image_load_performed": false,
+      "registry_publication_performed": false,
+      "public_release_publication_performed": false,
+      "scope": "All three exact-source dual-architecture archives were downloaded and verified through signed metadata, OCI indexes, all96 stored blobs, runtime layer diff IDs, source labels and embedded SBOM/provenance. Official GitHub attestation verification establishes the repository/workflow/exact source/hosted runner identity. This is build and artifact verification, not deployment, full product CI success or public release publication."
+    },
+    {
+      "commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+      "status": "completed",
+      "conclusion": "success",
+      "run_id": 39755974580,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39755974580",
+      "run_attempt": 1,
+      "workflow_rerun": false,
+      "cancelled": false,
+      "jobs_successful": 8,
+      "backend": "success",
+      "backend_passed": 2038,
+      "backend_failed": 0,
+      "backend_skipped": 0,
+      "backend_shards": [
+        557,
+        532,
+        425,
+        524
+      ],
+      "frontend": "success",
+      "frontend_client_passed": 274,
+      "sdk_passed": 26,
+      "secure": "success",
+      "secure_verify_steps_passed": 12,
+      "product": "success",
+      "product_commands_passed": 53,
+      "docker": "success",
+      "ci_images_built": 3,
+      "built_website_browser_groups_passed": 6,
+      "counted_as_full_ci_pass": true,
+      "scope": "Actual final-source complete workflow, eight successful jobs on its first attempt. The 53 product commands and 12 secure verification steps are not unique test-case counts. Three CI image builds and actual built-website acceptance succeeded; downloadable dual-architecture release images retain their separately verified cdec build identity.",
+      "jobs": [
+        {
+          "name": "Product browser and PostgreSQL workflow",
+          "conclusion": "success"
+        },
+        {
+          "name": "Real client encryption and recovery",
+          "conclusion": "success"
+        },
+        {
+          "name": "Backend Tests (shard 1/4)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Backend Tests (shard 2/4)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Backend Tests (shard 3/4)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Frontend Tests",
+          "conclusion": "success"
+        },
+        {
+          "name": "Backend Tests (shard 4/4)",
+          "conclusion": "success"
+        },
+        {
+          "name": "Docker Build",
+          "conclusion": "success"
+        }
+      ],
+      "website_acceptance_artifact": {
+        "artifact_id": 12415579511,
+        "artifact_name": "public-website-acceptance",
+        "artifact_archive_sha256": "501baaeb801826ac2302edbd5d4e642089397f87212c28c4d95e889a5b287b80",
+        "artifact_archive_digest_matches_github_metadata": true,
+        "report_sha256": "c671e684f50cc44f1fa59216ec51a318c82eb8bc569e19296668e925b2cd0937",
+        "groups_passed": 6,
+        "checked_source_files": 9,
+        "all_source_hashes_match_exact_final_commit": true,
+        "checks": {
+          "actual_static_server_headers_and_readiness": true,
+          "static_origin_refuses_account_routes_and_worker": true,
+          "actual_local_demo_messages_tasks_documents_and_customer_typeface": true,
+          "demo_mutations_disappear_on_reload": true,
+          "documentation_swedish_and_390_320px_layout": true,
+          "existing_credentials_unchanged_no_account_provider_requests_or_service_worker": true
+        },
+        "scope": "Downloaded actual built static-website browser evidence, including headers/readiness, account-route refusal, sample interactions/reset, Swedish 320/390px and absence of account/provider/worker use. This is not public Railway/TLS or a live provider deployment."
+      }
+    }
+  ],
+  "source_binding_notes": [
+    "The initial 43-file runtime/workflow review remains baseline a74. The later 14-file report retains 13 unchanged current hashes; its CI-workflow entry is superseded by the independently reviewed startup-retry supplement. Together with separate account-race and OIDC reviews, the unique final scope is 16 files: fourteen CI/test files and two calendar UI files. Historical hashes are preserved, not substituted.",
+    "The only product source changes after the feature baseline are one empty calendar-event option and its Swedish translation. Actual delayed native API response plus ordinary keyboard input reproduced the old selection trap and proved its correction. Authorization, approval, revision and queue logic are unchanged.",
+    "Actual native/SDK/dual-architecture OCI release builds and packed Embed21/Connect13 proofs retain cdec identities. Final 092 changes only reviewed OIDC/CI tests, leaving product/build-context sources identical. Its own complete first-attempt eight-job CI passed, including 2038 backend cases, 53 product commands and built-website six-group browser acceptance. Earlier failed workflows retain their failures.",
+    "Feature scopes and test groups overlap and are not a unique whole-suite sum. Collection is not execution. Internal review is not an external security audit.",
+    "The release source archive and annotated-tag Git bundle bind final 092. Downloadable SDK/native/OCI artifacts retain actual cdec build identity and verified equivalent product/build inputs. The offline HTML is a separate local sample UI package. No signed metadata was rewritten."
+  ],
+  "customer_acceptance_limits": [
+    "Customers supply and control their own identity/OAuth applications, provider tenants, APNs/Firebase identities, LiveKit configuration and release-signing/store identities; no such customer credentials are included.",
+    "Physical iOS/Android background, lock-screen, audio routing and live Apple/Firebase push delivery require device acceptance; simulator/debug builds do not establish those behaviors.",
+    "Google/Microsoft protocol fixtures do not certify live-vendor conditional actions, recipient email delivery or a customer SSO/provider rollout. Supported recurrence is finite and bounded; unsupported cases fail explicitly.",
+    "Removed participants may retain previously decrypted local history. Revocation denies current server authority and new event access; it is not remote erasure of cached plaintext or exported copies.",
+    "Public website/Railway deployment, registry/store publication, signed distribution, representative capacity testing and off-host backup/restore acceptance are separate.",
+    "No external security audit, independent certification or production capacity guarantee is claimed."
+  ],
+  "documentation": [
+    "https://github.com/freecollab-eu/freecollab/blob/0927e8e258819250d63e27cf0b514e09227960e9/docs/PRODUCT_013.md",
+    "https://github.com/freecollab-eu/freecollab/blob/0927e8e258819250d63e27cf0b514e09227960e9/docs/VALIDATION.md"
+  ],
+  "registry_publication": {
+    "npm": "No npm publication is performed or planned for this release; install the exact SDK tarball directly.",
+    "ghcr": "No GHCR publication is performed or planned for this release; OCI archives and verified signed metadata are intended for GitHub release downloads."
+  },
+  "build_provenance": {
+    "baseline_commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+    "final_source_commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "change": "Fourteen CI/test files and two calendar UI files differ from the feature baseline. Relative to actual cdec build artifacts, final 092 changes only OIDC test readiness and CI startup retry/diagnostics. Product/runtime/native/SDK/dependencies/Docker/release-build/Compose sources match; all signed build identities retain cdec.",
+    "baseline_evidence_retained": [
+      "automatic native build",
+      "SDK build-only artifact",
+      "container build-only workflow",
+      "production rehearsal source"
+    ],
+    "intermediate_commit": "4fa5f00b74b7a88892c7cb1bbb8b075603a04ea3",
+    "ci_test_changed_file_count": 14,
+    "previous_source_commit": "1136944df54c4690576d87d946711ec8a8e9434b",
+    "product_ui_changed_file_count": 2,
+    "successful_build_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+    "final_test_only_source_equivalence": {
+      "result": "PASS",
+      "tracked_files_each": 1030,
+      "identical_files": 1028,
+      "changed_files": [
+        ".github/workflows/ci.yml",
+        "frontend/tests/oidc-browser.py"
+      ],
+      "review_sha256": "2f11a4e3f54588e77e06ee3347e9808320cdac14d7c2d7ee7d332d0cce2b7230"
+    }
+  },
+  "superseded_ci": [
+    {
+      "run_id": 39735001574,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39735001574",
+      "commit": "a74e7da7e2b7cc02fb1dd571737e557bd109592c",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "counted_as_full_ci_pass": false,
+      "note": "Superseded. A cancelled shard had no uploaded diagnostic logs; no cause is inferred from the missing diagnostics."
+    },
+    {
+      "run_id": 39736111021,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39736111021",
+      "commit": "4fa5f00b74b7a88892c7cb1bbb8b075603a04ea3",
+      "status": "completed",
+      "conclusion": "cancelled",
+      "counted_as_full_ci_pass": false,
+      "note": "Superseded. A cancelled shard had no uploaded diagnostic logs; no cause is inferred from the missing diagnostics."
+    },
+    {
+      "run_id": 39740783291,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39740783291",
+      "commit": "703e0aca9aeda8586087bb5bade6683579484307",
+      "status": "completed",
+      "conclusion": "failure",
+      "counted_as_full_ci_pass": false,
+      "completed_job_evidence": {
+        "run_id": 39740783291,
+        "commit": "703e0aca9aeda8586087bb5bade6683579484307",
+        "all_backend_cases_executed": true,
+        "backend_passed": 2038,
+        "backend_failed": 0,
+        "backend_skipped": 0,
+        "shards": [
+          557,
+          532,
+          425,
+          524
+        ],
+        "shard_3_seconds": 513.95,
+        "backend_runner_image": "ubuntu-24.04",
+        "frontend": "success",
+        "workflow_conclusion": "failure",
+        "status": "completed",
+        "product": "failure",
+        "product_failure": {
+          "area": "offline-library reload",
+          "root_cause": "Reproduced Chromium151 test-emulation state mismatch: transport remained offline while navigator.onLine reset true after an actual service-worker reload.",
+          "classification": "Identified by two independent internal actual-browser reports; corrected only in two harnesses, with no product runtime change."
+        },
+        "secure": "success",
+        "docker": "skipped"
+      },
+      "note": "All 2038 backend cases, frontend and secure-client jobs passed; product browser failed and Docker Build was skipped. This actual failed workflow is preserved and is not treated as a full CI pass."
+    },
+    {
+      "run_id": 39744228987,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39744228987",
+      "commit": "a332d421f269dde91097a76fd89e30cc677a1f78",
+      "status": "completed",
+      "conclusion": "failure",
+      "counted_as_full_ci_pass": false,
+      "backend_passed": 2038,
+      "backend_failed": 0,
+      "backend_skipped": 0,
+      "frontend_client_passed": 274,
+      "sdk_passed": 26,
+      "secure_verify_steps_passed": 12,
+      "product": "failure",
+      "product_failure": "Calendar review disabled after late event loading; the actual native-keyboard selection defect was subsequently reproduced and corrected by the two-file UI change in final published source. The two offline proofs were not reached in this CI run.",
+      "docker": "skipped",
+      "cancelled": false
+    },
+    {
+      "commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "status": "completed",
+      "conclusion": "failure",
+      "run_id": 39748695013,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39748695013",
+      "backend": "success",
+      "backend_passed": 2038,
+      "backend_failed": 0,
+      "backend_skipped": 0,
+      "frontend": "success",
+      "frontend_client_passed": 274,
+      "sdk_passed": 26,
+      "secure": "success",
+      "secure_verify_steps_passed": 12,
+      "product": "failure",
+      "product_failure": {
+        "area": "OIDC mobile account settings",
+        "observed_failure": "Account settings control not visible during mobile navigation.",
+        "root_cause_status": "Confirmed test synchronization race: the mobile authenticated helper read visible=true before real media effects closed the sidebar 11.2ms later. A single readiness expectation preserves all auth checks; actual Chromium 151 HTTPS/OIDC proof passed 12/12. The final test-only descendant still needs its own full CI."
+      },
+      "docker": "skipped",
+      "counted_as_full_ci_pass": false,
+      "scope": "Actual terminal failed workflow. Backend, frontend and secure evidence remains valid for this source; no complete CI success is claimed. A subsequent reviewed correction requires its own exact-source full CI.",
+      "note": "Superseded after the proven responsive test-synchronization race was corrected in the test-only 1136944 descendant. This actual failed workflow remains a failure; final-head full CI is separate."
+    },
+    {
+      "commit": "1136944df54c4690576d87d946711ec8a8e9434b",
+      "status": "completed",
+      "run_id": 39751571510,
+      "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39751571510",
+      "backend": "success",
+      "frontend": "success",
+      "secure": "success",
+      "product": "success",
+      "docker": "failure",
+      "counted_as_full_ci_pass": false,
+      "scope": "Both actual attempts failed at website container readiness before browser acceptance. Backend 2038, frontend 274/SDK26, secure 12 and all 53 product commands passed, and all three image builds passed. None of this is a terminal full-CI pass. No third blind retry is planned; a reviewed CI-only startup fix needs new-source CI.",
+      "backend_passed": 2038,
+      "backend_failed": 0,
+      "backend_skipped": 0,
+      "frontend_client_passed": 274,
+      "sdk_passed": 26,
+      "secure_verify_steps_passed": 12,
+      "conclusion": "failure",
+      "product_commands_passed": 53,
+      "attempts": [
+        {
+          "attempt": 1,
+          "conclusion": "failure",
+          "docker": "failure",
+          "failure": "Startup health curl exited56 on connection reset before website browser acceptance.",
+          "website_acceptance_executed": false
+        },
+        {
+          "attempt": 2,
+          "conclusion": "failure",
+          "rerun_scope": "Only the failed Docker job; successful jobs carried forward.",
+          "docker": "failure",
+          "failure": "Startup health curl again exited56 before website browser acceptance.",
+          "website_acceptance_executed": false
+        }
+      ],
+      "note": "Superseded by reviewed bounded website-startup retry/diagnostics in 0927e8e. Both 1136944 attempts remain failures; successful jobs were carried forward in the Docker-only second attempt. Browser website acceptance was never reached in either failed startup."
+    }
+  ],
+  "final_ci_progress": {
+    "commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "status": "completed",
+    "conclusion": "success",
+    "run_id": 39755974580,
+    "url": "https://github.com/freecollab-eu/freecollab/actions/runs/39755974580",
+    "run_attempt": 1,
+    "workflow_rerun": false,
+    "cancelled": false,
+    "jobs_successful": 8,
+    "backend": "success",
+    "backend_passed": 2038,
+    "backend_failed": 0,
+    "backend_skipped": 0,
+    "backend_shards": [
+      557,
+      532,
+      425,
+      524
+    ],
+    "frontend": "success",
+    "frontend_client_passed": 274,
+    "sdk_passed": 26,
+    "secure": "success",
+    "secure_verify_steps_passed": 12,
+    "product": "success",
+    "product_commands_passed": 53,
+    "docker": "success",
+    "ci_images_built": 3,
+    "built_website_browser_groups_passed": 6,
+    "counted_as_full_ci_pass": true,
+    "scope": "Actual final-source complete workflow, eight successful jobs on its first attempt. The 53 product commands and 12 secure verification steps are not unique test-case counts. Three CI image builds and actual built-website acceptance succeeded; downloadable dual-architecture release images retain their separately verified cdec build identity."
+  },
+  "artifact_distribution_plan": {
+    "channel": "Public GitHub release assets",
+    "status": "prepared_versioned_github_release_asset_set",
+    "assets": [
+      "exact browser-tested SDK tarball",
+      "multi-architecture OCI archives",
+      "verified signed build metadata",
+      "final source archives and checksums",
+      "single-file actual product demo HTML with embedded licenses"
+    ],
+    "npm_publication": false,
+    "ghcr_publication": false,
+    "scope": "Prepared 24-asset release set with exact source/tag/archive/bundle and full CI verified; final global SHA256SUMS enumerates the published file bytes. OCI/SDK metadata preserves original cdec build identity. No npm/GHCR/store publication or hosted deployment is inferred.",
+    "expected_final_public_asset_count": 24,
+    "expected_asset_groups": {
+      "verified_oci_assets": 17,
+      "final_source_archive_and_git_bundle": 2,
+      "canonical_sdk_tarball_and_original_manifest": 2,
+      "final_validation_json": 1,
+      "global_checksums": 1,
+      "standalone_offline_demo_html": 1
+    },
+    "final_source_validation_binding": "Final source 0927e8e258819250d63e27cf0b514e09227960e9 is published; exact tree/blob checks show only the two reviewed CI/test paths differ from cdec. VALIDATION.json binds final source separately from actual build identities. Original signed OCI/SDK metadata is unchanged.",
+    "cdec_runtime_build_reuse": "Verified 1030 tracked paths, 1028 identical blobs, and only reviewed CI/browser-test changes. The frontend test is ignored by both frontend Docker contexts, the CI workflow is outside image contexts, and backend context is unchanged. Product/native/SDK/dependency/build/release-workflow/Compose files match; the exact final-head full CI has now passed."
+  },
+  "hosting": {
+    "website": "Static website configuration is prepared on the existing Railway web service; no live website deployment has started. GitHub source reconnection remains required.",
+    "railway_observations": [
+      {
+        "observed_at": "2026-10-22T08:12:36.978661Z",
+        "status": "provider_blocked",
+        "historical": true
+      },
+      {
+        "observed_at": "2026-10-22T08:38:51Z",
+        "status": "provider_blocked",
+        "historical": true,
+        "provider_message": "Deploys have been paused due to an upstream issue",
+        "provider_error_class": "BAD_USER_INPUT",
+        "access_validated": true,
+        "service_creation_succeeded": false,
+        "deployment_started": false,
+        "service_inventory_unchanged": true,
+        "dns_changed": false
+      }
+    ],
+    "scope": "Dated provider observations and saved website configuration, not live deployment acceptance. Source-trigger authorization still requires owner reconnection. No private project/service identifiers or credentials are included; Pages activation is not a release requirement.",
+    "provider_status_latest": {
+      "provider_update_time": "2026-10-22T09:28Z",
+      "operator_checked_at": "2026-10-22T09:29:59Z",
+      "reported_state": "Provider incident update still had not enabled Hobby deployments; reported build failures were increasing.",
+      "next_provider_update_expected": "2026-10-22T10:15Z",
+      "new_service_or_deployment_actions_performed": false,
+      "dns_changed": false
+    },
+    "railway_current": {
+      "observed_at": "2026-10-22T09:50:07.871076Z",
+      "requested_repository": "freecollab-eu/freecollab",
+      "requested_branch": "main",
+      "existing_website_configuration_saved_and_readback_verified": true,
+      "root_directory": "/frontend",
+      "dockerfile_path": "website/Dockerfile",
+      "healthcheck_path": "/healthz",
+      "healthcheck_timeout_seconds": 120,
+      "replicas": 1,
+      "root_config_file": null,
+      "actual_github_trigger_authorized_for_requested_repository": false,
+      "wait_for_ci_enabled": false,
+      "owner_action": "Reconnect the Railway GitHub source to the requested public repository/main and enable Wait for CI.",
+      "new_service_creation": "Still provider-paused; existing website configuration was updated instead.",
+      "deployment_started": false,
+      "active_live_website_deployment": false,
+      "api_and_database_configuration_unchanged": true,
+      "deleted_services": 0,
+      "dns_changed": false
+    },
+    "downloadable_preview": {
+      "url": "https://github.com/freecollab-eu/freecollab/archive/refs/heads/demo-preview.zip",
+      "preview_commit": "da010ce4c8b4767d093e8c423e9abfb45d0309c5",
+      "anonymous_download_verified": true,
+      "zip_bytes": 869142,
+      "zip_sha256": "1a3086801165c1a38b270e68c4a0539a0c7249a101fa548494ab80e9c93f6c3e",
+      "regular_files": 4,
+      "entry_file": "index.html",
+      "index_html_sha256": "27789faff8b980675705bd0a81841e64a43dffc539e074f5013ed0b99912ce01",
+      "scope": "Download/unzip/open the real sample preview without an account or installation. Separate orphan preview branch; no core/API deployment or product-main change. No Pages site was created and no Pages action is required."
+    }
+  },
+  "final_source_archive_preparation": {
+    "filename": "freecollab-0.13.0-source.tar.gz",
+    "commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "bytes": 2981557,
+    "sha256": "b390c421c98fd9fcec87f6701df04d57346c033a17de3eb313202336b390d6e0",
+    "tracked_files_verified_against_final_git_bytes": 1030,
+    "prepared_and_verified_by_release_owner": true,
+    "scope": "Final 092 source archive and every tracked file byte are verified. The annotated tag, clean tagged Git bundle and complete exact-source CI are verified separately in this record. Final global checksums describe the assembled public release files."
+  },
+  "standalone_offline_demo": {
+    "filename": "freecollab-demo-0.13.0.html",
+    "bytes": 1529904,
+    "sha256": "27789faff8b980675705bd0a81841e64a43dffc539e074f5013ed0b99912ce01",
+    "packaged_version": "0.13.0",
+    "product_source_commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "unchanged_current_product_source_files_verified": 56,
+    "actual_file_origin_offline_browser_groups_passed": 12,
+    "internal_static_integrity_review": "PASS",
+    "independently_rehashed_by_release_reviewer": true,
+    "source_modules_match_final_git": true,
+    "external_runtime_imports": 0,
+    "separate_assets": 0,
+    "embedded_font_resources": 25,
+    "actual_http_requests": 0,
+    "actual_workers": 0,
+    "actual_service_workers": 0,
+    "actual_account_storage_keys": 0,
+    "software_and_font_license_notices_verbatim": 9,
+    "language_and_offline_notice": "English/Swedish wrapper controls; actual Swedish product catalog preserved.",
+    "csp": "default-src none; connect-src none; worker-src none; packaged inline scripts/styles and embedded data fonts permitted; no unsafe-eval.",
+    "scope": "Locally packaged actual current Demo.tsx sample showroom, opened as a single offline file in Chromium 151; this is separate from official OCI builds. Sample messages/tasks/documents/appearance are memory-only and reset on reload. No account/API/backend/provider/native/Matrix/E2EE behavior is established by this preview; 390px viewport coverage is not all browsers/OS file-opening acceptance."
+  },
+  "final_source_git_bundle": {
+    "filename": "freecollab-0.13.0-main.bundle",
+    "commit": "0927e8e258819250d63e27cf0b514e09227960e9",
+    "bytes": 3309573,
+    "sha256": "a6509c152771ac9b82ce68c1b2b3a980aa2843e08d4c0a98a638d6f769b4b528",
+    "annotated_tag": "v0.13.0",
+    "clean_clone_tracked_file_bytes_verified": 1030,
+    "prepared_and_verified_by_release_owner": true
+  },
+  "unsigned_oci_installation_guide": {
+    "filename": "OCI_INSTALL.md",
+    "sha256": "7b80d2836588d4ce46acbe7dcadaeccd6d6220b4b77436719132e88f59b34ab7",
+    "oci_checksums_sha256": "72ce903fb0c00ae9f7804b64a5d216d976fe8a91b9340fd87ce5ce2d33a164c0",
+    "scope": "Explains final 092 source compatibility with actual cdec images. Both changed CI/test paths are excluded from image inputs. Original OCI archives and all four signed metadata subjects are unchanged; no byte-identical rebuild promise."
+  },
+  "validation_record_scope": "Prepared after complete final-source CI and annotated tagging, before GitHub release publication. This record validates source/build/artifact identity and executed checks; current download availability follows the release page."
+}

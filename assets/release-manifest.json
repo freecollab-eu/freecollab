@@ -1,0 +1,26 @@
+{
+  "format": "freecollab-release-v1",
+  "version": "0.13.0",
+  "repository": "freecollab-eu/freecollab",
+  "sourceCommit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+  "publication": "local-oci",
+  "sourceURL": "https://github.com/freecollab-eu/freecollab/commit/cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+  "createdAt": "2026-10-22T08:48:04.912201+00:00",
+  "images": {
+    "backend": {
+      "name": "ghcr.io/freecollab-eu/freecollab-backend",
+      "digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+      "reference": "ghcr.io/freecollab-eu/freecollab-backend@sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d"
+    },
+    "frontend": {
+      "name": "ghcr.io/freecollab-eu/freecollab-frontend",
+      "digest": "sha256:01474c439179cf78609d0f2032dcda1f093f7642eaa00cc4ac9a26b8c3a25588",
+      "reference": "ghcr.io/freecollab-eu/freecollab-frontend@sha256:01474c439179cf78609d0f2032dcda1f093f7642eaa00cc4ac9a26b8c3a25588"
+    },
+    "website": {
+      "name": "ghcr.io/freecollab-eu/freecollab-website",
+      "digest": "sha256:fffdaf90f07f472fdee660e7d2b2020884c0e436a98a57649b89ba57692285fb",
+      "reference": "ghcr.io/freecollab-eu/freecollab-website@sha256:fffdaf90f07f472fdee660e7d2b2020884c0e436a98a57649b89ba57692285fb"
+    }
+  }
+}

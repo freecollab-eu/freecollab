@@ -1,0 +1,99 @@
+{
+  "version": "0.13.0",
+  "sourceCommit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+  "release_manifest_sha256": "sha256:dbbbd03e016d49f51adbe81886f77d9a60643645af89815fb80c282cc8a640ae",
+  "publisher_identity": "Not established by this helper; independently verify the GitHub attestation of release-manifest.json first.",
+  "scope": "Original archive byte verification only; no extraction, image load, daemon mutation or registry publication.",
+  "images": {
+    "backend": {
+      "archive": "freecollab-backend-0.13.0.oci.tar",
+      "archive_sha256": "sha256:503a5ce4b209ef6bbf603050533cb543499bba532909a8b6925414d3707e2307",
+      "archive_bytes": 223328256,
+      "oci_index_digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+      "all_blob_count": 28,
+      "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+      "known_private_runtime_configuration_data_and_nginx_log_paths_empty": true,
+      "top_level_reference_names": [
+        "sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+        "v0.13.0"
+      ],
+      "source_for_skopeo": "oci-archive:freecollab-backend-0.13.0.oci.tar:sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "platforms": {
+        "amd64": {
+          "runtime_manifest_digest": "sha256:2dcf97956607c80ef37fb163a7bb81f7b77a7c416170f002e24a567b3a2c7a5a",
+          "local_image_config_id": "sha256:3dc001e78e68818ea8e3f7bbe5a68de02ff0bc4cd62ce7e56ed679f96f4866e3",
+          "runtime_layer_count": 9,
+          "verified_uncompressed_layer_bytes": 310912000,
+          "embedded_slsa_and_spdx_present": true
+        },
+        "arm64": {
+          "runtime_manifest_digest": "sha256:8519d7f8728536b83ca36a406cefbff745aa46a2437bd8698ada920facfd6bb1",
+          "local_image_config_id": "sha256:aa03858f3390eb5ea0d34778c6b8c47e79344055e275dd319c63227625c4002d",
+          "runtime_layer_count": 9,
+          "verified_uncompressed_layer_bytes": 343514624,
+          "embedded_slsa_and_spdx_present": true
+        }
+      }
+    },
+    "frontend": {
+      "archive": "freecollab-frontend-0.13.0.oci.tar",
+      "archive_sha256": "sha256:3d34b22362bbb25e915c3c7505ff85a91db8bb4aa45f950bfadbfccc4111a585",
+      "archive_bytes": 81910272,
+      "oci_index_digest": "sha256:01474c439179cf78609d0f2032dcda1f093f7642eaa00cc4ac9a26b8c3a25588",
+      "all_blob_count": 34,
+      "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+      "known_private_runtime_configuration_data_and_nginx_log_paths_empty": true,
+      "top_level_reference_names": [
+        "sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+        "v0.13.0"
+      ],
+      "source_for_skopeo": "oci-archive:freecollab-frontend-0.13.0.oci.tar:sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "platforms": {
+        "amd64": {
+          "runtime_manifest_digest": "sha256:5406e0ccd279261030231de17df90042f4ce165336e24fd02acd78c764a60710",
+          "local_image_config_id": "sha256:32e9609c39d8e7704d3b904452987ca49cc694fefc02f290f7e2532691c18550",
+          "runtime_layer_count": 11,
+          "verified_uncompressed_layer_bytes": 114158080,
+          "embedded_slsa_and_spdx_present": true
+        },
+        "arm64": {
+          "runtime_manifest_digest": "sha256:a267727657c1efaf71529f0806b206ed96cf7aa3a5780312e27ab1a2c6ba6a88",
+          "local_image_config_id": "sha256:02fd6442336eb751f4b561ec6929a92c884b4ad44f9ca9eccb1757f134f3d9cc",
+          "runtime_layer_count": 11,
+          "verified_uncompressed_layer_bytes": 113492480,
+          "embedded_slsa_and_spdx_present": true
+        }
+      }
+    },
+    "website": {
+      "archive": "freecollab-website-0.13.0.oci.tar",
+      "archive_sha256": "sha256:fdac01932adb464b6120ffa7ce344659ee76d61f693611285878159671a638a8",
+      "archive_bytes": 60510208,
+      "oci_index_digest": "sha256:fffdaf90f07f472fdee660e7d2b2020884c0e436a98a57649b89ba57692285fb",
+      "all_blob_count": 34,
+      "all_compressed_blob_digests_and_uncompressed_runtime_diff_ids_verified": true,
+      "known_private_runtime_configuration_data_and_nginx_log_paths_empty": true,
+      "top_level_reference_names": [
+        "sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+        "v0.13.0"
+      ],
+      "source_for_skopeo": "oci-archive:freecollab-website-0.13.0.oci.tar:sha-cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "platforms": {
+        "amd64": {
+          "runtime_manifest_digest": "sha256:d233b327a071e2f038233949cfa2b271968664d18caee312a05cbe87dee6b82d",
+          "local_image_config_id": "sha256:8e6477f86669c7cd0535a07973bdfbbb13ebac2b0cc6974758c91dc0452ab747",
+          "runtime_layer_count": 11,
+          "verified_uncompressed_layer_bytes": 73921536,
+          "embedded_slsa_and_spdx_present": true
+        },
+        "arm64": {
+          "runtime_manifest_digest": "sha256:ceed6ec94d7275340c35207c901574d08fce178c8cb0796c90e71c63b59da957",
+          "local_image_config_id": "sha256:5aa649ab42f2014693ceef9fc366eee85b0e3a0d43a4102f3ad2fe5d43fe8176",
+          "runtime_layer_count": 11,
+          "verified_uncompressed_layer_bytes": 73255936,
+          "embedded_slsa_and_spdx_present": true
+        }
+      }
+    }
+  }
+}

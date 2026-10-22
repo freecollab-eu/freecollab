@@ -1,0 +1,83 @@
+{
+  "scope": "Downloaded original build-only OCI artifacts; no Docker image load, service mutation, GHCR or public release publication.",
+  "completed_at": "2026-10-22T08:48:52.548934+00:00",
+  "source_commit": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+  "workflow_run": 39748780136,
+  "workflow_url": "https://github.com/freecollab-eu/freecollab/actions/runs/39748780136",
+  "manifest_publication_preserved": "local-oci",
+  "release_manifest_sha256": "dbbbd03e016d49f51adbe81886f77d9a60643645af89815fb80c282cc8a640ae",
+  "github_signature_repository_workflow_exact_source_and_hosted_runner_verified": true,
+  "on_disk_bundle_reverified_with_independently_TUF_verified_roots": true,
+  "signed_subjects": {
+    "backend.buildkit.json": "7e9ecaf3aa814fbcb1426cb4fca6cbccaabb23435552c1948106ba3ce145ba9e",
+    "frontend.buildkit.json": "0354950300e1ed99948c53f36d7ef2bdae0d0db863a57cfebd157778daff44b7",
+    "release-manifest.json": "dbbbd03e016d49f51adbe81886f77d9a60643645af89815fb80c282cc8a640ae",
+    "website.buildkit.json": "2d7e2fef9fc377993a914af52449f0ffef8d0b59d92cbd3b78ff5d3bfc3c7dbd"
+  },
+  "verified_certificates": [
+    {
+      "certificateIssuer": "CN=sigstore-intermediate,O=sigstore.dev",
+      "subjectAlternativeName": "https://github.com/freecollab-eu/freecollab/.github/workflows/release-containers.yml@refs/heads/main",
+      "issuer": "https://token.actions.githubusercontent.com",
+      "githubWorkflowTrigger": "workflow_dispatch",
+      "githubWorkflowSHA": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "githubWorkflowName": "Versioned container release",
+      "githubWorkflowRepository": "freecollab-eu/freecollab",
+      "githubWorkflowRef": "refs/heads/main",
+      "buildSignerURI": "https://github.com/freecollab-eu/freecollab/.github/workflows/release-containers.yml@refs/heads/main",
+      "buildSignerDigest": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "runnerEnvironment": "github-hosted",
+      "sourceRepositoryURI": "https://github.com/freecollab-eu/freecollab",
+      "sourceRepositoryDigest": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "sourceRepositoryRef": "refs/heads/main",
+      "sourceRepositoryIdentifier": "1428624207",
+      "sourceRepositoryOwnerURI": "https://github.com/freecollab-eu",
+      "sourceRepositoryOwnerIdentifier": "252331810",
+      "buildConfigURI": "https://github.com/freecollab-eu/freecollab/.github/workflows/release-containers.yml@refs/heads/main",
+      "buildConfigDigest": "cdecb4bc97562e8027b536e88e451f5a8be7b8d4",
+      "buildTrigger": "workflow_dispatch",
+      "runInvocationURI": "https://github.com/freecollab-eu/freecollab/actions/runs/39748780136/attempts/1",
+      "sourceRepositoryVisibilityAtSigning": "public"
+    }
+  ],
+  "metadata_to_oci_archive_chain": {
+    "backend": {
+      "signed_metadata_sha256": "7e9ecaf3aa814fbcb1426cb4fca6cbccaabb23435552c1948106ba3ce145ba9e",
+      "oci_index_digest": "sha256:79f34f8ede4345d409c4d085a3cce186f0a13ca65d16c990bb18559bfda2a50d",
+      "archive_sha256": "sha256:503a5ce4b209ef6bbf603050533cb543499bba532909a8b6925414d3707e2307",
+      "both_architectures_source_and_provenance_match": true
+    },
+    "frontend": {
+      "signed_metadata_sha256": "0354950300e1ed99948c53f36d7ef2bdae0d0db863a57cfebd157778daff44b7",
+      "oci_index_digest": "sha256:01474c439179cf78609d0f2032dcda1f093f7642eaa00cc4ac9a26b8c3a25588",
+      "archive_sha256": "sha256:3d34b22362bbb25e915c3c7505ff85a91db8bb4aa45f950bfadbfccc4111a585",
+      "both_architectures_source_and_provenance_match": true
+    },
+    "website": {
+      "signed_metadata_sha256": "2d7e2fef9fc377993a914af52449f0ffef8d0b59d92cbd3b78ff5d3bfc3c7dbd",
+      "oci_index_digest": "sha256:fffdaf90f07f472fdee660e7d2b2020884c0e436a98a57649b89ba57692285fb",
+      "archive_sha256": "sha256:fdac01932adb464b6120ffa7ce344659ee76d61f693611285878159671a638a8",
+      "both_architectures_source_and_provenance_match": true
+    }
+  },
+  "github_artifact_zip_digests": {
+    "freecollab-container-release-0.13.0": "sha256:fab098591eace638587453d81a32c1fb50b5075132f568dab0cf6ca267e20d31",
+    "freecollab-backend-0.13.0-oci": "sha256:54dd963ce4e3ef931c33bb0a3e664f4dc0e5a79da00a6f696b3112238315aa09",
+    "freecollab-frontend-0.13.0-oci": "sha256:97bc5ae6eabb8b467f14efc052bd54c20eaf267971a6fb04730c9deaff98ab37",
+    "freecollab-website-0.13.0-oci": "sha256:b58ccb0310673d8223dfebf48df3a20d89bcdad79ee208c63f0a5528639004a6"
+  },
+  "oci_archive_verification_sha256": "091b6c01d45b7781b29a27912c66552f05f8cbb59fa09b3a341d2cd9aae52434",
+  "local_compose_config_only_proof": {
+    "scope": "Actual Docker Compose config merge only; synthetic local image IDs/private fixture env; no daemon image/service mutation",
+    "app_and_database_services_never_pull": 6,
+    "backend_and_all_workers_share_local_config_id": true,
+    "frontend_backend_builds_reset": true,
+    "compose_overlay_sha256": "cb5a86ba92b6d60671495d03130055f47fea5f99d353c0764709ebc36f0443f6",
+    "source_compose_sha256": "2e1e6dbca0f455d1f75bd7fea8082983ec6fd2bf18f5405d71c48db30704b9c7"
+  },
+  "verifier_boundary_tests": "4 grouped tests including 10 negative subcases passed; independent review plus 6 direct SLSA v1/v0.2 source/repository assertions passed",
+  "docker_image_load_performed": false,
+  "registry_publication_performed": false,
+  "public_release_publication_performed": false,
+  "full_product_ci_publication_gate": "Owned by root; this verifier prepares files only and does not publish."
+}

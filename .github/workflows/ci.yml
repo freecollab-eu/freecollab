@@ -61,7 +61,10 @@ jobs:
           python -m pip install --require-hashes -r requirements-dev.lock
 
       - name: Install TLS Redis-compatible integration fixture
-        run: sudo apt-get update && sudo apt-get install -y redis-server
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y redis-server
 
       - name: Run tests
         working-directory: backend
@@ -119,10 +122,15 @@ jobs:
           npm test --prefix ../packages/components
           npm pack ../packages/components --dry-run
 
-      - name: Verify reverse proxy capability privacy
+      - name: Install reverse proxy integration fixture
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y nginx
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y nginx
+
+      - name: Verify reverse proxy capability privacy
+        timeout-minutes: 3
+        run: |
           python3 frontend/tests/nginx-capability-logging.py --nginx /usr/sbin/nginx --report "$RUNNER_TEMP/nginx-capability-privacy.json"
 
   product-e2e:
@@ -177,11 +185,15 @@ jobs:
           with open(os.environ['GITHUB_PATH'], 'a') as output:
               output.write(os.path.join(os.environ['GITHUB_WORKSPACE'], 'backend', '.venv', 'bin') + '\n')
           PY
-          sudo apt-get update && sudo apt-get install -y ffmpeg
           npm ci --prefix frontend
           npm ci --prefix packages/components --ignore-scripts
           npm run build --prefix frontend
           npm run build:widget --prefix frontend
+      - name: Install media integration fixture
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y ffmpeg
       - name: Start API and reference client
         run: |
           (cd backend && python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --no-proxy-headers) > /tmp/freecollab-api.log 2>&1 &

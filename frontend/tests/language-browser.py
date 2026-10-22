@@ -79,9 +79,12 @@ def native(base, token, method, path, body=None):
         value=response.read();return json.loads(value)if value else None
 
 
-def wait_file(page, path):
+def wait_file(page, path, page_errors=()):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
+        if page_errors:
+            detail = 'snapshot package.json does not export version' if any("does not provide an export named 'version'" in error for error in page_errors) else 'browser JavaScript initialization failed'
+            raise AssertionError('The native delayed request cannot start: ' + detail)
         if path.exists(): return
         page.wait_for_timeout(50)
     raise AssertionError('The real native delayed request was not captured')
@@ -93,10 +96,11 @@ def main():
         private = Path(directory); web = private / 'web'; web.mkdir()
         source = web / 'src'; shutil.copytree(ROOT / 'frontend/src', source)
         shutil.copytree(ROOT/'frontend/public',web/'public');shutil.copyfile(ROOT/'frontend/postcss.config.js',web/'postcss.config.js');shutil.copyfile(ROOT/'frontend/tailwind.config.js',web/'tailwind.config.js')
-        (web/'package.json').write_text('{"type":"module"}');(web/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
+        # App imports Admin, which reads the version from the real manifest.
+        shutil.copyfile(ROOT/'frontend/package.json',web/'package.json');(web/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
         # Static snapshot prevents unrelated teams' live catalog writes triggering
         # HMR reloads while measuring draft retention. Implementation is unedited.
-        source_hashes = {name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in ['frontend/src/i18n/index.tsx','frontend/src/i18n/core.ts','frontend/src/components/Chat.tsx','frontend/src/styles/chat.css','frontend/src/i18n/mobile-toolbar.sv.ts','frontend/src/App.tsx','frontend/src/components/WorkHub.tsx','frontend/src/styles/work-hub.css','backend/app/api/preferences.py']}
+        source_hashes = {name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in ['frontend/package.json','frontend/src/i18n/index.tsx','frontend/src/i18n/core.ts','frontend/src/components/Chat.tsx','frontend/src/styles/chat.css','frontend/src/i18n/mobile-toolbar.sv.ts','frontend/src/App.tsx','frontend/src/components/Admin.tsx','frontend/src/components/WorkHub.tsx','frontend/src/styles/work-hub.css','backend/app/api/preferences.py']}
         api_port, app_port = port(), port(); base, origin = f'http://127.0.0.1:{api_port}', f'http://127.0.0.1:{app_port}'
         def controls(**values):
             temporary = private / 'controls.next'; temporary.write_text(json.dumps(values)); temporary.replace(private / 'controls.json')
@@ -163,7 +167,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                 browser=playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH')or shutil.which('chromium'),headless=True,args=['--no-sandbox']);context=browser.new_context(viewport={'width':1440,'height':1050},locale='en-US');page=context.new_page();page.set_default_timeout(45000);errors=[];page.on('pageerror',lambda failure:errors.append(str(failure)))
                 context.add_init_script('window.__languageSessions='+json.dumps(sessions)+';for(const name of["alpha","beta"])localStorage.setItem("freecollab.workspace:"+name,"team");if(!localStorage.getItem("freecollab_token")){localStorage.setItem("freecollab_token",window.__languageSessions.alpha);localStorage.setItem("freecollab_user_id","alpha")}')
                 try:
-                    stage='native initial English and pending real GET';controls(get='alpha');page.goto(origin,wait_until='domcontentloaded');wait_file(page,private/'get-alpha.captured')
+                    stage='native initial English and pending real GET';controls(get='alpha');page.goto(origin,wait_until='domcontentloaded');wait_file(page,private/'get-alpha.captured',errors)
                     picker=page.locator('.proof-language-controls select');composer=page.locator('.fc-chat-composer textarea');choose_chat_channel(page, 'Lansering');expect(composer).to_be_visible();expect(picker).to_have_value('auto');assert page.evaluate('document.documentElement.lang')=='en';checks['native_english_browser_fallback_and_real_language_get']=True
                     stage='Swedish switch keeps native composer DOM, value, selection and user content';draft='Keep this unsent English draft exactly. Åäö.';composer.fill(draft);composer.evaluate('(node)=>{window.languageComposer=node;node.setSelectionRange(3,11)}');picker.select_option('sv');controls();expect(picker).to_have_value('sv');expect(page.locator('.proof-language-controls')).to_contain_text('Språk');expect(composer).to_have_value(draft);assert composer.evaluate('(node)=>node===window.languageComposer&&node.selectionStart===3&&node.selectionEnd===11');expect(page.get_by_text('A user-authored English note stays exactly as written.',exact=True)).to_be_visible();expect(page.locator('.fc-chat-message-content').get_by_text('Settings',exact=True)).to_be_visible();assert page.evaluate('document.documentElement.lang')=='sv';assert saved(base,sessions['alpha'])=='sv';checks['swedish_catalog_and_html_lang_preserve_native_draft_dom_selection_and_user_content']=True
                     stage='stale real GET response cannot replace successful newer selection';(private/'get.release').touch();page.wait_for_timeout(150);expect(picker).to_have_value('sv');assert page.evaluate('localStorage.getItem("freecollab.language:alpha")')=='sv';checks['stale_get_response_cannot_overwrite_newer_language_put']=True

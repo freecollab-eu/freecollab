@@ -83,7 +83,7 @@ def open_appearance(page):
     open_channels(page)
     button = page.get_by_role('button', name='Appearance settings', exact=True).first
     button.click()
-    dialog = page.get_by_role('dialog')
+    dialog = page.get_by_role('dialog', name='Make space your own.', exact=True)
     expect(dialog).to_be_visible()
     return dialog
 

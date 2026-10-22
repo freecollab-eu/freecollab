@@ -96,6 +96,14 @@ def test_ambiguous_or_nonfinite_json_is_not_accepted():
         with pytest.raises(transport.ProviderError): transport.Response(200, {}, body).json()
 
 
+def test_excessively_nested_provider_json_remains_a_typed_invalid_response():
+    body = b'{"nested":' + b'[' * 1500 + b'0' + b']' * 1500 + b'}'
+    assert len(body) < transport.MAX_JSON_BYTES
+    with pytest.raises(transport.ProviderError) as failure:
+        transport.Response(200, {}, body).json()
+    assert failure.value.code == 'invalid_response'
+
+
 @pytest.mark.parametrize('proxy_tls', [False, True])
 def test_real_connect_tunnel_verifies_tls_hostname_and_transfers_binary_dav_methods(tmp_path, monkeypatch, proxy_tls):
     key, certificate = tmp_path / 'key.pem', tmp_path / 'cert.pem'

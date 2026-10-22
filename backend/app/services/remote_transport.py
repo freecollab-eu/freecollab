@@ -54,7 +54,7 @@ class Response:
             if not isinstance(result, dict):
                 raise ValueError()
             return result
-        except (ValueError, TypeError, UnicodeError):
+        except (ValueError, TypeError, UnicodeError, RecursionError):
             raise ProviderError("invalid_response") from None
 
 

@@ -207,6 +207,7 @@ jobs:
           python frontend/tests/pilot-browser.py
           python frontend/tests/chat-browser.py
           python frontend/tests/widget-browser.py
+          python frontend/tests/widget-security-browser.py
           python frontend/tests/appearance-browser.py
           python frontend/tests/elite-browser.py
           python frontend/tests/open-studio-browser.py

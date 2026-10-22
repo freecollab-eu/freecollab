@@ -5,7 +5,7 @@ import json
 from threading import Barrier
 
 import pytest
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
 from sqlmodel import Session, SQLModel, create_engine, select
 
@@ -13,7 +13,7 @@ from app.api import preferences
 from app.database import get_session
 from app.models.preference import UserAppearance
 from app.models.user import User
-from app.services.auth import create_token, revoke_token
+from app.services.auth import create_token, get_current_user, revoke_token, security
 
 
 @pytest.fixture
@@ -144,32 +144,63 @@ def test_preferences_require_an_active_unrevoked_account(appearance, method):
         assert session.exec(select(UserAppearance)).all() == []
 
 
-def test_simultaneous_first_saves_resolve_to_one_valid_snapshot(appearance):
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("access_change", ["logout", "logout_everywhere", "blocked"])
+def test_save_rechecks_access_after_authentication(appearance, existing, access_change):
     client, engine, app = appearance
-    first_reads = Barrier(2, timeout=10)
+    original = snapshot(font_family="manrope")
+    if existing:
+        with Session(engine) as session:
+            session.add(UserAppearance(user_id="alice", values=json.dumps(original)))
+            session.commit()
+    token = create_token("alice")
 
-    class ConcurrentSession(Session):
-        checked_appearance = False
+    def authenticate_then_change_access(
+        credentials=Depends(security), session=Depends(get_session), request: Request = None,
+    ):
+        actor = get_current_user(credentials, session, request)
+        # A separate committed transaction changes authority after the normal
+        # dependency accepted this request, before its handler can mutate data.
+        with Session(engine) as changed:
+            if access_change == "logout":
+                revoke_token(token, changed)
+            elif access_change == "logout_everywhere":
+                from app.services.account_security import revoke_all_sessions
+                revoke_all_sessions(changed, actor.id)
+            else:
+                account = changed.get(User, actor.id)
+                account.is_blocked = True
+                changed.add(account)
+            changed.commit()
+        return actor
 
-        def get(self, entity, ident, **kwargs):
-            result = super().get(entity, ident, **kwargs)
-            if entity is UserAppearance and not self.checked_appearance:
-                self.checked_appearance = True
-                assert result is None
-                first_reads.wait()
-            return result
+    app.dependency_overrides[get_current_user] = authenticate_then_change_access
+    response = client.put(
+        "/preferences/appearance", headers={"Authorization": "Bearer " + token},
+        json=snapshot(font_family="serif"),
+    )
+    assert response.status_code == 401
+    with Session(engine) as session:
+        stored = session.get(UserAppearance, "alice")
+        if existing:
+            assert json.loads(stored.values) == original
+        else:
+            assert stored is None
 
-    def concurrent_session():
-        with ConcurrentSession(engine) as session:
-            yield session
 
-    app.dependency_overrides[get_session] = concurrent_session
+def test_simultaneous_first_saves_resolve_to_one_valid_snapshot(appearance):
+    client, engine, _ = appearance
+    start = Barrier(2, timeout=10)
     settings = [snapshot(font_family="serif"), snapshot(font_family="manrope")]
+
+    def save(data):
+        # Start both real requests together. Account-row serialization must
+        # still return each acknowledged snapshot and persist exactly one row.
+        start.wait()
+        return client.put("/preferences/appearance", json=data, headers=bearer())
+
     with ThreadPoolExecutor(max_workers=2) as workers:
-        responses = list(workers.map(
-            lambda data: client.put("/preferences/appearance", json=data, headers=bearer()),
-            settings,
-        ))
+        responses = list(workers.map(save, settings))
     assert [response.status_code for response in responses] == [200, 200]
     assert [response.json() for response in responses] == settings
     with Session(engine) as session:

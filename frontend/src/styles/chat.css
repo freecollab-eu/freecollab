@@ -284,7 +284,11 @@ body[data-density="compact"] .fc-chat-intro { padding-bottom: .5rem; }
 .fc-chat-notifications { margin: 0; padding: 0; border: 0; }
 .fc-chat-account-trigger { width: 44px; height: 44px; margin-left: .4rem; cursor: pointer; }
 .fc-chat-mobile-tools { position: relative; display: block; }
-.fc-chat-mobile-tools-popover { position: absolute; top: calc(100% + .75rem); right: 0; z-index: 45; width: min(19rem, calc(100vw - 2rem)); max-height: min(75dvh, 46rem); overflow-y: auto; overscroll-behavior: contain; padding: .5rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); box-shadow: 0 1rem 3rem color-mix(in srgb, var(--fc-text) 12%, transparent); }
+.fc-chat-mobile-tools-popover { position: absolute; top: calc(100% + .75rem); right: 0; z-index: 45; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 1rem; width: min(39rem, calc(100vw - 2rem)); max-height: min(75dvh, 46rem); overflow-y: auto; overscroll-behavior: contain; padding: .8rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); box-shadow: 0 1rem 3rem color-mix(in srgb, var(--fc-text) 12%, transparent); }
+.fc-chat-tools-column { min-width: 0; }
+.fc-chat-tools-section + .fc-chat-tools-section { margin-top: 1.1rem; }
+.fc-chat-tools-heading { margin: .25rem .8rem .65rem; color: var(--fc-muted); font-size: .68rem; font-weight: 550; line-height: 1.5; letter-spacing: .06em; text-transform: uppercase; }
+.fc-chat-tools-column + .fc-chat-tools-column { padding-left: .6rem; border-left: 1px solid var(--fc-border); }
 .fc-chat-mobile-tool { display: flex; align-items: center; gap: .8rem; width: 100%; min-height: 44px; padding: .65rem .8rem; border: 0; border-radius: calc(var(--fc-radius) * .6); background: transparent; color: var(--fc-text); font: inherit; font-size: .82rem; line-height: 1.4; text-align: left; cursor: pointer; }
 .fc-chat-mobile-tool:hover { color: var(--fc-accent); background: var(--fc-accent-soft); }
 .fc-chat-mobile-tool:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -2px; }
@@ -312,7 +316,7 @@ body[data-density="compact"] .fc-chat-intro { padding-bottom: .5rem; }
 .fc-chat-message-meta > strong { font-size: .875rem; font-weight: 550; }
 .fc-chat-message-meta > time, .fc-chat-message-meta > span { font-size: .72rem; }
 .fc-chat-message-menu { display: none; }
-.fc-chat-message-content { margin-top: .35rem; font-size: calc(var(--fc-message-size) * 1.1); line-height: 1.65; }
+.fc-chat-message-content { max-width: 68ch; margin-top: .35rem; font-size: calc(var(--fc-message-size) * 1.1); line-height: 1.65; }
 .fc-chat-message-actions { top: -.65rem; right: 0; max-width: 100%; flex-wrap: wrap; }
 .fc-chat-message-actions .fc-icon-button { width: 2.1rem; min-height: 2.1rem; }
 .fc-chat-reactions button { min-height: 2rem; font-size: .8rem; }
@@ -389,6 +393,12 @@ body[data-density="compact"] .fc-chat-intro { padding-bottom: .5rem; }
 .fc-chat-thread .fc-chat-avatar { width: 2.5rem; height: 2.5rem; font-size: .9rem; }
 .fc-chat-thread-parent strong { font-size: .85rem; }
 .fc-chat-thread-parent time { font-size: .72rem; }
+@media (min-width: 768px) {
+  .fc-chat:not(.is-spacious-room) .fc-chat-room-content { max-width: 900px; }
+  .fc-chat:not(.is-spacious-room) .fc-chat-message { padding-bottom: calc(1.45rem * var(--fc-space)); }
+  .fc-chat:not(.is-spacious-room) .fc-chat-avatar { width: 2.75rem; height: 2.75rem; font-size: .9rem; }
+  .fc-chat:not(.is-spacious-room) .fc-chat-date { margin-left: 3.75rem; }
+}
 body[data-density="compact"] .fc-chat { --chat-row-space: 1.25rem; }
 body[data-density="compact"] .is-spacious-room .fc-chat-message { padding-bottom: 1.5rem; }
 @media (max-width: 1100px) {
@@ -421,7 +431,8 @@ body[data-density="compact"] .is-spacious-room .fc-chat-message { padding-bottom
   .fc-chat-work-action > span { display: none; }
   .fc-chat-notifications { margin: 0; padding: 0; }
   .fc-chat-notification-popover { top: 4.5rem; }
-  .fc-chat-mobile-tools-popover { position: fixed; top: 4.5rem; right: 1rem; max-height: calc(100dvh - 6rem); }
+  .fc-chat-mobile-tools-popover { position: fixed; top: 4.5rem; right: 1rem; display: block; width: min(22rem, calc(100vw - 2rem)); max-height: calc(100dvh - 6rem); }
+  .fc-chat-tools-column + .fc-chat-tools-column { margin-top: 1.1rem; padding-left: 0; border-left: 0; }
   .fc-chat-connection { padding: .1rem 1.25rem; font-size: .7rem; }
   .fc-chat-timeline-inner { padding: 1.35rem 1.25rem 1rem; }
   .fc-chat-room-content:has(.fc-chat-shared-material) { display: flex; flex-direction: column; gap: .75rem; }

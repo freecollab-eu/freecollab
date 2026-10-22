@@ -48,6 +48,18 @@ const DEFAULT_CONFIG: Partial<WidgetConfig> = {
   welcomeMessage: 'Hello! How can we help you today?',
 };
 
+function widgetApiBase(value: string): string {
+  if (typeof value !== 'string' || !value.trim()) throw new Error('Provide a valid widget API URL.');
+  let url: URL;
+  try { url = new URL(value, window.location?.href); }
+  catch { throw new Error('Provide a valid widget API URL.'); }
+  if (url.username || url.password || url.search || url.hash || !['https:', 'http:'].includes(url.protocol)
+    || url.protocol !== 'https:' && !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error('The widget API URL must use HTTPS, or HTTP on loopback, without credentials, query parameters or a fragment.');
+  }
+  return url.href.replace(/\/$/, '');
+}
+
 class FreeCollabWidget {
   private config: WidgetConfig;
   private container: HTMLDivElement | null = null;
@@ -56,6 +68,7 @@ class FreeCollabWidget {
   private style: HTMLStyleElement | null = null;
   private pollTimer: ReturnType<typeof setTimeout> | null = null;
   private pollController: AbortController | null = null;
+  private sendController: AbortController | null = null;
   private generation = 0;
   private seenMessageIds = new Set<string>();
   private currentUserId: string | null = null;
@@ -64,6 +77,7 @@ class FreeCollabWidget {
 
   constructor(config: WidgetConfig) {
     this.config = { ...DEFAULT_CONFIG, ...config };
+    this.config.apiUrl = widgetApiBase(config.apiUrl);
     // Restrict interpolated CSS to a color token, never arbitrary stylesheet text.
     if (!/^#[0-9a-f]{3,8}$/i.test(this.config.primaryColor || '')) {
       this.config.primaryColor = DEFAULT_CONFIG.primaryColor;
@@ -385,9 +399,16 @@ class FreeCollabWidget {
   }
 
   private setupMessageHandler() {
+    if (this.destroyed) return;
     const generation = ++this.generation;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollController?.abort();
+    this.sendController?.abort(); this.sendController = null; this.sending = false;
+    const input = this.container?.querySelector('.freecollab-input') as HTMLInputElement | null;
+    const sendButton = this.container?.querySelector('.freecollab-send-btn') as HTMLButtonElement | null;
+    // A draft belongs to the old user/channel, just like its displayed history.
+    if (input) input.value = '';
+    if (sendButton) sendButton.disabled = false;
     this.currentUserId = null;
     this.seenMessageIds.clear();
     const messages = this.container?.querySelector('.freecollab-messages');
@@ -419,20 +440,21 @@ class FreeCollabWidget {
   }
 
   private async pollMessages(generation: number) {
+    if (generation !== this.generation || this.destroyed) return;
     const controller = new AbortController();
     this.pollController = controller;
     const headers = { Authorization: `Bearer ${this.config.userToken}` };
     try {
       const apiUrl = this.config.apiUrl.replace(/\/$/, '');
       if (!this.currentUserId) {
-        const identity = await fetch(`${apiUrl}/auth/me`, { headers, signal: controller.signal });
+        const identity = await fetch(`${apiUrl}/auth/me`, { headers, signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error' });
         if (!identity.ok) throw new Error(`Could not authenticate chat (${identity.status}).`);
         const user = await identity.json();
         if (generation !== this.generation || this.destroyed) return;
         this.currentUserId = user.id;
       }
       const response = await fetch(`${apiUrl}/messages/channels/${encodeURIComponent(this.config.channelId!)}?limit=50`, {
-        headers, signal: controller.signal,
+        headers, signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
       });
       if (!response.ok) throw new Error(`Could not load messages (${response.status}).`);
       const messages: Message[] = await response.json();
@@ -440,8 +462,10 @@ class FreeCollabWidget {
       // API returns newest first. Initial history is not an unread notification.
       const initial = this.seenMessageIds.size === 0;
       for (const message of messages.reverse()) {
+        if (generation !== this.generation || this.destroyed) return;
         this.addMessage(message, message.author_id === this.currentUserId, !initial);
       }
+      if (generation !== this.generation || this.destroyed) return;
       this.setStatus('');
     } catch (error) {
       if (!controller.signal.aborted && generation === this.generation && !this.destroyed) this.reportError(error);
@@ -506,6 +530,7 @@ class FreeCollabWidget {
       return;
     }
     const generation = this.generation;
+    const controller = new AbortController(); this.sendController = controller;
     const button = this.container?.querySelector('.freecollab-send-btn') as HTMLButtonElement | null;
     this.sending = true;
     if (button) button.disabled = true;
@@ -518,23 +543,29 @@ class FreeCollabWidget {
           Authorization: `Bearer ${this.config.userToken}`,
         },
         body: JSON.stringify({ content }),
+        signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error',
       });
       if (!response.ok) throw new Error(`Message was not sent (${response.status}). Please retry.`);
       const message: Message = await response.json();
       if (generation !== this.generation || this.destroyed) return;
-      // POST returns the stored ciphertext; display the submitted text after acknowledgement.
+      // Show the chosen text only after the server acknowledges this send.
       this.addMessage({ ...message, content }, true, false);
+      if (generation !== this.generation || this.destroyed) return;
       if (input && input.value.trim() === content) input.value = '';
       this.setStatus('');
     } catch (error) {
-      if (generation === this.generation && !this.destroyed) this.reportError(error);
+      if (!controller.signal.aborted && generation === this.generation && !this.destroyed) this.reportError(error);
     } finally {
-      this.sending = false;
-      if (button) button.disabled = false;
+      if (generation === this.generation && !this.destroyed) {
+        this.sending = false;
+        if (this.sendController === controller) this.sendController = null;
+        if (button) button.disabled = false;
+      }
     }
   }
 
   private addMessage(message: Message, sent: boolean = false, notify: boolean = true) {
+    const generation = this.generation;
     const messagesContainer = this.container?.querySelector('.freecollab-messages');
     if (!messagesContainer || this.destroyed || this.seenMessageIds.has(message.id)) return;
     this.seenMessageIds.add(message.id);
@@ -554,6 +585,8 @@ class FreeCollabWidget {
       this.config.onMessage(message);
     }
 
+    // Host callbacks may synchronously change user/channel or destroy the widget.
+    if (generation !== this.generation || this.destroyed) return;
     if (notify && !this.isOpen && !sent) {
       this.updateUnread(this.unreadCount + 1);
     }
@@ -564,11 +597,13 @@ class FreeCollabWidget {
   }
 
   public setUser(token: string) {
+    if (this.destroyed) return;
     this.config.userToken = token;
     this.setupMessageHandler();
   }
 
   public setChannel(channelId: string) {
+    if (this.destroyed) return;
     this.config.channelId = channelId;
     this.setupMessageHandler();
   }
@@ -578,6 +613,8 @@ class FreeCollabWidget {
     ++this.generation;
     if (this.pollTimer) clearTimeout(this.pollTimer);
     this.pollController?.abort();
+    this.sendController?.abort(); this.sendController = null;
+    this.config.userToken = undefined;
     this.container?.remove();
     this.style?.remove();
     if ((window as any).FreeCollabInstance === this) delete (window as any).FreeCollabInstance;

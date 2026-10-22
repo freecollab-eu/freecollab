@@ -15,6 +15,7 @@ from ..models.file import File
 from ..models.file_version import FileDocument, FileVersion
 from ..models.file_experience import OfficeEditSession
 from .access import lock_channel_writes, require_channel_member
+from .archive_limits import bounded_zip_directory
 from .auth import decode_token_claims, token_digest
 from .matrix_bridge import is_secure_channel
 from .remote_sync import is_file_deleted
@@ -27,6 +28,7 @@ OFFICE_TYPES = {
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": "ms-powerpoint",
 }
 MAX_PREVIEW_FILE = 10 * 1024 * 1024
+MAX_ARCHIVE_ENTRIES = 1000
 MAX_XML = 1024 * 1024
 MAX_UNPACKED = 8 * 1024 * 1024
 MAX_TEXT = 100000
@@ -122,9 +124,10 @@ def office_preview(content, content_type):
     if content_type not in OFFICE_TYPES or len(content) > MAX_PREVIEW_FILE:
         raise HTTPException(422, "Use a supported OOXML document no larger than 10 MiB")
     try:
-        with ZipFile(io.BytesIO(content)) as archive:
+        checked = bounded_zip_directory(content, max_entries=MAX_ARCHIVE_ENTRIES)
+        with ZipFile(io.BytesIO(checked)) as archive:
             entries = archive.infolist()
-            if not entries or len(entries) > 1000 or len({entry.filename for entry in entries}) != len(entries):
+            if not entries or len(entries) > MAX_ARCHIVE_ENTRIES or len({entry.filename for entry in entries}) != len(entries):
                 raise HTTPException(422, "Office archive has too many or duplicate entries")
             total = 0
             for entry in entries:
@@ -179,5 +182,5 @@ def office_preview(content, content_type):
                         add("\t".join(cells))
                 truncated |= len(names) > 10
             return {"kind": "office-text", "blocks": blocks, "truncated": bool(truncated), "passive": True}
-    except (BadZipFile, KeyError, RuntimeError, OSError):
+    except (BadZipFile, KeyError, RuntimeError, OSError, ValueError):
         raise HTTPException(422, "This Office document is invalid or unsupported") from None

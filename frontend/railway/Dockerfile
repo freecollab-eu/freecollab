@@ -5,7 +5,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=secret,id=proxy_ca,required=false \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
-    npm ci --strict-ssl=true --no-audit --no-fund
+    ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --strict-ssl=true --no-audit --no-fund
 COPY . .
 RUN npm run build && npm run build:widget
 FROM nginx:1.28-alpine

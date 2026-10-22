@@ -99,6 +99,8 @@ export function Auth({ onSuccess, invited, notice, onBack, initialChallenge, org
         if (!current()) return;
         api.applySession(session); setCode(''); setChallenge(null); onSuccess();
       } else if (mode === 'register') {
+        if ([...password].length < 12) throw new Error(t("New passwords must contain at least 12 characters."));
+        if (new TextEncoder().encode(password).length > 72) throw new Error(t("This password is too long. Try a shorter one."));
         const session = await accountApi.register(name.trim(), email.trim(), password);
         if (!current()) return;
         api.applySession(session); setPassword(''); onSuccess();
@@ -148,8 +150,8 @@ export function Auth({ onSuccess, invited, notice, onBack, initialChallenge, org
           {mode !== 'mfa' && <div className="fc-auth-field"><label htmlFor="auth-email">{t("Email")}</label><input className="fc-input" id="auth-email" type="email" autoComplete="email" value={email} onChange={event => setEmail(event.target.value)} placeholder={t("you@example.com")} disabled={loading} required /></div>}
           {(mode === 'login' || mode === 'register') && <div className="fc-auth-field">
             <label htmlFor="auth-password">{t("Password")}</label>
-            <div className="fc-auth-password"><input className="fc-input" id="auth-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Your password")} required minLength={6} disabled={loading} aria-describedby={mode === 'register' ? 'auth-password-help' : undefined} /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? t("Hide password") : t("Show password")} aria-pressed={showPassword} disabled={loading}>{showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}</button></div>
-            {mode === 'register' && <p id="auth-password-help" className="fc-auth-field-help">{t("At least 6 characters. Make it something only you know.")}</p>}
+            <div className="fc-auth-password"><input className="fc-input" id="auth-password" type={showPassword ? 'text' : 'password'} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} value={password} onChange={event => setPassword(event.target.value)} placeholder={t("Your password")} required minLength={mode === 'register' ? 12 : 1} disabled={loading} aria-describedby={mode === 'register' ? 'auth-password-help' : undefined} /><button type="button" onClick={() => setShowPassword(value => !value)} aria-label={showPassword ? t("Hide password") : t("Show password")} aria-pressed={showPassword} disabled={loading}>{showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}</button></div>
+            {mode === 'register' && <p id="auth-password-help" className="fc-auth-field-help">{t("At least 12 characters. Make it something only you know.")}</p>}
             {mode === 'login' && <button type="button" className="fc-account-link fc-auth-forgot" onClick={() => switchMode('forgot')} disabled={loading}>{t("Forgot password?")}</button>}
           </div>}
           {mode === 'mfa' && <div className="fc-auth-field"><label htmlFor="auth-code">{t("Authentication or recovery code")}</label><input ref={codeRef} className="fc-input fc-account-code-input" id="auth-code" type="text" autoComplete="one-time-code" spellCheck={false} value={code} onChange={event => setCode(event.target.value)} placeholder={t("Enter your code")} maxLength={80} disabled={loading} required /><p className="fc-auth-field-help">{t("The sign-in challenge expires after five minutes.")}</p></div>}

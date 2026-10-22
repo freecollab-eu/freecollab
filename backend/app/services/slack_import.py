@@ -8,7 +8,6 @@ import json
 import logging
 import re
 import stat
-import struct
 from pathlib import PurePosixPath
 from uuid import uuid4
 import zipfile
@@ -26,6 +25,7 @@ from ..models.slack_import import SlackImport, SlackImportMessage, SlackImportDe
 from ..models.user import User
 from ..models.workspace import WorkspaceChannel, WorkspaceMember
 from .account_security import seal_private, unseal_private
+from .archive_limits import bounded_zip_directory as checked_zip_directory
 from .crypto import encrypt_message, decrypt_message
 from .enterprise_governance import enforce_native_content, enforce_native_file
 from .request_guard import recheck_actor
@@ -121,42 +121,10 @@ def historical_details(row, labels):
 
 def bounded_zip_directory(raw):
     """Scan actual directory records before ZipFile can allocate ZipInfo objects."""
-    if len(raw) < 22: bad("Invalid ZIP directory")
-    floor = max(0, len(raw) - 65557)
-    at = len(raw)
-    end = -1
-    while at > floor:
-        at = raw.rfind(b"PK\x05\x06", floor, at)
-        if at < 0: break
-        if at + 22 <= len(raw) and at + 22 + struct.unpack_from("<H", raw, at + 20)[0] == len(raw):
-            end = at; break
-    if end < 0: bad("Invalid ZIP end record")
-    disk, directory_disk, disk_count, count, size, start = struct.unpack_from("<4H2I", raw, end + 4)
-    if disk or directory_disk or disk_count != count or count == 0xffff or start == 0xffffffff or size == 0xffffffff:
-        bad("Split and ZIP64 archives are unsupported")
-    if not count or count > MAX_ENTRIES or start + size != end: bad("Slack archive exceeds the directory bound")
-    cursor, actual = start, 0
-    while cursor < end:
-        if actual >= MAX_ENTRIES or cursor + 46 > end or raw[cursor:cursor+4] != b"PK\x01\x02":
-            bad("Slack archive exceeds the directory bound")
-        name, extra, comment, entry_disk = struct.unpack_from("<4H", raw, cursor + 28)
-        compressed, expanded = struct.unpack_from("<2I", raw, cursor + 20)
-        local = struct.unpack_from("<I", raw, cursor + 42)[0]
-        next_record = cursor + 46 + name + extra + comment
-        if entry_disk or 0xffffffff in {compressed, expanded, local} or next_record > end:
-            bad("Invalid, split or ZIP64 directory entry")
-        field, fields_end = cursor + 46 + name, cursor + 46 + name + extra
-        while field < fields_end:
-            if field + 4 > fields_end: bad("Invalid ZIP extra field")
-            kind, length = struct.unpack_from("<2H", raw, field)
-            if kind in {1, 0x9901} or field + 4 + length > fields_end: bad("ZIP64 and encrypted extra fields are unsupported")
-            field += 4 + length
-        actual += 1; cursor = next_record
-    if cursor != end or actual != count: bad("ZIP directory count does not match its records")
-    # Remove an optional ZIP comment before ZipFile's own backward EOCD search.
-    # Otherwise a fake later EOCD signature in that comment could select another
-    # directory after this preflight. Entry/data offsets and original digest stay intact.
-    return raw if end + 22 == len(raw) else raw[:end+20] + b"\x00\x00"
+    try:
+        return checked_zip_directory(raw, max_entries=MAX_ENTRIES, label="Slack archive")
+    except ValueError as error:
+        bad(str(error))
 
 
 class Archive:

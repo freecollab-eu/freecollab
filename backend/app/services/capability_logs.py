@@ -10,7 +10,19 @@ def _url_literal(value):
 
 _PREFIX = _url_literal('/') + '(?:' + _url_literal('api/') + ')?'
 _CAPABILITY = re.compile('(' + _PREFIX + _url_literal('office-edit/') + r')[^\s\"\']*', re.IGNORECASE)
-_OAUTH_CALLBACK = re.compile('(' + _PREFIX + _url_literal('personal-oauth/callback') + r')(?:\?|%3f)[^\s\"\']*', re.IGNORECASE)
+# Every native OAuth/OIDC callback carries one-use credentials. The generic
+# backend image can emit access logs even when the outer proxy suppresses them.
+_OAUTH_CALLBACK_PATHS = (
+    'auth/oidc/callback',
+    'cloud-files/oauth/callback',
+    'external-meetings/oauth/callback',
+    'sync/oauth/callback',
+    'personal-oauth/callback',
+)
+_OAUTH_CALLBACK = re.compile(
+    '(' + _PREFIX + '(?:' + '|'.join(_url_literal(path) for path in _OAUTH_CALLBACK_PATHS)
+    + ')(?:' + _url_literal('/') + r')?)(?:\?|%3f)[^\s\"\']*', re.IGNORECASE,
+)
 _CALENDAR_SUBSCRIPTION = re.compile('(' + _PREFIX + _url_literal('calendar/subscriptions/') + r')[^\s\"\']*', re.IGNORECASE)
 
 

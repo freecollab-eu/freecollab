@@ -16,11 +16,11 @@ Password reset/change increments this version as part of the same transaction as
 
 ## Credential rules
 
-Registration, login and admin-created users canonicalize email addresses by trimming surrounding whitespace and lowercasing them. Names are nonempty after trimming and limited to 80 characters; email input is validated and limited to 320 characters. Passwords must contain 1–72 UTF-8 bytes and no null character, so bcrypt cannot silently truncate them. The UI can impose a stronger minimum; this byte limit remains the server's upper bound.
+Registration, login and admin-created users canonicalize email addresses by trimming surrounding whitespace and lowercasing them. Names are nonempty after trimming and limited to 80 characters; email input is validated and limited to 320 characters. New native registrations and admin-created accounts require at least 12 Unicode code points and at most 72 UTF-8 bytes, with no null character. Existing-account login and reauthentication retain the 1–72 UTF-8 byte rule so valid legacy passwords remain usable. The server checks the byte limit without bcrypt truncation; the creation forms check the same code-point and byte boundaries.
 
 Normal registration and admin creation both reject canonical duplicates and handle concurrent unique-key conflicts. Legacy case-only duplicate addresses are not merged automatically: login rejects an ambiguous canonical address. Back up and reconcile those records through operator access, preserving channel ownership and membership, before enabling their login.
 
-Password reset/change requires a new password of 12–72 characters within the same 72-byte UTF-8 limit. Existing valid shorter passwords can still sign in. Password changes and sensitive account actions require the current password; with MFA enabled they also require a valid authenticator or unused recovery code. A rejected reauthentication returns HTTP 403 and does not revoke the signed-in session.
+Password reset/change requires at least 12 Unicode code points within the same 72-byte UTF-8 limit. Existing valid shorter passwords can still sign in. Password changes and sensitive account actions require the current password; with MFA enabled they also require a valid authenticator or unused recovery code. A rejected reauthentication returns HTTP 403 and does not revoke the signed-in session.
 
 ## Email ownership and password recovery
 

@@ -16,8 +16,8 @@ from urllib.request import urlopen
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json'
-SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Demo.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
+SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Demo.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 
 def port():
     with socket.socket() as listener:
@@ -97,6 +97,26 @@ def main():
                 page.get_by_label('Demo channel',exact=True).select_option('studio')
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_be_visible()
                 checks['guest_literal_channel_scoped_memory_chat_no_bot']=True
+                stage='independent unsent drafts survive channel and tool navigation'
+                draft='An unsent courtyard thought. Keep the exact wording.'
+                other_draft='An independent design thought.'
+                page.get_by_label('Your demo message',exact=True).fill(draft)
+                expect(page.get_by_text('Unsent draft · kept in this tab',exact=True)).to_be_visible()
+                REPORT.parent.mkdir(parents=True,exist_ok=True)
+                draft_image=REPORT.with_name('demo-showroom-draft.png');page.screenshot(path=str(draft_image),full_page=True)
+                page.get_by_label('Demo channel',exact=True).select_option('design')
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
+                page.get_by_label('Your demo message',exact=True).fill(other_draft)
+                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value(draft)
+                page.get_by_role('button',name='Send demo message',exact=True).click()
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
+                page.get_by_label('Demo channel',exact=True).select_option('design')
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value(other_draft)
+                section('Projects');section('Conversation')
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value(other_draft)
+                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                checks['independent_memory_drafts_survive_navigation_and_only_sent_draft_clears']=True
                 stage='actual project checkbox/add/filter'
                 section('Projects')
                 box=page.get_by_role('checkbox',name='Review the courtyard materials',exact=True);box.check();expect(box).to_be_checked()
@@ -151,6 +171,10 @@ def main():
                 page.keyboard.press('Shift+Tab');assert page.evaluate('document.querySelector("[role=alertdialog]").contains(document.activeElement)')
                 page.keyboard.press('Escape');expect(dialog).to_have_count(0)
                 reset_menu();page.get_by_role('button',name='Reset this demo',exact=True).click()
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
+                page.get_by_label('Demo channel',exact=True).select_option('design')
+                expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
+                page.get_by_label('Demo channel',exact=True).select_option('studio')
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_have_count(0)
                 expect(page.locator('.fc-studio-materials')).to_be_visible()
                 expect(page.locator('.fc-studio-scene')).to_have_attribute('data-material-position','right')
@@ -188,7 +212,7 @@ def main():
                 assert not unexpected,unexpected
                 checks['explicit_exit_callbacks_no_storage_api_provider_or_browser_errors']=True
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom only; no real users/accounts/providers','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile)],'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom only; no real users/accounts/providers','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image)],'source_sha256':source_hashes},indent=2)+'\n')
             print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
         except Exception:
             print('Failed stage: '+stage)

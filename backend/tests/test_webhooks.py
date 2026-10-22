@@ -8,13 +8,14 @@ import select as socket_select
 import ssl
 import subprocess
 import threading
+from concurrent.futures import Future, TimeoutError as FutureTimeout
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from types import SimpleNamespace
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.pool import StaticPool
 from sqlmodel import Session, SQLModel, create_engine, select
@@ -30,6 +31,7 @@ from app.models.user import User
 from app.models.webhook import WebhookDelivery, WebhookEndpoint
 from app.models.workspace import Workspace, WorkspaceChannel, WorkspaceMember
 from app.services import webhooks as service
+from app.services import oidc_transport as public_transport
 from app.services.auth import create_token
 
 
@@ -242,11 +244,78 @@ def test_ssrf_url_validation_rejects_private_credentials_controls_and_alt_ports(
 
 
 def test_dns_rebinding_and_mixed_dns_are_denied_before_any_network(monkeypatch):
-    monkeypatch.setattr(service.socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)), (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))])
+    monkeypatch.setattr(public_transport.socket, "getaddrinfo", lambda *args, **kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443)), (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("127.0.0.1", 443))])
     with pytest.raises(Exception): service.public_addresses("hooks.example.com")
     monkeypatch.setattr(service, "public_addresses", lambda host: (_ for _ in ()).throw(ValueError("rebound")))
     monkeypatch.setattr(service.httpcore, "ConnectionPool", lambda **kwargs: pytest.fail("Private rebinding reached network"))
     with pytest.raises(ValueError): service.post_webhook("https://hooks.example.com/", b"{}", {})
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "ff0e::1"])
+def test_multicast_webhook_destinations_are_not_public_unicast(address):
+    authority = "[" + address + "]" if ":" in address else address
+    with pytest.raises(HTTPException) as failure:
+        service.normalize_url("https://" + authority + "/")
+    assert failure.value.status_code == 400
+
+
+@pytest.mark.parametrize("address", ["224.0.0.1", "ff0e::1"])
+def test_multicast_dns_answers_are_rejected_even_alongside_public_addresses(monkeypatch, address):
+    monkeypatch.setattr(public_transport.socket, "getaddrinfo", lambda *_, **__: [
+        (socket.AF_INET6 if ":" in value else socket.AF_INET, socket.SOCK_STREAM, 6, "", (value, 443))
+        for value in ("8.8.8.8", address)
+    ])
+    with pytest.raises(HTTPException) as failure:
+        service.public_addresses("hooks.example.com")
+    assert failure.value.status_code == 400
+
+
+def test_stalled_dns_does_not_accumulate_unbounded_webhook_lookup_jobs(monkeypatch):
+    # Four operating-system lookups may outlive a caller's timeout. Further
+    # requests must not append new work while all four remain stuck.
+    pending = []
+    class StalledLookup(Future):
+        def result(self, timeout=None):
+            raise FutureTimeout()
+    def submit(*_, **__):
+        future = StalledLookup()
+        future.set_running_or_notify_cancel()
+        pending.append(future)
+        return future
+    pool = SimpleNamespace(submit=submit)
+    monkeypatch.setattr(service, "_DNS_RESOLVER", pool, raising=False)
+    monkeypatch.setattr(public_transport, "_DNS_POOL", pool)
+    slots = threading.BoundedSemaphore(4)
+    monkeypatch.setattr(public_transport, "_DNS_SLOTS", slots)
+    try:
+        for _ in range(5):
+            with pytest.raises(HTTPException):
+                service.public_addresses("hooks.example.com")
+        assert len(pending) == 4
+    finally:
+        for future in pending:
+            future.set_result([])
+    # Completed lookups release all admission slots for the next delivery.
+    assert all(slots.acquire(blocking=False) for _ in range(4))
+
+
+def test_proxy_dns_is_bounded_before_opening_the_webhook_connection(monkeypatch):
+    observed = []
+    monkeypatch.setattr(public_transport, "_resolve", lambda host, port, timeout: observed.append((host, port, timeout)) or ["10.0.0.2"])
+    backend = service._PinnedBackend("8.8.8.8", "hooks.example.com")
+    monkeypatch.setattr(backend.backend, "connect_tcp", lambda host, port, *args: observed.append((host, port)) or object())
+    backend.connect_tcp("trusted-proxy.internal", 8080, timeout=3)
+    assert observed[0][:2] == ("trusted-proxy.internal", 8080)
+    assert 0 < observed[0][2] <= 3
+    assert observed[1] == ("10.0.0.2", 8080)
+
+
+def test_proxy_dns_timeout_cannot_reach_a_socket(monkeypatch):
+    backend = service._PinnedBackend("8.8.8.8", "hooks.example.com")
+    monkeypatch.setattr(public_transport, "_resolve", lambda *args: (_ for _ in ()).throw(public_transport.TransportError("DNS timeout")))
+    monkeypatch.setattr(backend.backend, "connect_tcp", lambda *args: pytest.fail("Timed-out proxy DNS reached a socket"))
+    with pytest.raises(public_transport.TransportError):
+        backend.connect_tcp("trusted-proxy.internal", 8080, timeout=3)
 
 
 def test_pinned_tls_name_changes_only_destination_not_https_proxy():
@@ -332,10 +401,11 @@ def test_post_pins_destination_and_preserves_proxy_ca_and_no_redirects(monkeypat
     assert observed["options"]["ssl_context"].verify_mode == 2
 
 
-def test_real_connect_proxy_pins_ip_and_verifies_original_tls_hostname(tmp_path, monkeypatch):
+@pytest.mark.parametrize("proxy_tls,pinned_address", [(False, "8.8.8.8"), (True, "8.8.8.8"), (True, "127.0.0.1")])
+def test_real_connect_proxy_pins_ip_and_verifies_original_tls_hostname(tmp_path, monkeypatch, proxy_tls, pinned_address):
     key, certificate = tmp_path / "fixture.key", tmp_path / "fixture.pem"
     subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(certificate),
-                    "-days", "1", "-subj", "/CN=hooks.example.com", "-addext", "subjectAltName=DNS:hooks.example.com"],
+                    "-days", "1", "-subj", "/CN=hooks.example.com", "-addext", "subjectAltName=DNS:hooks.example.com,IP:127.0.0.1"],
                    check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     observed = {"connect": [], "sni": [], "requests": 0}
     class Receiver(BaseHTTPRequestHandler):
@@ -363,7 +433,7 @@ def test_real_connect_proxy_pins_ip_and_verifies_original_tls_hostname(tmp_path,
                 if len(headers) > 8192: return
             first = headers.split(b"\r\n", 1)[0]
             observed["connect"].append(first)
-            assert first == b"CONNECT 8.8.8.8:443 HTTP/1.1"
+            assert first == f"CONNECT {pinned_address}:443 HTTP/1.1".encode()
             # Deliberately route this isolated test proxy to its local TLS
             # fixture. Production code still CONNECTs only the validated IP.
             with socket.create_connection(("127.0.0.1", https.server_port), timeout=3) as upstream:
@@ -379,18 +449,23 @@ def test_real_connect_proxy_pins_ip_and_verifies_original_tls_hostname(tmp_path,
                 except (OSError, TimeoutError): pass
     proxy = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Proxy)
     proxy.daemon_threads = True
+    if proxy_tls:
+        proxy.socket = context.wrap_socket(proxy.socket, server_side=True)
     threads = [threading.Thread(target=server.serve_forever, daemon=True) for server in (https, proxy)]
     for thread in threads: thread.start()
     monkeypatch.setenv("SSL_CERT_FILE", str(certificate))
-    monkeypatch.setattr(service, "getproxies", lambda: {"https": f"http://127.0.0.1:{proxy.server_address[1]}"})
-    monkeypatch.setattr(service, "public_addresses", lambda host: ["8.8.8.8"])
+    monkeypatch.setattr(service, "getproxies", lambda: {"https": ("https" if proxy_tls else "http") + f"://127.0.0.1:{proxy.server_address[1]}"})
+    # The private-address case is injected only into this owned TLS fixture to
+    # exercise a proxy and destination sharing one literal IP. Production URL
+    # validation and DNS policy retain their private-network rejection.
+    monkeypatch.setattr(service, "public_addresses", lambda host: [pinned_address])
     try:
         body = b'{"fixture":true}'
         assert service.post_webhook("https://hooks.example.com/", body, {"Content-Type": "application/json"}) == (204, None)
         with pytest.raises(Exception):
             service.post_webhook("https://wrong-name.example.com/", body, {"Content-Type": "application/json"})
         assert observed["requests"] == 1
-        assert observed["sni"] == ["hooks.example.com", "wrong-name.example.com"]
+        assert observed["sni"] == ([None, "hooks.example.com", None, "wrong-name.example.com"] if proxy_tls else ["hooks.example.com", "wrong-name.example.com"])
         assert len(observed["connect"]) == 2
     finally:
         for server in (proxy, https): server.shutdown(); server.server_close()

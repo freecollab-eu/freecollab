@@ -171,10 +171,16 @@ async def office_dav(session_id: str, secret: str, filename: str, request: Reque
     headers = {**PRIVATE,"DAV":"1, 2","Allow":"OPTIONS, PROPFIND, GET, HEAD, PUT, LOCK, UNLOCK","ETag":service.etag(record),"MS-Author-Via":"DAV"}
     if method == "OPTIONS": return Response(status_code=200,headers=headers)
     if method in {"GET","HEAD"}:
+        downloaded_file_id = record.id
         content = service.bounded_file(record)
+        # A remote storage read may outlive logout, removal or revocation.
+        # Keep the returned bytes/ETag bound to the file actually downloaded,
+        # while checking all capability and resource grants again after I/O.
+        session.expire_all()
+        cap, _, _ = service.capability(session, session_id, secret)
         # GET establishes the baseline a lock-token-only Office PUT must match.
         if method=="GET":
-            cap.last_file_id = record.id; session.add(cap); session.commit()
+            cap.last_file_id = downloaded_file_id; session.add(cap); session.commit()
         return Response(content if method=="GET" else b"",media_type=record.content_type,headers={**headers,"Content-Length":str(len(content)),"Content-Disposition":"attachment; filename*=UTF-8''"+quote(cap.filename,safe="")})
     if method == "PROPFIND":
         if request.headers.get("depth", "0") != "0": raise HTTPException(403,"Only this document is exposed")

@@ -21,7 +21,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 class Register(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     email: EmailStr = Field(max_length=320)
-    password: str
+    password: str = Field(min_length=12)
 
     _validate_password = field_validator("password")(validate_password)
 

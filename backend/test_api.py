@@ -32,7 +32,7 @@ def test_full_flow():
         r = requests.post(f"{BASE_URL}/auth/register", json={
             "name": "Alice Test",
             "email": "alice@test.com",
-            "password": "Secret123!"
+            "password": "Secret-api-test123!"
         })
         if r.status_code == 400:  # Already exists
             print(f"  ⚠ User exists, skipping")
@@ -48,7 +48,7 @@ def test_full_flow():
     try:
         r = requests.post(f"{BASE_URL}/auth/login", json={
             "email": "alice@test.com",
-            "password": "Secret123!"
+            "password": "Secret-api-test123!"
         })
         assert r.status_code == 200, f"Got {r.status_code}: {r.text}"
         token = r.json()["access_token"]

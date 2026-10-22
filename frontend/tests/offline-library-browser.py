@@ -49,6 +49,26 @@ def ready(url, process):
 VAULT = '''async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('freecollab-mobile-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});try{return await new Promise((resolve,reject)=>{const tx=db.transaction(['keys','vault']);const keys=tx.objectStore('keys').getAll(),rows=tx.objectStore('vault').getAll();tx.oncomplete=()=>resolve({keys:keys.result.map(k=>({type:k.type,extractable:k.extractable,algorithm:k.algorithm.name})),rows:rows.result.map(r=>({id:r.id,owner:r.owner,kind:r.kind,ciphertext:[...new Uint8Array(r.ciphertext)],fields:Object.keys(r)}))});tx.onerror=()=>reject(tx.error)})}finally{db.close()}}'''
 
 
+def network_state(page, session, offline):
+    # Chromium151 can reset navigator.onLine after a service-worker navigation
+    # while Playwright still blocks real requests. Set actual browser protocol
+    # state for the new document; do not replace navigator or network responses.
+    session.send('Network.overrideNetworkState', {'offline':offline,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1})
+    page.wait_for_function('online=>navigator.onLine===online',arg=not offline)
+
+
+def set_offline(context, page, session, offline):
+    context.set_offline(offline)
+    network_state(page,session,offline)
+
+
+def reload_offline(page, session):
+    page.reload(wait_until='domcontentloaded')
+    network_state(page,session,True)
+    assert page.evaluate('!!navigator.serviceWorker.controller')
+    assert page.evaluate("async()=>{try{await fetch('/api/ready',{cache:'no-store'});return 'unexpected response'}catch(error){return error.name}}")=='TypeError'
+
+
 def main():
     results, processes, streams, stage = {}, [], [], 'private services'
     with tempfile.TemporaryDirectory(prefix='freecollab-mobile-') as directory:
@@ -114,7 +134,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 context=browser.new_context(viewport={'width':1440,'height':1000},reduced_motion='reduce');errors=[]
                 context.add_init_script('if(location.origin==='+json.dumps(app)+'&&!sessionStorage.getItem("proof-initialized")){localStorage.setItem("freecollab_token",'+json.dumps(tokens['alice'])+');localStorage.setItem("freecollab_user_id","alice");sessionStorage.setItem("proof-initialized","1")}')
                 context.on('page',lambda opened:opened.on('pageerror',lambda error:errors.append(str(error)+'\n'+(error.stack or ''))))
-                page=context.new_page();page.set_default_timeout(25000)
+                page=context.new_page();page.set_default_timeout(25000);network=context.new_cdp_session(page)
                 try:
                     stage='explicit opt-in online history and file snapshot'
                     page.goto(app,wait_until='networkidle');page.wait_for_function('navigator.serviceWorker.controller!==null',timeout=30000)
@@ -142,8 +162,27 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     raw=json.dumps(vault)
                     for secret in ['Offline history secret A','private-reference.txt',content.decode(),tokens['alice']]:assert secret not in raw
                     results['history_file_metadata_and_bytes_encrypted_under_nonextractable_origin_account_key']=True
+                    stage='online network failure still withholds retained history'
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click()
+                    failed={'requests':0}
+                    def unavailable_authority(route):
+                        failed['requests']+=1;route.abort('failed')
+                    context.route('**/api/auth/me',unavailable_authority)
+                    with page.expect_event('requestfailed',predicate=lambda request:request.url.endswith('/api/auth/me')):
+                        page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    page.wait_for_function("async()=>!(await navigator.locks.query()).held.some(lock=>lock.name==='freecollab-offline-library:alice')")
+                    assert failed['requests'] and page.evaluate('navigator.onLine')
+                    expect(dialog.get_by_role('list',name='Saved offline channels',exact=True).get_by_role('button',name='Studio',exact=True)).to_have_count(0)
+                    expect(dialog.get_by_role('region',name='Saved history for Studio',exact=True)).to_have_count(0)
+                    vault=page.evaluate(VAULT);assert {'offline-channel','offline-file'}.issubset({row['kind'] for row in vault['rows']})
+                    context.unroute('**/api/auth/me',unavailable_authority)
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    expect(dialog.get_by_role('list',name='Saved offline channels',exact=True).get_by_role('button',name='Studio',exact=True)).to_be_visible()
+                    results['failed_online_authority_check_hides_content_without_purging_encrypted_copies']=True
                     stage='real service worker offline reload and binary attachment read'
-                    context.set_offline(True);page.reload(wait_until='domcontentloaded')
+                    set_offline(context,page,network,True);reload_offline(page,network)
                     page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     dialog.get_by_role('button',name='Studio',exact=True).click()
                     expect(dialog.get_by_role('region',name='Saved history for Studio',exact=True).get_by_text('Offline history secret A',exact=True)).to_be_visible()
@@ -157,9 +196,10 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('queued-private.txt',exact=True)).to_be_visible()
                     vault=page.evaluate(VAULT);assert 'attachment-outbox' in {row['kind'] for row in vault['rows']}
                     raw=json.dumps(vault);assert 'Queued binary confidential A' not in raw and 'queued-private.txt' not in raw
-                    page.reload(wait_until='domcontentloaded');page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    reload_offline(page,network);page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('queued-private.txt',exact=True)).to_be_visible()
                     results['offline_binary_outbox_survives_actual_reload_without_plaintext_metadata_or_bytes']=True
+                    results['both_native_service_worker_reloads_keep_real_offline_network_and_navigator_state']=True
                     page.set_viewport_size({'width':320,'height':900});assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');assert dialog.evaluate('e=>e.scrollWidth<=e.clientWidth+1')
                     REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.with_name('offline-library-320.png')),full_page=True)
                     results['offline_library_and_queue_fit_320px']=True;page.set_viewport_size({'width':1440,'height':1000})
@@ -172,7 +212,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                             lost['once']=True;route.fetch();route.abort('failed')
                         else:route.continue_()
                     context.route('**/api/files/channels/shared',lose_ack)
-                    context.set_offline(False)
+                    set_offline(context,page,network,False)
                     deadline=time.monotonic()+30
                     while file_count()!=2 and time.monotonic()<deadline:page.wait_for_timeout(100)
                     assert file_count()==2 and lost['once']
@@ -182,12 +222,12 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert file_count()==2
                     results['actual_lost_ack_attachment_replay_uses_same_atomic_receipt_without_duplicate']=True
                     stage='removed membership erases known revoked cache and blocks attachment replay'
-                    context.set_offline(True)
+                    set_offline(context,page,network,True)
                     dialog.get_by_role('button',name='Studio',exact=True).click()
                     dialog.locator('#offline-attachment-input').set_input_files({'name':'revoked-private.txt','mimeType':'text/plain','buffer':b'Must never leave revoked device'})
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('revoked-private.txt',exact=True)).to_be_visible()
                     with sqlite3.connect(private/'proof.db') as db:db.execute("DELETE FROM channelmember WHERE channel_id='shared' AND user_id='alice'");db.commit()
-                    context.set_offline(False)
+                    set_offline(context,page,network,False)
                     expect(dialog.get_by_role('list',name='Saved offline channels',exact=True).get_by_role('button',name='Studio',exact=True)).to_have_count(0)
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('Needs review',exact=False)).to_be_visible()
                     assert file_count()==2

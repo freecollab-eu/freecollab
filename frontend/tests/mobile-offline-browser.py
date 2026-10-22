@@ -49,6 +49,26 @@ def ready(url, process):
 VAULT = '''async()=>{const db=await new Promise((resolve,reject)=>{const r=indexedDB.open('freecollab-mobile-v1');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error)});try{return await new Promise((resolve,reject)=>{const tx=db.transaction(['keys','vault']);const keys=tx.objectStore('keys').getAll(),rows=tx.objectStore('vault').getAll();tx.oncomplete=()=>resolve({keys:keys.result.map(k=>({type:k.type,extractable:k.extractable,algorithm:k.algorithm.name})),rows:rows.result.map(r=>({id:r.id,owner:r.owner,kind:r.kind,ciphertext:[...new Uint8Array(r.ciphertext)],fields:Object.keys(r)}))});tx.onerror=()=>reject(tx.error)})}finally{db.close()}}'''
 
 
+def network_state(page, session, offline):
+    # Chromium151 can reset navigator.onLine after a service-worker navigation
+    # while Playwright still blocks real requests. Set actual browser protocol
+    # state for the new document; do not replace navigator or network responses.
+    session.send('Network.overrideNetworkState', {'offline':offline,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1})
+    page.wait_for_function('online=>navigator.onLine===online',arg=not offline)
+
+
+def set_offline(context, page, session, offline):
+    context.set_offline(offline)
+    network_state(page,session,offline)
+
+
+def reload_offline(page, session):
+    page.reload(wait_until='domcontentloaded')
+    network_state(page,session,True)
+    assert page.evaluate('!!navigator.serviceWorker.controller')
+    assert page.evaluate("async()=>{try{await fetch('/api/ready',{cache:'no-store'});return 'unexpected response'}catch(error){return error.name}}")=='TypeError'
+
+
 def main():
     results, processes, streams, stage = {}, [], [], 'private services'
     with tempfile.TemporaryDirectory(prefix='freecollab-mobile-') as directory:
@@ -114,7 +134,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 context=browser.new_context(viewport={'width':1440,'height':1000},reduced_motion='reduce');errors=[]
                 context.add_init_script('if(location.origin==='+json.dumps(app)+'&&!sessionStorage.getItem("proof-initialized")){localStorage.setItem("freecollab_token",'+json.dumps(tokens['alice'])+');localStorage.setItem("freecollab_user_id","alice");sessionStorage.setItem("proof-initialized","1")}')
                 context.on('page',lambda opened:opened.on('pageerror',lambda error:errors.append(str(error)+'\n'+(error.stack or ''))))
-                page=context.new_page();page.set_default_timeout(25000)
+                page=context.new_page();page.set_default_timeout(25000);network=context.new_cdp_session(page)
                 try:
                     stage='production app and native service worker installation'
                     page.goto(app,wait_until='networkidle');page.wait_for_function('navigator.serviceWorker.controller!==null',timeout=30000)
@@ -124,7 +144,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert page.evaluate('document.querySelector("link[rel=manifest]").href.endsWith("/manifest.webmanifest")')
                     results['complete_production_app_native_service_worker_control']=True
                     stage='native encrypted vault and offline queue'
-                    context.set_offline(True);composer.fill('Offline queued message private A');page.get_by_role('button',name='Send message',exact=True).click()
+                    set_offline(context,page,network,True);composer.fill('Offline queued message private A');page.get_by_role('button',name='Send message',exact=True).click()
                     expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible()
                     composer.fill('Saved draft private A');page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
                     expect(page.get_by_role('dialog',name='Mobile and offline',exact=True).get_by_text('Saved draft private A',exact=True)).to_be_visible()
@@ -136,13 +156,14 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     raw=json.dumps(vault);assert all(value not in raw for value in ['Saved draft private A','Offline queued message private A',tokens['alice']])
                     assert count()==0;results['native_indexeddb_nonextractable_aes_gcm_no_plaintext_or_bearer']=True
                     stage='actual offline navigation and private draft library'
-                    page.reload(wait_until='domcontentloaded');page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    reload_offline(page,network);page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Saved draft private A',exact=True)).to_be_visible()
                     expect(dialog.get_by_text('Offline queued message private A',exact=True)).to_be_visible()
                     assert page.get_by_role('textbox',name='Message #Studio',exact=True).count()==0
                     dialog.get_by_role('button',name='Edit draft',exact=True).click();dialog.get_by_label('Private draft text',exact=True).fill('Edited offline private A');dialog.get_by_role('button',name='Save private draft',exact=True).click();expect(dialog.get_by_text('Edited offline private A',exact=True)).to_be_visible()
                     results['actual_offline_reload_edit_saved_draft_without_cached_history_or_catalog']=True
+                    results['native_service_worker_reload_keeps_real_offline_network_and_navigator_state']=True
                     cache_urls=page.evaluate('''async()=>{const urls=[];for(const key of await caches.keys())for(const request of await(await caches.open(key)).keys())urls.push(request.url);return urls}''')
                     assert cache_urls and all(url.startswith(app+'/assets/') or url in [app+'/',app+'/manifest.webmanifest',app+'/favicon.svg',app+'/icons/app-192.png',app+'/icons/app-512.png'] for url in cache_urls)
                     assert all('/api' not in url and 'token' not in url and '/socket.io' not in url for url in cache_urls)
@@ -151,7 +172,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.with_name('mobile-offline-320.png')),full_page=True)
                     results['offline_settings_320px_without_horizontal_overflow']=True;page.set_viewport_size({'width':1440,'height':1000})
                     stage='safe reconnect sends once after live authorization'
-                    context.set_offline(False)
+                    set_offline(context,page,network,False)
                     deadline=time.monotonic()+30
                     while count()!=1 and time.monotonic()<deadline:page.wait_for_timeout(200)
                     assert count()==1
@@ -184,15 +205,15 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     composer.fill('Acknowledged on server response lost');page.get_by_role('button',name='Send message',exact=True).click()
                     expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible();assert count()==2
                     context.unroute('**/api/mobile/offline/channels/shared/messages',lose_ack)
-                    context.set_offline(True);context.set_offline(False)
+                    set_offline(context,page,network,True);set_offline(context,page,network,False)
                     page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('No messages are waiting on this device.',exact=True)).to_be_visible();assert count()==2
                     results['lost_ack_retry_reuses_durable_client_receipt_without_duplicate']=True
                     stage='membership removed while offline stops reconnect send'
-                    page.get_by_role('button',name='Close mobile settings',exact=True).click();context.set_offline(True)
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click();set_offline(context,page,network,True)
                     composer.fill('Removed membership must never send');page.get_by_role('button',name='Send message',exact=True).click();expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible()
                     with sqlite3.connect(private/'proof.db') as db:db.execute("DELETE FROM channelmember WHERE channel_id='shared' AND user_id='alice'");db.commit()
-                    context.set_offline(False);page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    set_offline(context,page,network,False);page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Needs review',exact=True)).to_be_visible();assert count()==2
                     results['removed_membership_requires_review_and_cannot_auto_send']=True
                     stage='logout purge and two-account cross-tab isolation'

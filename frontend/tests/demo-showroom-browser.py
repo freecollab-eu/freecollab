@@ -17,7 +17,7 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
-SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Demo.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 
 def port():
     with socket.socket() as listener:
@@ -31,6 +31,8 @@ def main():
         web=private/'web'; shutil.copytree(ROOT/'frontend',web,ignore=shutil.ignore_patterns('node_modules','dist','dist-widget','tests','.vite'))
         (web/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
         (web/'index.html').write_text('<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" /></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>')
+        for entry, source in [('app', 'main'), ('website', 'website-entry')]:
+            (web/(entry+'.html')).write_text('<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width, initial-scale=1" /></head><body><div id="root"></div><script type="module" src="/src/'+source+'.tsx"></script></body></html>')
         (web/'entry.tsx').write_text('''import React from 'react';import{createRoot}from'react-dom/client';import{Demo}from'./src/components/Demo';import{applyLocale}from'./src/i18n';import'@fontsource-variable/inter';import'@fontsource-variable/manrope';import'@fontsource-variable/source-serif-4';import'./src/index.css';window.showroomLocale=applyLocale;window.showroomBack=0;window.showroomOpen=0;createRoot(document.getElementById('root')).render(<React.StrictMode><Demo onBack={()=>window.showroomBack++} onOpenApp={()=>window.showroomOpen++}/></React.StrictMode>);''')
         launcher=private/'serve.mjs'; launcher.write_text('import{createServer}from'+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';import react from'+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';const server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,hmr:false,watch:{ignored:["**"]},fs:{allow:'+json.dumps([str(private),str(ROOT/'frontend')])+'}}});await server.listen();')
         stream=(private/'vite.log').open('w')
@@ -135,6 +137,47 @@ def main():
                 page.get_by_role('button',name='Studio notes',exact=True).click();assert page.get_by_label('Edit demo document').input_value()!=edited
                 page.get_by_role('button',name='Project brief',exact=True).click();expect(page.get_by_label('Edit demo document')).to_have_value(edited)
                 checks['edited_document_markdown_actual_download_and_independent_documents']=True
+                stage='one conversation, the same shared brief, and a real local decision/owned task'
+                journey=page.get_by_role('navigation',name='Follow the courtyard project',exact=True)
+                journey.get_by_role('button',name='01 The conversation',exact=True).click()
+                expect(page.get_by_label('Edit courtyard brief',exact=True)).to_have_value(edited)
+                journey_brief='## A shared courtyard direction\n\nKeep the doorway open and compare two timber samples.'
+                page.get_by_label('Edit courtyard brief',exact=True).fill(journey_brief)
+                journey.get_by_role('button',name='02 The shared brief',exact=True).click()
+                expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
+                page.get_by_role('button',name='Agree a next step',exact=True).click()
+                task_count=page.get_by_role('checkbox').count()
+                decision='Choose warm timber <script>literal decision text</script>'
+                next_step='Bring two courtyard timber samples'
+                page.get_by_label('Sample decision',exact=True).fill(decision)
+                page.get_by_label('Next step',exact=True).fill(next_step)
+                page.get_by_label('Owner',exact=True).select_option('Noor')
+                page.get_by_role('button',name='Record sample decision',exact=True).click()
+                expect(page.get_by_text(decision,exact=True)).to_be_visible()
+                expect(page.get_by_text('Recorded in this demo',exact=True)).to_be_visible()
+                assert page.locator('.fc-studio-decision script').count()==0
+                follow_up=page.get_by_role('checkbox',name=next_step,exact=True)
+                expect(follow_up).to_have_count(1);follow_up.check()
+                assert page.get_by_role('checkbox').count()==task_count+1
+                expect(page.locator('.fc-studio-decision-record')).to_contain_text('Noor')
+                page.get_by_role('button',name='Revise sample decision',exact=True).click()
+                page.get_by_label('Sample decision',exact=True).fill('Keep this direction, with a clearer explanation.')
+                page.get_by_role('button',name='Record sample decision',exact=True).click()
+                expect(follow_up).to_be_checked()
+                page.get_by_role('button',name='Revise sample decision',exact=True).click()
+                revised_step='Bring the revised material samples'
+                page.get_by_label('Next step',exact=True).fill(revised_step)
+                page.get_by_label('Owner',exact=True).select_option('Elias')
+                page.get_by_role('button',name='Record sample decision',exact=True).click()
+                expect(follow_up).to_have_count(0)
+                expect(page.get_by_role('checkbox',name=revised_step,exact=True)).not_to_be_checked()
+                assert page.get_by_role('checkbox').count()==task_count+1
+                page.get_by_role('button',name='View shared brief',exact=True).click()
+                expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
+                journey.get_by_role('button',name='03 Decision & next step',exact=True).click()
+                expect(page.get_by_role('checkbox',name=revised_step,exact=True)).to_be_visible()
+                expect(journey.get_by_role('button',name='03 Decision & next step',exact=True)).to_have_attribute('aria-current','step')
+                checks['same_shared_brief_local_decision_owned_task_revision_and_completion']=True
                 stage='Microsoft and Google preparation only'
                 section('Connections')
                 for provider in ['Microsoft 365','Google Workspace']:
@@ -185,6 +228,9 @@ def main():
                     page.get_by_role('button',name=provider+' Preparation guide',exact=True).click()
                     for box in page.get_by_role('checkbox').all():expect(box).not_to_be_checked()
                 section('Projects');expect(page.get_by_role('checkbox',name='My new courtyard step',exact=True)).to_have_count(0)
+                expect(page.get_by_role('checkbox',name=revised_step,exact=True)).to_have_count(0)
+                expect(page.get_by_label('Sample decision',exact=True)).to_have_value('Use warm, durable materials and keep the courtyard open.')
+                expect(page.get_by_label('Owner',exact=True)).to_have_value('Maja')
                 expect(page.get_by_role('checkbox',name='Review the courtyard materials',exact=True)).not_to_be_checked()
                 section('Documents');assert page.get_by_label('Edit demo document').input_value()!=edited
                 checks['focus_trapped_reset_clears_messages_tasks_documents_checklists_theme_and_layout']=True
@@ -198,11 +244,23 @@ def main():
                     for name in ['Samtal','Projekt','Dokument','Anslutningar','Utseende']:
                         section(name)
                         assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1'),name+' horizontal overflow at '+str(width)
+                section('Projekt')
+                expect(page.get_by_role('heading',name='Gör nästa steg tydligt.',exact=True)).to_be_visible()
+                page.get_by_label('Exempelbeslut',exact=True).fill('Behåll den öppna gården.')
+                page.get_by_label('Nästa steg',exact=True).fill('Ta med två materialprover')
+                page.get_by_label('Ansvarig',exact=True).select_option('Nora')
+                page.get_by_role('button',name='Spara exempelbeslut',exact=True).click()
+                expect(page.get_by_role('checkbox',name='Ta med två materialprover',exact=True)).to_be_visible()
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+                journey_image=REPORT.with_name('demo-showroom-decision-mobile.png');page.screenshot(path=str(journey_image),full_page=True)
+                checks['swedish_decision_owner_and_next_task_at_320px']=True
                 section('Samtal')
                 mobile=REPORT.with_name('demo-showroom-mobile.png');page.screenshot(path=str(mobile),full_page=True)
                 reset_menu();expect(page.get_by_role('alertdialog')).to_be_visible();page.keyboard.press('Escape')
                 section('Samtal');page.get_by_label('Ditt demomeddelande',exact=True).fill('Ett lokalt meddelande');page.get_by_role('button',name='Skicka demomeddelande',exact=True).click()
                 page.reload(wait_until='networkidle');expect(page.get_by_text('Ett lokalt meddelande',exact=True)).to_have_count(0)
+                section('Projects');expect(page.get_by_role('checkbox',name='Ta med två materialprover',exact=True)).to_have_count(0)
+                expect(page.get_by_label('Sample decision',exact=True)).to_have_value('Use warm, durable materials and keep the courtyard open.')
                 checks['scoped_swedish_all_sections_390_320px_and_reload_discards_demo_data']=True
                 page.get_by_role('button',name='Back to FreeCollab',exact=True).click();tools();page.get_by_role('button',name='Open the app',exact=True).click()
                 assert page.evaluate('window.showroomBack')==1 and page.evaluate('window.showroomOpen')==1
@@ -211,8 +269,46 @@ def main():
                 assert not errors,errors
                 assert not unexpected,unexpected
                 checks['explicit_exit_callbacks_no_storage_api_provider_or_browser_errors']=True
+                stage='actual App and public website provider destinations, history, direct hashes and reload'
+                for entry in ['app','website']:
+                    routed=browser.new_context(viewport={'width':1440,'height':1000},reduced_motion='reduce')
+                    try:
+                        visitor=routed.new_page();visitor.set_default_timeout(25000)
+                        visitor.on('pageerror',lambda error:errors.append(str(error)))
+                        visitor.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+                        address=app+'/'+entry+'.html'
+                        for provider,name in [('microsoft','Microsoft 365'),('google','Google Workspace')]:
+                            visitor.goto(address,wait_until='networkidle')
+                            card=visitor.locator('.fc-public-provider-grid article').filter(has=visitor.get_by_role('heading',name=name,exact=True))
+                            card.get_by_role('button',name='Explore connection setup',exact=True).click()
+                            guide=visitor.get_by_role('button',name=name+' Preparation guide',exact=True)
+                            expect(guide).to_have_attribute('aria-pressed','true')
+                            expect(visitor.get_by_role('tabpanel',name='Connections',exact=True)).to_be_visible()
+                            assert visitor.evaluate('location.hash')=='#demo=connections&provider='+provider
+                            visitor.go_back(wait_until='domcontentloaded')
+                            expect(visitor.locator('#public-heading')).to_be_visible()
+                            visitor.go_forward(wait_until='domcontentloaded')
+                            expect(guide).to_have_attribute('aria-pressed','true')
+                            visitor.reload(wait_until='networkidle');expect(guide).to_have_attribute('aria-pressed','true')
+                            visitor.get_by_role('button',name='Back to FreeCollab',exact=True).click()
+                            expect(visitor.locator('#public-heading')).to_be_visible();assert visitor.evaluate('location.hash')==''
+                        visitor.goto(address+'#demo=documents',wait_until='networkidle')
+                        routed_edit='A shared brief kept while following an explicit provider route.'
+                        visitor.get_by_label('Edit demo document',exact=True).fill(routed_edit)
+                        visitor.evaluate("location.hash='demo=connections&provider=google'")
+                        expect(visitor.get_by_role('button',name='Google Workspace Preparation guide',exact=True)).to_have_attribute('aria-pressed','true')
+                        visitor.evaluate("location.hash='demo=documents'")
+                        expect(visitor.get_by_label('Edit demo document',exact=True)).to_have_value(routed_edit)
+                        visitor.reload(wait_until='networkidle')
+                        expect(visitor.get_by_label('Edit demo document',exact=True)).not_to_have_value(routed_edit)
+                        if entry=='website':
+                            assert visitor.evaluate('localStorage.length')==0 and visitor.evaluate('sessionStorage.length')==0
+                        checks[entry+'_actual_entry_provider_buttons_history_direct_hash_reload_and_shared_local_state']=True
+                    finally:routed.close()
+                assert not errors,errors
+                assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom only; no real users/accounts/providers','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image)],'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)],'source_sha256':source_hashes},indent=2)+'\n')
             print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
         except Exception:
             print('Failed stage: '+stage)

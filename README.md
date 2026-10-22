@@ -8,7 +8,7 @@ Self-hosted collaboration with workspaces, private and encrypted channels, direc
 
 FreeCollab brings conversations, documents, tasks, files and meetings into a workspace you control. Choose personal colors/type and Swedish or English, use your own customer SSO and prepare your organization's Microsoft 365/Google apps. The MIT-licensed source has no per-seat software fee; you cover hosting and external provider costs. Start with one API process; additional replicas require the shared coordination and storage described in [SCALING.md](docs/SCALING.md).
 
-The website's **Explore the demo** opens a browser-only showroom at `/#demo`, with sample messages, tasks, editable Markdown, appearance and both provider setup guides. It requires no account or provider connection. Sample changes and separate channel drafts stay in memory in the current tab; reload or confirm reset to start fresh. **Open App** enters the real authenticated application. For Railway, start with the [maintained deployment guide](RAILWAY_DEPLOY.md).
+**Explore the demo** opens a browser-only showroom at `/#demo`, with sample messages, tasks, editable Markdown, appearance and both provider setup guides. Follow the conversation, edit its shared brief, then record a sample decision with an assigned next step. The Microsoft and Google cards open their selected setup guide directly. It requires no account or provider connection. Sample changes and separate channel drafts stay in memory in the current tab; reload or confirm reset to start fresh. The full application supplies **Open App** for its authenticated installation. The [independent public website](deploy/website/README.md) serves only the landing page, documentation and demo. For Railway, start with the [maintained deployment guide](RAILWAY_DEPLOY.md).
 
 ## Start the self-hosted pilot
 
@@ -25,12 +25,13 @@ The pilot binds its frontend to loopback; the API and database have no host port
 
 ### First team workflow
 
-1. Open the app and create a personal account.
-2. Create a workspace and open **Get started** to set its name/logo, choose personal settings and create the first channel. Its creator is the channel admin.
-3. Use **Members** to create a single-use invitation link. Share it with the intended teammate; the recipient signs in and explicitly joins.
-4. Exchange messages, reply in threads and edit/delete your own messages.
-5. Upload a permitted file and download it from another member account. Nonmembers cannot read the channel or its files.
-6. Promote another member before the last channel admin leaves. Revoke an unused invitation or remove a member when access is no longer needed.
+1. Open the app and create a personal account with a password of at least 12 characters.
+2. Create a workspace. **Set up this workspace** appears in its empty room; **Get started** also remains in the tools menu for eligible administrators. Set the name/logo, choose personal settings and create the first channel. Its creator is the channel admin.
+3. In the guide, create a single-use workspace invitation and share it privately. The teammate signs in and explicitly accepts; this grants workspace membership, without access to existing channels.
+4. Choose **Open channel invitations** to open the selected channel's existing member panel. Its channel admin creates a separate invitation; the teammate accepts it to join that conversation. Workspace and channel administration are separate roles.
+5. Choose **Write the first message** to enter the conversation with the composer focused. Exchange messages, reply in threads and edit/delete your own messages.
+6. Upload a permitted file and download it from another member account. Nonmembers cannot read the channel or its files.
+7. Promote another member before the last channel admin leaves. Revoke an unused invitation or remove a member when access is no longer needed.
 
 Invitations expire and store only a token hash. They grant membership, not operator privileges. See [CHANNELS.md](docs/CHANNELS.md). Organization-managed teams can instead provision or invite people through their own SSO without creating personal passwords; see [customer onboarding](docs/OIDC.md).
 

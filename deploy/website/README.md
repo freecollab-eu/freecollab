@@ -9,13 +9,21 @@ connections; the supplied server rejects `/api`, `/socket.io`, `/embed`, `/nativ
 and service-worker requests. Existing credentials stored on this origin are
 preserved and ignored.
 
-Build locally from `frontend/`:
+Build and run the website image from `frontend/`; host Node/npm is not required:
 
 ```sh
-npm ci
-npm run build:website
 docker build -f website/Dockerfile -t freecollab-website:review .
-docker run --rm -p 127.0.0.1:8080:8080 freecollab-website:review
+docker run --rm -p 127.0.0.1:8081:8080 freecollab-website:review
+```
+
+Open `http://127.0.0.1:8081`. The application pilot uses port 8080 by default,
+so both services can run on the same host with these separate loopback ports.
+
+For an optional host asset build, use Node 24 LTS (minimum 22.12) from `frontend/`:
+
+```sh
+ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci
+npm run build:website
 ```
 
 For managed proxy/CA environments, pass the public trust bundle as the BuildKit

@@ -7,6 +7,7 @@ fixture accounts, keys, SQLite data, files and child services are temporary.
 from ui_navigation import close_channels, open_channels, open_chat_tool
 import base64
 import importlib.util
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -28,7 +29,7 @@ PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') 
 spec = importlib.util.spec_from_file_location('customer_sso_fixture', Path(__file__).with_name('customer-sso-browser.py'))
 p = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(p)
-REPORT = ROOT.parent / '.freecollab/proof-results/workspace-launch-browser.json'
+REPORT = Path(os.getenv('WORKSPACE_LAUNCH_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/workspace-launch-browser.json')))
 
 
 def main():
@@ -53,6 +54,7 @@ def main():
             p.ready(api_base + '/ready', processes); p.ready(app_base + '/', processes)
             owner = p.native_user(api_base, database, 'Launch Owner')
             teammate = p.native_user(api_base, database, 'Launch Teammate')
+            outsider = p.native_user(api_base, database, 'Launch Outsider')
             workspace = p.api(api_base, 'POST', '/workspaces', owner, {'name': 'Northern Studio'})
             logo = private / 'studio.png'
             def png_chunk(kind, content):
@@ -64,17 +66,36 @@ def main():
                 context = browser.new_context(viewport={'width': 1440, 'height': 1050}, reduced_motion='reduce', permissions=['clipboard-read', 'clipboard-write'])
                 page = context.new_page(); page.set_default_timeout(30000)
                 page_errors = []; page.on('pageerror', lambda error: page_errors.append(type(error).__name__))
+                other_context = browser.new_context(viewport={'width': 1440, 'height': 1000}, reduced_motion='reduce')
+                other = other_context.new_page(); other.set_default_timeout(30000)
+                other.on('pageerror', lambda error: page_errors.append(type(error).__name__))
                 try:
                     stage = 'native administrator opens the real Chat launch entry'
                     p.login(page, app_base, owner, workspace)
+                    expect(page.get_by_role('dialog', name='Workspace launch guide', exact=True)).to_have_count(0)
+                    prompt = page.locator('.fc-chat-launch-prompt')
+                    expect(prompt.get_by_role('button', name='Set up this workspace', exact=True)).to_be_visible()
+                    expect(page.get_by_role('navigation', name='Channels', exact=True)).to_be_hidden()
+                    page.set_viewport_size({'width': 320, 'height': 900})
+                    assert page.evaluate('() => document.documentElement.scrollWidth <= innerWidth + 1')
+                    REPORT.parent.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(REPORT.with_name('workspace-empty-mobile.png')), full_page=True)
+                    entry = prompt.get_by_role('button', name='Set up this workspace', exact=True)
+                    entry.focus(); page.keyboard.press('Enter')
+                    guide = page.get_by_role('dialog', name='Workspace launch guide', exact=True)
+                    expect(guide).to_be_visible(); page.keyboard.press('Escape')
+                    expect(guide).to_have_count(0); expect(entry).to_be_focused()
+                    page.set_viewport_size({'width': 1440, 'height': 1050})
                     open_channels(page)
                     expect(page.locator('.fc-chat-launch-card')).to_be_visible()
-                    open_chat_tool(page, 'Get started')
+                    close_channels(page)
+                    entry.click()
                     guide = page.get_by_role('dialog', name='Workspace launch guide', exact=True)
                     expect(guide.get_by_role('heading', name='Give your workspace an identity', exact=True)).to_be_visible()
                     assert not p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], owner)
                     assert not p.api(api_base, 'GET', '/workspaces/' + workspace['id'] + '/invites', owner)
                     results['actual_chat_entry_no_automatic_seed_or_invite'] = True
+                    results['visible_empty_workspace_setup_keyboard_focus_and_320px'] = True
 
                     stage = 'real workspace identity name and logo saves'
                     guide.get_by_label('Workspace name', exact=True).fill('Northern Team Studio')
@@ -91,7 +112,7 @@ def main():
                     page.once('dialog', lambda dialog: dialog.dismiss())
                     guide.get_by_role('button', name='Close workspace launch guide', exact=True).click()
                     expect(guide.get_by_label('First channel name', exact=True)).to_have_value('An unfinished channel')
-                    guide.get_by_label('First channel name', exact=True).fill('Our first conversation')
+                    guide.get_by_label('First channel name', exact=True).fill('Our first conversation — design, delivery and decisions across Northern Studio')
                     guide.get_by_role('button', name='Create channel', exact=True).click()
                     expect(guide.get_by_role('status').filter(has_text='Channel created.')).to_be_visible()
                     channels = p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], owner)
@@ -109,6 +130,10 @@ def main():
                     expect(guide).to_be_visible()
                     guide.get_by_role('button', name='Open connection guides', exact=True).click()
                     expect(page.get_by_role('dialog', name='Integrations', exact=True)).to_have_count(0)
+                    guide.get_by_role('button', name='Open channel invitations', exact=True).click()
+                    expect(page.get_by_role('dialog', name='Channel members', exact=True)).to_have_count(0)
+                    guide.get_by_role('button', name='Write the first message', exact=True).click()
+                    expect(guide).to_be_visible()
                     guide.get_by_role('button', name='Copy invitation', exact=True).click()
                     expect(guide.get_by_role('button', name='Copy again', exact=True)).to_be_visible()
                     assert page.evaluate('() => navigator.clipboard.readText()') == secret
@@ -116,28 +141,84 @@ def main():
                     guide.get_by_role('button', name='I have saved this invitation privately', exact=True).click()
                     expect(link).to_have_count(0)
                     invite_token = parse_qs(urlsplit(secret).fragment)['workspace-invite'][0]
-                    accepted = p.api(api_base, 'POST', '/workspaces/invites/accept', teammate, {'token': invite_token})
+                    other.goto(secret, wait_until='domcontentloaded')
+                    other.get_by_label('Email', exact=True).fill(teammate['email'])
+                    other.get_by_label('Password', exact=True).fill(p.PASSWORD)
+                    other.get_by_role('button', name='Sign In', exact=True).click()
+                    expect(other.get_by_role('heading', name='You’re invited.', exact=True)).to_be_visible()
+                    assert len(p.api(api_base, 'GET', '/workspaces/' + workspace['id'] + '/members', owner)) == 1
+                    with other.expect_response(lambda response: response.url.endswith('/workspaces/invites/accept') and response.request.method == 'POST') as joined_workspace:
+                        other.get_by_role('button', name='Join workspace', exact=True).click()
+                    assert joined_workspace.value.ok
+                    accepted = joined_workspace.value.json()
                     assert accepted['id'] == workspace['id']
+                    p.authenticated(other)
+                    assert not p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], teammate)
+                    expect(other.locator('.fc-chat-launch-prompt')).to_have_count(0)
+                    expect(other.locator('.fc-chat-composer textarea')).to_have_count(0)
+                    for person in (teammate, outsider):
+                        p.rejects(api_base, 'GET', '/messages/channels/' + channel['id'], person, statuses=(403, 404))
+                        p.rejects(api_base, 'POST', '/messages/channels/' + channel['id'], person, {'content': 'Access must be explicit.'}, statuses=(403, 404))
                     p.rejects(api_base, 'POST', '/workspaces/invites/accept', teammate, {'token': invite_token}, statuses=(400, 404, 409))
                     guide.get_by_role('button', name='Refresh workspace launch state', exact=True).click()
                     expect(guide.get_by_text('2 people', exact=True)).to_be_visible()
                     assert all('token' not in item or item['token'] is None for item in p.api(api_base, 'GET', '/workspaces/' + workspace['id'] + '/invites', owner))
                     guide.get_by_role('button', name='Create single-use invitation', exact=True).click()
                     expect(guide.get_by_label('Single-use invitation link', exact=True)).to_be_visible()
+                    revoked_workspace_token = parse_qs(urlsplit(guide.get_by_label('Single-use invitation link', exact=True).input_value()).fragment)['workspace-invite'][0]
                     guide.get_by_role('button', name='Revoke this invitation', exact=True).click()
                     expect(guide.get_by_label('Single-use invitation link', exact=True)).to_have_count(0)
+                    p.rejects(api_base, 'POST', '/workspaces/invites/accept', outsider, {'token': revoked_workspace_token}, statuses=(400, 404, 409))
                     results['actual_single_use_invite_copy_ack_revoke_and_no_storage'] = True
+                    results['actual_invitee_signin_and_workspace_acceptance_without_channel_access'] = True
                     print('PASS native identity/logo, guarded channel draft and real single-use invitation lifecycle', flush=True)
+
+                    stage = 'separate explicit channel invitation and actual teammate acceptance'
+                    assert not p.api(api_base, 'GET', '/channels/' + channel['id'] + '/invites', owner)
+                    assert len(p.api(api_base, 'GET', '/channels/' + channel['id'] + '/members', owner)) == 1
+                    guide.get_by_role('button', name='Open channel invitations', exact=True).click()
+                    expect(guide).to_have_count(0)
+                    members = page.get_by_role('dialog', name='Channel members', exact=True)
+                    expect(members.get_by_text(channel['name'], exact=True)).to_be_visible()
+                    with page.expect_response(lambda response: response.url.endswith('/channels/' + channel['id'] + '/invites') and response.request.method == 'POST') as channel_invitation:
+                        members.get_by_role('button', name='Create invitation link', exact=True).click()
+                    assert channel_invitation.value.ok
+                    channel_link = members.get_by_label('Invitation link', exact=True)
+                    expect(channel_link).to_be_visible(); channel_secret = channel_link.input_value()
+                    channel_token = parse_qs(urlsplit(channel_secret).fragment)['invite'][0]
+                    assert not p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], teammate)
+                    other.goto(channel_secret, wait_until='domcontentloaded')
+                    expect(other.get_by_role('button', name='Join channel', exact=True)).to_be_visible()
+                    assert not p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], teammate)
+                    with other.expect_response(lambda response: response.url.endswith('/channels/invites/accept') and response.request.method == 'POST') as joined_channel:
+                        other.get_by_role('button', name='Join channel', exact=True).click()
+                    assert joined_channel.value.ok and joined_channel.value.json()['id'] == channel['id']
+                    p.authenticated(other)
+                    teammate_channels = p.api(api_base, 'GET', '/channels?workspace_id=' + workspace['id'], teammate)
+                    assert [item['id'] for item in teammate_channels] == [channel['id']]
+                    assert len(p.api(api_base, 'GET', '/channels/' + channel['id'] + '/members', owner)) == 2
+                    p.rejects(api_base, 'POST', '/channels/invites/accept', outsider, {'token': channel_token}, statuses=(400, 404, 409))
+                    with sqlite3.connect(database) as connection:
+                        assert connection.execute('SELECT COUNT(*) FROM message WHERE channel_id=?', (channel['id'],)).fetchone()[0] == 0
+                    members.get_by_role('button', name='Close channel panel', exact=True).click()
+                    open_chat_tool(page, 'Get started')
+                    guide = page.get_by_role('dialog', name='Workspace launch guide', exact=True)
+                    expect(guide).to_be_visible()
+                    results['actual_separate_channel_invitation_explicit_acceptance_and_no_automatic_message'] = True
 
                     stage = 'existing personal appearance and both customer-owned connection guides'
                     guide.get_by_role('button', name='Language & appearance', exact=True).click()
                     appearance = page.get_by_role('dialog', name='Make space your own.', exact=True)
                     expect(appearance).to_be_visible()
                     appearance.locator('input[name="appearance-mode"][value="dark"]').check()
+                    appearance.locator('input[name="appearance-font"][value="serif"]').check()
+                    appearance.get_by_role('radio', name='Large', exact=True).check()
                     appearance.get_by_role('button', name='Save changes', exact=True).click()
                     expect(appearance).to_have_count(0)
                     guide.get_by_role('button', name='Refresh workspace launch state', exact=True).click()
                     expect(guide.get_by_text(re.compile('Dark appearance'))).to_be_visible()
+                    personal = p.api(api_base, 'GET', '/preferences/appearance', owner)
+                    assert personal['mode'] == 'dark' and personal['font_family'] == 'serif' and personal['font_size'] == 'large'
                     guide.get_by_role('button', name='Open connection guides', exact=True).click()
                     integrations = page.get_by_role('dialog', name='Integrations', exact=True)
                     expect(integrations).to_be_visible()
@@ -157,6 +238,9 @@ def main():
                     REPORT.parent.mkdir(parents=True, exist_ok=True)
                     guide.locator('.fc-account-body').evaluate('node => node.scrollTo(0, 0)')
                     page.screenshot(path=str(REPORT.with_name('workspace-launch-mobile.png')), full_page=True)
+                    guide.get_by_role('heading', name='Sedan, gå med i samtalet', exact=True).scroll_into_view_if_needed()
+                    assert guide.evaluate('node => node.scrollWidth <= node.clientWidth + 1')
+                    page.screenshot(path=str(REPORT.with_name('workspace-channel-access-mobile.png')), full_page=True)
                     results['saved_swedish_language_and_320px_layout'] = True
 
                     stage = 'explicit first message through the actual focused composer'
@@ -184,24 +268,41 @@ def main():
                     close_channels(page)
                     results['actual_first_message_encrypted_at_rest_and_established_workspace_not_nagged'] = True
 
+                    stage = 'two real participants share the first conversation while an outsider remains excluded'
+                    expect(other.locator('#message-' + delivered['id'] + ' .fc-chat-message-content')).to_have_text('Vårt första riktiga samtal börjar här.')
+                    other.locator('.fc-chat-composer textarea').fill('Jag är med. Nu kan vi prata i vår gemensamma kanal.')
+                    with other.expect_response(lambda response: response.url.endswith('/mobile/offline/channels/' + channel['id'] + '/messages') and response.request.method == 'POST') as replied:
+                        other.get_by_role('button', name='Send message', exact=True).click()
+                    assert replied.value.ok
+                    reply = replied.value.json()
+                    assert reply['channel_id'] == channel['id'] and reply['author_id'] == teammate['user_id']
+                    expect(page.locator('#message-' + reply['id'] + ' .fc-chat-message-content')).to_have_text('Jag är med. Nu kan vi prata i vår gemensamma kanal.')
+                    p.rejects(api_base, 'GET', '/messages/channels/' + channel['id'], outsider, statuses=(403, 404))
+                    p.rejects(api_base, 'POST', '/messages/channels/' + channel['id'], outsider, {'content': 'Must remain outside.'}, statuses=(403, 404))
+                    with sqlite3.connect(database) as connection:
+                        rows = connection.execute('SELECT content FROM message WHERE channel_id=?', (channel['id'],)).fetchall()
+                    assert len(rows) == 2 and all('Vårt första riktiga samtal' not in row[0] and 'Jag är med.' not in row[0] for row in rows)
+                    page.screenshot(path=str(REPORT.with_name('workspace-first-conversation-mobile.png')), full_page=True)
+                    results['two_actual_users_exchange_messages_after_explicit_access_and_outsider_denied'] = True
+
                     stage = 'ordinary teammate has no admin launch entry'
-                    other_context = browser.new_context(viewport={'width': 1440, 'height': 1000}, reduced_motion='reduce')
-                    try:
-                        other = other_context.new_page(); other.set_default_timeout(30000)
-                        p.login(other, app_base, teammate, accepted)
-                        other.get_by_role('button', name='More channel tools', exact=True).click()
-                        expect(other.get_by_role('button', name='Get started', exact=True)).to_have_count(0)
-                        other.keyboard.press('Escape')
-                        open_channels(other)
-                        expect(other.locator('.fc-chat-launch-card')).to_have_count(0)
-                        close_channels(other)
-                    finally:
-                        other_context.close()
+                    other.get_by_role('button', name='More channel tools', exact=True).click()
+                    expect(other.get_by_role('button', name='Get started', exact=True)).to_have_count(0)
+                    other.keyboard.press('Escape')
+                    open_channels(other)
+                    expect(other.locator('.fc-chat-launch-card')).to_have_count(0)
+                    close_channels(other)
                     assert not page_errors
                     results['member_cannot_enter_admin_guide_and_zero_page_errors'] = True
                 finally:
-                    context.close(); browser.close()
+                    other_context.close(); context.close(); browser.close()
+            proof_files = ['components/Chat.tsx', 'components/WorkspaceLaunchPanel.tsx', 'components/ChannelTools.tsx',
+                'components/WorkspaceInvitation.tsx', 'components/AcceptInvite.tsx', 'App.tsx', 'lib/workspace-launch.ts',
+                'styles/workspace-launch.css', 'i18n/workspace-first-conversation.sv.ts']
+            frozen_sources = {'frontend/src/' + name: hashlib.sha256((private / 'frontend/src' / name).read_bytes()).hexdigest() for name in proof_files}
             REPORT.write_text(json.dumps({'scope': 'Actual private API, frozen full application and Chromium; no providers, email or real users', 'results': results,
+                'frozen_frontend_sources': frozen_sources,
+                'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'cleanup': 'Own API/Vite services, SQLite data, files, keys, frozen frontend and browser contexts removed in finally'}, indent=2) + '\n')
             print('PASS workspace launch guide: ' + str(len(results)) + ' actual browser checks', flush=True)
         except Exception as failure:

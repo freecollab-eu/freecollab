@@ -12,6 +12,12 @@ Mobile uses one reading column. Message actions open from a labelled **More mess
 
 The public demo exposes its existing five sections through **Tools**. Its **Arrange** controls can pin, order and position the sample courtyard image and editable brief; **Focus** concentrates on the conversation. Each sample channel keeps a separate draft with a local draft indicator. Sending clears only that channel's draft. These sample changes stay in memory in the current tab and reset on reload or confirmed reset. They do not change another person's layout or connect external services. Authenticated channel drafts use the separate encrypted persistence described below.
 
+A quiet three-stop trail connects the demo conversation, its same editable shared brief and a sample decision with an assigned next step. Recording a decision adds one task; revising it updates that task rather than duplicating it. Changing its owner or action reopens the task; unchanged action/owner retain its completion. Provider cards open the chosen Microsoft or Google preparation guide directly, in both the full app and independent website. These routes and interactions do not authorize a provider.
+
+## First conversation
+
+Eligible native workspace administrators can open **Set up this workspace** directly from an empty room, without an automatic modal. The guide distinguishes workspace membership from channel access and opens the selected channel's existing member panel for the separate channel invitation. A workspace administrator who is only a channel member sees the read-only member action. **Write the first message** moves focus to the composer after the guide's modal isolation has been removed. Existing issued-link, unsaved-change and current-authority guards also apply to these navigation actions.
+
 ## Appearance
 
 The Appearance panel keeps its preview visible above the **Colors**, **Typography** and **Layout** navigation. Changes apply as a draft until **Save changes** succeeds. A save confirmation follows the authenticated server response; a failed save keeps the preview available for retry. Cancel and Reset retain the behavior described in [APPEARANCE.md](APPEARANCE.md).

@@ -5,8 +5,8 @@ import vm from 'node:vm';
 import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/demo-showroom.ts', import.meta.url), 'utf8');
 const exports = {};
-vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports });
-const { createDemoState, demoReducer, demoMarkdown } = exports;
+vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports, URLSearchParams });
+const { createDemoState, demoReducer, demoMarkdown, readDemoDestination, demoDestinationHash, demoDecisionTaskId } = exports;
 
 test('independent demo instances and reset never retain another visitor draft', () => {
   const first = createDemoState(), second = createDemoState();
@@ -74,4 +74,57 @@ test('personal layout is bounded, can be reordered and pinned, and resets indepe
   const reset = demoReducer(state, { type: 'reset' });
   assert.equal(reset.messages.studio.length, 3); assert.equal(reset.layout.focus, false);
   assert.equal(reset.layout.pinned.length, 0); assert.equal(reset.layout.side, 'right');
+});
+
+test('explicit demo destinations round-trip both providers without taking over account routes', () => {
+  assert.equal(demoDestinationHash(), '#demo');
+  assert.equal(readDemoDestination('#demo').section, 'chat');
+  for (const provider of ['microsoft', 'google']) {
+    const hash = demoDestinationHash({ section: 'connections', provider });
+    assert.equal(hash, '#demo=connections&provider=' + provider);
+    assert.equal(readDemoDestination(hash).section, 'connections');
+    assert.equal(readDemoDestination(hash).provider, provider);
+  }
+  for (const hash of ['#docs', '#sso=one-time-handoff', '#workspace-invite=private', '#meeting=room']) assert.equal(readDemoDestination(hash), null);
+  assert.equal(readDemoDestination('#demo=connections&provider=untrusted').provider, undefined);
+  assert.equal(readDemoDestination('#demo=untrusted&provider=google').section, 'chat');
+  assert.equal(readDemoDestination('#demo=documents&provider=google').provider, undefined);
+});
+
+test('a local decision creates one owned next-step task beside the same edited brief', () => {
+  const initial = createDemoState();
+  const edited = demoReducer(initial, { type: 'document', id: 'brief', text: 'My actual shared brief edit' });
+  let state = demoReducer(edited, { type: 'decision_record', text: '  Choose the timber samples  ', nextStep: '  Bring two samples  ', owner: 'Noor' });
+  assert.equal(initial.decision, null);
+  assert.equal(state.decision.text, 'Choose the timber samples');
+  assert.equal(state.decision.owner, 'Noor');
+  assert.equal(state.documents, edited.documents);
+  assert.equal(state.documents[0].edited, 'My actual shared brief edit');
+  const task = state.tasks.find(row => row.id === demoDecisionTaskId);
+  assert.equal(task.text, state.decision.nextStep); assert.equal(task.owner, state.decision.owner);
+  assert.equal(task.sample, false); assert.equal(task.done, false);
+  state = demoReducer(state, { type: 'task_toggle', id: task.id });
+  state = demoReducer(state, { type: 'decision_record', text: 'Clarify the same direction', nextStep: task.text, owner: 'Noor' });
+  assert.equal(state.tasks.find(row => row.id === task.id).done, true);
+  state = demoReducer(state, { type: 'decision_record', text: 'A revised choice', nextStep: 'Bring a new material', owner: 'Elias' });
+  assert.equal(state.tasks.length, initial.tasks.length + 1);
+  assert.equal(state.tasks.find(row => row.id === task.id).owner, 'Elias');
+  assert.equal(state.tasks.find(row => row.id === task.id).done, false);
+  const reset = demoReducer(state, { type: 'reset' });
+  assert.equal(reset.decision, null); assert.equal(reset.tasks.some(row => row.id === task.id), false);
+  assert.equal(reset.documents[0].edited, null);
+});
+
+test('decision input and task capacity stay bounded without partial state changes', () => {
+  const initial = createDemoState();
+  for (const action of [
+    { text: '', nextStep: 'A step', owner: 'Maja' },
+    { text: 'A decision', nextStep: ' ', owner: 'Maja' },
+    { text: 'x'.repeat(1001), nextStep: 'A step', owner: 'Maja' },
+    { text: 'A decision', nextStep: 'x'.repeat(181), owner: 'Maja' },
+    { text: 'A decision', nextStep: 'A step', owner: 'not-a-fictional-teammate' },
+  ]) assert.equal(demoReducer(initial, { type: 'decision_record', ...action }), initial);
+  let full = initial;
+  while (full.tasks.length < 50) full = demoReducer(full, { type: 'task_add', text: 'A visitor task' });
+  assert.equal(demoReducer(full, { type: 'decision_record', text: 'A choice', nextStep: 'A step', owner: 'Maja' }), full);
 });

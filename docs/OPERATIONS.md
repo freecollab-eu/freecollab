@@ -47,6 +47,34 @@ docker compose --env-file pilot.env --project-name freecollab exec backend \
   python -m app.cli bootstrap-admin --email operator@example.com
 ```
 
+Reload the application after bootstrapping so the account menu refreshes its role.
+The installation admin and a workspace owner are separate roles; creating a
+workspace makes its creator the owner without granting installation-wide access.
+
+To bring a first team into the local installation:
+
+1. Open the application at the configured local origin and create an account with a password of at least 12 characters.
+2. Create a workspace from the workspace switcher, then use its getting-started guide to create and open the first channel.
+3. Open **Channel members**, create an invitation link and share it privately. In a separate browser profile, the second person opens that link, creates an account or signs in, and explicitly joins the channel.
+4. Exchange a message and upload/download a permitted file from both accounts.
+
+A channel invitation gives a new recipient guest access to that workspace and
+membership in that channel. A workspace invitation alone does not grant access
+to existing channels; invite the recipient to each intended channel separately.
+Use **Open channel invitations** in the workspace guide to reach that step.
+
+For a normal restart, keep the same environment file and project name:
+
+```bash
+docker compose --env-file pilot.env --project-name freecollab restart
+docker compose --env-file pilot.env --project-name freecollab ps
+curl --fail --retry 30 --retry-connrefused --retry-delay 1 --retry-max-time 60 \
+  http://127.0.0.1:8080/api/ready
+```
+
+Substitute the configured port if changed. Reinitializing configuration changes
+keys rather than restarting a service; deleting volumes removes stored data.
+
 ## Account email and recovery
 
 The initializer selects private local file delivery and the Compose `mail` profile enables its worker explicitly:
@@ -120,13 +148,32 @@ Keep the previous image identifiers and take a cold backup first. Stop all write
 The CLI audits by default and writes only with `--apply`:
 
 ```bash
-docker compose --env-file pilot.env --project-name freecollab stop frontend backend
+set -euo pipefail
+# Keep this Bash shell open until the same running writers have been resumed.
+pilot_running_services="$(docker compose --env-file pilot.env --project-name freecollab ps --services --status running)"
+pilot_writers=()
+while IFS= read -r pilot_service; do
+  if [[ -n "$pilot_service" && "$pilot_service" != db ]]; then
+    pilot_writers+=("$pilot_service")
+  fi
+done <<< "$pilot_running_services"
+if (( ${#pilot_writers[@]} )); then
+  docker compose --env-file pilot.env --project-name freecollab stop "${pilot_writers[@]}"
+fi
 docker compose --env-file pilot.env --project-name freecollab run --rm --no-deps backend \
   python -m app.cli migrate-messages
 docker compose --env-file pilot.env --project-name freecollab run --rm --no-deps backend \
   python -m app.cli migrate-messages --apply
-docker compose --env-file pilot.env --project-name freecollab up -d --no-build --wait
+if (( ${#pilot_writers[@]} )); then
+  docker compose --env-file pilot.env --project-name freecollab up -d --no-build --no-deps --wait "${pilot_writers[@]}"
+fi
 ```
+
+This stops every running Compose writer, including integration, mail and optional
+workers, while leaving PostgreSQL available. Only the previously running services
+are recreated with the reviewed key configuration; stopped optional profiles stay
+stopped. Stop external writers separately. If an audit or migration fails, keep
+writers stopped while investigating against the backup.
 
 Do not rotate `JWT_SECRET` as a substitute for the legacy decryption key. Audit errors must be investigated against a backup; do not relabel unknown plaintext as authenticated ciphertext. SQLModel startup creates missing tables for the pilot's additive schema. It does not implement arbitrary schema alterations; future incompatible releases require explicit, tested migration tooling.
 
@@ -181,6 +228,9 @@ Never test restore against your source project. The following refuses an existin
 python scripts/pilot-restore.py pilot-backups/before-upgrade \
   --project freecollab-restore --env-file pilot-restore.env --port 8081
 ```
+
+Choose an unused target port. If the public website already uses its default
+8081 on this host, select another port such as `--port 8082` for the restore.
 
 The helper accepts v1 and v2 backups. It checks every artifact hash and tar path, rejects links/special files, requires the exact backed-up service images locally, and refuses existing containers, networks or colliding files/mail/Matrix/database volumes. It restores the database and every recorded volume, preserving private file permissions and numeric ownership for the app and Synapse. A previously running Matrix service restarts with its recorded image and retained identity. Mail and integration workers remain stopped by default, preserving their configuration and queues without sending restored work. After reviewing retained recipients/destinations and duplicate-delivery risks, `--resume-mail` and `--resume-integrations` independently opt in to workers that were running in the source backup. These flags do not start workers that were stopped at backup time. A legacy backup lacking an account-security key receives a new independent key; existing keys are preserved. The source installation is not changed. Restoring the same target again is refused. Do not manually delete an existing installation merely to satisfy this guard.
 

@@ -1,14 +1,36 @@
 /** Public showroom data. Every mutation is local and disappears on reset/reload. */
 export type DemoChannel = 'studio' | 'product' | 'design';
 export type DemoSection = 'chat' | 'projects' | 'documents' | 'connections' | 'appearance';
+export type DemoProvider = 'microsoft' | 'google';
+export interface DemoDestination { section?: DemoSection; provider?: DemoProvider }
+export type DemoOwner = 'Maja' | 'Noor' | 'Elias' | 'Nora';
+export const demoOwners: DemoOwner[] = ['Maja', 'Noor', 'Elias', 'Nora'];
+export const demoDecisionExample = { text: 'Use warm, durable materials and keep the courtyard open.', nextStep: 'Bring the material samples to the walkthrough' };
+export interface DemoDecision { text: string; nextStep: string; owner: DemoOwner }
+export const demoDecisionTaskId = 'courtyard-follow-up';
 export interface DemoMessage { id: string; author: string; text: string; time: string; sample: boolean }
-export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team' }
+export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team'; owner?: DemoOwner }
 export interface DemoDocument { id: 'brief' | 'notes'; title: string; source: string; edited: string | null }
 export type DemoMaterial = 'courtyard' | 'brief';
 export interface DemoLayout { order: DemoMaterial[]; pinned: DemoMaterial[]; side: 'left' | 'right'; focus: boolean }
 export const createDemoLayout = (): DemoLayout => ({ order: ['courtyard', 'brief'], pinned: [], side: 'right', focus: false });
-export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; nextId: number; layout: DemoLayout }
+export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; nextId: number; layout: DemoLayout; decision: DemoDecision | null }
 export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'connections', 'appearance'];
+export function readDemoDestination(hash: string): DemoDestination | null {
+  const params = new URLSearchParams(hash.replace(/^#/, ''));
+  if (!params.has('demo')) return null;
+  const requested = params.get('demo');
+  const section = demoSections.find(value => value === requested) ?? 'chat';
+  const provider = params.get('provider');
+  return section === 'connections' && (provider === 'microsoft' || provider === 'google') ? { section, provider } : { section };
+}
+export function demoDestinationHash(destination: DemoDestination = {}): string {
+  const section = destination.section && demoSections.includes(destination.section) ? destination.section : 'chat';
+  if (section === 'chat') return '#demo';
+  const params = new URLSearchParams({ demo: section });
+  if (section === 'connections' && (destination.provider === 'microsoft' || destination.provider === 'google')) params.set('provider', destination.provider);
+  return '#' + params.toString();
+}
 export function createDemoState(): DemoState {
   return {
     messages: {
@@ -35,10 +57,10 @@ export function createDemoState(): DemoState {
     documents: [
       { id: 'brief', title: 'Project brief', edited: null, source: '## A quieter courtyard\n\nCreate a welcoming shared space for the neighbourhood.\n\n### Our direction\n- Warm, durable materials\n- Room to gather and room to pause\n- A simple first version, shaped by feedback\n\n### Open question\nWhich materials work best for this space?' },
       { id: 'notes', title: 'Studio notes', edited: null, source: '## A few things we agreed\n\n- Start small and keep decisions visible.\n- Collect questions before the next walkthrough.\n- Give every task a clear next step.\n\n### Next conversation\nBring one idea that makes the courtyard feel more welcoming.' },
-    ], nextId: 1, layout: createDemoLayout(),
+    ], nextId: 1, layout: createDemoLayout(), decision: null,
   };
 }
-export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
+export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset') return createDemoState();
   if (action.type === 'layout_reset') return { ...state, layout: createDemoLayout() };
@@ -64,6 +86,14 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     return { ...state, nextId: state.nextId + 1, tasks: [...state.tasks, { id: 'local-' + state.nextId, text, done: false, sample: false, group: 'Team' }] };
   }
   if (action.type === 'task_toggle') return { ...state, tasks: state.tasks.map(row => row.id === action.id ? { ...row, done: !row.done } : row) };
+  if (action.type === 'decision_record') {
+    const text = action.text.trim(), nextStep = action.nextStep.trim();
+    const previousTask = state.tasks.find(row => row.id === demoDecisionTaskId);
+    if (!text || text.length > 1000 || !nextStep || nextStep.length > 180 || !demoOwners.includes(action.owner) || (!previousTask && state.tasks.length >= 50)) return state;
+    const decision = { text, nextStep, owner: action.owner };
+    const task: DemoTask = { id: demoDecisionTaskId, text: nextStep, owner: action.owner, sample: false, group: 'Team', done: previousTask?.text === nextStep && previousTask.owner === action.owner ? previousTask.done : false };
+    return { ...state, decision, tasks: previousTask ? state.tasks.map(row => row.id === demoDecisionTaskId ? task : row) : [...state.tasks, task] };
+  }
   if (action.type === 'document') {
     if (action.text.length > 20000) return state;
     return { ...state, documents: state.documents.map(row => row.id === action.id ? { ...row, edited: action.text } : row) };

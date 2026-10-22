@@ -114,9 +114,9 @@ const content: Record<string, { title: string; content: () => React.ReactNode }>
         <div className="fc-docs-callout"><h3>{t('Deploy on Railway or host it yourself')}</h3><p className="fc-muted">{t('Use the maintained deployment guide for private services, persistent storage, independent keys and background workers. Configure your own Microsoft 365 and Google apps through the connection guide.')}</p><div className="flex flex-wrap gap-4"><a className="fc-account-link" href="https://github.com/freecollab-eu/freecollab/blob/main/RAILWAY_DEPLOY.md" target="_blank" rel="noopener noreferrer">{t('Railway deployment guide')}</a><a className="fc-account-link" href="https://github.com/freecollab-eu/freecollab/blob/main/docs/CONNECTION_SETUP.md" target="_blank" rel="noopener noreferrer">{t('Customer connection guide')}</a></div></div>
         <h3 className="text-xl font-semibold">{t("Prerequisites")}</h3>
         <ul className="list-disc list-inside fc-muted space-y-1">
-          <li>{t("Node.js 20.19+ or 22.12+")}</li>
+          <li>{t("Node.js 24 LTS (minimum 22.12) for manual development")}</li>
           <li>{t("Python 3.11+")}</li>
-          <li>{t("Docker (optional)")}</li>
+          <li>{t("Docker with Compose v2 for the pilot")}</li>
         </ul>
 
         <h3 className="text-xl font-semibold mt-8">{t("Option 1: Docker pilot")}</h3>
@@ -137,14 +137,14 @@ docker compose --env-file pilot.env --project-name freecollab up --build -d --wa
           <pre className="p-4 text-sm overflow-x-auto">
             <code className="fc-muted">{`# Backend
 cd backend
-python -m venv venv
-source venv/bin/activate  # or .\\venv\\Scripts\\Activate.ps1 on Windows
-pip install -r requirements.txt
-uvicorn app.main:socket_app --reload --port 8000
+python -m venv .venv
+source .venv/bin/activate  # or .\\.venv\\Scripts\\Activate.ps1 on Windows
+python -m pip install --require-hashes -r requirements-dev.lock
+python -m uvicorn app.main:socket_app --reload --host 127.0.0.1 --port 8000
 
 # Frontend (new terminal)
 cd frontend
-npm ci
+ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci
 npm run dev`}</code>
           </pre>
         </div>

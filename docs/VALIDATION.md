@@ -1,5 +1,43 @@
 # FreeCollab validation record
 
+## Open Studio first conversation and launch rehearsal — 2026-10-22
+
+This untagged `design/open-studio` increment retains the approved open-room
+design and makes its first team conversation explicit. The public demo connects
+a conversation to its same editable brief, a decision and one assigned next step.
+Microsoft and Google cards open their own preparation guide directly. Customer
+credentials and consent remain in each customer's installation.
+
+| Area | Executed evidence |
+| --- | --- |
+| Client | **294 frontend Node cases passed**, including the 15 onboarding and 10 demo route/reducer cases. TypeScript and production application/trusted-embed and independent website builds passed. Four i18n cases passed again after aligning the built English/Swedish installation instructions with Node 24 LTS and the hash-locked development environment. |
+| First conversation | **12 actual two-user browser groups passed**: account entry, accepted workspace invitation without channel access, separate accepted channel invitation, focused composer, bidirectional messages, outsider denials and encrypted-at-rest native storage. **Seven additional independent browser/API groups** cover live channel-admin demotion, issued-link/unsaved-change guards, lost-authority link scrubbing, revoked invitations and outsider access. English, Swedish, keyboard operation and 320 px were exercised. These native channels are server-readable, not end-to-end encrypted. |
+| Public story and isolation | **14 demo browser groups passed** across the application and website entries. An independent run passed **16 production-browser groups**, including the actual English/Swedish installation page in both entries. Checks cover provider destinations/history, the shared brief, decision revisions without duplicate tasks, reset/reload, keyboard use and 320/390 px. The independent website ignored seeded account material and made no account/provider requests or worker/private-content storage operations. The full application's demo retains the application's normal account/mobile startup; its demo content and actions remain local. |
+| Downloadable preview | **22 actual offline Chromium groups**, an additional Swedish 320 px check and separate archive/source review passed. The preview uses the actual demo, styles, fonts and artwork with memory-only example content. Its HTML and ZIP are bound to source hashes; it is not a live account, provider or encryption demonstration. |
+| Fresh self-hosted installation | The real Compose/Docker installation used fresh configuration, PostgreSQL, API, default integration worker and production Nginx frontend. Initializer permissions/refusal to overwrite, first-operator bootstrap/refusal to bootstrap twice, explicit invitations, messages, unauthorized access and hash-checked cross-user file downloads passed. Restart retained accounts, roles, history and file bytes. **Five production-app browser groups and six independent-website browser groups passed** on the final Docker images. A separate disposable Matrix profile passed health, registration, login, authenticated identity and logout; this control-plane check alone is not a cryptographic proof. |
+
+The recorded scopes overlap and must not be added as a unique suite total.
+All fixtures used new accounts, keys and data; the retained pilot's four services
+and start times were preserved. The rehearsal used loopback HTTP and does not
+establish public TLS/WSS, customer Microsoft/Google acceptance, backup service
+readiness or production capacity. The migration runbook now stops all running
+Compose writers before content-key migration and resumes only that prior list.
+
+The backend application source is unchanged by this increment. At its parent
+`8777e015610b6de390a445e17b022494241ee85e`, all four backend CI shards, frontend,
+the product/PostgreSQL browser job and native Android/iOS compatibility passed.
+The real encryption job exposed a Connect test navigation race during correctly
+enforced recipient logout. The scoped test correction retains every API, socket,
+Matrix, signed-out and private-DOM assertion; unrelated refresh timeouts still
+fail. A separate actual Chromium reproduction and three negative controls passed.
+The corrected harness then passed **all 13 actual Connect groups** with two
+organizations, the packed SDK, real embedded Rust-crypto clients and a fresh
+Matrix homeserver, including bidirectional encrypted delivery and recipient/
+connection revocation. All source and built-file bindings remained unchanged.
+The workflow for each final published commit remains the authority for that
+commit's CI status. No release, npm publication or public Railway deployment is
+claimed by this record.
+
 ## 0.13 mobile calls, external calendars and encrypted shared work — 2026-10-22
 
 [PRODUCT_013.md](PRODUCT_013.md) describes the supported features and boundaries.

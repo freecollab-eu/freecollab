@@ -151,3 +151,48 @@
 .fc-studio-conversation > .fc-showroom-footnote { display: flex; flex-direction: column; gap: .45rem; }
 .fc-studio-draft { display: inline-flex; align-items: center; gap: .5rem; color: var(--fc-text); }
 .fc-studio-draft::before { content: ''; width: .35rem; height: .35rem; flex-shrink: 0; border-radius: 50%; background: var(--fc-accent); }
+
+/* A small trail through the same conversation, brief and follow-up. */
+.fc-studio-journey { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: .6rem 0 1rem; border-bottom: 1px solid var(--fc-border); }
+.fc-studio-journey > span { font-size: 11px; color: var(--fc-muted); line-height: 1.6; }
+.fc-studio-journey > div { display: flex; gap: .75rem; }
+.fc-studio-journey button { gap: .5rem; padding: .6rem .3rem; border: 0; font-size: 11px; text-align: left; }
+.fc-studio-journey small { color: var(--fc-muted); font-size: 9px; }
+.fc-studio-journey button[aria-current=step] { color: var(--fc-accent); }
+.fc-studio-journey svg { flex-shrink: 0; }
+.fc-studio-decision { padding: 1.5rem 0; margin-bottom: 2rem; border-top: 1px solid var(--fc-border); border-bottom: 1px solid var(--fc-border); }
+.fc-studio-decision > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; }
+.fc-studio-decision h3 { margin: .5rem 0 0; font-size: 25px; font-weight: 400; letter-spacing: -.04em; line-height: 1.3; }
+.fc-studio-decision > header button { font-size: 11px; }
+.fc-studio-decision label { display: grid; gap: .5rem; font-size: 11px; color: var(--fc-muted); min-width: 0; }
+.fc-studio-decision textarea, .fc-studio-decision input, .fc-studio-decision select { width: 100%; min-width: 0; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); padding: .8rem; background: var(--fc-surface); color: var(--fc-text); font-size: 14px; line-height: 1.6; }
+.fc-studio-decision textarea { min-height: 90px; resize: vertical; }
+.fc-studio-decision-fields { display: grid; grid-template-columns: minmax(0, 1fr) 130px; gap: 1rem; margin-top: 1rem; }
+.fc-studio-decision form > footer { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
+.fc-studio-decision footer p { margin: 0; max-width: 340px; font-size: 10px; line-height: 1.7; color: var(--fc-muted); }
+.fc-studio-decision footer button { flex-shrink: 0; font-size: 12px; }
+.fc-studio-decision-label { display: flex; align-items: center; gap: .4rem; color: var(--fc-accent); font-size: 11px; }
+.fc-studio-decision-record > p { font-size: 19px; line-height: 1.6; margin: .8rem 0 1rem; overflow-wrap: anywhere; }
+.fc-studio-decision-record dl { display: grid; grid-template-columns: minmax(0, 1fr) 130px; gap: 1rem; padding: 1rem 0; border-top: 1px solid var(--fc-border); }
+.fc-studio-decision-record dt { font-size: 10px; color: var(--fc-muted); }
+.fc-studio-decision-record dd { font-size: 13px; line-height: 1.7; margin: .4rem 0 0; overflow-wrap: anywhere; }
+.fc-studio-decision-record > button { padding-left: 0; font-size: 11px; }
+.fc-studio-document-next { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: 1rem; }
+.fc-studio-document-next p { font-size: 11px; color: var(--fc-muted); line-height: 1.7; }
+.fc-studio-document-next button { flex-shrink: 0; font-size: 12px; }
+@media (max-width: 900px) {
+  .fc-studio-journey { display: block; }
+  .fc-studio-journey > span { font-size: 10px; }
+  .fc-studio-journey > div { justify-content: space-between; margin-top: .2rem; }
+}
+@media (max-width: 760px) {
+  .fc-studio-journey > div { gap: .4rem; }
+  .fc-studio-journey button { flex: 1; align-items: flex-start; gap: .3rem; font-size: 10px; line-height: 1.5; }
+  .fc-studio-journey button svg { display: none; }
+  .fc-studio-decision > header { flex-direction: column; gap: .4rem; }
+  .fc-studio-decision > header button { padding-left: 0; }
+  .fc-studio-decision textarea, .fc-studio-decision input, .fc-studio-decision select { font-size: 16px; }
+  .fc-studio-decision-fields, .fc-studio-decision-record dl { grid-template-columns: 1fr; }
+  .fc-studio-decision form > footer, .fc-studio-document-next { align-items: flex-start; flex-direction: column; }
+  .fc-studio-decision form > footer button { width: 100%; }
+}

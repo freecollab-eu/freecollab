@@ -28,7 +28,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, expect, sync_playwright
 import requests
 import socketio
 
@@ -173,6 +173,20 @@ def wait_peer(dialog, peer_id, page):
         page.wait_for_timeout(250)
     expect(row).to_have_count(1)
     return row
+
+
+def confirm_revoked_embed(frame, refresh):
+    signed_out = frame.locator('[data-embed-state="signed-out"]')
+    if frame.locator('[data-embed-state="ready"]').count():
+        try:
+            # A sync/lease denial may already be removing this control. The
+            # optional refresh must not make successful fail-closed UI a failure.
+            refresh.click(timeout=3000)
+        except PlaywrightTimeoutError:
+            if not signed_out.is_visible() or frame.locator('.fc-chat').count():
+                raise
+    expect(signed_out).to_be_visible(timeout=45000)
+    expect(frame.locator('.fc-chat')).to_have_count(0)
 
 
 def main():
@@ -335,6 +349,9 @@ def main():
                                     headers={'Origin':app_base}, wait_timeout=15)
                 assert peer_socket.call('join', {'channel_id':channel_id}, timeout=10).get('ok')
                 checks['recipient_child_matrix_gateway_and_actual_socket_join_authorized_before_revoke'] = True
+                # Reveal the real control while access is still active; after
+                # revocation only its bounded click or actual sign-out is valid.
+                refresh = helpers.navigation.reveal_chat_tool(frames[1], 'Refresh messages')
                 stage = 'own-organization recipient grant revocation'
                 succeeds(api_base, '/connect/workspaces/org-b/connections/' + connection_id + '/members/' + beta['user_id'],
                     token=admin_b['access_token'], method='DELETE')
@@ -343,10 +360,7 @@ def main():
                 assert request(api_base, '/channels/' + channel_id, token=beta['access_token'])[0] == 403
                 assert request(api_base, '/_matrix/client/v3/sync?timeout=0', token=matrix_tokens['beta'])[0] == 401
                 assert peer_socket.call('join', {'channel_id':channel_id}, timeout=10).get('error')
-                if frames[1].locator('[data-embed-state="ready"]').count():
-                    helpers.navigation.open_chat_tool(frames[1], 'Refresh messages')
-                expect(frames[1].locator('[data-embed-state="signed-out"]')).to_be_visible(timeout=45000)
-                expect(frames[1].locator('.fc-chat')).to_have_count(0)
+                confirm_revoked_embed(frames[1], refresh)
                 checks['recipient_revoke_denies_existing_child_renewal_matrix_and_socket_and_clears_private_dom'] = True
                 assert succeeds(api_base, '/auth/me', token=beta['access_token'])['workspace_id'] == 'org-b'
                 assert succeeds(api_base, '/channels/' + channel_id, token=alpha['access_token'])['workspace_id'] == 'org-a'

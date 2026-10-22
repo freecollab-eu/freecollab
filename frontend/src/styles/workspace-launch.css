@@ -30,6 +30,11 @@
 .fc-launch-invite-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 13px; margin: 15px 0; }
 .fc-launch-invites { list-style: none; padding: 0; margin: 18px 0 0; }
 .fc-launch-invites li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 11px 0; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: 10px; line-height: 1.6; }
+.fc-launch-subtitle { margin: 0 0 12px; font-size: 12px; font-weight: 600; line-height: 1.6; }
+.fc-launch-channel-access { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--fc-border); }
+.fc-chat-launch-prompt { display: grid; gap: 6px; max-width: 36rem; margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--fc-border); }
+.fc-chat-launch-prompt .fc-chat-text-button { justify-self: start; min-height: 44px; text-align: left; white-space: normal; }
+.fc-chat-empty .fc-chat-launch-prompt p { margin: 0; color: var(--fc-muted); font-size: .8rem; line-height: 1.7; }
 .fc-launch-panel .fc-button { min-height: 42px; white-space: normal; }
 .fc-launch-panel .fc-input { max-width: 100%; }
 @media (max-width: 600px) {

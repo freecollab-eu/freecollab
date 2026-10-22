@@ -335,7 +335,8 @@ def browser_journey(page, context, base, origin, private, owner, outsider, works
     screenshot(page,REPORT.parent/'connection-setup-desktop.png',1440,1100)
 
     # Exact static JSON and clipboard values, followed by a real Google draft.
-    recipe(center,'files.google')
+    # Clear the active-channel default to exercise the unscoped validation guard.
+    recipe(center,'files.google',channel='')
     expect(center.locator('[data-connection-step="configure"]')).to_be_disabled()
     center.get_by_label('Connection channel',exact=True).select_option(first)
     expect(center.locator('[data-connection-step="configure"]')).to_be_enabled()

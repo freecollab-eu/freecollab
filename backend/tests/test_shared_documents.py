@@ -98,7 +98,8 @@ def test_secure_channel_only_accepts_validated_opaque_events(documents,monkeypat
         assert all(r.encrypted_payload is None for r in session.exec(select(SharedDocumentUpdate)).all());assert session.get(SharedDocumentComment,'c').encrypted_payload is None;assert session.get(SharedDocumentSnapshot,'s').encrypted_payload is None
     assert len(calls)>=5
 
-@pytest.mark.parametrize('bad',['','!!!!','AAAA\n','AA==',base64.b64encode(b'x'*(service.MAX_UPDATE_BYTES+1)).decode()])
+@pytest.mark.parametrize('bad',['','!!!!','AAAA\n','AA==',base64.b64encode(b'x'*(service.MAX_UPDATE_BYTES+1)).decode()],
+                         ids=['empty','invalid-base64','line-break','too-short','oversized'])
 def test_invalid_or_oversized_updates_rejected(documents,bad):assert create(documents,update_base64=bad).status_code==422
 
 def test_account_rechecked_after_lock(documents,monkeypatch):

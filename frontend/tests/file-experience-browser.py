@@ -201,7 +201,9 @@ export function mountFile(file:any){const host=document.createElement('div');doc
                     stage='personal Swedish preference reflected in owned file UI'
                     helpers.api(base,'PUT','/preferences/language',alice,{'locale':'sv'});left.reload(wait_until='domcontentloaded')
                     left.wait_for_function('document.documentElement.lang==="sv"')
-                    label=left.evaluate('async()=>{const{t}=await import("/src/i18n/index.tsx");return t("Channel files")}');left.get_by_role('button',name=label,exact=True).click()
+                    labels=left.evaluate('async()=>{const{t}=await import("/src/i18n/index.tsx");return {more:t("More channel tools"),files:t("Channel files")}}')
+                    left.get_by_role('button',name=labels['more'],exact=True).click()
+                    left.get_by_role('group',name=labels['more'],exact=True).get_by_role('button',name=labels['files'],exact=True).click()
                     name=left.evaluate('async()=>{const{t}=await import("/src/i18n/index.tsx");return t("Preview {value0}",{value0:"brief.docx"})}');left.get_by_role('button',name=name,exact=True).click()
                     expect(left.get_by_role('heading',name='Filkommentarer',exact=True)).to_be_visible();expect(left.get_by_label('Lägg till en filkommentar',exact=True)).to_be_visible()
                     assert not errors, 'Unexpected Chromium page exception';results['swedish_per_account_ui_and_mobile_320px_zero_browser_exceptions']=True

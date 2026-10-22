@@ -97,7 +97,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 panel.get_by_label('I opt in to this provider configuration for my account.').check();expect(panel.get_by_role('heading',name='Private conversation',exact=True)).to_be_visible()
                 assert not requests;results['fresh_auth_configured_named_agent_key_cleared_and_per_user_opt_in']=True
                 stage='selected context real HTTPS streamed answer citation and approval'
-                panel.get_by_role('button',name='Choose messages, documents and files',exact=True).click()
+                panel.get_by_role('button',name='Choose messages, documents, files and clip transcripts',exact=True).click()
                 selected_row=panel.locator('.fc-copilot-context label').filter(has_text=selected);expect(selected_row).to_be_visible();selected_row.get_by_role('checkbox').check()
                 panel.get_by_label('Task destination',exact=True).select_option('proof-project');panel.get_by_label('Your question',exact=True).fill('Summarize the selected source and propose a task.')
                 panel.get_by_label('Send this prompt, visible native AI history and checked sources to the configured provider.').check();panel.get_by_role('button',name='Send to provider',exact=True).click()

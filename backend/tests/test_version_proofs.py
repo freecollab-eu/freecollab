@@ -195,7 +195,8 @@ def test_lost_claim_response_reuses_idempotency_key_and_bad_proof_never_gets_bad
     assert api.client.get('/proofs/' + row['id'] + '/download').status_code == 409
 
 
-@pytest.mark.parametrize('content', [b'', b'fake proof', b'x' * (1024 * 1024 + 1)])
+@pytest.mark.parametrize('content', [b'', b'fake proof', b'x' * (1024 * 1024 + 1)],
+                         ids=['empty', 'malformed', 'oversized'])
 def test_ots_parser_rejects_malformed_or_unbounded_proofs(content):
     with pytest.raises(Exception):
         otrust.validate_proof(content, 'a'*64)

@@ -19,7 +19,9 @@ jobs:
   # Backend tests
   backend-test:
     name: Backend Tests (shard ${{ matrix.shard }}/4)
-    runs-on: ubuntu-latest
+    # Keep the TLS and process integration fixtures on a fixed LTS image.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +71,7 @@ jobs:
           VALKEY_SERVER_BIN: /usr/bin/redis-server
         run: |
           python ../scripts/test-ci-backend-tests.py
-          python ../scripts/ci-backend-tests.py --shard ${{ matrix.shard }} --shards 4 -- -v --cov=app --cov-report=xml:coverage-shard-${{ matrix.shard }}.xml
+          python ../scripts/ci-backend-tests.py --shard ${{ matrix.shard }} --shards 4 -- -v --cov=app --cov-report=xml:coverage-shard-${{ matrix.shard }}.xml -o faulthandler_timeout=60 --durations=20
 
       - name: Retain shard coverage
         uses: actions/upload-artifact@v4

@@ -146,7 +146,7 @@ with Session(engine) as session:
                     expect(configuration.locator('li').filter(has_text='Operator authenticators')).to_contain_text('Needs attention')
                     expect(configuration.locator('li').filter(has_text='Email worker leases')).to_contain_text('Needs attention')
                     expect(panel.get_by_text('0 of 1 enabled', exact=True)).to_be_visible()
-                    expect(panel.get_by_text('Free storage', exact=True)).to_be_visible()
+                    expect(panel.get_by_text('Free local storage', exact=True)).to_be_visible()
                     results['real_operator_overview_ui_with_fixed_checks_and_no_secret_values'] = True
                     stage = 'preserved email actions generate real denial and success events'
                     panel.get_by_role('button', name='Send test email', exact=True).click()
@@ -183,7 +183,7 @@ with Session(engine) as session:
                     panel.get_by_role('button', name='Show earlier actions', exact=True).click()
                     expect(history.locator('li')).to_have_count(len(data['items']))
                     assert len(data['items']) > 50
-                    expect(panel.get_by_text(re.compile('Up to 90 days, newest'))).to_be_visible()
+                    expect(panel.get_by_text(re.compile(r'Up to\s+90\s+days,\s+newest'))).to_be_visible()
                     results['audit_outcome_filter_and_stable_cursor_pagination_ui'] = True
                     stage = 'failed new endpoint retains existing mail controls'
                     page.route('**/api/operations/security', lambda route: route.fulfill(status=503, content_type='application/json', body=json.dumps({'detail': 'Temporary security status fixture unavailable'})))
@@ -193,7 +193,7 @@ with Session(engine) as session:
                     expect(panel.get_by_role('button', name='Send test email', exact=True)).to_be_enabled()
                     page.unroute('**/api/operations/security')
                     panel.get_by_role('button', name='Refresh security status', exact=True).click()
-                    expect(panel.get_by_text('Free storage', exact=True)).to_be_visible()
+                    expect(panel.get_by_text('Free local storage', exact=True)).to_be_visible()
                     results['security_status_failure_does_not_hide_or_disable_existing_mail'] = True
                     stage = 'operator mobile layout focus and safe evidence'
                     REPORT.parent.mkdir(parents=True, exist_ok=True)

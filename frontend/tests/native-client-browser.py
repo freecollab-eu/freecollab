@@ -15,7 +15,7 @@ import secrets
 import subprocess
 import sys
 import tempfile
-from threading import Thread
+from threading import Event, Thread
 from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import sync_playwright, expect
@@ -31,9 +31,15 @@ def main():
     with tempfile.TemporaryDirectory(prefix='freecollab-native-ui-') as directory:
         private = Path(directory)
         received = []
+        callback_received = Event()
         class Callback(BaseHTTPRequestHandler):
             def do_GET(self):
-                received.append(parse_qs(urlsplit(self.path).query))
+                target = urlsplit(self.path)
+                if target.path != '/freecollab-native/callback':
+                    self.send_response(404); self.send_header('Cache-Control','no-store'); self.end_headers()
+                    return
+                received.append(parse_qs(target.query))
+                callback_received.set()
                 self.send_response(200); self.send_header('Cache-Control','no-store'); self.end_headers(); self.wfile.write(b'Return to the app.')
             def log_message(self,*_): pass
         callback = ThreadingHTTPServer(('127.0.0.1',0),Callback)
@@ -91,7 +97,9 @@ def main():
                 checks.append('real approval dialog fits 320px')
                 dialog.get_by_role('button',name='Connect this app',exact=True).click()
                 page.wait_for_url('http://127.0.0.1:'+str(callback.server_port)+'/**')
-                assert len(received)==1 and received[0]['state']==[state]
+                assert callback_received.wait(30), 'Timed out waiting for native approval callback'
+                assert len(received)==1, 'Expected one native approval callback'
+                assert received[0]['state']==[state]
                 code=received[0]['code'][0]
                 assert len(code)==43 and owner['access_token'] not in page.url and verifier not in page.url
                 checks.append('explicit approval delivers only a one-use code and exact state to loopback')

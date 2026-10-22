@@ -420,8 +420,14 @@ jobs:
       - name: Verify built public website and local demo
         run: |
           docker run -d --name freecollab-public-ci -p 127.0.0.1:18081:8080 freecollab-website:ci
-          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:18081/healthz
+          curl --fail --silent --show-error --retry 30 --retry-all-errors --retry-delay 1 --retry-max-time 90 --connect-timeout 2 --max-time 5 http://127.0.0.1:18081/healthz
           python frontend/tests/website-browser.py --base-url http://127.0.0.1:18081 --report "$RUNNER_TEMP/freecollab-website-proof.json"
+
+      - name: Retain isolated website startup diagnostics
+        if: always()
+        run: |
+          docker logs --timestamps freecollab-public-ci > "$RUNNER_TEMP/freecollab-website-proof.container.log" 2>&1 || true
+          docker inspect --format '{{json .State}}' freecollab-public-ci > "$RUNNER_TEMP/freecollab-website-proof.state.json" 2>&1 || true
 
       - name: Remove isolated website container
         if: always()

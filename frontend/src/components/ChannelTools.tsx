@@ -6,6 +6,7 @@ import { api, Channel, ChannelInvite, ChannelMember } from '../lib/api';
 import { getSocket } from '../lib/socket';
 import { listChannelFiles, type ManagedFile } from '../lib/files-api';
 import { ChannelFiles } from './ChannelFiles';
+import { Avatar } from './Avatar';
 import { useModalFocus } from '../lib/useModalFocus';
 import '../styles/panels.css';
 
@@ -20,7 +21,6 @@ interface Props {
 
 const button = 'fc-button fc-panel-button';
 const describe = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
-const initials = (name: string) => name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || '?';
 
 export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onManage }: Props) {
   useI18n();
@@ -138,7 +138,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
                 const self = member.user_id === currentUser;
                 return <li key={member.user_id} className="fc-member-row">
                   <div className="fc-member-identity">
-                    <span className={`fc-member-avatar ${self ? 'is-self' : ''}`} aria-hidden="true">{initials(member.name)}</span>
+                    <span className={`fc-member-avatar ${self ? 'is-self' : ''}`} aria-hidden="true"><Avatar userId={member.user_id} name={member.name} workspaceId={channel.workspace_id} /></span>
                     <div className="fc-member-copy"><p>{member.name}{self ? t(" (you)") : ''}</p><span>{member.role === 'admin' ? <><ShieldCheck size={12} />{t("Channel admin")}</> : t("Member")}</span></div>
                   </div>
                   {isAdmin && <div className="fc-member-actions">

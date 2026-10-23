@@ -14,6 +14,7 @@ from sqlmodel import Session
 
 from ..config import settings
 from ..models.operations import WorkerHeartbeat
+from ..models import avatar  # noqa: F401 -- additive private photo erasure queue
 from ..models import app_platform, calendar_delivery, chat_productivity, file, file_version, integration_content, notification, native_calls, native_push, personal_oauth, remote_sync, slack_import, user, channel, workspace  # noqa: F401 -- register queue tables before schema creation
 
 log = logging.getLogger("freecollab.integrations")
@@ -41,8 +42,10 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
     from .calendar_delivery import run_pending as calendar_pending
     from .chat_productivity import run_pending as productivity_pending
     from .app_platform import run_pending as apps_pending, run_recaps
+    from .avatars import erase_pending_avatar_blobs
 
     batches = (
+        ("avatar-cleanup", True, erase_pending_avatar_blobs),
         ("webhooks", settings.webhooks_enabled, webhook_batch or (lambda session: deliver_pending(session, limit=2))),
         ("otrust", settings.otrust_enabled, proof_batch or (lambda session: process_pending(session, limit=2))),
         ("sync", getattr(settings, "sync_enabled", False), sync_batch or (lambda session: sync_pending(session, limit=2))),
@@ -64,7 +67,7 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
         session.add(heartbeat)
         session.commit()
     result = {}
-    demo_lanes = {"chat", "workflows", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup"}
+    demo_lanes = {"chat", "workflows", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup"}
     for name, enabled, batch in batches:
         if not enabled or demo_instance and name not in demo_lanes:
             result[name] = "disabled"

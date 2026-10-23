@@ -1,4 +1,5 @@
 const sv: Record<string, string> = {
+  'Profile photo cleanup': 'Rensning av profilbilder',
   'Calendar delivery': 'Kalenderleverans',
   'Web Push': 'Webbpush',
   'Native push': 'Push till mobilappen',

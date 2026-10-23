@@ -56,6 +56,7 @@ def assert_public_demo_safe_configuration():
 # Explicit native operations. New product routes remain unavailable until their
 # sample scope and side effects have been reviewed. No endpoint is emulated.
 _READ = (
+    r"/users/" + _ID + r"/avatar",
     r"/auth/me", r"/auth/users/" + _ID + r"/public-key", r"/account/(?:security|sessions)",
     r"/workspaces", r"/workspaces/" + _ID + r"(?:/members|/logo)?",
     r"/channels", r"/channels/" + _ID + r"(?:/members|/invites|/metadata)?",

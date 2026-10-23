@@ -16,10 +16,12 @@ import re
 import secrets
 import shutil
 import socket
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import zlib
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
@@ -55,6 +57,35 @@ def ready(url, processes):
 def native(base, token, path):
     with urlopen(Request(base + path, headers={'Authorization': 'Bearer ' + token}), timeout=10) as response:
         return json.load(response)
+
+
+def profile_png(path, color):
+    """A real private RGB image, deliberately non-square for the actual UI crop."""
+    width, height = 320, 192
+    def chunk(kind, payload):
+        return struct.pack('>I', len(payload)) + kind + payload + struct.pack('>I', zlib.crc32(kind + payload) & 0xffffffff)
+    pixels = b''.join(b'\x00' + bytes(color) * width for _ in range(height))
+    path.write_bytes(b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', width, height, 8, 2, 0, 0, 0))
+                     + chunk(b'tEXt', b'Description\x00Private browser profile fixture') + chunk(b'IDAT', zlib.compress(pixels)) + chunk(b'IEND', b''))
+
+
+def native_photo(base, token):
+    with urlopen(Request(base + '/users/alpha/avatar?workspace_id=team', headers={'Authorization': 'Bearer ' + token}), timeout=10) as response:
+        assert response.headers.get_content_type() == 'image/png'
+        photo = response.read()
+    assert struct.unpack('>II', photo[16:24]) == (256, 256), 'The real account picker did not crop to its square product format'
+    return hashlib.sha256(photo).hexdigest()
+
+
+def same_photo(page, image, expected):
+    deadline = time.monotonic() + 15
+    while time.monotonic() < deadline:
+        if image.count() == 1:
+            actual = image.evaluate('async(image)=>{if(!image.complete||!image.naturalWidth||!image.src.startsWith("blob:"))return null;const bytes=await(await fetch(image.src)).arrayBuffer();const digest=await crypto.subtle.digest("SHA-256",bytes);return Array.from(new Uint8Array(digest),value=>value.toString(16).padStart(2,"0")).join("")}')
+            if actual == expected:
+                return
+        page.wait_for_timeout(50)
+    raise AssertionError('A product portrait did not display the authenticated native photo bytes')
 
 
 def work(page):
@@ -108,12 +139,14 @@ def main():
         for name in ('package.json', 'postcss.config.js', 'tailwind.config.js'):
             shutil.copyfile(ROOT / 'frontend' / name, web / name)
         (web / 'node_modules').symlink_to(ROOT / 'frontend/node_modules', target_is_directory=True)
-        relevant = ['components/Chat.tsx', 'components/WorkHub.tsx', 'account/AccountProvider.tsx', 'i18n/index.tsx', 'i18n/core.ts', 'i18n/demo-natural-flow.sv.ts', 'lib/api.ts', 'lib/useModalFocus.ts', 'App.tsx']
+        relevant = ['components/Chat.tsx', 'components/WorkHub.tsx', 'account/AccountProvider.tsx', 'i18n/index.tsx', 'i18n/core.ts', 'i18n/demo-natural-flow.sv.ts', 'lib/api.ts', 'lib/useModalFocus.ts', 'App.tsx', 'account/AccountPanel.tsx', 'account/AccountPhoto.tsx', 'components/Avatar.tsx', 'components/ChannelTools.tsx', 'lib/avatar-api.ts', 'styles/avatar.css']
         relevant += [str(path.relative_to(source)) for path in source.glob('lib/*work*hub*')]
         relevant += [str(path.relative_to(source)) for path in source.glob('i18n/*work*hub*')]
         for name in sorted(set(relevant)):
             source_hashes['frontend/src/' + name] = hashlib.sha256((source / name).read_bytes()).hexdigest()
         source_hashes['frontend/tests/conversation-flow-browser.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        for name in ['backend/app/api/avatars.py', 'backend/app/services/avatars.py', 'backend/app/models/avatar.py']:
+            source_hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
         demo_dependencies = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in ('components/Demo.tsx', 'styles/product-demo-frame.css', 'lib/product-demo-url.ts') if (source / name).is_file()}
         api_port, app_port = port(), port()
         base, origin = f'http://127.0.0.1:{api_port}', f'http://127.0.0.1:{app_port}'
@@ -336,6 +369,64 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     leave(page, dialog, button)
                     checks['real_document_pending_update_blocks_return_and_tab_change_then_synchronizes'] = True
 
+                    stage = 'normal account uploads replaces and removes an actual profile photo'
+                    first_photo, replacement_photo = private / 'profile-first.png', private / 'profile-replacement.png'
+                    profile_png(first_photo, (128, 69, 42)); profile_png(replacement_photo, (35, 103, 133))
+                    token = sessions['alpha2']['access_token']
+                    page.get_by_role('button', name='Your account', exact=True).click()
+                    account = page.get_by_role('dialog', name='Account settings', exact=True)
+                    expect(account.get_by_role('heading', name='Profile photo', exact=True)).to_be_visible()
+                    with page.expect_file_chooser() as choose_photo:
+                        account.get_by_role('button', name='Upload photo', exact=True).click()
+                    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/account/avatar')) as uploaded:
+                        choose_photo.value.set_files(str(first_photo))
+                    assert uploaded.value.ok and uploaded.value.json() == {'has_avatar': True}
+                    expect(account.get_by_role('status')).to_have_text('Profile photo updated.')
+                    first_digest = native_photo(base, token)
+                    same_photo(page, account.locator('.fc-account-photo .fc-profile-avatar img'), first_digest)
+                    REPORT.parent.mkdir(parents=True, exist_ok=True)
+                    page.screenshot(path=str(REPORT.with_name('normal-product-profile-photo.png')))
+                    account.get_by_role('button', name='Close account settings', exact=True).click()
+                    expect(account).to_have_count(0)
+                    header_photo = page.locator('.fc-chat-account-trigger .fc-profile-avatar[data-user-id="alpha"] img')
+                    message_photo = page.locator('.fc-chat-message .fc-profile-avatar[data-user-id="alpha"] img').first
+                    same_photo(page, header_photo, first_digest); same_photo(page, message_photo, first_digest)
+                    page.get_by_role('button', name='More channel tools', exact=True).click()
+                    page.get_by_role('button', name='Channel members', exact=True).click()
+                    members_photo = page.locator('.fc-member-list .fc-profile-avatar[data-user-id="alpha"] img')
+                    same_photo(page, members_photo, first_digest)
+                    page.get_by_role('button', name='Close channel panel', exact=True).click()
+
+                    page.get_by_role('button', name='Your account', exact=True).click()
+                    account = page.get_by_role('dialog', name='Account settings', exact=True)
+                    with page.expect_file_chooser() as choose_photo:
+                        account.get_by_role('button', name='Change photo', exact=True).click()
+                    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/account/avatar')) as uploaded:
+                        choose_photo.value.set_files(str(replacement_photo))
+                    assert uploaded.value.ok
+                    replacement_digest = native_photo(base, token)
+                    assert replacement_digest != first_digest, 'Replacing the photo left the old native bytes'
+                    same_photo(page, account.locator('.fc-account-photo .fc-profile-avatar img'), replacement_digest)
+                    account.get_by_role('button', name='Close account settings', exact=True).click()
+                    same_photo(page, header_photo, replacement_digest); same_photo(page, message_photo, replacement_digest)
+                    page.get_by_role('button', name='Your account', exact=True).click()
+                    account = page.get_by_role('dialog', name='Account settings', exact=True)
+                    with page.expect_response(lambda response: response.request.method == 'DELETE' and response.url.endswith('/account/avatar')) as removed:
+                        account.get_by_role('button', name='Use initials instead', exact=True).click()
+                    assert removed.value.status == 204
+                    expect(account.get_by_role('status')).to_have_text('Profile photo removed.')
+                    expect(account.locator('.fc-account-photo .fc-profile-avatar img')).to_have_count(0)
+                    expect(account.locator('.fc-account-photo .fc-profile-avatar')).to_have_text('LB')
+                    try:
+                        native_photo(base, token)
+                        raise AssertionError('The deleted profile photo remained available from its native API')
+                    except HTTPError as failure:
+                        assert failure.code == 404, failure.code
+                    account.get_by_role('button', name='Close account settings', exact=True).click()
+                    expect(header_photo).to_have_count(0); expect(message_photo).to_have_count(0)
+                    expect(page.locator('.fc-chat-account-trigger .fc-profile-avatar')).to_have_text('LB')
+                    checks['normal_profile_picker_canvas_upload_replace_delete_and_authenticated_portraits'] = True
+
                     stage = 'Swedish 320px return, resumed tool and keyboard focus'
                     picker = page.locator('.proof-flow-controls select')
                     picker.select_option('sv')
@@ -383,8 +474,8 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
     for name, value in source_hashes.items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == value, 'Production source changed during the proof: ' + name
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update; no Matrix or provider acceptance claim. Imported product-demo frame dependencies were not visited; the actual example-data installation has a separate product-demo-browser proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
-    print('Conversation-flow browser proof passed: ' + str(len(checks)) + ' groups; scoped tool resume, same conversation, actual pending-document guards, navigation overrides, account isolation and Swedish 320px.')
+    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update and actual account-photo picker/canvas/upload/replace/delete with authenticated portrait bytes; no Matrix or provider acceptance claim. Imported product-demo frame dependencies were not visited; the actual example-data installation has a separate product-demo-browser proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
+    print('Conversation-flow browser proof passed: ' + str(len(checks)) + ' groups; scoped tool resume, same conversation, actual pending-document guards, navigation overrides, native profile-photo UI, account isolation and Swedish 320px.')
 
 
 if __name__ == '__main__':

@@ -27,6 +27,7 @@ from app.api import (auth, channels, messages, threads, reactions, read_receipts
 from app.models.public_demo import PublicDemoVisit
 from app.models.message import Message
 from app.models.session import ActiveSession, RevokedToken
+from app.models.avatar import UserAvatar
 from app.models.user import User
 from app.models.workspace import Workspace
 from app.services import public_demo as service
@@ -65,6 +66,7 @@ def sample(tmp_path, monkeypatch):
     SQLModel.metadata.create_all(engine)
     monkeypatch.setattr(database, "engine", engine)
     storage = StorageService(settings.storage_path)
+    monkeypatch.setattr("app.services.storage.storage_service", storage)
     monkeypatch.setattr(files, "storage_service", storage)
     monkeypatch.setattr(file_experience, "storage_service", storage)
     app = FastAPI()
@@ -118,9 +120,9 @@ def test_seeded_content_uses_real_readers_and_writes_with_cross_visit_isolation(
     h, channel = headers(one), one["channel_id"]
     other = headers(two)
     records = sample.client.get("/channels?workspace_id=" + one["workspace_id"], headers=h).json()
-    assert {row["name"] for row in records} == {"Studio", "Design notes", "Around the table"}
+    assert {row["name"] for row in records} == {"Courtyard", "Design", "Planning"}
     timeline = sample.client.get(f"/messages/channels/{channel}?roots_only=true", headers=h).json()
-    assert len(timeline) == 6 and "calm as the product" in timeline[-1]["content"]
+    assert len(timeline) == 6 and "Shall we open up to the courtyard?" == timeline[-1]["content"]
     assert sample.client.get(f"/messages/channels/{channel}", headers=other).status_code == 403
     sent = sample.client.post(f"/messages/channels/{channel}", json={"content": "An actual product message."}, headers=h)
     assert sent.status_code == 200, sent.text
@@ -133,13 +135,13 @@ def test_seeded_content_uses_real_readers_and_writes_with_cross_visit_isolation(
         assert result.json(), path
         assert sample.client.get(path, headers=other).status_code == 403, path
     docs = sample.client.get(f"/channels/{channel}/shared-documents", headers=h).json()
-    assert {row["title"] for row in docs} == {"Launch brief", "Design decisions", "Reading list"}
+    assert {row["title"] for row in docs} == {"Project brief", "Studio notes", "Materials & sketches"}
     org = sample.client.get(f"/channels/{channel}/shared-document-organization", headers=h).json()
-    assert org["stacks"][0]["title"] == "Launch" and len(org["placements"]) == 2
+    assert org["stacks"][0]["title"] == "Reference material" and len(org["placements"]) == 2
     assert org["relations"] and org["message_references"] and org["stack_comments"]
     project = sample.client.get(f"/channels/{channel}/projects", headers=h).json()[0]
     tasks = sample.client.get(f"/channels/{channel}/projects/{project['id']}/tasks", headers=h).json()
-    assert project["fields"]["title"] == "Summer launch" and len(tasks["items"]) == 3
+    assert project["fields"]["title"] == "Courtyard project" and len(tasks["items"]) == 3
     files_list = sample.client.get(f"/files/channels/{channel}", headers=h).json()
     for file in files_list:
         downloaded = sample.client.get("/files/" + file["id"], headers=h)
@@ -176,7 +178,10 @@ def test_expiry_and_physical_cleanup_preserve_another_visits_rows_and_files(samp
         assert all(session.get(User, identifier) is None for identifier in old_users)
         assert session.get(PublicDemoVisit, survivor["visit_id"]) is not None
     remaining = sample.client.get(f"/files/channels/{survivor['channel_id']}", headers=h).json()
-    assert {path.name for path in (sample.root / "files").iterdir()} == {file["id"] for file in remaining}
+    with Session(sample.engine) as session:
+        avatars = session.exec(select(UserAvatar)).all()
+        assert len(avatars) == 4 and not any(row.user_id in old_users for row in avatars)
+    assert {path.name for path in (sample.root / "files").iterdir()} == {file["id"] for file in remaining} | {row.blob_id for row in avatars}
     assert sample.client.get(f"/messages/channels/{survivor['channel_id']}", headers=h).status_code == 200
 
 
@@ -217,7 +222,7 @@ def test_orphan_collection_never_deletes_an_inflight_normal_upload(sample):
     os.utime(file, (time.time() - 700, time.time() - 700))
     with Session(sample.engine) as session: service.cleanup_expired_visits(session)
     assert not file.exists()
-    assert len(list((sample.root / "files").iterdir())) == 3
+    assert len(list((sample.root / "files").iterdir())) == 7
 
 
 def test_cleanup_deletes_large_threads_leaf_first_across_bounded_fk_batches(sample):

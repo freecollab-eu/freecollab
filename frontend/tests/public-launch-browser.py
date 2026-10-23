@@ -71,10 +71,14 @@ def main():
             page.get_by_label('Language', exact=True).select_option('sv')
             expect(page.locator('html')).to_have_attribute('lang', 'sv')
             expect(page.get_by_role('heading', level=1)).to_have_text('Bra arbete.På era villkor.')
-            page.locator('.fc-preview-composer input').fill('Good work.')
-            page.locator('.fc-preview-composer button').click()
-            expect(page.locator('.fc-preview-message.is-own p')).to_have_text('Good work.')
-            page.locator('.fc-preview-titlebar button').click()
+            preview = page.locator('.fc-public-product-preview')
+            expect(preview).to_contain_text('Samma produkt, med exempeldata.')
+            product_image = preview.locator('img.fc-public-product-image')
+            expect(product_image).to_be_visible()
+            expect(product_image).to_have_js_property('complete', True)
+            assert product_image.evaluate('(image)=>image.naturalWidth>0&&image.naturalHeight>0'), 'The actual product screenshot did not load'
+            expect(preview.get_by_role('button', name='Utforska demon', exact=True)).to_be_visible()
+            expect(page.locator('.fc-preview, .fc-preview-composer, .fc-preview-message')).to_have_count(0)
             capture('open-release-website-sv-desktop.png')
             capture('open-release-website-sv-full.png', True)
             for width in [390, 320]:
@@ -84,7 +88,7 @@ def main():
                 expect(page.get_by_text('Källkoden finns under MIT-licens', exact=False)).to_be_visible()
                 page.get_by_text('Är FreeCollab gratis?', exact=True).click()
             checks['saved_guest_swedish_language_faq_and_desktop_390_320_without_horizontal_overflow'] = True
-            page.get_by_role('button', name='Utforska demon', exact=True).first.click()
+            preview.get_by_role('button', name='Utforska demon', exact=True).click()
             expect(page.locator('[data-product-demo-frame]')).to_be_visible()
             frame = page.get_by_title('FreeCollab produktdemo', exact=True)
             expect(frame).to_be_visible()

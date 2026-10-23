@@ -1,12 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowDown, ArrowRight, ArrowUpRight, Check, CheckSquare, ChevronDown, FileText, Hash, MessageSquare, Plug, RotateCcw, Send, Server, ShieldCheck, Sparkles, Users, Video } from 'lucide-react';
+import { ArrowRight, ArrowUpRight, CheckSquare, ChevronDown, MessageSquare, Plug, Server, ShieldCheck, Sparkles, Users, Video } from 'lucide-react';
 import { Brand } from './Brand';
 import { LanguagePicker, t, useI18n } from '../i18n';
-import { buildAppearanceTokens, DEFAULT_APPEARANCE, PRESETS } from '../lib/appearance';
 import type { DemoDestination } from '../lib/demo-showroom';
-import courtyardImage from '../assets/open-studio/courtyard.png';
-import portraitImage from '../assets/open-studio/portraits.png';
+import productScreenshot from '../assets/product/courtyard-product.png';
 import '../styles/public.css';
+import '../styles/product-preview.css';
 
 interface LandingProps {
   onTryDemo: () => void;
@@ -15,96 +13,8 @@ interface LandingProps {
   appLabel?: string;
 }
 
-type PreviewChannel = 'general' | 'design' | 'notes';
-type PreviewFont = 'inter' | 'manrope' | 'serif';
-type PreviewMessage = { name: string; initials: string; text: string; time: string; portrait?: number; own?: boolean; file?: boolean };
-
-const sampleMessages: Record<PreviewChannel, PreviewMessage[]> = {
-  general: [
-    { name: 'Maja Lind', initials: 'ML', portrait: 0, text: 'Shall we open up towards the courtyard?', time: '10:39' },
-    { name: 'Noor Berg', initials: 'NB', portrait: 1, text: 'Yes. Then the light reaches all the way in.', time: '10:42' },
-    { name: 'Elias Holm', initials: 'EH', portrait: 2, text: 'I’ve shared the new sketch here.', time: '10:45', file: true },
-  ],
-  design: [
-    { name: 'Nora Ek', initials: 'NE', portrait: 3, text: 'Warm materials. A little more space to gather.', time: '10:51' },
-    { name: 'Maja Lind', initials: 'ML', portrait: 0, text: 'Agreed. Let’s bring one direction to Friday’s review.', time: '10:56' },
-  ],
-  notes: [],
-};
-
-const previewFonts: { id: PreviewFont; name: string }[] = [
-  { id: 'inter', name: 'Inter' },
-  { id: 'manrope', name: 'Manrope' },
-  { id: 'serif', name: 'Source Serif' },
-];
-
 export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingProps) {
   useI18n();
-  const [channel, setChannel] = useState<PreviewChannel>('general');
-  const [draft, setDraft] = useState('');
-  const [sentMessages, setSentMessages] = useState<Record<PreviewChannel, PreviewMessage[]>>({ general: [], design: [], notes: [] });
-  const [liked, setLiked] = useState(false);
-  const [expandedFile, setExpandedFile] = useState<string | null>(null);
-  const [palette, setPalette] = useState<string | null>(null);
-  const [font, setFont] = useState<PreviewFont | ''>('');
-  const [previewNotice, setPreviewNotice] = useState('Messages stay in this browser tab.');
-  const messagesRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLInputElement>(null);
-  const messages = [...sampleMessages[channel], ...sentMessages[channel]];
-
-  // These preferences belong only to the sample; the visitor's appearance is untouched.
-  const previewStyle = useMemo(() => {
-    const tokens: Record<string, string> = { '--fc-preview-portraits': `url("${portraitImage}")` };
-    const selectedPalette = PRESETS.find(item => item.id === palette);
-    if (selectedPalette) {
-      const mode = document.documentElement.dataset.mode === 'dark' ? 'dark' : 'light';
-      const colors = buildAppearanceTokens({ ...DEFAULT_APPEARANCE, ...selectedPalette, mode });
-      Object.entries(colors).forEach(([key, value]) => {
-        if (!['--fc-font', '--fc-heading-font', '--fc-body-size', '--fc-message-size', '--fc-radius', '--fc-space'].includes(key)) tokens[key] = value;
-      });
-    }
-    if (font) {
-      const type = buildAppearanceTokens({ ...DEFAULT_APPEARANCE, font_family: font });
-      tokens['--fc-font'] = type['--fc-font'];
-      tokens['--fc-heading-font'] = type['--fc-heading-font'];
-    }
-    return tokens as React.CSSProperties;
-  }, [palette, font]);
-
-  useEffect(() => {
-    if (sentMessages[channel].length && messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [sentMessages, channel]);
-
-  useEffect(() => {
-    if (expandedFile) messagesRef.current?.querySelector('.fc-preview-file-excerpt')?.scrollIntoView({ block: 'nearest' });
-  }, [expandedFile]);
-
-  const sendSampleMessage = (event: React.FormEvent) => {
-    event.preventDefault();
-    const text = draft.trim();
-    if (!text) return;
-    setSentMessages(previous => ({
-      ...previous,
-      [channel]: [...previous[channel].slice(-9), { name: 'You', initials: 'Y', text, time: 'Now', own: true }],
-    }));
-    setDraft('');
-    setPreviewNotice('Sample message added. Only visible in this tab.');
-    composerRef.current?.focus();
-  };
-
-  const resetPreview = () => {
-    setSentMessages({ general: [], design: [], notes: [] });
-    setDraft('');
-    setLiked(false);
-    setExpandedFile(null);
-    setPalette(null);
-    setFont('');
-    setChannel('general');
-    setPreviewNotice('Sample workspace reset. Make yourself at home.');
-  };
-
   return (
     <div className="fc-public">
       <header className="fc-public-header">
@@ -137,46 +47,14 @@ export function Landing({ onTryDemo, onExploreDemo, onDocs, appLabel }: LandingP
           </div>
 
           <div className="fc-public-preview-wrap">
-            <div className="fc-public-preview-overline"><span>{t("01 / A SHARED PLACE")}</span><span>{t("TRY IT BELOW ")}<ArrowDown size={10} aria-hidden="true" /></span></div>
-            <div className="fc-preview" style={previewStyle} aria-label={t("Interactive sample workspace")}>
-              <div className="fc-preview-titlebar">
-                <div className="fc-preview-studio-identity"><Brand size="small" /><span className="fc-preview-workspace-name">Nord Studio</span><label className="fc-preview-channel-picker"><Hash size={14} aria-hidden="true" /><span className="fc-public-sr-only">{t('Sample channels')}</span><select aria-label={t('Sample channels')} value={channel} onChange={event => { setChannel(event.target.value as PreviewChannel); setDraft(''); setExpandedFile(null); }}><option value="general">{t('Courtyard')}</option><option value="design">{t('Design')}</option><option value="notes">{t('Notes')}</option></select><ChevronDown size={12} aria-hidden="true" /></label></div>
-                <button type="button" className="fc-preview-icon-button" onClick={resetPreview} aria-label={t("Reset sample conversation")} title={t("Reset sample conversation")}><RotateCcw size={15} /></button>
-              </div>
-              <div className="fc-preview-layout">
-                <div className="fc-preview-conversation">
-                  <div className="fc-preview-messages" ref={messagesRef} aria-live="polite" aria-relevant="additions">
-                    {messages.length === 0 && <div className="fc-preview-empty"><FileText size={30} strokeWidth={1.2} aria-hidden="true" /><h3>{t("No sample notes yet.")}</h3><p>{t("A useful link. A small idea.")}<br />{t("Leave something here for later.")}</p><button type="button" onClick={() => { setDraft(t('An idea for our next review: ')); composerRef.current?.focus(); }}>{t("Write the first note ")}<ArrowRight size={12} aria-hidden="true" /></button></div>}
-                    {messages.map((message, index) => {
-                      const fileKey = `${channel}-${index}`;
-                      return (
-                        <article className={`fc-preview-message${message.own ? ' is-own' : ''}${channel === 'general' && index === 0 ? ' is-lead' : ''}`} key={fileKey}>
-                          <span className={`fc-preview-avatar${message.portrait !== undefined ? ` fc-preview-portrait fc-preview-portrait-${message.portrait}` : ''}`} aria-hidden="true">{message.portrait === undefined ? t('You').slice(0, 1) : ''}</span>
-                          <div className="fc-preview-message-content">
-                            <div className="fc-preview-message-meta"><strong>{message.own ? t("You") : message.name}</strong><time>{message.time === "Now" ? t("Now") : message.time}</time></div>
-                            <p>{message.own ? message.text : t(message.text)}</p>
-                            {message.file && <><button type="button" className="fc-preview-file" aria-label={t("Read sample project notes")} aria-expanded={expandedFile === fileKey} onClick={() => setExpandedFile(expandedFile === fileKey ? null : fileKey)}><FileText size={21} strokeWidth={1.4} aria-hidden="true" /><span><strong>{t("Courtyard notes.md")}</strong><span>{t("Sample document · Read notes")}</span></span><ChevronDown size={12} aria-hidden="true" /></button>{expandedFile === fileKey && <div className="fc-preview-file-excerpt"><strong>{t("For the courtyard review")}</strong><p>{t("01. Make room for the light.")}<br />{t("02. Bring the material samples.")}<br />{t("03. Keep the next step in one place.")}</p></div>}</>}
-                            {channel === 'general' && index === 0 && <button type="button" className={`fc-preview-reaction${liked ? ' is-active' : ''}`} aria-label={t("Like Maja's sample message")} aria-pressed={liked} onClick={() => setLiked(value => !value)}><Check size={11} strokeWidth={1.5} aria-hidden="true" />{liked ? '2' : '1'}</button>}
-                          </div>
-                        </article>
-                      );
-                    })}
-                  </div>
-                  <form className="fc-preview-composer" onSubmit={sendSampleMessage}>
-                    <input ref={composerRef} aria-label={t("Write a sample message")} placeholder={t('What’s on your mind?')} value={draft} onChange={event => setDraft(event.target.value)} maxLength={500} />
-                    <button type="submit" aria-label={t("Send sample message")} disabled={!draft.trim()}><Send size={16} aria-hidden="true" /></button>
-                  </form>
-                </div>
-                <figure className="fc-preview-material"><span className="fc-preview-material-note">{t('More room for conversation.')}<ArrowDown size={28} strokeWidth={1} aria-hidden="true" /></span><img src={courtyardImage} alt={t('A sunlit brick courtyard with space to gather.')} width={1122} height={1402} decoding="async" /><figcaption><span>{t('Courtyard, version 04')}</span><span>{t('Sample material · shared by Elias')}</span></figcaption></figure>
-              </div>
-              <div className="fc-preview-studio-footer"><div className="fc-preview-team" aria-hidden="true">{[0, 1, 2, 3].map(index => <span className={`fc-preview-portrait fc-preview-portrait-${index}`} key={index} />)}</div><span>{t('Four perspectives. One shared place.')}</span><span className="fc-preview-local-label">{t('Sample data · no account needed')}</span></div>
-            </div>
-            <div className="fc-public-preview-personalize">
-              <div><span>{t("YOUR OWN PERSPECTIVE")}</span><p>{t("Try a color. Find your type.")}</p></div>
-              <div className="fc-public-preview-palette" role="group" aria-label={t("Sample color palette")}>{PRESETS.map(item => <button type="button" key={item.id} aria-label={t("Preview {value0} palette", { value0: String(item.name) })} aria-pressed={palette === item.id} title={item.name} style={{ '--fc-swatch': item.accent_color } as React.CSSProperties} onClick={() => { setPalette(item.id); setPreviewNotice('Palette updated in the sample only.'); }}><span /></button>)}</div>
-              <label className="fc-public-preview-font"><span className="fc-public-sr-only">{t("Sample typeface")}</span><select aria-label={t("Sample typeface")} value={font} onChange={event => { setFont(event.target.value as PreviewFont | ''); setPreviewNotice('Typeface updated in the sample only.'); }}><option value="">{t("Your typeface")}</option>{previewFonts.map(item => <option key={item.id} value={item.id}>{item.name}</option>)}</select><ChevronDown size={12} aria-hidden="true" /></label>
-            </div>
-            <p className="fc-public-preview-caption"><span className="fc-public-preview-sample-label">{t("INTERACTIVE SAMPLE")}</span><span role="status">{t(previewNotice)}</span></p>
+            <div className="fc-public-preview-overline"><span>{t('01 / A SHARED PLACE')}</span><span>{t('The actual product')}</span></div>
+            <figure className="fc-public-product-preview">
+              <button type="button" className="fc-public-product-open" aria-label={t('Explore the demo')} onClick={() => onExploreDemo()}>
+                <img className="fc-public-product-image" src={productScreenshot} alt={t('FreeCollab with a Courtyard conversation, shared document and next step.')} width={1440} height={1047} decoding="async" />
+                <span className="fc-public-product-open-label">{t('Explore the demo')}<ArrowUpRight size={17} aria-hidden="true" /></span>
+              </button>
+              <figcaption>{t('The same product, with example data.')}</figcaption>
+            </figure>
           </div>
         </section>
 

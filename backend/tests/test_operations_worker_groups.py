@@ -6,6 +6,7 @@ from sqlmodel import Session
 
 from app.config import settings
 from app.models.app_platform import AppAIDraft, AppInstallation, AppJob, ChannelRecapSchedule
+from app.models.avatar import AvatarErasure
 from app.models.calendar_delivery import CalendarProviderJob, CalendarProviderPublication
 from app.models.channel import Channel
 from app.models.chat_productivity import MessageReminder, ScheduledMessage
@@ -24,7 +25,7 @@ FLAGS = ("webhooks_enabled", "otrust_enabled", "sync_enabled", "workflows_enable
          "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled")
 GROUPS = {"webhooks", "otrust", "sync", "calendar-delivery", "workflows", "data", "push",
           "native_push", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup",
-          "chat", "apps", "recaps"}
+          "chat", "apps", "recaps", "avatar-cleanup"}
 
 
 def disable_features(monkeypatch):
@@ -85,6 +86,7 @@ def seed_new_groups(engine, now):
             due_at=past, session_hash="private-session", claims_json="private-claims", status="notified"))
         session.add(MessageReminder(user_id="operator", channel_id="private-channel", item_id="private-completed", kind="message",
             due_at=past, session_hash="private-session", claims_json="{}", status="completed", completed_at=now))
+        session.add(AvatarErasure(blob_id="private-removed-profile-photo", user_id="operator", created_at=past))
         session.commit()
         for index, status in enumerate(("queued", "running", "succeeded", "uncertain")):
             session.add(CalendarProviderJob(client_id=str(index), request_hash="private-request", user_id="operator", channel_id="private-channel",
@@ -113,6 +115,7 @@ def test_all_worker_groups_report_real_states_due_lag_and_no_private_data(operat
     assert queues["recaps"] == {"pending": 1, "scheduled": 1, "disabled": 1, "oldest_pending_seconds": 420}
     assert "published" not in queues["recaps"] and "completed" not in queues["recaps"]
     assert queues["native-call-cleanup"] == {"pending": 1, "scheduled": 1, "oldest_pending_seconds": 420}
+    assert queues["avatar-cleanup"] == {"pending": 1, "oldest_pending_seconds": 420}
     for group in ("slack-import-cleanup", "personal-oauth-cleanup"):
         assert queues[group] == {"pending": 1, "scheduled": 1, "inactive": 1, "oldest_pending_seconds": 420}
     response = client.get("/operations/status", headers=headers())
@@ -122,6 +125,7 @@ def test_all_worker_groups_report_real_states_due_lag_and_no_private_data(operat
     assert 'queue="calendar-delivery",status="uncertain"} 1' in metrics.text
     assert 'queue="chat",status="notification_pending"} 1' in metrics.text
     assert 'queue="recaps",status="scheduled"} 1' in metrics.text
+    assert 'queue="avatar-cleanup",status="pending"} 1' in metrics.text
     assert "private-" not in response.text + metrics.text
 
 
@@ -142,8 +146,30 @@ def test_always_on_work_requires_worker_but_terminal_or_disabled_queue_records_d
     with Session(engine) as session:
         queues = integration_queue_status(session)
     assert integration_worker_required(queues)
-    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup"):
+    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup"):
         assert integration_worker_required({group: queues[group]})
     assert not integration_worker_required({"webhooks": {"pending": 2}, "recaps": {"scheduled": 1}})
     assert not integration_worker_required({"apps": {"delivered": 3, "uncertain": 1, "failed": 1},
-        "chat": {"sent": 1, "notified": 2, "completed": 1}, "personal-oauth-cleanup": {"inactive": 2}})
+        "chat": {"sent": 1, "notified": 2, "completed": 1}, "personal-oauth-cleanup": {"inactive": 2}, "avatar-cleanup": {"pending": 0}})
+
+
+def test_native_photo_erasure_worker_clears_pending_status_and_worker_requirement(operator, monkeypatch):
+    from app.services import storage
+    from app.services.integration_worker import run_once
+    client, engine, root = operator
+    disable_features(monkeypatch)
+    store = storage.StorageService(root / "private-photos")
+    monkeypatch.setattr(storage, "storage_service", store)
+    blob = "e" * 32
+    store.save_file_sync(blob, b"old private profile photo")
+    with Session(engine) as session:
+        session.add(AvatarErasure(blob_id=blob, user_id="operator"))
+        session.commit()
+    before = client.get("/operations/status", headers=headers()).json()
+    assert before["integration_queues"]["avatar-cleanup"]["pending"] == 1
+    assert before["integration_worker"]["enabled"]
+    assert run_once(engine)["avatar-cleanup"] == 1
+    after = client.get("/operations/status", headers=headers()).json()
+    assert after["integration_queues"]["avatar-cleanup"]["pending"] == 0
+    assert not after["integration_worker"]["enabled"]
+    assert store.read_file(blob) is None

@@ -16,6 +16,35 @@ Inter, Manrope and Source Serif 4 ship with the frontend. System uses the device
 
 Saving requires a successful authenticated API request. A failed save keeps the preview available for retry. Loading failures show a retry action; a cached appearance may still be shown. The account's server copy is authoritative, and saved settings load when the app starts or the account changes. A separate cache for each account in browser local storage helps display its last loaded appearance. Changing accounts clears the preceding account's active preview. This does not provide live synchronization between different devices.
 
+## Profile photos
+
+Open **Your account** and choose **Upload photo** to select your own PNG, JPEG or
+WebP image (up to 5 MB and 8192 × 8192 pixels). The client prepares a 256-pixel
+square PNG locally; the server validates and re-encodes its pixels, removing
+metadata. **Change photo** replaces it and **Remove photo** restores initials.
+The account, conversations, threads and member lists all read that person's
+actual profile photo. They do not assign stock portraits to user IDs.
+
+`POST /account/avatar` and `DELETE /account/avatar` operate on the current
+personal account. Managed/workspace-scoped sessions cannot change its personal
+profile. `GET /users/{user_id}/avatar` requires current authentication and a
+current shared workspace/channel grant (or the same user). An optional
+`workspace_id` narrows that read; it grants no additional access. Responses are
+private, not stored in a public image cache, and use no external image URLs.
+
+The additive `UserAvatar` table holds metadata and a private storage blob ID.
+Existing database and uploaded-file backups cover profile photos too. Replacing,
+removing or closing an account removes the old photo; failed physical erasure is
+retried by the normal worker. Account/workspace changes discard client photo
+URLs. Public demo profiles use this same storage and reader; uploading personal
+photos is disabled in that disposable public installation.
+
+The native photo checks cover current/revoked authority, malformed or oversized
+images, replacement, deletion and durable erasure. A real normal-product browser
+test also exercises the file chooser, preparation, upload, matching photo bytes
+across account/chat/member views, replacement and removal. See
+[validation](VALIDATION.md) for the dated scope.
+
 ## Colors and readability
 
 The app derives text, surfaces, borders and button colors from the saved colors. It adjusts accent text and borders where needed to improve contrast, so those roles can differ from the stored hex value. Original-color buttons use a separately derived readable foreground. The selected values remain available in the color controls.

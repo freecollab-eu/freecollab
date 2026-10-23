@@ -61,7 +61,16 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
   börjar vid nytt uttryckligt samtycke och backfyller inte äldre samtal.
 - AI-källgränsen räknar den verkliga 24 000-teckenskontexten före sändning.
   Inget tyst bortklippande. Den gamla anonyma server-Groq-demon är borttagen.
-- Driftpanelen visar samtliga fjorton workergrupper med verkliga tillstånd.
+- Den godkända rumsvyn används i både produkt och demo. Verkliga filer,
+  dokument/högar och uppgifter öppnar ordinarie verktyg och behåller samtalets
+  utkast och läsposition. Webbplatsen visar en riktig skärmbild från produkten;
+  dess knapp öppnar samma app med isolerade exempeldata. Se [produktdemon](PRODUCT_DEMO.md).
+- Profilbilder kommer från användarnas egna kontouppladdningar via ett
+  behörighetskontrollerat bild-API, med initialer när bild saknas. Byte,
+  borttagning och kontoradering hanterar även gamla lagrade bildfiler. Se
+  [utseende och profilbilder](APPEARANCE.md).
+- Driftpanelen visar samtliga femton workergrupper med verkliga tillstånd,
+  inklusive rensning av borttagna profilbilder.
   Lösenordsformulär använder backendens gränser även för Unicode/UTF-8.
 - Produktguiden i appen länkar dagens avtal; gamla påståenden om saknat SDK
   och experimentella exempel som produktfunktioner har rättats.

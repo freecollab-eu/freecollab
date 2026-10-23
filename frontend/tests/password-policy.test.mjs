@@ -52,7 +52,7 @@ function formFixture(kind) {
     '../i18n': { t: value => value, useI18n() {}, currentLocale: () => 'en' },
     '../lib/api': { api: { getCurrentUserId: () => 'visitor', getMe: async () => ({ id: 'visitor', name: 'Visitor', email: 'visitor@example.com', session_scope: 'native' }), logout: () => calls.push(['logout']) } },
     '../lib/account-api': { accountApi }, '../lib/password-policy': { newPasswordValidationError: check },
-    '../lib/useModalFocus': { useModalFocus() {} }, '../components/SSOConnections': {}, '../components/ScopedSessionNotice': {}, './Brand': {}, '../styles/account.css': {},
+    '../lib/useModalFocus': { useModalFocus() {} }, '../components/SSOConnections': {}, '../components/ScopedSessionNotice': {}, './Brand': {}, './AccountPhoto': { AccountPhoto() { return null; } }, '../styles/account.css': {},
   };
   const path = kind === 'reset' ? '../src/components/AuthenticationFlow.tsx' : '../src/account/AccountPanel.tsx';
   const compiled = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText;

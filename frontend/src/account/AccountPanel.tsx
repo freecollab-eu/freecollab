@@ -9,6 +9,7 @@ import { useModalFocus } from '../lib/useModalFocus';
 import { SSOConnections } from '../components/SSOConnections';
 import { ScopedSessionNotice } from '../components/ScopedSessionNotice';
 import { LanguagePicker, t, useI18n, currentLocale } from '../i18n';
+import { AccountPhoto } from './AccountPhoto';
 
 interface AccountPanelProps { onClose: () => void; onSecureSettings?: () => void; }
 type Section = 'account' | 'security' | 'sessions';
@@ -191,6 +192,7 @@ export function AccountPanel({ onClose, onSecureSettings }: AccountPanelProps) {
             <section className="fc-account-section"><span className="fc-kicker">{t("Your identity")}</span><h3>{user.name}</h3><p className="fc-account-muted">{t("Your personal account can belong to more than one workspace.")}</p><dl className="fc-account-details"><div><dt>{t("Email")}</dt><dd>{security.email}</dd></div><div><dt>{t("Verification")}</dt><dd className={security.email_verified ? 'fc-account-success' : ''}>{security.email_verified ? <><CheckCircle2 size={15} />{t("Verified")}</> : t("Not yet verified")}</dd></div></dl>
               {!security.email_verified && <><button type="button" className="fc-button" disabled={!!busy || !security.mail_delivery_available} onClick={() => void run('verify', async () => { const response = await accountApi.requestVerification(); if (isCurrent()) setNotice(response.message); })}>{busy === 'verify' && <Loader2 size={15} className="fc-account-spinner" />}{t("Send verification email")}</button>{!security.mail_delivery_available && <p className="fc-account-muted">{t("Email delivery is currently unavailable on this server.")}</p>}</>}
             </section>
+            <AccountPhoto user={user} />
             <SSOConnections security={security} />
             <section className="fc-account-section fc-account-key-note"><KeyRound size={21} /><div><h3>{t("Account access and encrypted history")}</h3><p>{t("Your password and sign-in recovery codes restore account access. Encrypted message history uses its own trusted devices and recovery key.")}</p>{onSecureSettings && <button className="fc-account-link" type="button" onClick={() => { if (recoveryCodes.length && !codesStored) { setSection('security'); setNotice(t("Save your sign-in recovery codes before opening encryption settings.")); } else onSecureSettings(); }}>{t("Manage encryption devices & recovery")}</button>}</div></section>
           </>}

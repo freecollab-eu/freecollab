@@ -397,6 +397,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     # of JWT/native/embed session sidecars; erase them before session cleanup.
     _delete_rows(session, "meetingparticipantauthority", "user_id", [actor.id])
     # Remove account/device credentials and private profile data explicitly.
+    from ..services.avatars import remove_avatar, erase_pending_avatar_blobs
+    remove_avatar(session, actor.id)
     subscriptions = service._table("pushsubscription")
     subscription_ids = service._records(session, subscriptions.name, subscriptions.c.user_id == actor.id) if subscriptions is not None else []
     _delete_rows(session, "pushdelivery", "subscription_id", service._ids(subscription_ids))
@@ -508,5 +510,6 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     actor.password_hash = hash_password(secrets.token_hex(32)); actor.public_key = None; actor.encrypted_private_key = None
     actor.role = "user"; actor.is_blocked = True
     session.add(actor); session.add(AccountIdentityErasure(user_id=actor.id)); session.commit()
+    erase_pending_avatar_blobs(session)
     return {"identity_erased": True, "signed_out": True, "retained_authorship_stub": True,
             "shared_content_and_backups_erased": False}

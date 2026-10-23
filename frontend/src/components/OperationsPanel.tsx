@@ -16,6 +16,7 @@ const issues: Record<string, string> = {
   public_url_not_https: 'The public application URL needs HTTPS before external use.',
 };
 const queueNames: Record<string, string> = {
+  'avatar-cleanup': 'Profile photo cleanup',
   webhooks: 'Webhooks', otrust: 'Version proofs', sync: 'Cloud synchronization',
   'calendar-delivery': 'Calendar delivery', workflows: 'Workflows', data: 'Data controls',
   push: 'Web Push', native_push: 'Native push', apps: 'App commands', recaps: 'Private recap schedules',

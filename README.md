@@ -7,8 +7,8 @@
 This branch adds real channel details, native document stacks and message
 references, derived stack discussions and reviewed inline stack AI. The audit
 also corrects presence, thread history, app-AI consent and worker diagnostics.
-These changes are not yet a published release. The static demo remains local
-examples; it is separate from the authenticated product.
+These changes are not yet a published release. The demo runs the actual product
+with isolated example accounts and data; the website shows a capture of that app.
 
 Self-hosted collaboration with workspaces, private and encrypted channels, direct messages, files and decisions. MIT licensed.
 
@@ -20,6 +20,11 @@ See [local and network self-hosting](docs/SELF_HOSTING.md) and [operations](docs
 ![FreeCollab interactive product demo with sample conversations and workspace tools](docs/images/freecollab-demo.png)
 
 FreeCollab brings conversations, documents, tasks, files and meetings into a workspace you control. Choose personal colors/type and Swedish or English, use your own customer SSO and prepare your organization's Microsoft 365/Google apps. The MIT-licensed source has no per-seat software fee; you cover hosting and external provider costs. Start with one API process; additional replicas require the shared coordination and storage described in [SCALING.md](docs/SCALING.md).
+
+The conversation, shared brief and next task use the same room components in
+the product and demo. Profile photos come from each person's account upload,
+with authenticated reads and initials when no photo is available. See
+[personal appearance and profile photos](docs/APPEARANCE.md).
 
 **Explore the demo** opens the same `Chat`, `WorkHub`, editors and settings as
 the product, backed by its normal API. Each visitor receives an isolated,
@@ -117,7 +122,7 @@ In an active cross-installation Connect channel, **Work → Shared work** adds e
 
 [Native calling](docs/NATIVE_CALLING.md) adds iOS CallKit/PushKit and Android Telecom with LiveKit media. Customers configure their own push and LiveKit services. Admission requires the current signed-in source and channel access, and secure-channel participants explicitly acknowledge that this audio is readable by the SFU. Platform signing and physical-device acceptance remain customer release steps.
 
-[Distribution](docs/DISTRIBUTION.md) provides exact-version container/SDK pipelines, digest-pinned installation metadata, native signing workflows and a separate static website/demo image. A configured workflow is distinct from a published registry artifact or deployed website.
+[Distribution](docs/DISTRIBUTION.md) provides exact-version container/SDK pipelines, digest-pinned installation metadata, native signing workflows and a separate static website image. The [product demo](docs/PRODUCT_DEMO.md) runs its own disposable app/API installation. A configured workflow is distinct from a published registry artifact or deployed website.
 
 Native installation administrators also have **Integrations → Operations**: private security configuration, operator MFA coverage, upload-storage headroom, stalled queue claims and recent authenticated security actions. The bounded activity log excludes request bodies, query strings, IP addresses, email and credentials; it is a server-observed history under the database administrator's control. Configuration checks do not verify public certificates, provider delivery or backup freshness. See [security operations](docs/SECURITY_OPERATIONS.md).
 

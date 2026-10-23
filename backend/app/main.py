@@ -39,6 +39,7 @@ from .api import calendar_planning
 from .api import calendar_delivery
 from .api import my_day
 from .api import personal_oauth
+from .api import avatars
 from .services.native_calls import configured as native_call_configuration
 from .models import workspace_crypto_grant  # Register additive tables before init_db.
 from .realtime.socket import sio, start_realtime_broker, stop_realtime_broker, realtime_broker_ready
@@ -115,6 +116,7 @@ app.include_router(presence.router)
 app.include_router(notifications.router)
 app.include_router(admin.router)
 app.include_router(preferences.router)
+app.include_router(avatars.router)
 app.include_router(account.router)
 app.include_router(workspaces.router)
 app.include_router(direct_messages.router)

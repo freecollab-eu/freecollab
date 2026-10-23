@@ -1,0 +1,8 @@
+.fc-public-product-preview { margin: 0; }
+.fc-public-product-open { display: block; position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); color: var(--fc-text); background: var(--fc-surface); cursor: pointer; }
+.fc-public-product-image { display: block; width: 100%; height: auto; }
+.fc-public-product-open-label { position: absolute; right: clamp(12px, 2vw, 28px); bottom: clamp(12px, 2vw, 28px); display: inline-flex; align-items: center; gap: 12px; padding: 12px 17px; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); font: 500 12px/1.3 var(--fc-font); }
+.fc-public-product-open:hover .fc-public-product-open-label { color: var(--fc-accent); }
+.fc-public-product-open:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 5px; }
+.fc-public-product-preview figcaption { margin-top: 12px; color: var(--fc-muted); font-size: 11px; line-height: 1.7; }
+@media (max-width: 480px) { .fc-public-product-open-label { gap: 7px; padding: 8px 10px; font-size: 10px; } .fc-public-product-preview figcaption { font-size: 10px; } }

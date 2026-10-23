@@ -12,6 +12,7 @@ from sqlmodel import select
 from ..config import settings
 from ..models.account_security import MailOutbox
 from ..models.operations import WorkerHeartbeat
+from ..models.avatar import AvatarErasure
 from ..models.webhook import WebhookDelivery
 from ..models.version_proof import VersionProof
 from ..models import file_version  # Register the sync file-state dependency.
@@ -209,6 +210,11 @@ def integration_queue_status(session, now: datetime | None = None) -> dict:
         "inactive": _count(session, PersonalOAuthGrant, ~active_grant),
         "oldest_pending_seconds": _pending_age(first, now),
     }
+    first = session.exec(select(func.min(AvatarErasure.created_at))).one()
+    result["avatar-cleanup"] = {
+        "pending": _count(session, AvatarErasure),
+        "oldest_pending_seconds": _pending_age(first, now),
+    }
     return result
 
 
@@ -226,7 +232,7 @@ def integration_worker_required(queues: dict) -> bool:
         "workflows_enabled", "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled")):
         return True
     return any(queues.get(group, {}).get(state, 0) for group in
-        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup")
+        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup")
         for state in ("pending", "processing", "scheduled", "notification_pending"))
 
 

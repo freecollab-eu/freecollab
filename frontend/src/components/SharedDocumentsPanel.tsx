@@ -7,12 +7,12 @@ import { ContextualCopilot } from './ContextualCopilot';
 import { SharedDocumentOrganization } from './SharedDocumentOrganization';
 import '../styles/shared-documents.css';
 
-interface Props { workspaceId: string; channelId: string; isAdmin?: boolean; onPendingChange?: (pending: boolean) => void; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
+interface Props { workspaceId: string; channelId: string; isAdmin?: boolean; initialDocumentId?: string; initialStackId?: string; onPendingChange?: (pending: boolean) => void; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const describe = (failure: unknown) => failure instanceof Error ? failure.message : 'This document action could not be completed.';
 const empty: DocumentState = { title: '', body: '', ready: false, locked: false, pending: 0, error: '', sequence: 0 };
 const date = (value: string) => new Date(/(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? value : value + 'Z').toLocaleString(currentLocale(), { dateStyle: 'medium', timeStyle: 'short' });
 
-export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, onPendingChange, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
+export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, initialDocumentId, initialStackId, onPendingChange, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const [rows, setRows] = useState<SharedDocumentRecord[]>([]), [selected, setSelected] = useState<SharedDocumentRecord | null>(null);
   const [loading, setLoading] = useState(true), [showArchived, setShowArchived] = useState(false), [creating, setCreating] = useState(false), [newTitle, setNewTitle] = useState('');
@@ -23,18 +23,31 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
   const [members, setMembers] = useState<Record<string, string>>({});
   const owner = useRef(api.getAccessToken()), generation = useRef(0), listRequest = useRef(0), session = useRef<SharedDocumentSession | null>(null), errorRef = useRef<HTMLDivElement>(null);
   const selectedId = useRef<string | null>(null); selectedId.current = selected?.id || null;
+  const initialSelectionApplied = useRef(false);
   const current = (request: number) => request === generation.current && owner.current === api.getAccessToken();
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
 
   async function load(request = generation.current, archived = showArchived) {
     const listGeneration = ++listRequest.current;
     setLoading(true); setError('');
-    try { const result = await sharedDocumentsApi.list(channelId, archived); if (current(request) && listGeneration === listRequest.current) setRows(result); }
+    try {
+      const result = await sharedDocumentsApi.list(channelId, archived);
+      if (current(request) && listGeneration === listRequest.current) {
+        const visible = result.filter(row => row.channel_id === channelId);
+        setRows(visible);
+        if (!archived && !initialSelectionApplied.current) {
+          initialSelectionApplied.current = true;
+          const target = visible.find(row => row.id === initialDocumentId && !row.archived);
+          if (target && !selectedId.current) setSelected(target);
+        }
+      }
+    }
     catch (failure) { if (current(request) && listGeneration === listRequest.current) setError(describe(failure)); }
     finally { if (current(request) && listGeneration === listRequest.current) setLoading(false); }
   }
   useEffect(() => {
     const request = ++generation.current; owner.current = api.getAccessToken();
+    initialSelectionApplied.current = false;
     setRows([]); setSelected(null); setState(empty); setComments([]); setHistory(null); setCreating(false); setNewTitle(''); setError(''); setNotice(''); setBusy('');
     void load(request, false); setShowArchived(false);
     void api.getChannelMembers(channelId).then(result => { if (current(request)) setMembers(Object.fromEntries(result.map(row => [row.user_id, row.name]))); }).catch(() => undefined);
@@ -140,7 +153,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
     {!selected ? <>
       <div className="fc-shared-toolbar"><button type="button" className="fc-button fc-button-primary" onClick={() => setCreating(!creating)}><Plus size={15} />{t("New shared document")}</button><label className="fc-shared-toggle"><input type="checkbox" checked={showArchived} onChange={event => { const archived = event.target.checked; setShowArchived(archived); void load(generation.current, archived); }} />{t("Show archived")}</label></div>
       {creating && <form onSubmit={create} className="fc-shared-form"><label htmlFor="shared-document-new-title">{t("Document title")}</label><input id="shared-document-new-title" className="fc-input" maxLength={200} value={newTitle} onChange={event => setNewTitle(event.target.value)} required autoFocus /><div className="fc-account-actions"><button type="button" className="fc-button" onClick={() => setCreating(false)} disabled={!!busy}>{t("Cancel")}</button><button className="fc-button fc-button-primary" type="submit" disabled={!!busy || !newTitle.trim()}>{busy === 'create' ? <Loader2 size={15} className="fc-shared-spinner" /> : <Plus size={15} />}{t("Create document")}</button></div></form>}
-      {loading ? <p className="fc-shared-muted" role="status">{t("Loading shared documents…")}</p> : <SharedDocumentOrganization key={channelId + ':' + showArchived} workspaceId={workspaceId} channelId={channelId} documents={rows} archived={showArchived} isAdmin={isAdmin} members={members} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage} onOpen={openOrganizedDocument} />}
+      {loading ? <p className="fc-shared-muted" role="status">{t("Loading shared documents…")}</p> : <SharedDocumentOrganization key={channelId + ':' + showArchived} workspaceId={workspaceId} channelId={channelId} documents={rows} initialStackId={initialStackId} archived={showArchived} isAdmin={isAdmin} members={members} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage} onOpen={openOrganizedDocument} />}
     </> : <>
       <div className="fc-shared-toolbar"><button type="button" className="fc-button" onClick={() => { if (state.pending) { setError(t("Keep this document open until its pending edits are synchronized.")); return; } setSelected(null); void load(); }}><ArrowLeft size={15} />{t("All documents")}</button><span className="fc-shared-sync" role="status">{state.locked ? t("Editing unavailable") : !state.ready ? t("Synchronizing…") : state.pending ? t(state.pending === 1 ? '{count} edit waiting to sync' : '{count} edits waiting to sync', { count: state.pending }) : selected.archived ? t("Archived · Read only") : t("All edits synchronized")}</span></div>
       {state.error && <div role="alert" className="fc-alert fc-account-error">{state.error}{!state.locked && <button type="button" className="fc-button" onClick={() => void session.current?.sync()}><RefreshCw size={14} />{t("Retry synchronization")}</button>}</div>}

@@ -61,7 +61,7 @@ python -m app.services.integration_worker --interval 10
 python -m app.services.integration_worker --once
 ```
 
-The worker records its heartbeat and processes bounded batches for each enabled queue in independent database sessions. A failed provider transaction does not roll back other groups. Groups run serially on the supported single worker, so a slow provider can delay later groups; the dashboard and metrics cover all 14 groups. [Integration operations](INTEGRATION_OPERATIONS.md) explains the actual counters and heartbeat limits. Flags prevent dispatch while disabled, even if pending work exists. Durable sync mappings, claims, cursors and retry times survive restarts. Webhook delivery remains at least once; receivers must deduplicate event IDs.
+The worker records its heartbeat and processes bounded batches for each enabled queue in independent database sessions. A failed provider transaction does not roll back other groups. Groups run serially on the supported single worker, so a slow provider can delay later groups; the dashboard and metrics cover all 15 groups, including pending private profile-photo erasure in `avatar-cleanup`. [Integration operations](INTEGRATION_OPERATIONS.md) explains the actual counters and heartbeat limits. Feature flags prevent their provider dispatch while disabled, even if pending work exists; always-on local cleanup remains available. Durable sync mappings, claims, cursors and retry times survive restarts. Webhook delivery remains at least once; receivers must deduplicate event IDs.
 
 ## Encryption and disclosure
 

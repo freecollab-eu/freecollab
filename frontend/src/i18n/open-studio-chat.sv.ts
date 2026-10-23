@@ -1,4 +1,9 @@
 const catalog: Record<string, string> = {
+  'One conversation. Something to build on.': 'Ett samtal. Något att bygga vidare på.',
+  'Conversation and shared work': 'Samtal och gemensamt arbete',
+  'The conversation': 'Samtalet',
+  'The shared brief': 'Det gemensamma underlaget',
+  'Decision & next step': 'Beslut och nästa steg',
   'What are you thinking?': 'Vad tänker du på?',
   'Focus': 'Fokus',
   'Focus mode': 'Fokusläge',

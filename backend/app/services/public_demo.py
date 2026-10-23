@@ -74,6 +74,7 @@ def _owned_rows(session, visit):
         names = set(column.name for column in table.primary_key.columns)
         names.update(fk.parent.name for fk in table.foreign_keys)
         names.update(fk.column.name for target in tables for fk in target.foreign_keys if fk.column.table is table)
+        if table.name in {"useravatar", "avatarerasure"}: names.add("blob_id")
         columns[table.name] = [column for column in table.columns if column.name in names]
 
     def collect(table, conditions):
@@ -122,6 +123,8 @@ def _owned_rows(session, visit):
 def _purge_visit(session, visit):
     tables, rows = _owned_rows(session, visit)
     file_ids = [record["id"] for record in rows.get("file", {}).values()]
+    file_ids.extend(record["blob_id"] for name in ("useravatar", "avatarerasure")
+                    for record in rows.get(name, {}).values())
     for table in reversed(tables):
         pending = dict(rows[table.name])
         keys = list(table.primary_key.columns)
@@ -155,6 +158,9 @@ def _remove_orphan_files(session, maximum=200):
     if not root.exists():
         return
     retained = set(session.execute(sql_select(SQLModel.metadata.tables["file"].c.id)).scalars())
+    for name in ("useravatar", "avatarerasure"):
+        if name in SQLModel.metadata.tables:
+            retained.update(session.execute(sql_select(SQLModel.metadata.tables[name].c.blob_id)).scalars())
     storage = StorageService(root)
     count = 0
     for path in root.iterdir():

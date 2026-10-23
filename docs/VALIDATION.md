@@ -1,6 +1,76 @@
 # FreeCollab validation record
 
+## Shared product room and personal photos — 2026-10-23
+
+The actual product room keeps its conversation and composer mounted beside
+existing channel files, one shared document with its real Yjs excerpt and stack,
+and an unfinished native task. These cards open the normal editors, stacks,
+task and file views. The approved Courtyard example uses actual product records
+and authenticated image bytes. [The demo contract](PRODUCT_DEMO.md) describes
+the same layout, its bounded read-only overview and the public account limits.
+
+Executed overlapping validation scopes for this increment:
+
+- **27 actual product/UI/API browser groups passed**, with all **550 bound
+  runtime/configuration/proof files** matching the final worktree. These cover
+  authentic Courtyard and profile images, exact document/stack/task/file
+  destinations, source navigation, keyboard reading continuity after real
+  material refresh, more than twelve messages, and an eight-line composer with
+  left/right material and focus mode. The existing native message, document,
+  task, workflow/worker, upload, appearance, provider-boundary and visitor/reset
+  checks remain. Swedish at 320 px edits and reopens actual saved document text
+  while retaining the conversation draft and a strict visual source anchor.
+  No unexpected external requests, retained credential accesses, IndexedDB
+  operations, service-worker registrations, page errors or rate-limit failures
+  occurred.
+  The automation waited **six seconds between completed groups**, using the
+  unchanged public demo limits and normal product API.
+- **11 normal-product browser groups passed**, retaining all ten existing
+  continuity, tool-memory, account/workspace, pending-document and Swedish
+  320 px groups. The new group uses the actual account file chooser and canvas
+  crop, then the real profile-photo API. Account, header, message and member
+  portraits display the same authenticated bytes; replacement changes them,
+  and deletion returns the API to 404 with initials in the UI. All **20 bound
+  frontend/backend/proof source hashes** matched at completion; no browser
+  page errors occurred.
+- **Five built-application handoff groups passed**, preserving the real frame,
+  reload, documentation, English/Swedish and 1440/390/320 px checks. The loaded
+  native-product screenshot's button opens the configured product iframe.
+  Application and trusted-embed production builds passed, with **325 source
+  hashes** matching and **76 built-artifact hashes** recorded. Expected iframe
+  navigation was inspected and aborted before creating a sample account;
+  no unexpected external/account requests or page errors occurred.
+- **22 native profile-photo integration cases passed**, including current
+  membership, guest/block restrictions, account deletion during storage I/O,
+  bounded PNG decoding/metadata removal and durable erasure. These are part of
+  **117 final runtime, operations, demo-boundary and avatar cases**. The native
+  worker drained a pending photo erasure and reported its fifteenth operation
+  group through the actual queue/worker contract. **Ten client read
+  cases passed** for pending-request sharing, independent cancellation,
+  account/workspace isolation and late transport completion after invalidation.
+- **Eight material-reader and actual editor/click-guard cases passed**. They
+  cover native/encrypted boundaries, same-channel target validation, stale
+  scope rejection, bounded document/project reading and one-time deep-link
+  consumption that preserves a newly created page. TypeScript also passed.
+- The complete frontend Node run passed **434 cases**.
+- The original **2,335-case backend cohort has passing file-group coverage**:
+  553 + 464 + 667 + 651. The affected 31-file group was rerun exhaustively in
+  four private groups of 154 + 209 + 157 + 131 cases after its worker contract
+  fixes. The final 117 targeted cases above overlap this cohort and include
+  three later regressions; they are not 117 additional distinct cases.
+- All **1,320 relative Markdown file links** across the README and documentation
+  resolved in the final worktree.
+
+The normal-product browser fixture used its own accounts, API/Vite processes,
+database, image files and keys, then removed them. Earlier sections retain the
+results for their original source state; their totals are not additional runs
+of this design increment. Live provider, Matrix, public deployment and physical
+mobile acceptance remain separate scopes.
+
 ## Product demo parity — 2026-10-23
+
+**Historical source:** the following 16-group/533-file evidence describes the
+preceding parity increment, before the shared product room validated above.
 
 The public demo now mounts the actual `Chat`, `WorkHub`, editors, providers and
 settings against the normal backend and native integration worker. The separate

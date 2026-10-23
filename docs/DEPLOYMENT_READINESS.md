@@ -29,9 +29,17 @@ needs attention. The integration worker handles always-available app events,
 scheduled messages, reminders and cleanup, plus enabled recaps, workflows, data
 controls, webhooks, proofs, remote synchronization and browser/native push.
 On-demand AI, cloud-picker and meeting actions execute independently. The private
-dashboard reports fourteen actual worker groups and their stored states or due
+dashboard reports fifteen actual worker groups and their stored states or due
 times; flags describe local availability only;
 customer configuration, consent and current grants are separate.
+
+The always-on `avatar-cleanup` group reports committed private profile-photo
+erasure records awaiting removal and the oldest record's age. Pending records
+require the integration worker even when all dispatch features are disabled.
+Each pass examines at most 20 records; storage failures remain queued for retry.
+The diagnostic exposes aggregate state only, without photos, account or blob
+identifiers, hashes or storage credentials. This group uses the installation's
+private storage backend and performs no integration-provider dispatch.
 
 From the configured backend environment, the actual worker entry points are:
 

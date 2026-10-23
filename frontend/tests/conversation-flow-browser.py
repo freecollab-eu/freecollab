@@ -129,7 +129,9 @@ def leave(page, dialog, button=None):
     dialog.get_by_role('button', name=RETURN).click()
     expect(dialog).to_have_count(0)
     if button is not None:
-        assert page.evaluate('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn&&!window.flowExpectedReturn.closest("[inert]")'), 'Closing work did not restore its visible opening control'
+        # Closing unmounts the editor before the next-frame focus restoration.
+        # Keep the same exact connected, active and non-inert return target.
+        page.wait_for_function('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn&&!window.flowExpectedReturn.closest("[inert]")', timeout=5000)
 
 
 def switch_workspace(page, name):

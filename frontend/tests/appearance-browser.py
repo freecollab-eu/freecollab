@@ -161,7 +161,7 @@ with sync_playwright() as p:
         dialog = open_appearance(page)
         dialog.get_by_role('button', name='Clay', exact=True).click()
         dialog.get_by_label('Accent, hexadecimal color', exact=True).fill('#754b68')
-        dialog.get_by_label('Canvas · light, hexadecimal color', exact=True).fill('#f5f1f4')
+        dialog.get_by_label('Light canvas, hexadecimal color', exact=True).fill('#f5f1f4')
         choose(dialog, re.compile('Manrope'), exact=False)
         choose(dialog, 'Large')
         choose(dialog, 'Compact')
@@ -200,7 +200,7 @@ with sync_playwright() as p:
         choose(dialog, 'Dark')
         assert page.locator('html').get_attribute('data-mode') == 'dark'
         assert_theme_contrast(page)
-        dialog.get_by_label('Canvas · dark, hexadecimal color', exact=True).fill('#000000')
+        dialog.get_by_label('Dark canvas, hexadecimal color', exact=True).fill('#000000')
         dialog.get_by_label('Accent, hexadecimal color', exact=True).fill('#ffffff')
         assert_theme_contrast(page)
         choose(dialog, 'System')

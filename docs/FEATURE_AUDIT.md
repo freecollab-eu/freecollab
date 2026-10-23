@@ -42,6 +42,12 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
 
 ## Luckor som åtgärdades i denna granskning
 
+- `/` i skrivfältet visar en sökbar lista över tillgängliga produktfunktioner,
+  med svenska/engelska sökord, korta beskrivningar och tangentbordsval. Knappen
+  **/ Alla funktioner** behåller ett pågående meddelande. Roll, krypteringsläge,
+  verifierad anslutning och inbäddning styr vilka ingångar som visas. Valet
+  öppnar produktens vanliga funktion; inget meddelande eller externt kommando
+  skickas automatiskt. Se [funktionslistans kontrakt](SLASH_COMMANDS.md).
 - Dokument, nästa steg och beslut öppnas i samtalets egen arbetsyta, med
   meddelanden och skrivfält kvar. Sparat arbete kan öppnas från sitt
   ursprungsmeddelande. Native-kopplingar lagrar endast behörighetskontrollerade
@@ -97,7 +103,8 @@ Detta är kodluckor, skilda från kundens aktivering av befintliga adaptrar:
    och externa filer samt textspannsankrade kommentarer. Säker platt
    dokumentredigering/kommentarer finns redan. En separat privat native-kalender
    är också en lucka; Min arbetsdag sammanställer nu tillåtet kanalinnehåll.
-4. **Bredare Slack-beteenden:** slash-tolkning direkt i skrivfältet, löpande
+4. **Bredare Slack-beteenden:** direkt exekvering av godtyckliga installerade
+   appkommandon med argument i skrivfältet, löpande
    Slack-livebridge, persistent semantiskt sökindex, automatisk mötesinspelning
    och kontinuerliga liveundertexter. Dagens appar/import/sök/klipp är snävare.
 5. **Klientdistribution och federation:** automatisk desktopuppdatering,

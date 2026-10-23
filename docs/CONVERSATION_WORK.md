@@ -8,6 +8,11 @@ conversation in one column.
 
 ## Everyday flow
 
+- Type `/` in the composer, or choose **/ All features**, to find every
+  available feature without leaving the conversation. Search in English or
+  Swedish; arrows and Enter open a feature, Escape keeps the draft. The button
+  searches separately without replacing an existing message. See
+  [commands, permissions and safe draft behavior](SLASH_COMMANDS.md).
 - Choose **Add a document**, **Next step**, **Decision** or **Meet** beside the
   composer. **More** offers channel activity, workflows, cloud files, apps and
   installation settings in the same work area.

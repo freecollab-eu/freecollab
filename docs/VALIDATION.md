@@ -1,5 +1,47 @@
 # FreeCollab validation record
 
+## Composer feature discovery — 2026-10-23
+
+The shared product composer now opens the [available feature list](SLASH_COMMANDS.md)
+with `/`, or through an explicit search that preserves an existing message.
+Its 35 defined entry points are filtered by the current account, channel,
+workspace and embedding scope; the visible count varies with that context.
+The normal editors, approval forms and encryption clients remain authoritative.
+
+Executed for this increment:
+
+- **484 frontend Node cases passed**, including ten new parser, bilingual
+  matching, complete-inventory, permission and encrypted/embedded-context cases.
+- TypeScript, application, trusted-embed and demo production builds passed.
+- The existing complete **six-group composer regression** also passed on 567
+  unchanged bound files: multiline/IME, exact-once outbox recovery, reading
+  position, quick switching, modal focus and 320/390 px custom-theme behavior.
+- **Seven actual browser groups passed**, using independent disposable native
+  and example-product installations. Each snapshot binds **569 source files**,
+  with zero current-source mismatches. The checks open real document/task
+  interfaces, verify no automatic message/resource write, preserve both drafts
+  and search focus after a rejected work change, and await actual seeded task
+  titles in the example installation.
+- The same run verifies unknown-query Enter/Escape behavior, ordinary URLs,
+  prose and multiline messages, channel-scoped drafts, genuine account-session
+  replacement, current member permissions, saved Swedish language, all entries
+  reachable in the 320 px list and no horizontal overflow. Owned example visits
+  are revoked, and temporary API/Vite processes, databases, files and keys are
+  removed.
+- Read-only review corrected two additional UI issues: federated-work
+  eligibility is reverified on a new opening, and rejected explicit-search
+  navigation restores the search input. Selection scrolling depends on the
+  selected entry rather than unrelated conversation rerenders.
+- The existing CI browser job now runs the self-contained slash harness. The
+  feature contract, audit, design system and README are updated; **193 relative
+  links** in the affected documentation resolve.
+
+These checks do not execute a customer's installed app, AI provider or
+federated connection. Their existing external acceptance requirements remain.
+The earlier 33-group demo and 15-group conversation runs below describe their
+own recorded source snapshots; they are not substituted for this increment's
+seven-group proof.
+
 ## Work inside the conversation — 2026-10-23
 
 The actual signed-in product and example installation now open native document,

@@ -101,6 +101,12 @@ Use **Add a document**, **Next step**, **Decision** or **Meet** beside the compo
 
 Use the topbar channel name to open the channel drawer. Open **Quick switcher** in **More channel tools** or press **Cmd/Ctrl+K** to find your channels, open Appearance/Files/Members or create a channel. Quick-switcher matches use the current loaded conversation. **Search all history** separately loads authorized channel history onto the device, displays synchronization progress and supports channel, person and date filters. Its decrypted search data is cleared when the dialog closes; it is not sent to a server search index. Use **↑/↓** to choose a result, **Enter** to open it and **Escape** to close; prefix a query with `#` to show channels only.
 
+Type **`/`** in the message composer, or choose **/ All features**, to search all
+available feature entry points in English or Swedish. Documents, tasks and
+decisions open in the conversation; normal save and consent controls remain.
+The feature button preserves an existing message draft. See the
+[command list and permissions](docs/SLASH_COMMANDS.md).
+
 In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. When you scroll back, incoming messages preserve your reading position; **Jump to latest** takes you to the new messages and updates the read receipt. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
 
 Legacy posts/flows and their generic comments remain **disabled by default**;

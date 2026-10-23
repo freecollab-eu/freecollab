@@ -50,6 +50,15 @@ Channel names match across case, accents and extra spaces. Prefix a query with `
 
 ## Writing and reading
 
+The composer's `/` opens a nonmodal feature list directly above the writing
+area. English and Swedish words search the available entries; arrows and Enter
+open a feature. **/ All features** supplies a separate search field when a
+message is already being written. The list uses the current theme, keeps focus
+in its initiating input, scrolls its own results and closes when the person
+moves to another channel or account. It never publishes a command query or
+starts an external action. Escape preserves literal text; a cancelled work
+navigation preserves both drafts. See [the full command contract](SLASH_COMMANDS.md).
+
 The composer grows for multiline text. **Enter** sends, **Shift+Enter** inserts a line break, and input-method composition prevents Enter from sending prematurely. Message editing also preserves line breaks. In ordinary personal-account sessions, per-channel drafts are serialized into an account-bound AES-GCM browser vault and survive channel changes, failed sends and reloads. The Mobile dialog exposes drafts and the separately opted-in [offline history/file library](MOBILE_OFFLINE.md), including after an offline reload without loaded channels. Chosen history, file downloads and durable attachment queues use the same appearance settings and clearly label local-copy freshness. Reconnection rechecks the current sign-in, membership and encryption mode; native receipts prevent duplicate delivery after a lost response. New typing takes precedence over an asynchronous restored draft. Sign-out purges the local vault and its device keys. The public demo keeps its draft state in the current visit and does not use that persistent browser vault.
 
 Incoming messages follow the latest conversation when the reader is already near the bottom. While reading earlier messages, the view stays in place and shows a new-message count with **Jump to latest**. Those arrivals alone do not advance the latest-message read receipt while the reader remains scrolled back. Reaching the bottom, choosing the jump action or sending your own message returns to the latest conversation. Scroll transitions respect the device's reduced-motion preference.

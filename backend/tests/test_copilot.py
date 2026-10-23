@@ -43,7 +43,7 @@ def provider(tmp_path,monkeypatch):
             state['requests'].append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
             delta={'tool_calls':[{'index':0,'id':'call_1','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'project','title':'Approved private task'})}}]} if state['tool'] else {'content':'Private answer [S1]'}
             packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls' if state['tool'] else 'stop'}]}
-            body=('data: '+json.dumps(packet)+'\r\n\r\n'+('' if state['truncate'] else 'data: [DONE]\r\n\r\n')).encode()
+            body=(''.join('data: '+json.dumps(frame)+'\r\n\r\n' for frame in state.get('packets',[packet]))+('' if state['truncate'] else 'data: [DONE]\r\n\r\n')).encode()
             self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Content-Length',str(len(body))); self.end_headers()
             for index in range(0,len(body),7):self.wfile.write(body[index:index+7]);self.wfile.flush()
     server=ThreadingHTTPServer(('127.0.0.1',0),Handler); context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(certificate,key);server.socket=context.wrap_socket(server.socket,server_side=True)
@@ -92,6 +92,44 @@ def test_truncated_real_provider_stream_never_publishes_partial_answer(ai,provid
     assert ask(ai,conversation(ai)).status_code==502
     with Session(ai[1]) as session:
         turn=session.exec(select(CopilotTurn)).one();assert turn.status=='failed' and turn.encrypted_result is None and turn.completed_at is not None
+
+@pytest.mark.parametrize('ending,truncate,expected',[
+    ('stop',False,200),
+    ('end_turn',False,502),
+    (None,False,502),
+    ('stop',True,502),
+    ('length',False,502),
+    ('unknown_finish',False,502),
+],ids=['normal-stop','end-turn-is-not-terminal','missing-terminal','missing-done','truncated-length','unknown-finish'])
+def test_real_https_end_turn_is_an_intermediate_marker_not_a_terminal_finish(ai,provider,ending,truncate,expected):
+    endpoint,state=provider;state['truncate']=truncate
+    state['packets']=[
+        {'choices':[{'index':0,'delta':{'content':'Private '},'finish_reason':'end_turn'}]},
+        {'choices':[{'index':0,'delta':{'content':'answer [S1]'},'finish_reason':None}]},
+        {'choices':[{'index':0,'delta':{},'finish_reason':ending}]},
+    ]
+    use_provider(ai,endpoint);row=conversation(ai);response=ask(ai,row)
+    assert response.status_code==expected,response.text
+    assert len(state['requests'])==1 and state['requests'][0]['stream'] is True
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one()
+        if expected==200:
+            assert response.json()['text']=='Private answer [S1]' and turn.status=='complete'
+            assert service.opened(turn.encrypted_result,'result',turn.id)['text']==response.json()['text']
+        else:
+            assert turn.status=='failed' and turn.encrypted_result is None and turn.completed_at is not None
+            assert ai[0].get(PREFIX+'/conversations/'+row['id'],headers=headers(ai)).json()['turns']==[]
+
+def test_real_https_end_turn_cannot_reopen_an_actually_finished_choice(ai,provider):
+    endpoint,state=provider
+    state['packets']=[
+        {'choices':[{'index':0,'delta':{'content':'Private answer [S1]'},'finish_reason':'stop'}]},
+        {'choices':[{'index':0,'delta':{'content':' must not be published'},'finish_reason':'end_turn'}]},
+    ]
+    use_provider(ai,endpoint);response=ask(ai,conversation(ai))
+    assert response.status_code==502
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one();assert turn.status=='failed' and turn.encrypted_result is None
 
 def test_revoked_membership_after_provider_network_discards_output(ai,monkeypatch):
     def revoke(*_):

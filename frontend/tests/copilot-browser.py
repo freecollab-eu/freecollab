@@ -9,6 +9,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -18,6 +19,7 @@ import sys
 import tempfile
 import threading
 from playwright.sync_api import expect,sync_playwright
+from ui_navigation import open_chat_tool
 ROOT=Path(__file__).resolve().parents[2]
 PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec=importlib.util.spec_from_file_location('copilot_proof_helpers',Path(__file__).with_name('remote-sync-browser.py'))
@@ -26,7 +28,7 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
-PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/styles/copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/connection-presets.ts','frontend/src/styles/copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
@@ -65,6 +67,11 @@ endpoint=os.environ['PROOF_COPILOT_ENDPOINT']
 normal=copilot.transport.normalize_url
 addresses=copilot.transport.public_addresses
 proxy=copilot.transport._proxy
+complete=copilot.completion
+def private_completion(provider,payload):
+    if provider.endpoint!=endpoint: raise RuntimeError('Private proof refuses non-fixture AI destinations')
+    return complete(provider,payload)
+copilot.completion=private_completion
 copilot.transport.normalize_url=lambda value,**kw:(urlsplit(value),'localhost') if value==endpoint else normal(value,**kw)
 copilot.transport.public_addresses=lambda host,**kw:['127.0.0.1'] if host=='localhost' else addresses(host,**kw)
 copilot.transport._proxy=lambda host,port:None if host=='localhost' else proxy(host,port)
@@ -82,8 +89,9 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
             helpers.api(base,'POST','/channels/'+channel['id']+'/projects',owner,{'id':'proof-project','fields':{'title':'Review project','description':'Private fixture','color':'sage'}})
             with sync_playwright() as playwright:
                 browser=playwright.chromium.launch(headless=True,executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox'])
-                context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(45000);errors=[];urls=[]
+                context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(45000);errors=[];urls=[];writes=[]
                 page.on('pageerror',lambda failure:errors.append(str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:1000]));page.on('request',lambda request:urls.append(request.url))
+                page.on('request',lambda request:writes.append((request.method,request.url)) if request.method not in {'GET','HEAD','OPTIONS'} else None)
                 stage='honest no-key production panel'
                 page.goto(app,wait_until='domcontentloaded',timeout=90000);page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+owner['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
@@ -154,6 +162,31 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(panel.get_by_text('Private AI history reset.',exact=True)).to_be_visible()
                 with sqlite3.connect(private/'proof.db') as connection:assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
                 results['private_history_reset_retains_approved_shared_task']=True
+                stage='Grok connection preset edits the draft only and clears typed destination credentials'
+                page.get_by_role('button',name='Close workspace tools',exact=True).click();open_chat_tool(page,'Integrations')
+                integrations=page.get_by_role('dialog',name='Integrations',exact=True)
+                integrations.get_by_role('button',name='Connection setup',exact=True).click()
+                setup=integrations.locator('.fc-connection-setup');expect(setup).to_have_attribute('aria-busy','false')
+                setup.locator('[data-connection-recipe="ai.openai_compatible"]').click();setup.locator('[data-connection-step="configure"]').click()
+                provider=setup.get_by_role('region',name='AI Copilot',exact=True)
+                preset=provider.get_by_role('combobox',name=re.compile(r'^AI provider preset'));expect(preset).to_be_visible()
+                expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value(endpoint)
+                provider.get_by_label('Provider API key',exact=True).fill(KEY);provider.get_by_label('Current password',exact=True).fill(PASSWORD);provider.get_by_label('Authenticator or recovery code',exact=True).fill('123456')
+                before=len(writes);provider_calls=len(requests);saved=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
+                preset.select_option('xai-grok')
+                expect(preset.locator('option:checked')).to_have_text('Grok · xAI')
+                expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value('https://api.x.ai/v1/chat/completions')
+                expect(provider.get_by_label('Model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+                for label in ('Provider API key','Current password','Authenticator or recovery code'):expect(provider.get_by_label(label,exact=True)).to_have_value('')
+                expect(provider.get_by_role('button',name='Save provider and agents',exact=True)).to_be_disabled()
+                current=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
+                assert current['provider']==saved['provider'] and current['config_revision']==saved['config_revision'] and current['provider']['endpoint']==endpoint
+                assert len(writes)==before and len(requests)==provider_calls and not any(url.startswith('https://api.x.ai/') for url in urls)
+                provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.get_by_label('Model',exact=True).fill('fixture-chat')
+                expect(setup.get_by_role('button',name='Discard changes and return to preparation',exact=True)).to_have_count(0)
+                integrations.get_by_role('button',name='Close integrations',exact=True).click()
+                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-copilot').click()
+                results['grok_preset_only_edits_draft_clears_secrets_without_save_or_xai_calls']=True
                 stage='saved Swedish language and responsive panel'
                 helpers.api(base,'PUT','/preferences/language',owner,{'locale':'sv'});page.reload(wait_until='domcontentloaded')
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=60000)

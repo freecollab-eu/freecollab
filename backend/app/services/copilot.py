@@ -250,7 +250,8 @@ def parse_completion(chunks):
             item['name']+=function.get('name') or ''; item['arguments']+=function.get('arguments') or ''
             if any(len(value)>8000 for value in item.values()): raise ValueError('tool argument bound')
         reason=choice.get('finish_reason')
-        if reason is not None:
+        # xAI uses end_turn on non-final streaming chunks; it is not completion.
+        if reason is not None and reason!='end_turn':
             if reason not in {'stop','tool_calls'}: raise ValueError('unsupported or truncated finish')
             finished=True
     if not done or not finished: raise ValueError('incomplete provider stream')

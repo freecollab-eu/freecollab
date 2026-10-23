@@ -14,6 +14,7 @@ const catalog: Record<string, string> = {
   "AI provider preset": "Förval för AI-leverantör",
   "OpenAI · GPT-4o mini": "OpenAI · GPT-4o mini",
   "OpenAI · GPT-4.1 mini": "OpenAI · GPT-4.1 mini",
+  "Grok · xAI": "Grok · xAI",
   "Your OpenAI-compatible service": "Din OpenAI-kompatibla tjänst",
   "Presets fill editable fields only. Nothing is saved or sent until you explicitly save and later choose to use AI.": "Förval fyller bara i redigerbara fält. Inget sparas eller skickas förrän du uttryckligen sparar och senare väljer att använda AI.",
   "Required: your provider endpoint, model ID, API key and current FreeCollab password. Add an authenticator or recovery code if your account uses MFA.": "Obligatoriskt: leverantörens ändpunkt, modell-ID, API-nyckel och ditt nuvarande FreeCollab-lösenord. Lägg till en autentiserings- eller återställningskod om ditt konto använder MFA.",

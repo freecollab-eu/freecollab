@@ -73,6 +73,41 @@ test('AI setup opens a clean owner draft without context reads; changing endpoin
   h.unmount(); assert.equal(dirty.at(-1), false);
 });
 
+test('xAI Grok preset only prepares an editable provider draft and clears confirmation credentials', async () => {
+  const requests = [];
+  const status = { globally_enabled: true, configured: false, consented: false, config_revision: 0, provider: null, agents: [], conversations: [] };
+  const h = componentHarness('components/CopilotPanel.tsx', 'CopilotPanel', { workspaceId: 'workspace', channelId: 'selected', isAdmin: true, setupMode: true }, {
+    '../lib/api': { api: { getAccessToken: () => 'actor' } }, '../lib/files-api': {},
+    '../lib/copilot-api': { copilotApi: {
+      status: async () => { requests.push('status'); return status; },
+      configure: async () => requests.push('configure'),
+      consent: async () => requests.push('consent'),
+      create: async () => requests.push('create'),
+      send: async () => requests.push('send'),
+    }, copilotChannelIsSecure: async () => { throw new Error('A provider preset must not read channel crypto'); } },
+  });
+  await h.settle();
+  for (const [label, value] of [['Provider API key', 'typed-before-provider-choice'], ['Current password', 'current-password'], ['Authenticator or recovery code', '654321']]) h.field(label).props.onChange({ target: { value } });
+  await h.settle();
+  assert.ok(h.nodes().some(node => node.type === 'option' && node.props.value === 'xai-grok'), 'Grok must be selectable through the actual preset control');
+  h.field('AI provider preset').props.onChange({ target: { value: 'xai-grok' } });
+  await h.settle();
+  assert.equal(h.field('AI provider preset').props.value, 'xai-grok');
+  assert.equal(h.field('Chat completions endpoint').props.value, 'https://api.x.ai/v1/chat/completions');
+  const selectedModel = h.field('Model').props.value;
+  assert.equal(selectedModel, 'grok-4.20-0309-non-reasoning');
+  for (const label of ['Provider API key', 'Current password', 'Authenticator or recovery code']) assert.equal(h.field(label).props.value, '');
+  assert.equal(copilotCheckbox(h, 'Enable this workspace provider').props.checked, false);
+  assert.deepEqual(requests, ['status']);
+  h.field('Model').props.onChange({ target: { value: 'grok-customer-model-choice' } });
+  await h.settle();
+  assert.equal(h.field('Model').props.value, 'grok-customer-model-choice');
+  assert.equal(h.field('AI provider preset').props.value, 'custom');
+  assert.equal(h.field('Chat completions endpoint').props.value, 'https://api.x.ai/v1/chat/completions');
+  assert.deepEqual(requests, ['status'], 'Selecting and editing the preset must neither save nor send an AI request');
+  h.unmount();
+});
+
 test('sync setup starts a clean selected-calendar draft and protects edits from recipe changes', async () => {
   const dirty = [], writes = [];
   const h = componentHarness('components/SyncSettings.tsx', 'SyncSettings', { workspaceId: 'workspace', channels: [channel], security: { mfa_enabled: false }, setupMode: true, initialProvider: 'google', initialKind: 'calendar', initialChannelId: 'selected', onGuardChange() {}, onDirtyChange: value => dirty.push(value) }, {

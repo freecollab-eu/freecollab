@@ -50,8 +50,38 @@ personliga inställningar.
 I en bred vy kan materialet flyttas till vänster eller höger via verktygsmenyn;
 placeringen gäller bara användarens aktuella session och kanal. På smala skärmar
 ligger samtal och material i en kolumn. Dokument-, hög- och uppgiftslänkar öppnar
-den riktiga posten i de ordinarie verktygen. När verktygen stängs återgår man till
-samtalets läsposition och kontroll, med samma monterade skrivfält och utkast.
+den riktiga posten i samtalets arbetsregion. **Lägg till ett dokument**,
+**Nästa steg**, **Beslut** och **Mötas** finns vid skrivfältet; **Mer** öppnar bland
+annat kanalaktivitet och befintliga arbetsflöden. Den vanliga samtalsvyn har ingen
+verktygsflikrad och arbetsregionen är inte modal. Man kan fortsätta skriva och
+skicka meddelanden medan det riktiga dokumentet, uppgiften eller beslutet är öppet.
+
+Ett meddelande kan uttryckligen föras vidare till ett dokument, nästa steg eller
+beslut. Den ordinarie resursen sparas först. Dokument- och uppgiftslänkar använder
+en beständig koppling med endast resursens och källmeddelandets identifierare.
+Beslut har redan ett källmeddelandefält i sin ordinarie revision; länken härleds
+direkt från det sparade beslutet. Innehåll och status läses från de vanliga
+behörighetskontrollerade API:erna. Ett klick öppnar den
+exakta posten. Dessa meddelandekopplingar stöds i native-kanaler. Krypterade
+kanaler får ingen klartextfallback. Arbetsflöden är fortfarande kanalens vanliga
+arbetsflöden med start, godkännande och bakgrundsjobb, inte meddelandebundna
+flödesinstanser.
+
+Stängning och byte av arbete, kanal eller arbetsyta kontrollerar osparade ändringar
+innan den aktuella vyn ersätts. Pågående dokumentsynkronisering samt sparningar av
+dokument, uppgifter och beslut behöver slutföras innan man lämnar dem. Vanliga osparade utkast får
+en bekräftelse; avböjer man lämnas redigeraren och utkastet kvar.
+Ett misslyckat sparande ger ingen falsk lyckad koppling. Källmeddelandet kan visas
+utan att redigeraren stängs. **Escape** i samtalets skrivfält stänger inte arbetet;
+i arbetsregionen gäller dess vanliga skydd mot att lämna osparade ändringar.
+Återgång bevarar samma monterade skrivfält och samtalsutkast. Utloggning, ny
+session och förlorad behörighet rensar det gamla sammanhanget direkt.
+
+Dokumentets övriga funktioner finns under **Dokumentalternativ** och
+**Ordna dokument**: befintlig historik, arkivering, export, högar, flytt,
+ångra och relationer använder samma produktåtgärder som tidigare. Den separata
+WorkHub-dialog som uttryckliga SDK-/inbäddningsvyer använder är en egen
+presentationsform av de ordinarie verktygen.
 
 En komplett kanal utan tidigare läsposition öppnas vid samtalets början.
 **Hoppa till senaste** leder till nya meddelanden; direktchattar, sidindelad
@@ -115,11 +145,13 @@ köra FreeCollab. Se [egen dator, LAN och VPN](SELF_HOSTING.md).
 | --- | --- |
 | Samma produktklient | [demo-entry](../frontend/src/demo-entry.tsx), [sessionram](../frontend/src/components/ProductDemoSession.tsx), [Chat](../frontend/src/components/Chat.tsx), [WorkHub](../frontend/src/components/WorkHub.tsx) |
 | Verkligt material bredvid samtalet | [materialvy](../frontend/src/components/ChatSharedMaterial.tsx), [avgränsad läsning](../frontend/src/lib/chat-shared-material.ts) |
+| Arbete från ett meddelande | [native-kopplingar](../frontend/src/lib/conversation-work-api.ts), [aktuella resursreferenser](../frontend/src/components/ConversationWorkReferences.tsx), [navigationsskydd](../frontend/src/lib/conversation-navigation.ts) |
 | Ordinarie profilbilder | [kontoinställning](../frontend/src/account/AccountPhoto.tsx), [porträtt](../frontend/src/components/Avatar.tsx), [bild-API](../backend/app/api/avatars.py) |
 | Webbplatsens ingång | [verklig produktbild](../frontend/src/assets/product/courtyard-product.png), [webbplats](../frontend/src/components/Landing.tsx), [handoff-proof](../frontend/tests/public-launch-browser.py) |
 | Riktiga exempeldata och session | [bootstrap-API](../backend/app/api/public_demo.py), [sessionservice](../backend/app/services/public_demo.py), [exempeldata](../backend/app/services/public_demo_seed.py), [besöksmodell](../backend/app/models/public_demo.py) |
 | Publik demos avgränsning | [HTTP-policy](../backend/app/services/public_demo_boundary.py), [startupinställningar](../backend/app/config.py) |
 | Regressionsproof | [riktig browser/API-körning](../frontend/tests/product-demo-browser.py) |
+| Kontinuitet i egen installation | [native-samtal, navigationsskydd och verkliga sparanden](../frontend/tests/conversation-flow-browser.py) |
 
 Browserproofen använder egna temporära API-/Vite-processer och en egen
 exempeldatabas. Den ska köra verkliga gränssnittsåtgärder och verifiera deras
@@ -141,7 +173,35 @@ BACKEND_PYTHON=backend/.venv/bin/python python3 frontend/tests/product-demo-brow
 rapportplats. Processerna, databasen, nycklarna och filerna skapas temporärt och
 tas bort efter körningen; rapport och skärmbilder behålls separat.
 
-Kört **2026-10-23: 27/27 browsergrupper godkända** mot riktiga temporära API-,
+Den integrerade produktdemon kördes **2026-10-23 med 33/33 grupper godkända**
+mot riktiga temporära API-, klient- och workerprocesser. Utöver befintliga
+meddelande-, dokument-, hög-, uppgifts- och arbetsflöden verifierades arbete
+direkt från meddelanden: sparade dokument och uppgifter återöppnades genom
+sina verkliga resurskopplingar, och beslut behöll sitt ursprungsmeddelande.
+Ett riktigt meddelande kunde skickas medan samma Yjs-redigerare låg kvar.
+Osparade uppgiftsutkast överlevde avböjd navigation. Svenska vid 320 px
+verifierade synlig dokumentredigering, sparad text efter återöppning och
+bevarat samtalsutkast. **558 käll-, konfigurations- och proof-filer** matchade
+arbetskopian vid avslut. Inga externa anrop, sidfel, åtkomster till bevarade
+kontonycklar, IndexedDB-operationer eller service worker-registreringar
+observerades. Ägda processer, tillfälliga data och nycklar rensades.
+
+Den privata automationen väntade minst sex sekunder mellan slutförda grupper
+och längre när den uppmätta anropstakten krävde det. Produktens API och
+begränsningspolicy användes oförändrade; inga HTTP 429-svar förekom.
+
+Den integrerade arbetsregionen verifierades **2026-10-23 med 15/15 grupper** i
+den vanliga installationens separata browserproof. Den körde riktiga
+dokument-, uppgifts- och beslutssparningar, blockerade byte medan en verklig
+Yjs-skrivning väntade och behöll osparade utkast vid avböjd navigation mellan
+arbete, kanaler och arbetsytor. Ett riktigt meddelande kunde skickas medan
+dokumentredigeraren låg kvar. Beslutets sparknapp kunde nås med vanlig
+pekarnavigation i den rullningsbara arbetsregionen. Kontobilder, sessionsbyte,
+återgång och svenska vid 320 px ingick. **555 käll-, konfigurations- och
+proof-filer** matchade arbetskopian när körningen avslutades.
+
+Föregående produktversion, före den integrerade arbetsregionen, kördes
+**2026-10-23: 27/27 browsergrupper godkända** mot riktiga temporära API-,
 klient- och workerprocesser. Körningen behöll de tidigare native-flödena och
 verifierade dessutom riktiga gårds-/profilbilder, exakta materiallänkar,
 tangentbordsåtergång, fler än tolv meddelanden och en flerradig composer med
@@ -153,9 +213,7 @@ anrop, sidfel, läsningar/skrivningar av bevarade kontonycklar, IndexedDB-operat
 eller service worker-registreringar. Alla ägda testprocesser och tillfälliga data
 rensades.
 
-Automationen väntade sex sekunder mellan slutförda grupper för att följa
-exempelmiljöns ordinarie anropsgränser. Produktens API och begränsningspolicy
-användes oförändrade. Den föregående paritetsversionens **16/16 grupper och
+Den föregående paritetsversionens **16/16 grupper och
 533 runtimekällor** är historiskt underlag, separat redovisat i
 [valideringshistoriken](VALIDATION.md).
 

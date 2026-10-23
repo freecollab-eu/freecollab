@@ -1,3 +1,4 @@
+from ui_navigation import open_conversation_work
 #!/usr/bin/env python3
 """Actual-App app install -> command -> signed receiver -> callback card proof.
 
@@ -167,8 +168,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port=''' + str(api_port) + ''',proxy_hea
                 expect(secret_input).to_have_count(0)
                 checks["real_install_once_only_secret_and_navigation_guard"] = True
                 dialog.get_by_role("button", name="Done", exact=True).click()
-                page.get_by_role("button", name="Open workspace tools", exact=True).click()
-                page.locator("#work-tab-apps").click()
+                open_conversation_work(page,"apps")
                 channel_panel = page.get_by_role("region", name="Channel apps and automation", exact=True)
                 expect(channel_panel).to_be_visible(timeout=30000)
                 page.screenshot(path="/tmp/freecollab-app-platform-channel.png")
@@ -263,8 +263,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port=''' + str(api_port) + ''',proxy_hea
                 checks['recap_worker_discloses_only_postconsent_messages_and_never_publishes_automatically'] = True
                 f.api(base, "PUT", "/preferences/language", owner, {"locale": "sv"})
                 page.reload(wait_until="domcontentloaded"); expect(page.locator(".fc-chat")).to_be_visible()
-                page.get_by_role("button", name="Öppna arbetsytans verktyg", exact=True).click()
-                page.locator("#work-tab-apps").click()
+                open_conversation_work(page,"apps",locale="sv")
                 channel_panel = page.get_by_role("region", name="Kanalappar och automatisering", exact=True)
                 expect(channel_panel.get_by_role("heading", name="Små steg. Tydliga behörigheter.", exact=True)).to_be_visible()
                 for width in (390, 320):

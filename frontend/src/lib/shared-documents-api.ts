@@ -156,11 +156,11 @@ export const sharedDocumentsApi = {
     const token = api.getAccessToken(), rows = await api.request<SharedDocumentRecord[]>(path(channelId) + '?archived=' + archived);
     const result = await Promise.all(rows.map(resolveSummary)); current(token); return result;
   },
-  async create(channelId: string, title: string) {
+  async create(channelId: string, title: string, initialBody = '') {
     const token = api.getAccessToken(); current(token);
     const doc = new Y.Doc(), identifier = crypto.randomUUID();
     try {
-      doc.getText('title').insert(0, title.trim() || 'Untitled document'); doc.getText('body'); validateDocument(doc);
+      doc.getText('title').insert(0, title.trim() || 'Untitled document'); doc.getText('body').insert(0, initialBody); validateDocument(doc);
       const item = { id: crypto.randomUUID(), bytes: Y.encodeStateAsUpdate(doc), title: doc.getText('title').toString() };
       return await writeUpdate(channelId, identifier, item, token!, true) as SharedDocumentRecord;
     } finally { doc.destroy(); }

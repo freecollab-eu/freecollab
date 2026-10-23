@@ -42,6 +42,13 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
 
 ## Luckor som åtgärdades i denna granskning
 
+- Dokument, nästa steg och beslut öppnas i samtalets egen arbetsyta, med
+  meddelanden och skrivfält kvar. Sparat arbete kan öppnas från sitt
+  ursprungsmeddelande. Native-kopplingar lagrar endast behörighetskontrollerade
+  resurs-ID:n; verkliga dokument, uppgifter och beslut behåller sina ordinarie
+  API:er. Krypterade samtal får ingen okrypterad reservkoppling. Historik,
+  arkivering och organisation nås genom kontextuella val i samma arbetsyta.
+  Se [samtalsflödet och dess gränser](PRODUCT_DEMO.md).
 - Kanalnamn/beskrivning har ett riktigt versionsskyddat redigeringsflöde, även
   för verifierad Matrix-metadata. Oregistrerade konkurrerande event får inte
   ersätta den sparade auktoritativa profilen.

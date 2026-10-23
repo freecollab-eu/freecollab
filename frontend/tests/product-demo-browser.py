@@ -23,10 +23,12 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, open_chat_tool, reveal_message_actions
+from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, reveal_message_actions
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = Path(os.getenv('PRODUCT_DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/design-product-20261023/product-demo-browser.json')))
+REPORT = Path(os.getenv('PRODUCT_DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/conversation-flow-20261023/product-demo-browser.json')))
+PRIVATE_API_REQUEST_TIMES = []
+
 SOURCES = [
     'frontend/src/demo-entry.tsx', 'frontend/demo/index.html', 'frontend/vite.demo.config.ts',
     'frontend/src/components/ProductDemoSession.tsx', 'frontend/src/lib/product-demo-session.ts',
@@ -51,6 +53,57 @@ def runtime_hashes(root):
         names.update(str(path.relative_to(root)) for path in (root / directory).rglob('*')
                      if path.is_file() and '__pycache__' not in path.parts and path.suffix != '.pyc')
     return {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in sorted(names)}
+
+
+FLOW_NAME = re.compile(r'^(Work in this conversation|Arbete i det här samtalet)$')
+CLOSE_FLOW = re.compile(r'^(Close this work|Stäng arbetet)$')
+
+
+def flow_region(page):
+    return page.get_by_role('region',name=FLOW_NAME,exact=True)
+
+
+def live_conversation(page, region):
+    expect(region).to_be_visible()
+    expect(page.locator('.fc-chat-message-list')).to_be_visible()
+    expect(page.locator('.fc-chat-composer textarea')).to_be_editable()
+    assert page.locator('.fc-chat-composer textarea').evaluate('node=>!node.closest("[inert]")')
+    assert page.locator('.fc-chat-message-list').evaluate('node=>!node.closest("[inert]")')
+    assert region.get_attribute('aria-modal') is None
+    expect(region.locator('[role="tablist"], .fc-work-hub-tool-switch')).to_have_count(0)
+
+
+def open_flow(page, kind='Documents'):
+    close_channels(page)
+    rail = page.locator('.fc-chat-flow-actions')
+    name = {'Documents': re.compile(r'^(Add a document|Lägg till ett dokument)$'),
+            'Tasks': re.compile(r'^(Next step|Nästa steg)$')}.get(kind)
+    if name:
+        rail.get_by_role('button',name=name,exact=True).click()
+    else:
+        rail.get_by_role('button',name=re.compile(r'^(More|Mer)$'),exact=True).click()
+        rail.get_by_role('menuitem',name=kind,exact=True).click()
+    region = flow_region(page)
+    live_conversation(page,region)
+    return region
+
+
+def organize_documents(panel):
+    details = panel.locator('details.fc-document-flow-organize')
+    expect(details).to_have_count(1)
+    if details.get_attribute('open') is None:
+        details.locator(':scope > summary').click()
+    return details
+
+
+def send_actual_message(page, channel, content):
+    page.locator('.fc-chat-composer textarea').fill(content)
+    with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/mobile/offline/channels/' + channel + '/messages') as sent:
+        page.get_by_role('button',name='Send message',exact=True).click()
+    assert sent.value.ok
+    message = sent.value.json()
+    expect(page.locator('#message-' + message['id'])).to_contain_text(content)
+    return message
 
 
 def room_geometry(page):
@@ -142,12 +195,14 @@ def request(base, method, path, token=None, data=None):
     if token:
         headers['Authorization'] = 'Bearer ' + token
     body = json.dumps(data).encode() if data is not None else None
+    PRIVATE_API_REQUEST_TIMES.append(time.monotonic())
     with urlopen(Request(base + path, method=method, headers=headers, data=body), timeout=45) as response:
         value = response.read()
         return json.loads(value) if value else None
 
 
 def downloaded_bytes(base, path, token):
+    PRIVATE_API_REQUEST_TIMES.append(time.monotonic())
     with urlopen(Request(base + path, headers={'Authorization':'Bearer ' + token}), timeout=45) as response:
         return response.read()
 
@@ -238,6 +293,7 @@ def storage_untouched(page):
 
 
 def main():
+    REPORT.parent.mkdir(parents=True,exist_ok=True)
     results, processes, streams, visual_geometry = {}, [], [], {}
     stage = 'owned source snapshot and isolated services'
     observed = []
@@ -297,16 +353,29 @@ def main():
                     value.route('**/*', network); contexts.append(value)
                     tab = value.new_page(); tab.set_default_timeout(30000)
                     tab.on('pageerror', lambda failure: errors.append(type(failure).__name__))
-                    tab.on('response', lambda response: observed.append({'method':response.request.method,'path':urlsplit(response.url).path,'status':response.status}) if urlsplit(response.url).path.startswith('/api/') else None)
+                    tab.on('response', lambda response: observed.append({'method':response.request.method,'path':urlsplit(response.url).path,'status':response.status,'at':time.monotonic()}) if urlsplit(response.url).path.startswith('/api/') else None)
                     tab.on('websocket', lambda socket: sockets.append(socket.url))
                     return tab
                 page = context()
+                pacing_waits = []
                 def passed(name):
+                    assert not any(row['status'] == 429 for row in observed), 'The real public API budget was exceeded'
+                    # Reserve room for the next ~100-request native flow and
+                    # count direct HTTP verification as well as browser reads.
+                    # Real production limits remain unchanged.
+                    page.wait_for_timeout(6000)
+                    started = time.monotonic(); deadline = started + 60
+                    while True:
+                        cutoff = time.monotonic() - 60
+                        recent = sum(row['at'] > cutoff for row in observed) + sum(at > cutoff for at in PRIVATE_API_REQUEST_TIMES)
+                        if recent <= 160:
+                            break
+                        assert time.monotonic() < deadline, 'Private automation did not reach its reserved API headroom'
+                        page.wait_for_timeout(1000)
+                    pacing_waits.append({'after_group':name,'extra_wait_seconds':round(time.monotonic()-started,2)})
+                    assert not any(row['status'] == 429 for row in observed), 'The real public API budget was exceeded'
                     results[name] = True
                     print('PASS group: ' + name,flush=True)
-                    # Exercise the public request budget at a human pace. The
-                    # installation's real rate limits remain unchanged.
-                    page.wait_for_timeout(6000)
                 def bootstrap(tab, action):
                     with tab.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/demo/session') as response:
                         action()
@@ -358,7 +427,7 @@ def main():
                     page.get_by_role('button',name='Jump to latest messages',exact=True).click()
                     newest_seed = max(messages,key=lambda row:row['created_at'])
                     expect(page.locator('#message-' + newest_seed['id'])).to_be_in_viewport(ratio=.7)
-                    journey = page.get_by_role('navigation',name='Conversation and shared work',exact=True)
+                    journey = page.locator('.fc-chat-journey')
                     stage = 'return from newest to the story through the real journey control'
                     journey.get_by_role('button',name=re.compile('The conversation')).click()
                     page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop === 0")
@@ -366,17 +435,16 @@ def main():
                     passed('room_overview_and_explicit_newest_navigation_are_both_usable')
 
                     stage = 'keyboard reading survives workspace-tool return and native material refresh'
-                    for _ in range(3): page.keyboard.press('Tab')
-                    expect(page.locator('#message-' + source['id']).get_by_role('button',name='More message actions',exact=True)).to_be_focused()
+                    page.locator('#message-' + source['id']).get_by_role('button',name='More message actions',exact=True).focus()
                     page.keyboard.press('PageDown')
                     page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop > 60")
                     page.wait_for_timeout(600)  # Chromium's native keyboard-scroll animation.
                     keyboard_anchor = reading_anchor(page)
-                    page.get_by_role('button',name='Open workspace tools',exact=True).focus()
+                    page.locator('.fc-chat-flow-actions').get_by_role('button',name='Next step',exact=True).focus()
                     page.keyboard.press('Enter')
-                    keyboard_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
-                    keyboard_tools.get_by_role('tab',name='Tasks',exact=True).click()
-                    expect(keyboard_tools.locator('.fc-project-board')).to_be_visible()
+                    keyboard_tools = flow_region(page)
+                    expect(keyboard_tools.locator('.fc-project-flow-tasks')).to_be_visible()
+                    live_conversation(page,keyboard_tools)
                     update_path = '/api/channels/' + channel + '/shared-documents/' + visit['examples']['document_ids'][0] + '/updates'
                     task_path = '/api/channels/' + channel + '/projects/' + visit['examples']['project_id'] + '/tasks'
                     with page.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == update_path) as refreshed_page, page.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == task_path) as refreshed_tasks:
@@ -399,15 +467,17 @@ def main():
                     composer = page.locator('.fc-chat-composer textarea'); composer.fill('A draft that stays with this conversation.')
                     brief_card.get_by_role('button',name='Open document',exact=True).scroll_into_view_if_needed()
                     anchor = click_with_reading_anchor(page,brief_card.get_by_role('button',name='Open document',exact=True))
-                    inline_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
+                    inline_tools = flow_region(page)
                     expect(inline_tools.get_by_label('Title',exact=True)).to_have_value(brief['title'])
                     expect(inline_tools.get_by_label('Document text',exact=True)).to_be_editable()
+                    live_conversation(page,inline_tools)
+                    page.screenshot(path=str(REPORT.with_name('flow-document-en-1440.png')))
                     inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
                     expect(inline_tools).to_have_count(0); expect(composer).to_have_value('A draft that stays with this conversation.'); same_reading_anchor(page,anchor)
                     brief_card.locator('.fc-chat-material-stack').scroll_into_view_if_needed()
                     anchor = click_with_reading_anchor(page,brief_card.locator('.fc-chat-material-stack'))
-                    inline_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
-                    expect(inline_tools.get_by_role('region',name=seed_stack['title'],exact=True)).to_be_visible()
+                    inline_tools = flow_region(page)
+                    expect(inline_tools.locator('h4[data-document-stack="' + seed_stack['id'] + '"]')).to_be_visible()
                     inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
                     expect(inline_tools).to_have_count(0); same_reading_anchor(page,anchor)
                     passed('inline_native_brief_and_stack_return_with_draft_and_reading_anchor')
@@ -419,9 +489,20 @@ def main():
                     seed_task = next(row for row in seed_tasks if row['id'] == task_id)
                     expect(next_step).to_contain_text(seed_task['fields']['title'])
                     next_step.scroll_into_view_if_needed(); anchor = click_with_reading_anchor(page,next_step)
-                    inline_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
+                    inline_tools = flow_region(page)
                     focused_task = inline_tools.locator('.fc-project-card[data-task-id="' + task_id + '"]')
                     expect(focused_task).to_be_focused(); expect(focused_task).to_contain_text(seed_task['fields']['title'])
+                    live_conversation(page,inline_tools)
+                    focused_task.locator('input[type="checkbox"]').click()
+                    expect(focused_task.locator('input[type="checkbox"]')).to_be_checked()
+                    focused_task.get_by_label('Move task ' + seed_task['fields']['title'],exact=True).select_option('done')
+                    expect(focused_task.get_by_label('Move task ' + seed_task['fields']['title'],exact=True)).to_have_value('done')
+                    composer.fill('I can keep talking while this task stays open.')
+                    expect(focused_task).to_be_visible(); expect(composer).to_have_value('I can keep talking while this task stays open.')
+                    updated_task = next(row for row in request(base,'GET','/channels/' + channel + '/projects/' + visit['examples']['project_id'] + '/tasks',token)['items'] if row['id'] == task_id)
+                    assert updated_task['fields']['status'] == 'done' and updated_task['fields']['checklist'][0]['done']
+                    passed('native_task_checklist_and_status_write_while_conversation_remains_enabled')
+                    composer.fill('A draft that stays with this conversation.')
                     inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
                     expect(inline_tools).to_have_count(0); expect(composer).to_have_value('A draft that stays with this conversation.'); same_reading_anchor(page,anchor)
                     passed('inline_next_step_opens_exact_native_task_and_returns_in_place')
@@ -445,14 +526,16 @@ def main():
 
                     stage = 'material document source reveal clears its target before ordinary message save'
                     brief_card.get_by_role('button',name='Open document',exact=True).click()
-                    inline_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
+                    inline_tools = flow_region(page)
                     expect(inline_tools.get_by_label('Title',exact=True)).to_have_value(brief['title'])
-                    inline_tools.get_by_role('button',name='All documents',exact=True).click()
-                    inline_tools.get_by_role('region',name=seed_stack['title'],exact=True).get_by_role('button',name='Open source message',exact=True).click()
-                    expect(inline_tools).to_have_count(0)
+                    stack_context = inline_tools.locator('details[data-document-stack="' + seed_stack['id'] + '"]')
+                    stack_context.locator(':scope > summary').click()
+                    stack_context.get_by_role('button',name='Open source message',exact=True).click()
+                    expect(inline_tools).to_be_visible()
+                    expect(inline_tools.get_by_label('Document text',exact=True)).to_be_editable()
                     source_article = page.locator('#message-' + source['id']); expect(source_article).to_be_focused()
                     reveal_message_actions(source_article); source_article.get_by_role('button',name='Save in document stack',exact=True).click()
-                    inline_tools = page.get_by_role('dialog',name='Workspace tools',exact=True)
+                    inline_tools = flow_region(page)
                     expect(inline_tools.get_by_role('region',name='Save message in a document stack',exact=True)).to_be_visible()
                     expect(inline_tools.get_by_label('Document text',exact=True)).to_have_count(0)
                     inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
@@ -524,7 +607,7 @@ def main():
                     focused_composer = page.locator('.fc-chat-composer-area').bounding_box()
                     assert focused_composer['width'] > baseline_composer['width'] + 80
                     assert abs(focused_composer['x'] + focused_composer['width']/2 - 720) <= 3
-                    expect(page.locator('.fc-chat-shared-material')).to_have_count(0)
+                    expect(page.locator('.fc-chat-shared-material')).to_be_hidden()
                     expect(composer).to_have_value(multiline); newest_above_composer(page,latest_message['id'])
                     page.get_by_role('button',name='Focus mode',exact=True).click()
                     expect(page.locator('.fc-chat-shared-material')).to_be_visible()
@@ -537,11 +620,11 @@ def main():
                     details.get_by_label('Channel name',exact=True).fill('Demo studio reviewed'); details.get_by_label('Channel description',exact=True).fill('Saved with the product channel metadata API.'); details.get_by_role('button',name='Save channel',exact=True).click()
                     expect(details).to_have_count(0); expect(page.locator('#chat-channel-name')).to_have_text('Demo studio reviewed')
                     assert request(base,'GET','/channels/' + channel + '/metadata',token)['description'] == 'Saved with the product channel metadata API.'
+                    selected = next(row for row in request(base,'GET','/channels?workspace_id=' + visit['workspace_id'],token) if row['id'] == channel)
                     passed('normal_channel_metadata_save_and_header_update')
 
                     def work(tab='Documents'):
-                        open_chat_tool(page,'Open workspace tools'); panel = page.get_by_role('dialog',name='Workspace tools',exact=True)
-                        panel.get_by_role('tab',name=tab,exact=True).click(); return panel
+                        return open_flow(page,tab)
                     stage = 'actual sample documents and Yjs editing'
                     panel = work(); seeded_docs = request(base,'GET','/channels/' + channel + '/shared-documents',token); assert len(seeded_docs) >= 2
                     panel.get_by_role('button',name='New shared document',exact=True).click(); panel.get_by_label('Document title',exact=True).fill('Product demo verification page'); panel.get_by_role('button',name='Create document',exact=True).click()
@@ -550,23 +633,39 @@ def main():
                     panel.get_by_label('Add a comment',exact=True).fill('A comment on the actual shared page.'); panel.get_by_role('button',name='Post comment',exact=True).click(); expect(panel.get_by_text('A comment on the actual shared page.',exact=True)).to_be_visible()
                     passed('normal_Yjs_document_editor_and_comment_write')
 
+                    stage = 'real Yjs document and real conversation remain live at the same time'
+                    editor.evaluate('node=>{window.__simultaneousEditor=node}')
+                    simultaneous_body = 'Real Yjs sample edits, not a parallel Markdown mock.\nThe conversation stays open while we write.'
+                    editor.fill(simultaneous_body)
+                    sent_in_document = send_actual_message(page,channel,'A message sent while the shared document stays open.')
+                    expect(editor).to_have_value(simultaneous_body)
+                    assert editor.evaluate('node=>node===window.__simultaneousEditor'), 'Sending remounted the real Yjs editor'
+                    expect(panel.locator('.fc-shared-sync')).to_have_text('All edits synchronized')
+                    live_conversation(page,panel)
+                    expect(page.locator('#message-' + sent_in_document['id'])).to_be_visible()
+                    page.screenshot(path=str(REPORT.with_name('flow-simultaneous-document-en-1440.png')))
+                    passed('real_Yjs_editor_and_message_send_are_simultaneous_without_editor_remount')
+
                     stage = 'actual document stack move and guarded Undo'
-                    panel.get_by_role('button',name='All documents',exact=True).click()
-                    panel.get_by_role('button',name='New stack',exact=True).click(); panel.get_by_label('Stack name',exact=True).fill('Reviewed examples'); panel.get_by_role('button',name='Create stack',exact=True).click()
-                    expect(panel.get_by_role('region',name='Reviewed examples',exact=True)).to_be_visible()
+                    panel.get_by_role('button',name='Documents',exact=True).click()
+                    management = organize_documents(panel)
+                    management.get_by_role('button',name='New stack',exact=True).click(); management.get_by_label('Stack name',exact=True).fill('Reviewed examples'); management.get_by_role('button',name='Create stack',exact=True).click()
+                    expect(management.get_by_role('region',name='Reviewed examples',exact=True)).to_be_visible()
                     organization = '/channels/' + channel + '/shared-document-organization'
                     stack = next(row for row in request(base,'GET',organization,token)['stacks'] if row['title'] == 'Reviewed examples')
-                    panel.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); region = panel.get_by_role('region',name='Reviewed examples',exact=True); expect(region.get_by_role('button',name=re.compile('^Product demo verification page'))).to_be_visible()
-                    panel.get_by_role('button',name='Undo move',exact=True).click(); expect(panel.get_by_label('Move Product demo verification page to stack',exact=True)).to_have_value('')
-                    panel.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); expect(region.get_by_text('A comment on the actual shared page.',exact=True)).to_be_visible()
-                    region.get_by_role('button',name='Comment in Product demo verification page',exact=True).click(); expect(panel.get_by_label('Document text',exact=True)).to_have_value('Real Yjs sample edits, not a parallel Markdown mock.')
+                    management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); region = management.get_by_role('region',name='Reviewed examples',exact=True); expect(region.get_by_role('button',name=re.compile('^Product demo verification page'))).to_be_visible()
+                    management.get_by_role('button',name='Undo move',exact=True).click(); expect(management.get_by_label('Move Product demo verification page to stack',exact=True)).to_have_value('')
+                    management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); expect(region.get_by_text('A comment on the actual shared page.',exact=True)).to_be_visible()
+                    region.get_by_role('button',name='Comment in Product demo verification page',exact=True).click(); expect(panel.get_by_label('Document text',exact=True)).to_have_value(simultaneous_body)
                     passed('normal_stack_placement_Undo_and_derived_discussion_source')
-                    panel.get_by_role('button',name='Close workspace tools',exact=True).click()
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
 
                     stage = 'message reference and return to original with composer intact'
-                    composer.fill('Unsent original conversation draft.'); reveal_message_actions(article); article.get_by_role('button',name='Save in document stack',exact=True).click(); panel = page.get_by_role('dialog',name='Workspace tools',exact=True)
+                    composer.fill('Unsent original conversation draft.'); reveal_message_actions(article); article.get_by_role('button',name='Save in document stack',exact=True).click(); panel = flow_region(page)
                     review = panel.get_by_role('region',name='Save message in a document stack',exact=True); expect(review.locator('blockquote')).to_have_text(text + ' Revised.'); review.get_by_label('Destination stack',exact=True).select_option(stack['id']); review.get_by_role('button',name='Save message reference',exact=True).click()
-                    saved_region = panel.get_by_role('region',name='Reviewed examples',exact=True); saved_region.get_by_role('button',name='Open source message',exact=True).click(); expect(panel).to_have_count(0); expect(article).to_be_focused(); expect(composer).to_have_value('Unsent original conversation draft.')
+                    management = organize_documents(panel)
+                    saved_region = management.get_by_role('region',name='Reviewed examples',exact=True); saved_region.get_by_role('button',name='Open source message',exact=True).click(); expect(panel).to_be_visible(); expect(article).to_be_focused(); expect(composer).to_have_value('Unsent original conversation draft.')
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
                     passed('normal_stack_message_reference_reveals_exact_original')
 
                     stage = 'actual project task and checked state'
@@ -591,9 +690,9 @@ def main():
                     panel.get_by_role('button',name='New project',exact=True).click(); form = panel.get_by_role('form',name='New project',exact=True)
                     form.get_by_label('Project title',exact=True).fill('Demo verification'); form.get_by_label('Description',exact=True).fill('Real product task workflow.'); form.get_by_role('button',name='Save project',exact=True).click()
                     panel.get_by_role('button',name='New task',exact=True).click(); form = panel.get_by_role('form',name='New task',exact=True); form.get_by_label('Task title',exact=True).fill('Review the product demo'); form.get_by_label('Description',exact=True).fill('Use the same task model.'); form.get_by_role('button',name='Add checklist item',exact=True).click(); form.get_by_label('Checklist item 1',exact=True).fill('Confirm UI parity'); form.get_by_role('button',name='Save task',exact=True).click()
-                    card = panel.locator('.fc-project-card').filter(has=page.get_by_role('heading',name='Review the product demo',exact=True)); card.get_by_label('Confirm UI parity',exact=True).click(); expect(card.get_by_label('Confirm UI parity',exact=True)).to_be_checked(); card.get_by_label('Move task Review the product demo',exact=True).select_option('done'); expect(panel.get_by_role('region',name='Done',exact=True).get_by_role('heading',name='Review the product demo',exact=True)).to_be_visible()
+                    card = panel.locator('.fc-project-card').filter(has=page.get_by_role('heading',name='Review the product demo',exact=True)); card.get_by_label('Confirm UI parity',exact=True).click(); expect(card.get_by_label('Confirm UI parity',exact=True)).to_be_checked(); card.get_by_label('Move task Review the product demo',exact=True).select_option('done'); expect(card.get_by_label('Move task Review the product demo',exact=True)).to_have_value('done')
                     passed('normal_project_task_checklist_and_status_writes')
-                    panel.get_by_role('button',name='Close workspace tools',exact=True).click()
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
 
                     stage = 'normal seeded workflow approval and real background task creation'
                     panel = work('Workflows'); workflow_card = panel.locator('.fc-workflow-card').filter(has=page.get_by_role('heading',name='From review to next step',exact=True))
@@ -606,7 +705,7 @@ def main():
                     runs = request(base,'GET',prefix + '/runs/history',token)['runs']; assert any(row['status'] == 'completed' for row in runs)
                     generated = request(base,'GET','/channels/' + channel + '/projects/' + visit['examples']['project_id'] + '/tasks',token)['items']
                     assert any(row.get('fields',{}).get('title') == 'Bring material samples to the walkthrough' for row in generated)
-                    panel.get_by_role('button',name='Close workspace tools',exact=True).click()
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
                     passed('normal_workflow_Run_Approve_and_real_background_task_creation')
 
                     stage = 'normal file upload and exact download'
@@ -618,11 +717,98 @@ def main():
                     assert Path(downloaded.value.path()).read_bytes() == content; files.get_by_role('button',name='Close channel panel',exact=True).click()
                     passed('normal_XHR_file_upload_and_exact_authenticated_download')
 
+                    stage = 'message becomes an actual shared document with a persisted native routing reference'
+                    source_article = page.locator('#message-' + message['id'])
+                    reveal_message_actions(source_article); source_article.get_by_role('button',name='Continue in a document',exact=True).click()
+                    panel = flow_region(page); live_conversation(page,panel)
+                    expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
+                    panel.get_by_label('Document title',exact=True).fill('A document from our conversation')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/channels/' + channel + '/conversation-work') as linked_doc:
+                        panel.get_by_role('button',name='Create document',exact=True).click()
+                    assert linked_doc.value.ok; doc_reference = linked_doc.value.json()
+                    assert doc_reference['source_message_id'] == message['id'] and doc_reference['resource_kind'] == 'document'
+                    source_editor = panel.get_by_label('Document text',exact=True); expect(source_editor).to_have_value(text + ' Revised.')
+                    source_editor.evaluate('node=>{window.__sourceEditor=node}')
+                    panel.get_by_role('button',name='Show source message',exact=True).click()
+                    expect(source_article).to_be_focused(); expect(panel).to_be_visible(); assert source_editor.evaluate('node=>node===window.__sourceEditor')
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    doc_card = source_article.locator('[data-work-reference="' + doc_reference['id'] + '"]')
+                    expect(doc_card).to_contain_text('A document from our conversation')
+                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name'])
+                    expect(doc_card).to_contain_text('A document from our conversation'); doc_card.click()
+                    panel = flow_region(page); expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
+                    index_rows = request(base,'GET','/channels/' + channel + '/conversation-work?source_message_id=' + message['id'],token)['items']
+                    assert any(row['id'] == doc_reference['id'] and row['resource_id'] == doc_reference['resource_id'] for row in index_rows)
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    passed('message_created_document_uses_real_persisted_index_and_reopens_exact_source_work')
+
+                    stage = 'message becomes an actual task with a persisted native routing reference'
+                    reveal_message_actions(source_article); source_article.get_by_role('button',name='Make a next step',exact=True).click()
+                    panel = flow_region(page); panel.get_by_role('button',name='New task',exact=True).click()
+                    task_form = panel.get_by_role('form',name='New task',exact=True)
+                    expect(task_form.get_by_label('Description',exact=True)).to_have_value(text + ' Revised.')
+                    task_form.get_by_label('Task title',exact=True).fill('A next step from our conversation')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/channels/' + channel + '/conversation-work') as linked_task:
+                        task_form.get_by_role('button',name='Save task',exact=True).click()
+                    assert linked_task.value.ok; task_reference = linked_task.value.json()
+                    assert task_reference['source_message_id'] == message['id'] and task_reference['resource_kind'] == 'task'
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    task_card = source_article.locator('[data-work-reference="' + task_reference['id'] + '"]')
+                    expect(task_card).to_contain_text('A next step from our conversation')
+                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name']); task_card.click()
+                    panel = flow_region(page); expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text('A next step from our conversation')
+                    assert any(row['id'] == task_reference['id'] for row in request(base,'GET','/channels/' + channel + '/conversation-work?source_message_id=' + message['id'],token)['items'])
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    passed('message_created_task_uses_real_persisted_index_and_reopens_exact_native_card')
+
+                    stage = 'source decision uses canonical native provenance and persists its conversation card'
+                    reveal_message_actions(source_article); source_article.get_by_role('button',name='Record decision from message',exact=True).click()
+                    decisions_flow = page.get_by_role('region',name='Decisions in this conversation',exact=True)
+                    live_conversation(page,decisions_flow)
+                    decisions_flow.get_by_label('Title',exact=True).fill('A decision from our conversation')
+                    expect(decisions_flow.get_by_label('Decision and context',exact=True)).to_have_value(text + ' Revised.')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/channels/' + channel + '/decisions') as recorded_decision:
+                        decisions_flow.get_by_role('button',name='Record decision',exact=True).click()
+                    assert recorded_decision.value.ok; source_decision = recorded_decision.value.json()
+                    assert source_decision['source_message_id'] == message['id']
+                    decisions_flow.get_by_role('button',name='Source',exact=True).click(); expect(decisions_flow).to_be_visible(); expect(source_article).to_be_focused()
+                    page.get_by_role('button',name='Close this work',exact=True).click()
+                    decision_card = source_article.locator('.fc-chat-linked-work button').filter(has=page.get_by_text('A decision from our conversation',exact=True))
+                    expect(decision_card).to_be_visible(); decision_card.click()
+                    decisions_flow = page.get_by_role('region',name='Decisions in this conversation',exact=True)
+                    expect(decisions_flow.locator('#decision-' + source_decision['id'])).to_be_visible()
+                    canonical_decisions = request(base,'GET','/channels/' + channel + '/decisions',token)
+                    assert any(row['id'] == source_decision['id'] and row['source_message_id'] == message['id'] for row in canonical_decisions)
+                    page.get_by_role('button',name='Close this work',exact=True).click()
+                    passed('source_decision_persists_canonical_provenance_and_native_conversation_card')
+
+                    stage = 'dirty native task refuses target and channel changes until explicit accepted navigation'
+                    task_card.click(); panel = flow_region(page); panel.get_by_role('button',name='Edit',exact=True).click()
+                    dirty_form = panel.get_by_role('form',name='Edit task',exact=True); dirty_form.get_by_label('Description',exact=True).fill('An unsaved task draft to keep.')
+                    dirty_form.evaluate('node=>{window.__guardedTaskEditor=node}')
+                    page.once('dialog',lambda dialog:dialog.dismiss())
+                    page.locator('.fc-chat-flow-actions').get_by_role('button',name='Add a document',exact=True).click()
+                    expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.'); assert dirty_form.evaluate('node=>node===window.__guardedTaskEditor')
+                    page.once('dialog',lambda dialog:dialog.dismiss()); choose_chat_channel(page,other['name']); close_channels(page)
+                    expect(page.locator('#chat-channel-name')).to_have_text(selected['name']); expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.')
+                    live_conversation(page,panel)
+                    page.once('dialog',lambda dialog:dialog.accept()); choose_chat_channel(page,other['name'])
+                    expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(flow_region(page)).to_have_count(0)
+                    choose_chat_channel(page,selected['name']); task_card.click(); panel = flow_region(page)
+                    expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text(text + ' Revised.')
+                    assert panel.get_by_role('form',name='Edit task',exact=True).count() == 0
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    passed('dirty_task_target_and_channel_navigation_decline_preserves_editor_accept_leaves_without_publishing')
+
                     stage = 'real saved appearance and truthful unconfigured AI'
                     open_chat_tool(page,'Appearance settings'); appearance = page.get_by_role('dialog',name='Make space your own.',exact=True); appearance.get_by_role('radio',name='Dark',exact=True).check(); appearance.get_by_role('button',name='Save changes',exact=True).click(); expect(appearance).to_have_count(0)
                     assert request(base,'GET','/preferences/appearance',token)['mode'] == 'dark'
-                    panel = work('Copilot'); expect(panel).to_contain_text(re.compile('not enabled|not configured|disabled',re.I)); assert not page.get_by_role('button',name='Send to AI',exact=True).is_enabled() if page.get_by_role('button',name='Send to AI',exact=True).count() else True
-                    panel.get_by_role('button',name='Close workspace tools',exact=True).click()
+                    ai = page.locator('.fc-chat-journey-context .fc-contextual-copilot')
+                    ai.get_by_role('button',name=re.compile('^AI help for ')).click()
+                    expect(ai.locator('.fc-contextual-copilot-card')).to_be_visible()
+                    expect(ai).to_contain_text(re.compile('not enabled|not configured|disabled|must enable and connect',re.I))
+                    expect(ai.get_by_role('button',name='Send to provider',exact=True)).to_have_count(0)
+                    ai.get_by_role('button',name='Close AI help',exact=True).click()
                     passed('normal_appearance_save_and_truthful_external_AI_boundary')
 
                     stage = 'actual Microsoft and Google guides show disabled public integrations'
@@ -668,11 +854,19 @@ def main():
                     sv_composer = swedish.locator('.fc-chat-composer textarea'); sv_composer.fill('Ett oskickat utkast som ska finnas kvar.')
                     sv_card.locator('.fc-chat-material-footer button').scroll_into_view_if_needed()
                     sv_anchor = click_with_reading_anchor(swedish,sv_card.locator('.fc-chat-material-footer button'))
-                    sv_inline = swedish.get_by_role('dialog',name='Arbetsytans verktyg',exact=True)
+                    sv_inline = flow_region(swedish)
                     expect(sv_inline.locator('#shared-document-title')).to_have_value(sv_seed['title'])
                     sv_body = sv_inline.get_by_label('Dokumenttext',exact=True); expect(sv_body).to_be_editable()
+                    swedish.wait_for_function("""() => {
+                      const editor=document.querySelector('#shared-document-body'), timeline=document.querySelector('.fc-chat-timeline'), composer=document.querySelector('.fc-chat-composer-area');
+                      if (!editor || !timeline || !composer) return false;
+                      const box=editor.getBoundingClientRect();
+                      return Math.min(box.bottom,composer.getBoundingClientRect().top)-Math.max(box.top,timeline.getBoundingClientRect().top)>=120;
+                    }""")
                     saved_body = sv_body.input_value() + '\n\nEn liten anteckning från mobilvyn.'
                     sv_body.fill(saved_body); expect(sv_inline.locator('.fc-shared-sync')).to_have_text('Alla ändringar är synkroniserade')
+                    live_conversation(swedish,sv_inline)
+                    swedish.screenshot(path=str(REPORT.with_name('flow-document-sv-320.png')))
                     sv_organization_path = '/api/channels/' + sv_visit['channel_id'] + '/shared-document-organization'
                     def return_from_sv_document():
                         with swedish.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == sv_organization_path) as refreshed:
@@ -684,13 +878,16 @@ def main():
                     return_from_sv_document()
                     expect(sv_inline).to_have_count(0); expect(sv_composer).to_have_value('Ett oskickat utkast som ska finnas kvar.'); same_reading_anchor(swedish,sv_anchor)
                     sv_reopen_anchor = click_with_reading_anchor(swedish,sv_card.locator('.fc-chat-material-footer button'))
-                    sv_inline = swedish.get_by_role('dialog',name='Arbetsytans verktyg',exact=True)
+                    sv_inline = flow_region(swedish)
                     expect(sv_inline.get_by_label('Dokumenttext',exact=True)).to_have_value(saved_body)
                     assert sv_inline.evaluate('node=>node.scrollWidth <= node.clientWidth + 1')
                     return_from_sv_document()
                     expect(sv_composer).to_have_value('Ett oskickat utkast som ska finnas kvar.'); same_reading_anchor(swedish,sv_reopen_anchor)
                     passed('Swedish320px_inline_native_document_edit_reopens_saved_text_and_preserves_draft')
-                    open_chat_tool(swedish,'Öppna arbetsytans verktyg'); sv_panel = swedish.get_by_role('dialog',name='Arbetsytans verktyg',exact=True); sv_panel.get_by_label('Verktyg',exact=True).select_option('documents'); expect(sv_panel.get_by_role('button',name='Nytt delat dokument',exact=True)).to_be_visible(); expect(sv_panel.get_by_role('button',name=re.compile('^' + re.escape(sv_seed['title'])))).to_be_visible(); assert sv_panel.evaluate('node=>node.scrollWidth <= node.clientWidth + 1')
+                    sv_panel = open_flow(swedish,'Documents')
+                    expect(sv_panel.get_by_role('button',name='Nytt delat dokument',exact=True)).to_be_visible()
+                    expect(sv_panel.locator('[data-document-id="' + sv_seed['id'] + '"]')).to_be_visible()
+                    assert sv_panel.evaluate('node=>node.scrollWidth <= node.clientWidth + 1')
                     REPORT.parent.mkdir(parents=True,exist_ok=True); swedish.screenshot(path=str(REPORT.with_name('product-demo-sv-320.png'))); page.screenshot(path=str(REPORT.with_name('product-demo-en-1440.png'))); storage_untouched(swedish)
                     passed('Swedish320px_uses_the_same_actual_product_and_documents_panel')
 
@@ -725,7 +922,7 @@ def main():
                 stream.close()
     REPORT.parent.mkdir(parents=True,exist_ok=True)
     REPORT.write_text(json.dumps({'scope':'Actual product Chat/providers/WorkHub and normal backend API with isolated temporary demo accounts/data; no mocked business responses',
-        'results':results,'private_automation_pacing_seconds_per_group':6,'visual_geometry':visual_geometry,'source_hashes':source_hashes,'cleanup':'Own processes, temporary source snapshots, keys, SQLite/files and browser contexts removed',
+        'results':results,'private_automation_pacing':{'minimum_group_seconds':6,'rolling_window_seconds':60,'next_group_request_target':160,'extra_waits':pacing_waits,'direct_HTTP_requests_counted':True,'HTTP_429_responses':sum(row['status']==429 for row in observed)},'visual_geometry':visual_geometry,'source_hashes':source_hashes,'cleanup':'Own processes, temporary source snapshots, keys, SQLite/files and browser contexts removed',
         'limits':['Native sample installation with explicitly unavailable external integrations; no live provider or Matrix service acceptance.',
                   'This private loopback proof does not attest Railway deployment, public TLS, scalability or physical device behavior.']},indent=2)+'\n')
     print('PASS product demo: ' + str(len(results)) + ' real product/browser groups',flush=True)

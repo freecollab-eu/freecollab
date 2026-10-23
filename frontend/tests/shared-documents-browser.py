@@ -233,10 +233,10 @@ def secure_proof(base, private, workspace, users, pages, results, environment, p
 
 
 def open_documents(page):
-    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-    panel = page.get_by_role('dialog', name='Workspace tools', exact=True)
-    panel.get_by_role('tab', name='Documents', exact=True).click()
-    expect(panel.get_by_role('heading', name='Shared documents', exact=True)).to_be_visible()
+    from ui_navigation import open_conversation_work
+    panel = open_conversation_work(page, 'documents')
+    expect(panel).to_have_attribute('data-work-kind', 'documents')
+    expect(panel.get_by_role('tablist')).to_have_count(0)
     return panel
 
 
@@ -318,6 +318,7 @@ def main():
                     expect(first.get_by_label('Document text', exact=True)).to_be_editable()
                     first.get_by_label('Document text', exact=True).fill(BASELINE)
                     expect(first.get_by_text('All edits synchronized', exact=True)).to_be_visible()
+                    first.locator('details.fc-shared-flow-options > summary').click()
                     first.get_by_role('button', name='Named revisions', exact=True).click()
                     first.get_by_label('Revision name', exact=True).fill('Before concurrent edits')
                     first.get_by_role('button', name='Save revision', exact=True).click()
@@ -337,9 +338,8 @@ def main():
                         expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
                         expect(panel.get_by_text(re.compile('edit[s]? waiting to sync'))).to_be_visible()
                         expect(panel.get_by_role('button', name='Retry synchronization', exact=True)).to_be_visible()
-                    pages[0].once('dialog', lambda dialog: dialog.dismiss())
-                    first.get_by_role('tab', name='Tasks', exact=True).click()
-                    expect(first.get_by_role('tab', name='Documents', exact=True)).to_have_attribute('aria-selected', 'true')
+                    pages[0].locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    expect(first).to_have_attribute('data-work-kind', 'documents')
                     expect(first.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Alice concurrent note.\n')
                     results['offline_editing_and_unsynced_navigation_guard'] = True
                     for context in reversed(contexts): context.set_offline(False)

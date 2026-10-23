@@ -36,7 +36,10 @@ ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / 'packages/components'
 PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
 REPORT = Path(os.getenv('CONNECT_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/connect-browser-0.13.0.json')))
-EXPECTED_PACKAGE = 'a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1'
+# Reviewed canonical release:artifact bytes; all 59 packed public files match
+# the fresh distribution, with sourceDigest bound to the 23 current SDK sources.
+# Rebuild and review this exact artifact when public package inputs change.
+EXPECTED_PACKAGE = '81606a74ccedc2d0de86bf7c30c9f9c1a4546fe897ab5b84acbe684a70d8afca'
 SPEC = importlib.util.spec_from_file_location('owned_embed_proof_helpers', Path(__file__).with_name('embed-browser-proof.py'))
 helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helpers)

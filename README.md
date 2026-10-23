@@ -17,7 +17,7 @@ Accounts and data belong to that installation; no central FreeCollab account or
 cloud control plane is required. Microsoft, Google and AI are optional services.
 See [local and network self-hosting](docs/SELF_HOSTING.md) and [operations](docs/OPERATIONS.md).
 
-![FreeCollab interactive product demo with sample conversations and workspace tools](docs/images/freecollab-demo.png)
+![FreeCollab conversation with its actual shared document and next step](docs/images/freecollab-demo.png)
 
 FreeCollab brings conversations, documents, tasks, files and meetings into a workspace you control. Choose personal colors/type and Swedish or English, use your own customer SSO and prepare your organization's Microsoft 365/Google apps. The MIT-licensed source has no per-seat software fee; you cover hosting and external provider costs. Start with one API process; additional replicas require the shared coordination and storage described in [SCALING.md](docs/SCALING.md).
 
@@ -95,7 +95,7 @@ The reference client includes email verification and recovery, MFA and sessions,
 
 The reference client uses an open room with warm stone, ink, a vermilion accent and generous space for the conversation. Open **Appearance** in **More channel tools** or the channel drawer to preview your own palette, typeface, text size, spacing and corners. Choose Studio, Linen, Fjord, Clay or Ink, or enter custom accent and canvas colors; light, dark and system modes are available. **Save changes** stores preferences on your account, **Cancel** restores your saved appearance, and **Reset** previews the defaults until you save. Existing saved appearances stay intact. The four type choices use bundled fonts or your device's system font, with no font CDN. See [personal appearance and its API](docs/APPEARANCE.md).
 
-**Work** reopens the last tool selected in the current channel during this visit. **Back to conversation** preserves the underlying chat and returns focus to the opening control; unsaved document, feed and shared-work changes still require a decision before leaving. Tool choices reset on reload, sign-in or workspace changes. Direct task and resource links continue to open their requested tool.
+Use **Add a document**, **Next step**, **Decision** or **Meet** beside the composer to work inside the current conversation. A message's actions can start a real document, task or decision from that message; saved work has a link at its source. Editors open beside the usable conversation, with no daily tool tab strip. **More** opens contextual channel activity, workflows and integrations. Document organization, revisions and project options remain available in contextual disclosures. **Shared work** recalls the channel's last tool during this visit; direct resource links open their exact native record. Pending document writes block navigation until synchronized, and unsent drafts require a decision before leaving. Choices reset on reload, sign-in or workspace changes. See [work inside the conversation](docs/CONVERSATION_WORK.md).
 
 ### Keyboard and reading
 

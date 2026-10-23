@@ -2,6 +2,10 @@
 
 The reference client starts with warm stone, ink and a vermilion accent. Each person can adapt this appearance without changing another member's view or the team's shared content. These settings belong to the signed-in account, rather than a channel or installation. Existing saved appearances remain intact when defaults change.
 
+The same appearance applies to the [conversation's inline work area](CONVERSATION_WORK.md),
+including its real document, next-step and decision editors. Everyday work does
+not open a separate tool tab strip.
+
 ## Use the appearance panel
 
 1. Sign in and choose **Appearance** in **More channel tools** or the channel drawer, or use **Cmd/Ctrl+K** and choose **Appearance settings**.

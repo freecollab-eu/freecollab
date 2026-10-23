@@ -366,9 +366,12 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
     if mapping is not None and connections and local_ids:
         add("remotesyncitem", _records(session, mapping.name, and_(mapping.c.connection_id.in_(_ids(connections)), mapping.c.local_id.in_(local_ids))))
     # Delete only known dependents; unknown future FK models fail closed below.
+    # A conversation routing reference is not a hold on either resource. Its
+    # own age or an authorized source/target purge can remove the reference.
+    add("conversationworkreference", [row for row in _channel_records(session, "conversationworkreference", channel_ids) if _old(row, cutoff)])
     allowed_dependents = {"reaction", "readreceipt", "messagechange", "threadsubscription", "fileversion", "fileuploadreceipt",
         "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
-        "shareddocumentcomment", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
+        "shareddocumentcomment", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
         "calendarproviderpublication", "calendarproviderjob", "nativecallsession", "nativecallconsent"}
     expanded = True
     while expanded:
@@ -553,6 +556,7 @@ EXPORT_FIELDS = {
     "shareddocumentplacement": "document_id channel_id stack_id version updated_by updated_at",
     "shareddocumentrelation": "id channel_id first_document_id second_document_id created_by created_at",
     "shareddocumentstackreference": "id channel_id stack_id message_id created_by created_at",
+    "conversationworkreference": "id channel_id source_message_id resource_kind document_id task_id decision_id created_by created_at",
     "channelmetadata": "channel_id version content_mode matrix_event_id encrypted_payload created_by updated_by created_at updated_at",
     "workflowdefinition": "id workspace_id channel_id created_by granted_by current_revision enabled created_at updated_at",
     "workflowrevision": "workflow_id revision encrypted_definition created_by created_at",
@@ -592,7 +596,7 @@ def export_data(session, job, request):
     records = {"channel": [{"id": row.id, "name": None if row.id in secure_ids else row.name,
                 "type": row.type, "created_at": row.created_at, "content_mode": "matrix" if row.id in secure_ids else "server"} for row in channels]}
     parents = {}
-    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "shareddocumentstack", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "channelmetadata", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
+    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "shareddocumentstack", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "channelmetadata", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
         rows = _channel_records(session, name, channel_ids)
         if name in {"message", "file", "filedocument", "appcard"}:
             # Matrix messages/media are not represented by native file bytes.

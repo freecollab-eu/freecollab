@@ -77,6 +77,11 @@ def main():
             expect(product_image).to_be_visible()
             expect(product_image).to_have_js_property('complete', True)
             assert product_image.evaluate('(image)=>image.naturalWidth>0&&image.naturalHeight>0'), 'The actual product screenshot did not load'
+            assert product_image.evaluate('(image)=>image.naturalWidth===Number(image.getAttribute("width"))&&image.naturalHeight===Number(image.getAttribute("height"))'), 'Product screenshot dimensions do not match its native capture'
+            screenshot_response = context.request.get(product_image.evaluate('(image)=>image.src'))
+            assert screenshot_response.ok
+            screenshot_sha256 = hashlib.sha256(screenshot_response.body()).hexdigest()
+            assert screenshot_sha256 == hashlib.sha256((ROOT / 'frontend/src/assets/product/courtyard-product.png').read_bytes()).hexdigest(), 'Built landing uses a stale product screenshot'
             expect(preview.get_by_role('button', name='Utforska demon', exact=True)).to_be_visible()
             expect(page.locator('.fc-preview, .fc-preview-composer, .fc-preview-message')).to_have_count(0)
             capture('open-release-website-sv-desktop.png')
@@ -131,7 +136,7 @@ def main():
             checks['zero_javascript_errors_account_api_calls_and_external_provider_requests'] = True
             context.close(); browser.close()
         hashes = {str(p.relative_to(dist)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(dist.rglob('*')) if p.is_file()}
-        REPORT.write_text(json.dumps({'ok':True, 'checks':checks, 'production_dist_sha256':hashes, 'screenshots':screenshots, 'external_requests':0, 'account_api_calls':0, 'inspected_demo_iframe_navigations':len(demo_navigations), 'cleanup':'Private static HTTP server and browser context closed; expected demo iframe navigation was aborted before any sample account/session request.', 'scope':'Actual built App entry, guest landing and exact real-product iframe handoff. Inner sample-workspace behavior is verified separately by product-demo-browser.py; no provider or Railway deployment claim.'}, indent=2)+'\n')
+        REPORT.write_text(json.dumps({'ok':True, 'checks':checks, 'production_dist_sha256':hashes, 'native_product_screenshot_sha256':screenshot_sha256, 'screenshots':screenshots, 'external_requests':0, 'account_api_calls':0, 'inspected_demo_iframe_navigations':len(demo_navigations), 'cleanup':'Private static HTTP server and browser context closed; expected demo iframe navigation was aborted before any sample account/session request.', 'scope':'Actual built App entry, guest landing with exact current native screenshot bytes and real-product iframe handoff. Inner sample-workspace behavior is verified separately by product-demo-browser.py; no provider or Railway deployment claim.'}, indent=2)+'\n')
         REPORT.chmod(0o600)
         print(f'Public built-app proof: {len(checks)}/{len(checks)} passed')
     finally:

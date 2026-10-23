@@ -9,19 +9,39 @@ const translate = (source, values = {}) => source.replace(/\{(\w+)\}/g, (all, ke
 
 /** Exercise the real parent callbacks without a provider, effects, timers or a server. */
 function componentFixture(name, states) {
-  const state = { token: 'account-one', states, refs: [], updates: [], mutations: [] };
+  const source = readFileSync(new URL('../src/components/' + name + '.tsx', import.meta.url), 'utf8');
+  const parsed = ts.createSourceFile(name + '.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const component = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
+  assert.ok(component?.body, 'the fixture executes the actual named component');
+  // Resolve the real hook names instead of pinning numeric slots. Adding a
+  // state/ref for flow presentation must not silently seed a different field.
+  const hooks = { useState: [], useRef: [] };
+  function collect(node) {
+    if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && Object.hasOwn(hooks, node.expression.text)) {
+      const declaration = node.parent;
+      assert.ok(ts.isVariableDeclaration(declaration), 'fixture hooks have explicit variable declarations');
+      const binding = ts.isArrayBindingPattern(declaration.name) ? declaration.name.elements[0].name : declaration.name;
+      assert.ok(ts.isIdentifier(binding));
+      hooks[node.expression.text].push(binding.text);
+    }
+    ts.forEachChild(node, collect);
+  }
+  collect(component.body);
+  const state = { token: 'account-one', states, refs: {}, updates: [], mutations: [] };
   let stateIndex = 0, refIndex = 0;
   const Copilot = () => null;
   const jsx = (type, props) => ({ type, props: props || {} });
   const enqueue = (index, value) => state.updates.push({ index, value });
   const react = {
     useState(initial) {
-      const index = stateIndex++;
+      const index = hooks.useState[stateIndex++];
+      assert.ok(index, 'every state call belongs to a named real component hook');
       if (!Object.hasOwn(state.states, index)) state.states[index] = typeof initial === 'function' ? initial() : initial;
       return [state.states[index], value => enqueue(index, value)];
     },
-    useRef(initial) { const index = refIndex++; return state.refs[index] ?? (state.refs[index] = { current: initial }); },
+    useRef(initial) { const index = hooks.useRef[refIndex++]; assert.ok(index); return state.refs[index] ?? (state.refs[index] = { current: initial }); },
     useEffect() {},
+    useLayoutEffect() {},
   };
   const unexpected = () => { throw new Error('Applying an AI result must not save a project or task.'); };
   const api = { getAccessToken: () => state.token, getCurrentUserId: () => 'actor' };
@@ -33,7 +53,6 @@ function componentFixture(name, states) {
     '../lib/shared-documents-api': {}, '../lib/collaboration-api': {}, '../lib/files-api': {},
     '../lib/project-tasks-api': { projectTasksApi: { saveTask: unexpected, saveProject: unexpected } },
   };
-  const source = readFileSync(new URL('../src/components/' + name + '.tsx', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exports = {};
   vm.runInNewContext(compiled, { exports, require: id => dependencies[id] ?? {}, Date, Set, Map, JSON, crypto: { randomUUID: () => 'new-id' } });
@@ -66,13 +85,13 @@ const documentRecord = {
 function documentFixture(body = 'Original document') {
   const value = { title: 'Plan', body, pending: 0, ready: true, locked: false, error: '', sequence: 7 };
   // Selected document and its synchronized view; unrelated effects are deliberately inactive.
-  const fixture = componentFixture('SharedDocumentsPanel', { 1: plain(documentRecord), 6: plain(value) });
+  const fixture = componentFixture('SharedDocumentsPanel', { selected: plain(documentRecord), state: plain(value) });
   fixture.render();
   const controller = {
     channelId: 'channel', metadata: plain(documentRecord), state: () => ({ ...value }),
-    replace(field, text) { fixture.state.mutations.push({ field, text }); value[field] = text; value.pending = 1; fixture.enqueue(6, { ...value }); },
+    replace(field, text) { fixture.state.mutations.push({ field, text }); value[field] = text; value.pending = 1; fixture.enqueue('state', { ...value }); },
   };
-  fixture.state.refs[3].current = controller;
+  fixture.state.refs.session.current = controller;
   const props = fixture.render()[0];
   assert.ok(props, 'verified document exposes in-place AI help');
   return { ...fixture, value, controller, props };
@@ -99,9 +118,9 @@ const documentDrift = [
   ['document version advanced', f => { f.controller.metadata.version++; }],
   ['document was archived', f => { f.controller.metadata.archived = true; }],
   ['account changed', f => { f.state.token = 'replacement-account'; }],
-  ['panel generation changed', f => { f.state.refs[1].current++; }],
-  ['document session was replaced', f => { f.state.refs[3].current = { ...f.controller }; }],
-  ['another document was selected', f => { f.state.refs[5].current = 'another-document'; }],
+  ['panel generation changed', f => { f.state.refs.generation.current++; }],
+  ['document session was replaced', f => { f.state.refs.session.current = { ...f.controller }; }],
+  ['another document was selected', f => { f.state.refs.selectedId.current = 'another-document'; }],
 ];
 for (const [reason, change] of documentDrift) test('document apply rejects when ' + reason, () => {
   const fixture = documentFixture(); change(fixture);
@@ -126,7 +145,7 @@ function editorFixture(kind = 'task', description) {
   const row = plain(kind === 'task' ? task : project);
   if (description !== undefined) row.fields.description = description;
   const editor = { kind, id: row.id, fields: plain(row.fields), previous: row };
-  const fixture = componentFixture('ProjectTasksPanel', { 0: [plain(project)], 1: 'project', 2: kind === 'task' ? [row] : [], 6: false, 11: editor });
+  const fixture = componentFixture('ProjectTasksPanel', { projects: [plain(project)], selected: 'project', tasks: kind === 'task' ? [row] : [], loading: false, editor });
   const props = fixture.render().find(value => value.contextLabel === (kind === 'task' ? 'Task description draft' : 'Project description draft'));
   assert.ok(props, 'editor exposes in-place AI help');
   return { ...fixture, props, editor };
@@ -136,7 +155,7 @@ for (const kind of ['task', 'project']) test(kind + ' applies only to its descri
   const fixture = editorFixture(kind), before = plain(fixture.editor.fields);
   assert.equal(fixture.props.onApply('Reviewed description', fixture.props.contextKey), true);
   fixture.flush();
-  const after = fixture.state.states[11].fields;
+  const after = fixture.state.states.editor.fields;
   assert.equal(after.description, 'Reviewed description');
   const preserved = plain(after); delete before.description; delete preserved.description;
   assert.deepEqual(preserved, before);
@@ -148,10 +167,10 @@ for (const field of ['title', 'description', 'status', 'priority', 'assignee_use
   const fixture = editorFixture();
   const changed = plain(fixture.editor);
   changed.fields[field] = Array.isArray(changed.fields[field]) ? [] : 'New user value';
-  fixture.enqueue(11, changed);
+  fixture.enqueue('editor', changed);
   fixture.props.onApply('Must not overwrite', fixture.props.contextKey);
   fixture.flush();
-  assert.deepEqual(plain(fixture.state.states[11]), changed);
+  assert.deepEqual(plain(fixture.state.states.editor), changed);
 });
 
 test('the actual description input preserves its queued user text against an earlier AI callback', () => {
@@ -160,13 +179,13 @@ test('the actual description input preserves its queued user text against an ear
   input.props.onChange({ target: { value: 'My newer wording' } });
   fixture.props.onApply('Earlier AI wording', fixture.props.contextKey);
   fixture.flush();
-  assert.equal(fixture.state.states[11].fields.description, 'My newer wording');
+  assert.equal(fixture.state.states.editor.fields.description, 'My newer wording');
 });
 
 test('changing account prevents any editor application', () => {
   const fixture = editorFixture(); fixture.state.token = 'replacement-account';
   assert.equal(fixture.props.onApply('Never apply', fixture.props.contextKey), false);
-  fixture.flush(); assert.equal(fixture.state.states[11].fields.description, 'Keep these details');
+  fixture.flush(); assert.equal(fixture.state.states.editor.fields.description, 'Keep these details');
 });
 
 test('long, quoted drafts produce bounded, valid, explicitly marked JSON in the reviewed request', () => {

@@ -30,8 +30,8 @@ from playwright.sync_api import expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
 REPORT = Path(os.getenv('CONVERSATION_FLOW_REPORT', str(ROOT.parent / '.freecollab/proof-results/conversation-flow-browser.json')))
-WORK = re.compile(r'^(Open workspace tools|Öppna arbetsytans verktyg)$')
-DIALOG = re.compile(r'^(Workspace tools|Arbetsytans verktyg)$')
+WORK = re.compile(r'^(Work in this conversation|Arbete i det här samtalet)$')
+DIALOG = WORK
 RETURN = re.compile(r'^(Back to conversation|Tillbaka till samtalet)$')
 
 
@@ -54,8 +54,9 @@ def ready(url, processes):
     raise AssertionError('Private conversation-flow readiness timed out')
 
 
-def native(base, token, path):
-    with urlopen(Request(base + path, headers={'Authorization': 'Bearer ' + token}), timeout=10) as response:
+def native(base, token, path, data=None, method='GET'):
+    headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+    with urlopen(Request(base + path, data=json.dumps(data).encode() if data is not None else None, headers=headers, method=method), timeout=10) as response:
         return json.load(response)
 
 
@@ -91,24 +92,36 @@ def same_photo(page, image, expected):
 def work(page):
     close_channels(page)
     button = page.get_by_role('button', name=WORK)
+    button.evaluate('(node)=>{window.flowExpectedReturn=node}')
     button.click()
-    dialog = page.get_by_role('dialog', name=DIALOG)
+    dialog = page.get_by_role('region', name=DIALOG)
     expect(dialog).to_be_visible()
+    expect(dialog.get_by_role('tablist')).to_have_count(0)
+    expect(dialog.get_by_role('combobox', name='Workspace tool', exact=True)).to_have_count(0)
+    assert not dialog.evaluate('(node)=>node.closest("[inert]")||node.getAttribute("aria-modal")==="true"')
+    assert page.locator('.fc-chat-composer textarea').is_enabled()
     return dialog, button
 
 
 def selected(dialog, value):
-    expect(dialog.locator('.fc-work-hub-tool-switch select')).to_have_value(value)
-    expect(dialog.get_by_role('tab', selected=True, include_hidden=True)).to_have_count(1)
-    expect(dialog.locator('#work-tab-' + value)).to_have_attribute('aria-selected', 'true')
+    expect(dialog).to_have_attribute('data-work-kind', value)
+    expect(dialog.get_by_role('tablist')).to_have_count(0)
 
 
 def select(dialog, value):
-    picker = dialog.locator('.fc-work-hub-tool-switch select')
-    if picker.is_visible():
-        picker.select_option(value)
+    page = dialog.page
+    actions = page.locator('.fc-chat-flow-actions')
+    names = {'tasks': re.compile(r'^(Next step|Nästa steg)$'), 'documents': re.compile(r'^(Add a document|Lägg till ett dokument)$'), 'meetings': re.compile(r'^(Meet|Mötas)$')}
+    if value in names:
+        target = actions.get_by_role('button', name=names[value], exact=True)
     else:
-        dialog.locator('#work-tab-' + value).click()
+        more = actions.get_by_role('button', name=re.compile(r'^(More|Mer)$'), exact=True)
+        more.click()
+        page.get_by_role('button', name=WORK).evaluate('(node)=>{window.flowExpectedReturn=node}')
+        target = actions.get_by_role('menuitem', name={'feed': 'Channel activity', 'workflows': 'Workflows', 'cloud': 'Cloud files'}[value], exact=True)
+    if value in names:
+        target.evaluate('(node)=>{window.flowExpectedReturn=node}')
+    target.click()
     selected(dialog, value)
 
 
@@ -116,7 +129,7 @@ def leave(page, dialog, button=None):
     dialog.get_by_role('button', name=RETURN).click()
     expect(dialog).to_have_count(0)
     if button is not None:
-        expect(button).to_be_focused()
+        assert page.evaluate('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn&&!window.flowExpectedReturn.closest("[inert]")'), 'Closing work did not restore its visible opening control'
 
 
 def switch_workspace(page, name):
@@ -142,10 +155,16 @@ def main():
         relevant = ['components/Chat.tsx', 'components/WorkHub.tsx', 'account/AccountProvider.tsx', 'i18n/index.tsx', 'i18n/core.ts', 'i18n/demo-natural-flow.sv.ts', 'lib/api.ts', 'lib/useModalFocus.ts', 'App.tsx', 'account/AccountPanel.tsx', 'account/AccountPhoto.tsx', 'components/Avatar.tsx', 'components/ChannelTools.tsx', 'lib/avatar-api.ts', 'styles/avatar.css']
         relevant += [str(path.relative_to(source)) for path in source.glob('lib/*work*hub*')]
         relevant += [str(path.relative_to(source)) for path in source.glob('i18n/*work*hub*')]
+        relevant += ['components/SharedDocumentsPanel.tsx', 'components/SharedDocumentOrganization.tsx', 'components/ProjectTasksPanel.tsx', 'components/CollaborationPanel.tsx', 'lib/conversation-navigation.ts', 'lib/conversation-work-api.ts', 'lib/shared-documents-api.ts', 'i18n/conversation-work.sv.ts', 'styles/conversation-work.css']
+        relevant += [str(path.relative_to(source)) for path in source.rglob('*') if path.is_file()]
         for name in sorted(set(relevant)):
             source_hashes['frontend/src/' + name] = hashlib.sha256((source / name).read_bytes()).hexdigest()
         source_hashes['frontend/tests/conversation-flow-browser.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
         for name in ['backend/app/api/avatars.py', 'backend/app/services/avatars.py', 'backend/app/models/avatar.py']:
+            source_hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+        for path in (ROOT / 'backend/app').rglob('*.py'):
+            source_hashes[str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
+        for name in ['frontend/package.json', 'frontend/postcss.config.js', 'frontend/tailwind.config.js', 'frontend/tests/ui_navigation.py']:
             source_hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
         demo_dependencies = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in ('components/Demo.tsx', 'styles/product-demo-frame.css', 'lib/product-demo-url.ts') if (source / name).is_file()}
         api_port, app_port = port(), port()
@@ -225,6 +244,9 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                 assert failure.code == 404, failure.code
             checks['ordinary_installation_does_not_expose_public_demo_bootstrap'] = True
             sessions = json.loads((private / 'sessions.json').read_text())
+            native(base, sessions['alpha']['access_token'], '/channels/shared/projects', {'id': 'flow-project', 'expected_revision': 0, 'archived': False, 'fields': {'title': 'Courtyard next steps', 'description': 'Actual native work', 'color': 'sage'}}, 'POST')
+            native(base, sessions['alpha']['access_token'], '/channels/shared/projects/flow-project/tasks', {'id': 'flow-task', 'expected_revision': 0, 'archived': False, 'fields': {'title': 'Review material samples', 'description': 'Existing task for exact-target navigation', 'status': 'todo', 'priority': 'normal', 'assignee_user_id': None, 'due_date': None, 'checklist': [], 'file_ids': [], 'decision_ids': []}}, 'POST')
+            decision = native(base, sessions['alpha']['access_token'], '/channels/shared/decisions', {'title': 'Keep the courtyard open', 'content': 'Actual decision target', 'status': 'accepted'}, 'POST')
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'), headless=True, args=['--no-sandbox'])
                 context = browser.new_context(viewport={'width': 1440, 'height': 1050}, locale='en-US')
@@ -248,9 +270,12 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     timeline.evaluate('(node)=>{node.scrollTop=Math.min(300,node.scrollHeight-node.clientHeight);node.dispatchEvent(new Event("scroll"));window.flowTimeline=node;window.flowScroll=node.scrollTop}')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    dialog.evaluate('(node)=>{window.flowDialog=node}')
+                    page.locator('.fc-chat').evaluate('(node)=>{window.flowShell=node}')
                     select(dialog, 'documents')
-                    assert dialog.evaluate('(node)=>node===window.flowDialog'), 'Changing tools remounted the dialog'
+                    assert page.locator('.fc-chat').evaluate('(node)=>node===window.flowShell'), 'Changing work remounted the conversation shell'
+                    composer.focus()
+                    expect(composer).to_be_focused()
+                    assert not composer.evaluate('(node)=>!!node.closest("[inert]")'), 'Inline work disabled the conversation'
                     leave(page, dialog, button)
                     expect(composer).to_have_value(draft)
                     assert composer.evaluate('(node)=>node===window.flowComposer&&node.selectionStart===3&&node.selectionEnd===11')
@@ -279,7 +304,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     stage = 'explicit resource navigation overrides a remembered generic tool'
                     channel = native(base, sessions['alpha']['access_token'], '/channels/design')
                     page.evaluate('(channel)=>window.dispatchEvent(new CustomEvent("freecollab:open-search-source",{detail:{channel_id:channel.id,kind:"document",id:"navigation-intent"}}))', channel)
-                    dialog = page.get_by_role('dialog', name=DIALOG)
+                    dialog = page.get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     leave(page, dialog)
                     checks['explicit_production_resource_navigation_overrides_remembered_generic_view'] = True
@@ -345,29 +370,151 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                             raise AssertionError('The actual pending document update was not captured')
                         page.wait_for_timeout(25)
                     confirmations = []
-                    def decline(value):
+                    def accept_unexpected(value):
                         confirmations.append(value.message)
-                        value.dismiss()
-                    page.once('dialog', decline)
+                        value.accept()
+                    page.on('dialog', accept_unexpected)
                     dialog.get_by_role('button', name=RETURN).click()
-                    assert len(confirmations) == 1 and 'Changes have not saved' in confirmations[0]
+                    assert not confirmations, 'Outstanding Yjs work must block leaving before a discard confirmation'
                     expect(dialog).to_be_visible()
                     expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
-                    dialog.evaluate('(node)=>{window.flowGuardedDialog=node}')
-                    page.once('dialog', decline)
-                    dialog.locator('#work-tab-tasks').click()
-                    assert len(confirmations) == 2
+                    dialog.evaluate('(node)=>{window.flowGuardedWork=node}')
+                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    assert not confirmations
                     selected(dialog, 'documents')
-                    assert dialog.evaluate('(node)=>node===window.flowGuardedDialog')
+                    assert dialog.evaluate('(node)=>node===window.flowGuardedWork')
+                    choose_chat_channel(page, 'Design')
+                    assert not confirmations
+                    close_channels(page)
+                    expect(page.get_by_role('textbox', name='Message #Courtyard', exact=True)).to_be_visible()
+                    switch_workspace(page, 'Research Studio')
+                    assert not confirmations
+                    expect(page.locator('.fc-workspace-switch-trigger')).to_contain_text('Nord Studio')
+                    page.evaluate('(id)=>window.dispatchEvent(new CustomEvent("freecollab:open-decision",{detail:{channel_id:"shared",decision_id:id}}))', decision['id'])
+                    assert not confirmations
+                    selected(dialog, 'documents')
+                    expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
+                    assert dialog.evaluate('(node)=>node===window.flowGuardedWork')
+                    checks['pending_native_document_blocks_channel_workspace_and_exact_decision_target'] = True
+
+                    stage = 'conversation remains usable while a real document update is pending'
+                    body.evaluate('(node)=>{window.flowPendingEditor=node}')
+                    composer = page.locator('.fc-chat-composer textarea')
+                    composer.fill('A real message while the document is still synchronizing.')
+                    expect(composer).to_be_focused()
+                    assert not composer.evaluate('(node)=>!!node.closest("[inert]")')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/mobile/offline/channels/shared/messages')) as sent:
+                        page.get_by_role('button', name='Send message', exact=True).click()
+                    assert sent.value.ok
+                    expect(page.locator('.fc-chat-message-content').filter(has_text=re.compile(r'^A real message while the document is still synchronizing\.$'))).to_be_visible()
+                    expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
+                    assert body.evaluate('(node)=>node===window.flowPendingEditor'), 'Sending a message remounted the document editor'
+                    composer.fill(draft)
+                    composer.press('Escape')
+                    expect(dialog).to_be_visible()
+                    expect(composer).to_be_focused()
+                    checks['real_message_send_and_composer_escape_preserve_pending_inline_document'] = True
+                    page.remove_listener('dialog', accept_unexpected)
                     (private / 'update.release').touch()
                     expect(dialog.locator('.fc-shared-sync')).to_have_text('All edits synchronized', timeout=15000)
                     updates = native(base, sessions['alpha2']['access_token'], '/channels/shared/shared-documents/' + document['id'] + '/updates')
                     assert len(updates['items']) >= 2, 'Actual update did not reach the production server'
+                    comment_draft = dialog.get_by_label('Add a comment', exact=True)
+                    comment_draft.fill('Keep this unsent native document comment.')
+                    draft_confirmations = []
+                    def decline_document_draft(value):
+                        draft_confirmations.append(value.message); value.dismiss()
+                    page.once('dialog', decline_document_draft)
+                    dialog.get_by_role('button', name=RETURN).click()
+                    expect(comment_draft).to_have_value('Keep this unsent native document comment.')
+                    page.once('dialog', decline_document_draft)
+                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    assert len(draft_confirmations) == 2 and all('Changes have not saved' in value for value in draft_confirmations)
+                    expect(comment_draft).to_have_value('Keep this unsent native document comment.')
+                    comment_draft.fill('')
                     leave(page, dialog)
                     dialog, button = work(page)
                     selected(dialog, 'documents')
                     leave(page, dialog, button)
-                    checks['real_document_pending_update_blocks_return_and_tab_change_then_synchronizes'] = True
+                    checks['real_document_pending_update_blocks_return_and_work_change_then_synchronizes'] = True
+
+                    stage = 'unsaved native task guards close work target channel and workspace'
+                    dialog, button = work(page)
+                    select(dialog, 'tasks')
+                    dialog.get_by_role('button', name='New task', exact=True).click()
+                    task_form = dialog.get_by_role('form', name='New task', exact=True)
+                    task_form.get_by_label('Task title', exact=True).fill('Choose the courtyard material')
+                    task_form.get_by_label('Description', exact=True).fill('Keep this actual native task draft through navigation attempts.')
+                    task_form.evaluate('(node)=>{window.flowTaskEditor=node}')
+                    task_confirmations = []
+                    def decline_task(value):
+                        task_confirmations.append(value.message)
+                        value.dismiss()
+                    page.once('dialog', decline_task)
+                    dialog.get_by_role('button', name=RETURN).click()
+                    page.once('dialog', decline_task)
+                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Add a document', exact=True).click()
+                    page.once('dialog', decline_task)
+                    choose_chat_channel(page, 'Design')
+                    close_channels(page)
+                    page.once('dialog', decline_task)
+                    switch_workspace(page, 'Research Studio')
+                    assert len(task_confirmations) == 4 and all('Changes have not saved' in value for value in task_confirmations)
+                    expect(task_form.get_by_label('Task title', exact=True)).to_have_value('Choose the courtyard material')
+                    assert task_form.evaluate('(node)=>node===window.flowTaskEditor')
+                    expect(page.locator('.fc-workspace-switch-trigger')).to_contain_text('Nord Studio')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/projects/flow-project/tasks')) as task_saved:
+                        task_form.get_by_role('button', name='Save task', exact=True).click()
+                    assert task_saved.value.ok
+                    saved_task = task_saved.value.json()
+                    expect(task_form).to_have_count(0)
+                    expect(dialog.locator('[data-task-id="' + saved_task['id'] + '"]')).to_contain_text('Choose the courtyard material')
+                    actual_tasks = native(base, sessions['alpha2']['access_token'], '/channels/shared/projects/flow-project/tasks')['items']
+                    assert any(row['id'] == saved_task['id'] and row['fields']['title'] == 'Choose the courtyard material' for row in actual_tasks)
+                    leave(page, dialog)
+                    checks['real_task_draft_blocks_close_target_channel_workspace_then_saves_native_record'] = True
+
+                    stage = 'unsaved native decision guards work target channel and workspace'
+                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Decision', exact=True).click()
+                    notebook = page.get_by_role('region', name='Decisions in this conversation', exact=True)
+                    expect(notebook).to_be_visible()
+                    expect(notebook.get_by_role('tablist')).to_have_count(0)
+                    notebook.get_by_role('button', name='Record a decision', exact=True).click()
+                    decision_title = notebook.get_by_label('Title', exact=True)
+                    decision_title.fill('Use local materials')
+                    notebook.get_by_label('Decision and context', exact=True).fill('A deliberate native decision without leaving the conversation.')
+                    decision_title.evaluate('(node)=>{window.flowDecisionEditor=node}')
+                    decision_confirmations = []
+                    def decline_decision(value):
+                        decision_confirmations.append(value.message)
+                        value.dismiss()
+                    page.once('dialog', decline_decision)
+                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    page.once('dialog', decline_decision)
+                    choose_chat_channel(page, 'Design')
+                    close_channels(page)
+                    page.once('dialog', decline_decision)
+                    switch_workspace(page, 'Research Studio')
+                    assert len(decision_confirmations) == 3
+                    expect(decision_title).to_have_value('Use local materials')
+                    assert decision_title.evaluate('(node)=>node===window.flowDecisionEditor')
+                    composer.fill('My conversation draft stays editable beside the decision.')
+                    expect(composer).to_be_focused()
+                    expect(decision_title).to_have_value('Use local materials')
+                    with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/channels/shared/decisions')) as decision_saved:
+                        notebook.get_by_role('button', name='Record decision', exact=True).click()
+                    assert decision_saved.value.ok
+                    saved_decision = decision_saved.value.json()
+                    expect(notebook.get_by_role('heading', name='Use local materials', exact=True)).to_be_visible()
+                    actual_decisions = native(base, sessions['alpha2']['access_token'], '/channels/shared/decisions')
+                    assert any(row['id'] == saved_decision['id'] and row['content'] == 'A deliberate native decision without leaving the conversation.' for row in actual_decisions)
+                    notebook.focus(); notebook.press('Escape')
+                    expect(notebook).to_have_count(0)
+                    expect(composer).to_have_value('My conversation draft stays editable beside the decision.')
+                    checks['real_decision_draft_blocks_target_channel_workspace_then_saves_with_live_composer'] = True
+                    dialog, button = work(page)
+                    select(dialog, 'documents')
+                    leave(page, dialog, button)
 
                     stage = 'normal account uploads replaces and removes an actual profile photo'
                     first_photo, replacement_photo = private / 'profile-first.png', private / 'profile-replacement.png'
@@ -438,9 +585,10 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     expect(dialog.get_by_role('button', name='Tillbaka till samtalet', exact=True)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     assert dialog.evaluate('(node)=>node.scrollWidth<=node.clientWidth')
+                    dialog.focus()
                     page.keyboard.press('Escape')
                     expect(dialog).to_have_count(0)
-                    expect(button).to_be_focused()
+                    assert page.evaluate('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn')
                     dialog, button = work(page)
                     selected(dialog, 'documents')
                     leave(page, dialog, button)
@@ -456,6 +604,9 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     browser.close()
         except Exception:
             print('FAILED conversation-flow stage: ' + stage, file=sys.stderr)
+            REPORT.parent.mkdir(parents=True, exist_ok=True)
+            for name in ['api.log', 'vite.log']:
+                if (private / name).is_file(): shutil.copyfile(private / name, REPORT.with_name('conversation-flow-' + name))
             raise
         finally:
             (private / 'update.release').touch()
@@ -474,8 +625,8 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
     for name, value in source_hashes.items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == value, 'Production source changed during the proof: ' + name
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update and actual account-photo picker/canvas/upload/replace/delete with authenticated portrait bytes; no Matrix or provider acceptance claim. Imported product-demo frame dependencies were not visited; the actual example-data installation has a separate product-demo-browser proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
-    print('Conversation-flow browser proof passed: ' + str(len(checks)) + ' groups; scoped tool resume, same conversation, actual pending-document guards, navigation overrides, native profile-photo UI, account isolation and Swedish 320px.')
+    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/inline WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update, unsaved native task/decision target/channel/workspace guards, simultaneous real message/composer and editor continuity, and actual account-photo picker/canvas/upload/replace/delete with authenticated portrait bytes; no Matrix or provider acceptance claim. Imported product-demo frame dependencies were not visited; the actual example-data installation has a separate product-demo-browser proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
+    print('Conversation-flow browser proof passed: ' + str(len(checks)) + ' groups; inline work without modal/tabs, scoped resume, same interactive conversation, native document/task/decision guards and saves, profile-photo UI, account isolation and Swedish 320px.')
 
 
 if __name__ == '__main__':

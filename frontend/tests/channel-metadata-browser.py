@@ -52,7 +52,7 @@ def main():
             with sync_playwright() as playwright:
                 browser=playwright.chromium.launch(headless=True,executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox']);context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(30000);errors=[];page.on('pageerror',lambda failure:errors.append(type(failure).__name__))
                 try:
-                    stage='real sign-in and details discovery';doc.login(page,origin,emails[0],workspace['id'],owner['user_id']);page.get_by_role('button',name='Close workspace tools',exact=True).click();choose_chat_channel(page,'Research')
+                    stage='real sign-in and details discovery';doc.login(page,origin,emails[0],workspace['id'],owner['user_id']);page.get_by_role('button',name='Close this work',exact=True).click();choose_chat_channel(page,'Research')
                     trigger=page.get_by_role('button',name='More channel tools',exact=True)
                     def details():
                         open_chat_tool(page,'Channel details');panel=page.get_by_role('dialog',name='Manage channel',exact=True);expect(panel.get_by_label('Channel name',exact=True)).to_be_editable();return panel

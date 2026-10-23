@@ -22,7 +22,6 @@ from ..services.workspaces import (
 )
 from ..services.matrix_bridge import remove_secure_member, sync_secure_membership
 from ..services.auth import get_current_user
-from ..services.group_crypto import GroupCryptoService
 from ..realtime.socket import broadcast_to_channel, send_to_user
 from uuid import uuid4
 
@@ -130,33 +129,21 @@ def create_channel(
                                encrypted_channel_key=member.encrypted_channel_key,
                                **channel_security_metadata(session, channel.id))
     channel = Channel(id=uuid4().hex, name=data.name, type=data.type)
-
-    # Generate channel encryption key
-    channel_key = GroupCryptoService.generate_channel_key()
-    
-    # Get all members including creator
-    all_member_ids = set(data.member_ids) | {user.id}
-    
-    # Get public keys for all members
+    # Ordinary rooms use native server-side storage. E2EE is enabled through
+    # an explicit SecureChannel/Matrix binding, independently of account keys.
+    # Never mark new native rooms with unused legacy encryption envelopes.
     members = session.query(User).filter(User.id.in_(all_member_ids)).all()
     if len(members) != len(all_member_ids) or any(m.is_blocked for m in members):
         raise HTTPException(400, "All channel members must be active users")
     session.add(channel)
     session.flush()
     session.add(WorkspaceChannel(channel_id=channel.id, workspace_id=workspace_id))
-    member_public_keys = {m.id: m.public_key for m in members if m.public_key}
-    
-    # Encrypt channel key for each member
-    encrypted_keys = GroupCryptoService.encrypt_key_for_members(channel_key, member_public_keys)
-    
-    # Add members with their encrypted keys
     for member_id in all_member_ids:
         role = "admin" if member_id == user.id else "member"
         session.add(ChannelMember(
             channel_id=channel.id,
             user_id=member_id,
             role=role,
-            encrypted_channel_key=encrypted_keys.get(member_id),
         ))
     
     session.commit()
@@ -165,7 +152,6 @@ def create_channel(
         id=channel.id,
         name=channel.name,
         type=channel.type,
-        encrypted_channel_key=encrypted_keys.get(user.id),
         role="admin",
         workspace_id=workspace_id,
         **channel_security_metadata(session, channel.id),

@@ -78,10 +78,10 @@ def main():
                 page.screenshot(path=str(REPORT.with_name(REPORT.stem+'-desktop.png')))
                 stage='exact project navigation switches workspace'
                 day.get_by_role('button',name=fields['title'],exact=True).click()
-                work=page.get_by_role('dialog',name='Workspace tools',exact=True)
-                expect(work).to_be_visible(); expect(work.get_by_role('combobox',name='Choose project',exact=True)).to_have_value('target-project')
+                work=page.get_by_role('region',name='Work in this conversation',exact=True)
+                expect(work).to_be_visible(); expect(work).to_have_attribute('data-work-kind','tasks'); expect(work.locator('.fc-project-card')).to_have_attribute('data-task-id','personal-task')
                 expect(work.get_by_role('heading',name=fields['title'],exact=True)).to_be_visible()
-                work.get_by_role('button',name='Close workspace tools',exact=True).click()
+                work.get_by_role('button',name='Close this work',exact=True).click()
                 checks['task_link_reauthorizes_switches_workspace_and_opens_exact_project']=True
                 stage='source-authorized completion and follow-up'
                 open_chat_tool(page, 'My day')

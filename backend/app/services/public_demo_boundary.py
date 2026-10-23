@@ -56,6 +56,7 @@ def assert_public_demo_safe_configuration():
 # Explicit native operations. New product routes remain unavailable until their
 # sample scope and side effects have been reviewed. No endpoint is emulated.
 _READ = (
+    r"/channels/" + _ID + r"/conversation-work",
     r"/users/" + _ID + r"/avatar",
     r"/auth/me", r"/auth/users/" + _ID + r"/public-key", r"/account/(?:security|sessions)",
     r"/workspaces", r"/workspaces/" + _ID + r"(?:/members|/logo)?",
@@ -84,6 +85,7 @@ _READ = (
 )
 _WRITE = {
     "POST": (
+        r"/channels/" + _ID + r"/conversation-work",
         r"/auth/logout", r"/channels", r"/direct-messages", r"/group-conversations",
         r"/messages/channels/" + _ID, r"/threads/messages/" + _ID + r"/reply",
         r"/mobile/offline/channels/" + _ID + r"/messages",
@@ -116,6 +118,7 @@ _WRITE = {
         r"/channels/" + _ID + r"/shared-document-organization/stacks/" + _ID,
     ),
     "DELETE": (
+        r"/channels/" + _ID + r"/conversation-work/" + _ID,
         r"/demo/session", r"/scheduled-messages/" + _ID,
         r"/messages/" + _ID, r"/files/" + _ID,
         r"/reactions/messages/" + _ID + r"/[^/]{1,32}",

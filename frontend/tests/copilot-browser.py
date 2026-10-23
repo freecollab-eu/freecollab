@@ -20,7 +20,7 @@ import tempfile
 import threading
 import traceback
 from playwright.sync_api import expect,sync_playwright
-from ui_navigation import open_chat_tool
+from ui_navigation import open_conversation_work, open_chat_tool
 ROOT=Path(__file__).resolve().parents[2]
 PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec=importlib.util.spec_from_file_location('copilot_proof_helpers',Path(__file__).with_name('remote-sync-browser.py'))
@@ -98,7 +98,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 stage='honest no-key production panel'
                 page.goto(app,wait_until='domcontentloaded',timeout=90000);page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+owner['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
-                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);page.get_by_role('button',name='Open workspace tools',exact=True).click();page.locator('#work-tab-copilot').click()
+                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);open_conversation_work(page,'copilot')
                 panel=page.get_by_role('region',name='AI Copilot',exact=True)
                 expect(panel.get_by_text('AI configuration required',exact=True)).to_be_visible();assert not requests
                 results['honest_configuration_required_no_provider_calls_without_key']=True
@@ -167,7 +167,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 results['private_history_reset_retains_approved_shared_task']=True
                 stage='in-place message AI has reviewed context and no automatic provider request'
                 inline_writes_start=len(writes)
-                page.get_by_role('button',name='Close workspace tools',exact=True).click()
+                page.get_by_role('button',name='Close this work',exact=True).click()
                 composer=page.locator('.fc-chat-composer textarea');original_draft='My own wording stays.';composer.fill(original_draft)
                 article=page.locator('article.fc-chat-message').filter(has=page.locator('.fc-chat-message-content').filter(has_text=selected))
                 expect(article).to_have_count(1);article.locator('.fc-contextual-copilot-trigger').click()
@@ -231,7 +231,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
                     assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
                 results['inline_composer_sends_only_reviewed_draft_and_explicitly_replaces_without_posting']=True
-                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-documents').click()
+                open_conversation_work(page,'documents')
                 stage='actual native stack review sends only its explicitly chosen verified Yjs page to private HTTPS'
                 documents=page.get_by_role('region',name='Shared documents',exact=True)
                 stack_body='EXPLICIT VERIFIED STACK PAGE CONTENT';omitted_stack_body='OMITTED STACK PAGE MUST NEVER REACH AI';omitted_comment='STACK COMMENT IS NOT AN AI SOURCE'
@@ -240,12 +240,17 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(documents.get_by_label('Document text',exact=True)).to_be_editable();documents.get_by_label('Document text',exact=True).fill(body);expect(documents.get_by_text('All edits synchronized',exact=True)).to_be_visible()
                     if title=='Chosen stack page':
                         documents.get_by_label('Add a comment',exact=True).fill(omitted_comment);documents.get_by_role('button',name='Post comment',exact=True).click();expect(documents.get_by_text(omitted_comment,exact=True)).to_be_visible()
-                    documents.get_by_role('button',name='All documents',exact=True).click();expect(documents.get_by_role('region',name='Document stacks',exact=True)).to_be_visible()
-                documents.get_by_role('button',name='New stack',exact=True).click();documents.get_by_label('Stack name',exact=True).fill('Private proof stack');documents.get_by_role('button',name='Create stack',exact=True).click()
-                stack=documents.get_by_role('region',name='Private proof stack',exact=True);expect(stack).to_be_visible()
+                    # A comment can render before its native readback finishes.
+                    # The real export control becomes enabled only after that
+                    # busy operation completes; do not race the discard guard.
+                    expect(documents.get_by_role('button',name='Export Markdown',exact=True,include_hidden=True)).to_be_enabled()
+                    documents.get_by_role('button',name='Documents',exact=True).click();expect(documents.get_by_role('region',name='Document stacks',exact=True)).to_be_visible()
+                organize=documents.locator('details.fc-document-flow-organize');organize.locator('summary').click()
+                organize.get_by_role('button',name='New stack',exact=True).click();organize.get_by_label('Stack name',exact=True).fill('Private proof stack');organize.get_by_role('button',name='Create stack',exact=True).click()
+                stack=organize.get_by_role('region',name='Private proof stack',exact=True);expect(stack).to_be_visible()
                 organization=helpers.api(base,'GET','/channels/'+channel['id']+'/shared-document-organization',owner);stack_id=next(item['id'] for item in organization['stacks'] if item['title']=='Private proof stack')
                 for title in ('Chosen stack page','Omitted stack page'):
-                    documents.get_by_label('Move '+title+' to stack',exact=True).select_option(stack_id);expect(stack.get_by_role('button',name=re.compile('^'+title))).to_be_visible()
+                    organize.get_by_label('Move '+title+' to stack',exact=True).select_option(stack_id);expect(stack.get_by_role('button',name=re.compile('^'+title))).to_be_visible()
                 stack.get_by_text('Review this stack with AI',exact=True).click();stack_selection=stack.get_by_role('group',name='Pages included in AI review',exact=True)
                 stack_selection.get_by_label('Omitted stack page',exact=True).uncheck();expect(stack_selection.get_by_label('Chosen stack page',exact=True)).to_be_checked()
                 stack.locator('.fc-contextual-copilot-trigger').click();stack_ai=stack.locator('.fc-contextual-copilot-card');expect(stack_ai).to_have_attribute('aria-busy','false')
@@ -265,9 +270,9 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
                     assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1 and connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
                 results['actual_stack_ai_uses_only_selected_verified_page_not_unselected_pages_comments_or_native_writes']=True
-                page.locator('#work-tab-copilot').click()
+                open_conversation_work(page,'copilot')
                 stage='Grok connection preset edits the draft only and clears typed destination credentials'
-                page.get_by_role('button',name='Close workspace tools',exact=True).click();open_chat_tool(page,'Integrations')
+                page.get_by_role('button',name='Close this work',exact=True).click();open_chat_tool(page,'Integrations')
                 integrations=page.get_by_role('dialog',name='Integrations',exact=True)
                 integrations.get_by_role('button',name='Connection setup',exact=True).click()
                 setup=integrations.locator('.fc-connection-setup');expect(setup).to_have_attribute('aria-busy','false')
@@ -289,12 +294,12 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.get_by_label('Model',exact=True).fill('fixture-chat')
                 expect(setup.get_by_role('button',name='Discard changes and return to preparation',exact=True)).to_have_count(0)
                 integrations.get_by_role('button',name='Close integrations',exact=True).click()
-                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-copilot').click()
+                open_conversation_work(page,'copilot')
                 results['grok_preset_only_edits_draft_clears_secrets_without_save_or_xai_calls']=True
                 stage='saved Swedish language and responsive panel'
                 helpers.api(base,'PUT','/preferences/language',owner,{'locale':'sv'});page.reload(wait_until='domcontentloaded')
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=60000)
-                page.locator('button.fc-chat-topbar-action:has(svg.lucide-layers)').click();page.locator('#work-tab-copilot').click()
+                open_conversation_work(page,'copilot',locale='sv')
                 panel=page.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
                 expect(panel.get_by_role('group',name='Snabbval',exact=True)).to_be_visible();expect(panel.get_by_role('complementary',name='Innan du skickar till AI',exact=True)).to_contain_text('fixture-chat')
                 REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.parent/'copilot-desktop-sv.png'))

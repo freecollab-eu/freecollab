@@ -108,12 +108,12 @@ def main():
                 dialog = open_thread(root); expect(dialog.get_by_role('textbox', name='Reply in thread', exact=True)).to_have_value(draft)
                 for source, action in [(root, dialog.locator('.fc-chat-thread-parent').get_by_role('button', name='Save in document stack', exact=True)), (replies[-1], dialog.locator('[data-thread-reply="' + replies[-1]['id'] + '"]').get_by_role('button', name='Save in document stack', exact=True))]:
                     action.click(); expect(page.get_by_role('dialog', name='Thread', exact=True)).to_have_count(0)
-                    work = page.get_by_role('dialog', name='Workspace tools', exact=True)
-                    expect(work.get_by_role('tab', name='Documents', exact=True)).to_have_attribute('aria-selected', 'true')
+                    work = page.get_by_role('region', name='Work in this conversation', exact=True)
+                    expect(work).to_have_attribute('data-work-kind', 'documents'); expect(work.get_by_role('tablist')).to_have_count(0)
                     review = work.get_by_role('region', name='Save message in a document stack', exact=True)
                     expect(review.locator('blockquote')).to_have_text(source['content'])
                     expect(review.get_by_role('button', name='Save message reference', exact=True)).to_be_disabled()
-                    work.get_by_role('button', name='Close workspace tools', exact=True).click()
+                    work.get_by_role('button', name='Close this work', exact=True).click()
                     dialog = open_thread(root); expect(dialog.get_by_role('textbox', name='Reply in thread', exact=True)).to_have_value(draft)
                 dialog.get_by_role('button', name='Close thread', exact=True).click()
                 results['thread_switch_and_exact_parent_reply_stack_review_preserve_unsent_drafts'] = True

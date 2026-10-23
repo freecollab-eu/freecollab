@@ -1,6 +1,73 @@
 # FreeCollab validation record
 
+## Work inside the conversation — 2026-10-23
+
+The actual signed-in product and example installation now open native document,
+task and decision work beside their usable conversation. Message-derived work
+can be reopened at its source. The [flow contract](CONVERSATION_WORK.md) describes
+explicit saves, contextual management, native-only routing and current limits.
+
+Executed overlapping scopes for this increment:
+
+- **33 actual demo UI/API groups passed**, with all **558 bound source files**
+  matching the final runtime. Real source-created documents and tasks use the
+  persisted routing index; decisions retain canonical source provenance. Work
+  reopens after channel changes, native Yjs editing and message sending retain
+  the same editor DOM, dirty navigation is guarded, and the retained-draft
+  Swedish 320 px editor remains usable. The original worker, files, portraits,
+  provider boundary, independent visitor and reset checks remain. Actual request
+  pacing keeps the unchanged public limits; **zero HTTP 429 responses**, unexpected
+  external requests, retained credential accesses or browser errors occurred.
+- **474 frontend Node cases passed**, together with TypeScript. These include
+  scoped navigation guards, strict pending-write protection, atomic native and
+  encrypted document creation, exact resource targeting, and AI draft boundaries.
+- **15 normal-product browser groups passed**, with all **555 bound files**
+  unchanged through the run. Existing continuity, account isolation, profile-photo
+  and Swedish 320 px checks remain. New actual flows retain the same editor DOM
+  while sending a message, hard-block pending native writes, and preserve unsent
+  document/task/decision drafts across work, channel, workspace and exact-target
+  navigation. Real task and decision saves persist through their native APIs.
+- **Five built-App handoff groups passed** with **330 source hashes and 480
+  complete build-input hashes** unchanged. Application and trusted-embed builds
+  passed. The exact native product PNG, dimensions, real iframe handoff,
+  English/Swedish, reload and documentation remain checked; expected iframe
+  navigation is inspected and aborted before a sample visit.
+- **136 backend channel/security/routing cases passed** on their final bound
+  source. Eight new real registered-user cases create native rooms and both DM
+  entry points, then share actual documents, tasks and decisions. New native
+  rooms no longer receive an unused legacy envelope. Existing legacy envelopes
+  remain untouched and still reject the native routing API. The routing slice
+  includes fresh membership/DM-block races, unavailable targets, idempotency,
+  authorization, export and retention. A separate **19-case demo suite passed**.
+- Existing native browser suites passed after moving their real entry points:
+  projects/tasks **10**, shared documents **7**, document organization **15**,
+  workflows **6**, activity **3**, Copilot **15**, language **16**, apps **9**,
+  data controls **6**, personal home **7**, native push **7** and calling **11**.
+  Native push/calling use isolated vendor/device fixtures; these results do not
+  establish physical-device or live customer-provider acceptance.
+- The actual Swedish 320 px mobile editor retained a multiline conversation
+  draft and exposed **255 px of document text**, compared with 40 px before the
+  intent-aware readiness scroll. Later composer/comment focus remains respected.
+  The same visibility assertion was retained rather than reduced.
+- The complete existing room browser passed **five checks**, including a held
+  real file response that cannot reveal old private material after channel change.
+- A freshly built standalone SDK archive was checked against all **59 packed
+  file bytes**, exact inventory and canonical file modes; its source digest
+  matched all **23 SDK source files**. The encrypted Connect proof retains its
+  strict exact-package SHA assertion with that verified archive. This artifact
+  check is separate from a complete real-encryption browser run.
+
+The fixtures use disposable accounts, databases, generated keys and owned local
+services. Earlier sections describe their historical source states, rather than
+additional complete runs of this increment. Public deployment and exact-head CI
+are recorded separately; no release or main-branch merge is implied. An unchanged
+seven-group communication proof passed on the final source, as did a diagnostic
+run. One earlier historical-reply focus assertion failed intermittently and was
+not reproduced; no runtime fix for that observation is claimed.
+
 ## Shared product room and personal photos — 2026-10-23
+
+**Historical source:** this section predates the inline conversation-work increment above.
 
 The actual product room keeps its conversation and composer mounted beside
 existing channel files, one shared document with its real Yjs excerpt and stack,

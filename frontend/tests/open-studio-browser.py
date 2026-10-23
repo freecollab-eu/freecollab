@@ -124,7 +124,12 @@ with sync_playwright() as p:
         held = []
         page.route('**/api/files/channels/' + room['id'], lambda route: held.append(route))
         focus.click()
-        page.wait_for_function('() => !document.querySelector(".fc-chat-shared-material")')
+        # Inline work keeps the authorized material reader mounted during
+        # focus mode. Re-enter its real channel to hold a fresh scoped read.
+        choose(other)
+        with page.expect_request(lambda request: request.method == 'GET' and request.url.split('?')[0] == BASE + '/api/files/channels/' + room['id']):
+            choose(room)
+        expect(material).to_have_count(0)
         choose(other)
         assert held, 'Expected delayed shared-material request was not held'
         with page.expect_response(lambda response: '/files/channels/' + room['id'] in response.url):

@@ -56,6 +56,48 @@ test('secure document creation sends only an authenticated opaque reference to t
   assert.ok(!f.state.requests[0].options.body.includes('private'));
 });
 
+test('explicit native document creation commits the reviewed title and body in one initial Yjs update', async () => {
+  const f = fixture({ encrypted: false });
+  await f.sharedDocumentsApi.create('channel', '  Courtyard brief  ', 'Reviewed message\n\nA real working draft.');
+  assert.equal(f.state.requests.length, 1); assert.equal(f.state.events.length, 0);
+  const body = JSON.parse(f.state.requests[0].options.body), doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, Uint8Array.from(atob(body.update_base64), character => character.charCodeAt(0)));
+    assert.equal(doc.getText('title').toString(), 'Courtyard brief');
+    assert.equal(doc.getText('body').toString(), 'Reviewed message\n\nA real working draft.');
+  } finally { doc.destroy(); }
+});
+
+test('explicit encrypted document draft stays in one verified encrypted event and an opaque native reference', async () => {
+  const f = fixture(); await f.sharedDocumentsApi.create('channel', 'Private brief', 'Reviewed private body');
+  assert.equal(f.state.events.length, 1); assert.equal(f.state.requests.length, 1);
+  const doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, Uint8Array.from(atob(f.state.events[0].content.fields.update_base64), character => character.charCodeAt(0)));
+    assert.equal(doc.getText('title').toString(), 'Private brief');
+    assert.equal(doc.getText('body').toString(), 'Reviewed private body');
+    assert.deepEqual(Object.keys(JSON.parse(f.state.requests[0].options.body)).sort(), ['id', 'matrix_event_id', 'update_id']);
+    assert.ok(!f.state.requests[0].options.body.includes('private'));
+  } finally { doc.destroy(); }
+});
+
+test('new document body is bounded before any native write or encrypted event', async () => {
+  for (const encrypted of [false, true]) {
+    const f = fixture({ encrypted });
+    await assert.rejects(f.sharedDocumentsApi.create('channel', 'Brief', 'x'.repeat(50001)), /limit|long|50,000|50000/i);
+    assert.equal(f.state.requests.length, 0); assert.equal(f.state.events.length, 0);
+  }
+});
+
+test('existing two-argument document creation retains an empty initial body', async () => {
+  const f = fixture({ encrypted: false }); await f.sharedDocumentsApi.create('channel', 'Existing workflow');
+  const body = JSON.parse(f.state.requests[0].options.body), doc = new Y.Doc();
+  try {
+    Y.applyUpdate(doc, Uint8Array.from(atob(body.update_base64), character => character.charCodeAt(0)));
+    assert.equal(doc.getText('body').toString(), '');
+  } finally { doc.destroy(); }
+});
+
 test('changing account during the second crypto acquisition prevents encrypted content reaching the replacement identity', async () => {
   const f = fixture({ cryptoChanged: state => { if (state.loads === 2) state.token = 'replacement-account'; } });
   await assert.rejects(f.sharedDocumentsApi.create('channel', 'Do not transfer this private draft'), /account changed/);

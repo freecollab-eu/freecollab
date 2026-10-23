@@ -20,6 +20,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import open_conversation_work
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('private_task_proof_helpers', Path(__file__).with_name('remote-sync-browser.py'))
@@ -34,8 +35,7 @@ def login(page, app, user, workspace):
     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
     page.get_by_label('Email', exact=True).fill(user['email']); page.get_by_label('Password', exact=True).fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
-    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-    panel = page.get_by_role('dialog', name='Workspace tools', exact=True)
+    panel = open_conversation_work(page, 'tasks')
     expect(panel).to_be_visible()
     return panel
 
@@ -114,7 +114,8 @@ with Session(engine) as session:
                     with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/channels/' + channel['id'] + '/projects') as saved:
                         form.get_by_role('button', name='Save project', exact=True).click()
                     assert saved.value.status == 200; project = saved.value.json()
-                    expect(panel.get_by_role('heading', name='Launch project', exact=True)).to_be_visible()
+                    assert project['fields']['color'] == 'blue'
+                    expect(panel.get_by_role('button', name='Launch project', exact=True)).to_have_attribute('aria-pressed', 'true')
                     results['actual_project_create_color_and_channel_scope'] = True
                     stage = 'task assignment, deadline, checklist and real links'
                     panel.get_by_role('button', name='New task', exact=True).click()
@@ -150,9 +151,9 @@ with Session(engine) as session:
                     detail.get_by_role('button', name='Close linked decision', exact=True).click()
                     expect(card.get_by_role('button', name='Open decision Launch approval', exact=True)).to_be_focused()
                     results['linked_file_download_bytes_and_current_decision_details'] = True
-                    stage = 'Kanban move and acknowledged checklist edit'
+                    stage = 'native task stage move and acknowledged checklist edit'
                     card.get_by_label('Move task Prepare launch', exact=True).select_option('doing')
-                    expect(panel.get_by_role('region', name='In progress', exact=True).get_by_role('heading', name='Prepare launch', exact=True)).to_be_visible()
+                    expect(card.get_by_label('Move task Prepare launch', exact=True)).to_have_value('doing')
                     with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path.endswith('/tasks')) as completed:
                         card.get_by_label('Review launch brief', exact=True).click()
                     assert completed.value.status == 200
@@ -161,13 +162,14 @@ with Session(engine) as session:
                     history = panel.get_by_role('region', name='Project or task revision history', exact=True)
                     expect(history).to_contain_text('Version 3'); expect(history).to_contain_text('Version 1')
                     panel.get_by_role('button', name='Close revision history', exact=True).click()
-                    results['kanban_and_checklist_updates_append_immutable_history'] = True
+                    results['native_stage_and_checklist_updates_append_immutable_history'] = True
                     stage = 'two browsers edit concurrently without silent overwrite'
                     card.get_by_role('button', name='Edit', exact=True).click()
                     owner_editor = panel.get_by_role('form', name='Edit task', exact=True)
                     owner_editor.get_by_label('Task title', exact=True).fill('Unsaved owner draft')
                     peer_panel = login(peer_page, app, peer, workspace)
-                    peer_panel.get_by_label('Choose project', exact=True).select_option(project['id'])
+                    peer_panel.get_by_role('button', name='Launch project', exact=True).click()
+                    peer_panel.locator('.fc-project-flow-task').filter(has_text='Prepare launch').click()
                     peer_card = peer_panel.locator('.fc-project-card').filter(has=peer_page.get_by_role('heading', name='Prepare launch', exact=True))
                     peer_card.get_by_role('button', name='Edit', exact=True).click()
                     peer_panel.get_by_label('Task title', exact=True).fill('Peer revision')
@@ -176,17 +178,21 @@ with Session(engine) as session:
                     owner_editor.get_by_role('button', name='Save task', exact=True).click()
                     expect(panel.get_by_role('alert')).to_contain_text('changed')
                     expect(owner_editor.get_by_label('Task title', exact=True)).to_have_value('Unsaved owner draft')
+                    page.once('dialog', lambda prompt: prompt.accept())
                     panel.get_by_role('button', name='Reload current revisions', exact=True).click()
                     expect(panel.get_by_role('form', name='Edit task', exact=True)).to_have_count(0)
                     card = panel.locator('.fc-project-card').filter(has=page.get_by_role('heading', name='Peer revision', exact=True))
                     expect(card).to_be_visible(); card.get_by_label('Move task Peer revision', exact=True).select_option('done')
-                    expect(panel.get_by_role('region', name='Done', exact=True).get_by_role('heading', name='Peer revision', exact=True)).to_be_visible()
+                    expect(card.get_by_label('Move task Peer revision', exact=True)).to_have_value('done')
                     results['two_browser_stale_revision_refused_until_explicit_reload'] = True
                     stage = 'archive and reopen keep task history'
                     card.get_by_role('button', name='Archive', exact=True).click()
                     panel.get_by_role('group', name='Confirm archive change', exact=True).get_by_role('button', name='Archive item', exact=True).click()
+                    panel.get_by_role('button', name='All tasks', exact=True).click()
                     expect(panel.get_by_role('heading', name='Peer revision', exact=True)).to_have_count(0)
+                    panel.locator('details.fc-project-flow-options > summary').click()
                     panel.get_by_label('Show archived tasks', exact=True).check()
+                    panel.locator('.fc-project-flow-task').filter(has_text='Peer revision').click()
                     card = panel.locator('.fc-project-card').filter(has=page.get_by_role('heading', name='Peer revision', exact=True))
                     expect(card.get_by_label('Move task Peer revision', exact=True)).to_be_disabled()
                     card.get_by_role('button', name='Reopen', exact=True).click()
@@ -220,9 +226,13 @@ with Session(engine) as session:
                     assert panel.evaluate('element => element.scrollWidth <= element.clientWidth + 1')
                     panel.get_by_label('Show archived tasks', exact=True).focus()
                     for key in ['Tab', 'Tab', 'Shift+Tab']:
-                        page.keyboard.press(key); assert panel.evaluate('element => element.contains(document.activeElement)')
+                        page.keyboard.press(key)
+                        assert page.evaluate('document.activeElement!==document.body&&!document.activeElement.closest("[inert]")'), 'Inline task keyboard navigation lost an interactive control'
+                    composer = page.locator('.fc-chat-composer textarea')
+                    composer.focus(); expect(composer).to_be_focused()
+                    expect(panel.get_by_role('tablist')).to_have_count(0)
                     page.screenshot(path=str(REPORT.with_name('project-tasks-mobile.png')))
-                    results['responsive_320px_kanban_and_keyboard_focus'] = True
+                    results['responsive_320px_inline_task_and_interactive_conversation_focus'] = True
                     stage = 'stale task links recheck revoked channel membership'
                     revoked = '''import os
 from sqlmodel import Session

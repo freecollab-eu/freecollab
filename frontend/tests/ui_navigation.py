@@ -37,6 +37,37 @@ def open_chat_tool(page, name, timeout=90000):
     reveal_chat_tool(page, name, timeout).click()
 
 
+def open_conversation_work(page, kind, locale='en'):
+    """Open an actual inline work action; the conversation stays available."""
+    chat_ready(page)
+    close_channels(page)
+    names = {
+        'documents': ('Add a document', 'Lägg till ett dokument'),
+        'tasks': ('Next step', 'Nästa steg'),
+        'decisions': ('Decision', 'Beslut'),
+        'meetings': ('Meet', 'Mötas'),
+        'feed': ('Channel activity', 'Aktivitet i samtalet'),
+        'copilot': ('AI settings', 'AI-inställningar'),
+        'cloud': ('Cloud files', 'Molnfiler'),
+        'external-meetings': ('Meeting services', 'Mötestjänster'),
+        'workflows': ('Workflows', 'Arbetsflöden'),
+        'apps': ('Apps & automation', 'Appar och automatisering'),
+        'data': ('Data & retention', 'Data och lagring'),
+        'mobile': ('Mobile & offline', 'Mobil och offline'),
+    }
+    position = 1 if locale == 'sv' else 0
+    actions = page.locator('.fc-chat-flow-actions')
+    name = names[kind][position]
+    if kind in ('documents', 'tasks', 'decisions', 'meetings'):
+        actions.get_by_role('button', name=name, exact=True).click()
+    else:
+        actions.get_by_role('button', name=('Mer' if position else 'More'), exact=True).click()
+        actions.get_by_role('menuitem', name=name, exact=True).click()
+    region = page.get_by_role('region', name=('Arbete i det här samtalet' if position else 'Work in this conversation'), exact=True)
+    region.wait_for(state='visible')
+    return region
+
+
 def open_channels(page, timeout=90000):
     chat_ready(page, timeout)
     navigation = page.get_by_role('navigation', name=_CHANNELS)

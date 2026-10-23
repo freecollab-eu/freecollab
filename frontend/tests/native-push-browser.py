@@ -23,7 +23,7 @@ from playwright.sync_api import sync_playwright, expect
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('native_push_browser_fixture',Path(__file__).with_name('customer-sso-browser.py'))
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
-PYTHON=str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable
+PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 REPORT=ROOT.parent/'.freecollab/proof-results/native-push-browser.json'
 TOKEN='synthetic_android_registration_'+'x'*80
 
@@ -121,12 +121,12 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 expect(page.get_by_role('button',name='Open call',exact=True)).to_be_visible(timeout=30000)
                 assert page.evaluate('window.__nativeMedia')==0
                 page.get_by_role('button',name='Open call',exact=True).click()
-                work=page.get_by_role('dialog',name='Workspace tools',exact=True)
+                work=page.get_by_role('region',name='Work in this conversation',exact=True)
                 expect(work).to_be_visible(timeout=30000)
-                expect(work.get_by_role('combobox',name='Workspace tool',exact=True)).to_have_value('meetings')
+                expect(work).to_have_attribute('data-work-kind','meetings'); expect(work.get_by_role('tablist')).to_have_count(0)
                 assert page.evaluate('window.__nativeMedia')==0
                 checks.append('generic incoming-call reference resolves current authority and opens real meeting controls without automatic media/admission')
-                work.get_by_role('button',name='Close workspace tools',exact=True).click()
+                work.get_by_role('button',name='Close this work',exact=True).click()
                 stage='expired action'
                 p.api(base,'POST','/meetings/'+meeting['id']+'/end',host,{})
                 page.evaluate('(item)=>window.__nativePending.push(item)',incoming)

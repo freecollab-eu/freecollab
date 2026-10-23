@@ -307,6 +307,16 @@ def seed_demo_workspace(session, *, visit_id: str, user_id: str, workspace_id: s
             avatar = set_avatar_bytes(session, identifier, (ASSET_DIRECTORY / (portrait + ".png")).read_bytes())
             file_ids.append(avatar.blob_id)
         session.flush()
+        from .conversation_work import attach_reference
+        reference_ids = []
+        for source_id, kind, resource_id in (
+            (messages[0].id, "document", examples["document_ids"][0]),
+            (messages[2].id, "task", examples["task_ids"][0]),
+            (messages[4].id, "decision", examples["decision_id"]),
+        ):
+            reference, _, _ = attach_reference(session, studio.id, visitor, source_id, kind, resource_id)
+            reference_ids.append(reference.id)
+        examples["conversation_work_reference_ids"] = reference_ids
         return {"channel_id": studio.id, "example_ids": examples, "file_ids": file_ids}
     except BaseException:
         for file_id in file_ids:

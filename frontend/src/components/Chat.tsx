@@ -26,6 +26,9 @@ import {
   ArrowDown,
   Plug,
   Layers,
+  FileText,
+  CheckSquare,
+  Video,
   Smartphone,
   MoreHorizontal,
   Compass,
@@ -53,7 +56,11 @@ import { IntegrationsPanel } from './IntegrationsPanel';
 import { WorkspaceLaunchPanel } from './WorkspaceLaunchPanel';
 import { WorkspaceFeedbackDialog } from './WorkspaceFeedbackDialog';
 import { shouldSuggestWorkspaceLaunch } from '../lib/workspace-launch';
-import { WorkHub, type WorkHubTab } from './WorkHub';
+import { WorkHub, type WorkHubTab, type ConversationResourceSelection } from './WorkHub';
+import { ConversationWorkReferences, useConversationWorkReferences, type ResolvedConversationWork } from './ConversationWorkReferences';
+import { conversationWorkApi } from '../lib/conversation-work-api';
+import { mayLeaveConversationWork } from '../lib/conversation-navigation';
+import { allowsChannelMaterial } from '../lib/chat-shared-material';
 import { createWorkHubViewMemory } from '../lib/work-hub-view';
 import { HistoricalSlackDetails } from './HistoricalSlackDetails';
 import { ChatProductivityPanel } from './ChatProductivityPanel';
@@ -72,6 +79,7 @@ import { Avatar } from './Avatar';
 import { ContextualCopilot } from './ContextualCopilot';
 import { copilotIntents } from '../lib/copilot-intents';
 import '../styles/chat.css';
+import '../styles/conversation-work.css';
 
 interface ChatProps {
   onLogout: (warning?: string) => void;
@@ -130,13 +138,26 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [workHubTask, setWorkHubTask] = useState<{ projectId?: string; taskId?: string } | null>(null);
   const [workHubDocument, setWorkHubDocument] = useState<{ documentId?: string; stackId?: string; workspaceId: string; channelId: string; token: string } | null>(null);
   const [materialRefresh, setMaterialRefresh] = useState(0);
+  const [flowMoreOpen, setFlowMoreOpen] = useState(false);
+  const flowActionsRef = useRef<HTMLDivElement>(null), flowMoreTrigger = useRef<HTMLButtonElement>(null);
+  const [flowNotice, setFlowNotice] = useState('');
+  const [workHubSource, setWorkHubSource] = useState<{ message: Message; token: string; workspaceId: string } | null>(null);
+  const flowConversationMoved = useRef(false);
   const workHubOrigin = useRef<{ element: HTMLElement | null; top: number; workspaceId: string; channelId: string; token: string } | null>(null);
   const initialTools = useRef({ token: api.getAccessToken(), work: initialWorkHubTab, integration: initialIntegrationTab, applied: false });
   const [stackMessageEntry, setStackMessageEntry] = useState<{ workspaceId: string; channelId: string; messageId: string; token: string } | null>(null);
   const stackSourceRequest = useRef(0);
+  const workContextChannel = useRef<string | null>(null);
   const workHubViews = useRef<ReturnType<typeof createWorkHubViewMemory> | null>(null);
   if (!workHubViews.current) workHubViews.current = createWorkHubViewMemory();
+  useEffect(() => {
+    if (!flowMoreOpen) return;
+    const outside = (event: PointerEvent) => { if (!flowActionsRef.current?.contains(event.target as Node)) setFlowMoreOpen(false); };
+    document.addEventListener('pointerdown', outside);
+    return () => document.removeEventListener('pointerdown', outside);
+  }, [flowMoreOpen]);
   const workHubIdentity = { userId: api.getCurrentUserId(), credential: api.getAccessToken() };
+  const workReferences = useConversationWorkReferences(activeChannel, workspace?.id, materialRefresh);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [mobileNotice, setMobileNotice] = useState('');
@@ -255,7 +276,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   useEffect(() => {
     setActiveChannel(null); setChannels([]); setMessages([]); setHistoryOpen(false); setIntegrationsOpen(false); setWorkHubOpen(false); setCollaborationTab(null); setLaunchOpen(false); setFeedbackOpen(false); setIntegrationEntry(null);
-    workHubViews.current?.clear(); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null;
+    workHubViews.current?.clear(); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubSource(null); setFlowNotice(''); setFlowMoreOpen(false);
     draftsRef.current = {}; readingPositionsRef.current.clear(); roomOverviewRef.current = false;
     setRoomArrangements({}); setMaterialChannelId(null);
     if (workspace) { setLoading(true); void loadChannels(); } else setLoading(workspacesLoading);
@@ -310,7 +331,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const openTools = (event: Event) => {
       const detail = (event as CustomEvent<{channel: Channel; tab: WorkHubTab}>).detail;
       if (!detail?.channel || detail.channel.workspace_id !== workspaceRef.current || embeddedChannelId && detail.channel.id !== embeddedChannelId || !['feed', 'workflows', 'cloud'].includes(detail.tab)) return;
-      selectChannel(detail.channel); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab(detail.tab); setWorkHubOpen(true);
+      if (!mayLeaveConversationWork() || !selectChannel(detail.channel, true)) return;
+      setWorkHubSource(null); setCollaborationTab(null); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab(detail.tab); setWorkHubOpen(true);
     };
     const reload = () => { void loadChannels(); };
     window.addEventListener('freecollab:channels-updated', reload);
@@ -323,9 +345,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const openDecision = (event: Event) => {
       const detail = (event as CustomEvent<{channel_id:string;decision_id:string}>).detail;
       const channel = channels.find(item => item.id === detail?.channel_id);
-      if (!channel) return;
-      setHistoryOpen(false); setDecisionSource(undefined); setFocusDecisionId(detail.decision_id);
-      setActiveChannel(channel); setCollaborationTab('decisions');
+      if (!channel || !mayLeaveConversationWork() || !selectChannel(channel, true)) return;
+      setWorkHubOpen(false); setWorkHubSource(null); setWorkHubDocument(null); setWorkHubTask(null);
+      setHistoryOpen(false); setDecisionSource(undefined); setFocusDecisionId(detail.decision_id); setCollaborationTab('decisions');
     };
     window.addEventListener('freecollab:open-decision',openDecision);
     return () => window.removeEventListener('freecollab:open-decision',openDecision);
@@ -336,7 +358,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       const detail=(event as CustomEvent<{channel_id:string;kind:string;id:string;parent_id?:string}>).detail;
       const channel=channels.find(item=>item.id===detail?.channel_id);
       if(!channel||embeddedChannelId&&channel.id!==embeddedChannelId)return;
-      setHistoryOpen(false);selectChannel(channel);
+      if (!mayLeaveConversationWork() || !selectChannel(channel, true)) return;
+      setWorkHubSource(null); setCollaborationTab(null); setHistoryOpen(false);
       if(['file','file-content'].includes(detail.kind)){setToolPanel('files');return;}
       const target:Record<string,WorkHubTab>={document:'documents',task:'tasks',project:'tasks',feed:'feed'};
       if(target[detail.kind]){setWorkHubTask(null);setWorkHubDocument(null);workHubOrigin.current=null;setWorkHubInitialTab(target[detail.kind]);setWorkHubOpen(true);}
@@ -382,7 +405,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     pendingPersonalSource.current = null;
     if (!channel) { setActionError('This source is no longer available in your current workspace.'); return; }
     if (target.kind === 'message' && target.item_id) pendingJumpRef.current = { id: target.item_id, channel_id: channel.id, author_id: '', content: '', encrypted: !!channel.secure, created_at: '' };
-    selectChannel(channel);
+    if (!mayLeaveConversationWork() || !selectChannel(channel, true)) return;
+    setWorkHubSource(null); setCollaborationTab(null);
     if (target.kind === 'message' && activeChannelRef.current === channel.id) void loadMessages(channel.id);
     if (target.kind === 'task' || target.kind === 'meeting') { setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubTask(target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : null); setWorkHubInitialTab(target.kind === 'task' ? 'tasks' : 'meetings'); setWorkHubOpen(true); }
     if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: channel.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
@@ -478,8 +502,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   useEffect(() => {
     setMessages([]);
-    setHasOlder(false); setLoadingOlder(false); setSelectedMentions([]); setMentionOpen(false); setCollaborationTab(null);
-    setPendingMessages(0); setAtLatest(true); setWorkHubDocument(null); workHubOrigin.current = null;
+    setHasOlder(false); setLoadingOlder(false); setSelectedMentions([]); setMentionOpen(false);
+    setPendingMessages(0); setAtLatest(true);
+    // Explicit navigation clears the old editor synchronously, before setting
+    // its new exact target. Authoritative channel changes still purge it here.
+    if (workContextChannel.current !== (activeChannel?.id || null)) resetConversationWork();
+    workContextChannel.current = activeChannel?.id || null;
     setHighlightedMessage(null);
     setCommandOpen(false);
     composingRef.current = false;
@@ -938,9 +966,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const openHistoryMessage = (message: Message) => {
     const channel = channels.find(item => item.id === message.channel_id);
     if (!channel) return;
+    if (!mayLeaveConversationWork()) return;
     pendingJumpRef.current = message;
     setHistoryOpen(false); setCollaborationTab(null);
-    if (activeChannelRef.current === channel.id) void loadMessages(channel.id); else selectChannel(channel);
+    if (activeChannelRef.current === channel.id) void loadMessages(channel.id); else if (!selectChannel(channel)) pendingJumpRef.current = null;
   };
 
   const loadReactions = async (messageId: string) => {
@@ -1216,10 +1245,21 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     } finally { setCreating(false); }
   };
 
-  const selectChannel = (channel: Channel) => {
-    if (embeddedChannelId && channel.id !== embeddedChannelId) return;
+  const resetConversationWork = () => {
+    setWorkHubOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setWorkHubSource(null);
+    setCollaborationTab(null); setDecisionSource(undefined); setFocusDecisionId(undefined);
+    workHubOrigin.current = null; setFlowMoreOpen(false); setFlowNotice('');
+  };
+  const selectChannel = (channel: Channel, preflightDone = false) => {
+    const token = api.getAccessToken(), actor = api.getCurrentUserId();
+    if (embeddedChannelId && channel.id !== embeddedChannelId) return false;
+    if (channel.id !== activeChannelRef.current && !preflightDone && !mayLeaveConversationWork()) return false;
+    if (token !== api.getAccessToken() || actor !== api.getCurrentUserId()) return false;
+    if (channel.id !== activeChannelRef.current) resetConversationWork();
+    workContextChannel.current = channel.id;
     setActiveChannel(channel);
     setSidebarOpen(false);
+    return true;
   };
 
   const rememberWorkHubTab = (tab: WorkHubTab) => {
@@ -1230,18 +1270,18 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const openWorkHub = () => {
-    if (!activeChannel || !workspace || !workHubIdentity.credential || !workHubIdentity.userId ||
-        (activeChannel.workspace_id && activeChannel.workspace_id !== workspace.id) ||
-        workHubIdentity.credential !== api.getAccessToken() || workHubIdentity.userId !== api.getCurrentUserId()) return;
-    setWorkHubInitialTab(workHubViews.current?.recall({ ...workHubIdentity, workspaceId: workspace.id, channelId: activeChannel.id, secure: !!activeChannel.secure }) ?? 'tasks');
-    setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubOpen(true); setToolPanel(null); setThreadMessage(null);
+    if (!activeChannel || !workspace) return;
+    openRoomWork(workHubViews.current?.recall({ ...workHubIdentity, workspaceId: workspace.id, channelId: activeChannel.id, secure: !!activeChannel.secure }) ?? 'documents');
   };
 
-  const openRoomWork = (tab: 'documents' | 'tasks', target: { documentId?: string; stackId?: string; taskId?: string; projectId?: string } = {}) => {
+  const openRoomWork = (tab: WorkHubTab, target: { documentId?: string; stackId?: string; taskId?: string; projectId?: string } = {}, source?: Message) => {
+    if (!mayLeaveConversationWork()) return;
     const token = api.getAccessToken();
     if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id ||
         (activeChannel.workspace_id && activeChannel.workspace_id !== workspace.id) || workHubIdentity.credential !== token || workHubIdentity.userId !== api.getCurrentUserId()) return;
-    roomOverviewRef.current = false;
+    roomOverviewRef.current = false; flowConversationMoved.current = false;
+    setWorkHubSource(source && source.channel_id === activeChannel.id && !source.deleted && !source.locked ? { message: source, token, workspaceId: workspace.id } : null);
+    setCollaborationTab(null); setFlowMoreOpen(false); setFlowNotice('');
     workHubOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
       top: timelineRef.current?.scrollTop || 0, token, workspaceId: workspace.id, channelId: activeChannel.id };
     setWorkHubDocument(tab === 'documents' ? { documentId: target.documentId, stackId: target.stackId, token, workspaceId: workspace.id, channelId: activeChannel.id } : null);
@@ -1251,13 +1291,65 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   const closeWorkHub = () => {
     const origin = workHubOrigin.current; workHubOrigin.current = null;
-    setWorkHubOpen(false); setStackMessageEntry(null); setWorkHubDocument(null); setMaterialRefresh(value => value + 1);
+    const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
+    setWorkHubOpen(false); setCollaborationTab(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
     requestAnimationFrame(() => {
-      if (!origin || origin.token !== api.getAccessToken() || origin.workspaceId !== workspaceRef.current || origin.channelId !== activeChannelRef.current) return;
-      if (timelineRef.current) timelineRef.current.scrollTop = origin.top;
-      if (origin.element?.isConnected) origin.element.focus({ preventScroll: true });
+      if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
+      if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
+      const fallback = timelineRef.current?.closest('.fc-chat')?.querySelector<HTMLElement>('[data-conversation-work-return]');
+      if (flowConversationMoved.current) inputRef.current?.focus({ preventScroll: true });
+      else if (origin?.element?.isConnected) origin.element.focus({ preventScroll: true });
+      else (fallback || inputRef.current)?.focus({ preventScroll: true });
       handleTimelineScroll();
     });
+  };
+
+  const revealFlowSource = async (messageId: string) => {
+    const channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken(), request = ++stackSourceRequest.current;
+    if (!channelId || !workspaceId || !token || activeChannelRef.current !== channelId || workspaceRef.current !== workspaceId) return;
+    flowConversationMoved.current = true;
+    const element = document.getElementById('message-' + messageId);
+    if (element) { element.scrollIntoView({ block: 'center', behavior: scrollBehavior() }); element.focus({ preventScroll: true }); }
+    else {
+      const current = () => request === stackSourceRequest.current && token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current;
+      try {
+        const source = await api.request<Message>('/messages/' + encodeURIComponent(messageId));
+        if (!current()) return;
+        if (source.id !== messageId || source.channel_id !== channelId || source.deleted || source.locked) throw new Error('This source message is no longer available.');
+        // Resolve the actual parent before loading roots, while keeping the
+        // document mounted. loadMessages opens the genuine saved reply thread.
+        pendingJumpRef.current = source;
+        await loadMessages(channelId);
+      } catch (failure) { if (current()) setActionError(failure instanceof Error ? failure.message : 'This source message is no longer available.'); }
+    }
+  };
+  const activeWorkSource = workHubSource?.token === api.getAccessToken() && workHubSource.workspaceId === workspace?.id && workHubSource.message.channel_id === activeChannel?.id
+    ? messages.find(row => row.id === workHubSource.message.id && !row.deleted && !row.locked) || null : null;
+  const attachConversationWork = async (resource: ConversationResourceSelection) => {
+    const source = activeWorkSource, channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken();
+    if (!source || !channelId || !workspaceId || !token) return;
+    if (!activeChannel || !allowsChannelMaterial(activeChannel, workspaceId)) { setFlowNotice(t('This work stays encrypted. Message links are not yet available in encrypted conversations.')); return; }
+    try {
+      await conversationWorkApi.create(channelId, { source_message_id: source.id, resource_kind: resource.kind, resource_id: resource.id });
+      if (token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current) { setMaterialRefresh(value => value + 1); setFlowNotice(t('Linked to the original message.')); }
+    } catch (failure) {
+      if (token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current) setFlowNotice(t('The work is saved. Its message link could not be saved. Use Link this work to the message to retry.'));
+    }
+  };
+  const openConversationDecision = (source?: Message, decisionId?: string, tab: 'decisions' | 'pins' = 'decisions') => {
+    if (!activeChannel || !workspace || !mayLeaveConversationWork()) return;
+    workHubOrigin.current = {element: document.activeElement instanceof HTMLElement ? document.activeElement : null, top: timelineRef.current?.scrollTop || 0, token: api.getAccessToken()!, workspaceId: workspace.id, channelId: activeChannel.id};
+    flowConversationMoved.current = false;
+    setWorkHubOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setFlowMoreOpen(false); setFlowNotice('');
+    setDecisionSource(source?.channel_id === activeChannel.id && !source.deleted && !source.locked ? source : undefined);
+    setFocusDecisionId(decisionId || undefined); setCollaborationTab(tab); setToolPanel(null); setThreadMessage(null);
+  };
+  const openReferencedWork = (row: ResolvedConversationWork) => {
+    const source = messages.find(item => item.id === row.reference.source_message_id && !item.deleted && !item.locked);
+    if (!source) return;
+    if (row.reference.resource_kind === 'decision') { openConversationDecision(undefined, row.reference.resource_id); return; }
+    openRoomWork(row.reference.resource_kind === 'document' ? 'documents' : 'tasks', row.reference.resource_kind === 'document'
+      ? { documentId: row.reference.resource_id } : { taskId: row.reference.resource_id, projectId: row.reference.project_id || undefined }, source);
   };
 
   useEffect(() => { setStackMessageEntry(null); ++stackSourceRequest.current; }, [workspace?.id, activeChannel?.id]);
@@ -1268,30 +1360,17 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   }, []);
 
   const saveMessageInStack = (message: Message) => {
+    if (!mayLeaveConversationWork()) return;
     const token = api.getAccessToken();
     if (!token || !workspace || !activeChannel || activeChannel.secure || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id
         || workHubIdentity.credential !== token || message.channel_id !== activeChannel.id || message.deleted || message.locked) return;
     setStackMessageEntry({ workspaceId: workspace.id, channelId: activeChannel.id, messageId: message.id, token });
+    setWorkHubSource(null); setCollaborationTab(null); setFlowMoreOpen(false);
     setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab('documents'); setWorkHubOpen(true); setToolPanel(null); setMessageActionsOpen(null); setThreadMessage(null);
   };
 
   const renderThreadStackAction = (message: Message) => activeChannel && !activeChannel.secure && !message.deleted && !message.locked
     ? <button type="button" className="fc-icon-button fc-chat-thread-stack" aria-label={t('Save in document stack')} title={t('Save in document stack')} onClick={() => saveMessageInStack(message)}><Layers size={15} /></button> : null;
-
-  const revealStackMessage = async (messageId: string) => {
-    const channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken(), request = ++stackSourceRequest.current;
-    if (!channelId || !workspaceId || !token || activeChannel?.secure || activeChannelRef.current !== channelId || workspaceRef.current !== workspaceId) return;
-    // WorkHub checks unsaved edits synchronously before calling this handler.
-    // Close before awaiting, so no later editor changes can be discarded by it.
-    setWorkHubOpen(false); setStackMessageEntry(null); setWorkHubDocument(null); workHubOrigin.current = null; setMaterialRefresh(value => value + 1); setActionError('');
-    const current = () => request === stackSourceRequest.current && token === api.getAccessToken() && activeChannelRef.current === channelId && workspaceRef.current === workspaceId;
-    try {
-      const source = await api.request<Message>('/messages/' + encodeURIComponent(messageId));
-      if (!current()) return;
-      if (source.id !== messageId || source.channel_id !== channelId || source.deleted || source.locked) throw new Error('This source message is no longer available.');
-      openHistoryMessage(source);
-    } catch (failure) { if (current()) setActionError(failure instanceof Error ? failure.message : 'This source message is no longer available.'); }
-  };
 
   const jumpToMessage = (messageId: string) => {
     requestAnimationFrame(() => {
@@ -1327,6 +1406,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
     event.preventDefault();
+    flowConversationMoved.current = true;
     event.currentTarget.form?.requestSubmit();
   };
 
@@ -1366,6 +1446,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     );
   }
 
+  const conversationWork = workHubOpen && workspace && activeChannel ? <WorkHub presentation="flow" sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}` } workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
+  const conversationNotebook = activeChannel && collaborationTab ? <CollaborationPanel presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}`} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
   return (
     <div key="chat-shell" className={`fc-chat ${focusMode ? 'is-focus-mode' : ''} ${spaciousRoom ? 'is-spacious-room' : ''} ${activeChannel && materialChannelId === activeChannel.id ? 'has-shared-material' : ''} ${activeChannel && roomArrangements[activeChannel.id] === 'left' ? 'has-material-left' : ''}`}>
       {sidebarOpen && <div ref={channelDialogRef} id="chat-channel-drawer" className="fc-chat-channel-layer" role="dialog" aria-modal="true" aria-label={t("Workspace channels")} tabIndex={-1}>
@@ -1433,7 +1515,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           </div>
           <div className="fc-chat-topbar-actions">
             <button type="button" className="fc-chat-topbar-action fc-chat-search-action" aria-label={t("Search all history")} onClick={() => setHistoryOpen(true)}><Search size={19} /></button>
-            {activeChannel && <button type="button" aria-label={t("Open workspace tools")} className="fc-chat-topbar-action fc-chat-work-action" onClick={openWorkHub}><Layers size={17} /><span>{t("Work")}</span></button>}
+            {activeChannel && <button type="button" aria-label={t("Work in this conversation")} data-conversation-work-return className="fc-chat-topbar-action fc-chat-work-action" onClick={openWorkHub}><Layers size={17} /><span>{t("Shared work")}</span></button>}
             <div ref={mobileToolsRef} className="fc-chat-mobile-tools" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeMobileTools(); }} onKeyDown={event => {
               if (event.key === 'Escape' && mobileToolsOpen) { event.preventDefault(); event.stopPropagation(); closeMobileTools(true); }
             }}>
@@ -1457,7 +1539,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                   {activeChannel && <div className="fc-chat-tools-section" role="group" aria-label={t('This conversation')}>
                     <p className="fc-chat-tools-heading" aria-hidden="true">{t('This conversation')}</p>
                     {!['direct', 'group_direct'].includes(activeChannel.type) && <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setToolPanel(null); setChannelDetailsOpen(true); })}><Settings size={17} /><span>{t('Channel details')}</span></button>}
-                    <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setCollaborationTab('pins'); setDecisionSource(undefined); setToolPanel(null); setThreadMessage(null); })}><Check size={17} /><span>{t('Saved items and decisions')}</span></button>
+                    <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => openConversationDecision(undefined, undefined, 'pins'))}><Check size={17} /><span>{t('Saved items and decisions')}</span></button>
                     <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setThreadMessage(null); setToolPanel(current => current === 'members' ? null : 'members'); })}><Users size={17} /><span>{t('Channel members')}</span></button>
                     <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => { setThreadMessage(null); setToolPanel(current => current === 'files' ? null : 'files'); })}><Paperclip size={17} /><span>{t('Channel files')}</span></button>
                     <button type="button" className="fc-chat-mobile-tool" onClick={() => openMobileTool(() => openSecureSettings(activeChannel.secure ? activeChannel.id : undefined))}><Lock size={17} /><span>{activeChannel.secure ? t('End-to-end encrypted') : t('Server-encrypted messages')}</span></button>
@@ -1499,21 +1581,17 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
         {activeChannel && <div className="fc-chat-journey">
           <div className="fc-chat-journey-context"><span>{activeChannel.description || t('One conversation. Something to build on.')}</span>{renderConversationAssist()}</div>
-          <nav className="fc-chat-journey-links" aria-label={t('Conversation and shared work')}>
-            <button type="button" aria-current="step" aria-label={t('The conversation')} onClick={showConversationStart}><small aria-hidden="true">01</small><span>{t('The conversation')}</span><ArrowUpRight size={13} /></button>
-            <button type="button" aria-label={t('The shared brief')} onClick={() => openRoomWork('documents')}><small aria-hidden="true">02</small><span className="fc-chat-journey-label">{t('The shared brief')}</span><span className="fc-chat-journey-label-short" aria-hidden="true">{t('Documents')}</span><ArrowUpRight size={13} /></button>
-            <button type="button" aria-label={t('Decision & next step')} onClick={() => openRoomWork('tasks')}><small aria-hidden="true">03</small><span className="fc-chat-journey-label">{t('Decision & next step')}</span><span className="fc-chat-journey-label-short" aria-hidden="true">{t('Next step')}</span><ArrowUpRight size={13} /></button>
-          </nav>
+          <button type="button" className="fc-chat-text-button" onClick={showConversationStart}>{t('The conversation')}<ArrowUpRight size={13} /></button>
         </div>}
         {connection !== 'Connected' && <div className="fc-chat-connection" role="status" data-connected="false"><span className="fc-chat-connection-dot" /><span>{connection}</span>{activeChannel && <button type="button" onClick={() => void loadMessages(activeChannel.id)}><RefreshCw size={11} /><span>{t("Refresh messages")}</span></button>}</div>}
 
-        <div className="fc-chat-timeline-wrap"><div ref={timelineRef} onScroll={handleTimelineScroll} onWheel={() => { followingLatestRef.current = false; roomOverviewRef.current = false; }} onTouchStart={() => { followingLatestRef.current = false; roomOverviewRef.current = false; }} onPointerDown={() => { followingLatestRef.current = false; roomOverviewRef.current = false; }} onKeyDown={event => { if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ', 'Tab', 'Enter'].includes(event.key)) { roomOverviewRef.current = false; followingLatestRef.current = false; clearTimeout(followTimeoutRef.current); } }} className="fc-chat-timeline" aria-label={t("Channel messages")}>
+        <div className="fc-chat-timeline-wrap"><div ref={timelineRef} onScroll={handleTimelineScroll} onWheel={event => { if ((event.target as Element).closest('.fc-chat-message-list')) flowConversationMoved.current = true; followingLatestRef.current = false; roomOverviewRef.current = false; }} onTouchStart={event => { if ((event.target as Element).closest('.fc-chat-message-list')) flowConversationMoved.current = true; followingLatestRef.current = false; roomOverviewRef.current = false; }} onPointerDown={event => { if ((event.target as Element).closest('.fc-chat-message-list')) flowConversationMoved.current = true; followingLatestRef.current = false; roomOverviewRef.current = false; }} onKeyDown={event => { if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ', 'Tab', 'Enter'].includes(event.key)) { roomOverviewRef.current = false; followingLatestRef.current = false; clearTimeout(followTimeoutRef.current); } }} className="fc-chat-timeline" aria-label={t("Channel messages")}>
           <div className="fc-chat-timeline-inner">
             {activeChannel && messages.length === 0 && <div className="fc-chat-intro"><span className="fc-kicker">{t("A space for conversation")}</span><h1>{activeChannel.name || t("Your channel")}<span>.</span></h1><p>{t("Ideas, updates, and everything in between.")}</p></div>}
             {messageError && <div role="alert" className="fc-alert">{messageError}{encryptionLocked ? <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && openSecureSettings(activeChannel.id)}>{t("Unlock encrypted messaging")}</button> : <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && void loadMessages(activeChannel.id)}>{t("Retry messages")}</button>}</div>}
             {messagesLoading && messages.length === 0 && <div className="fc-chat-history-loading" role="status"><span className="fc-chat-loader" /><span>{t("Loading your conversation…")}</span></div>}
             {hasOlder && <button type="button" className="fc-button fc-chat-load-older" disabled={loadingOlder} onClick={() => void loadOlderMessages()}>{loadingOlder ? t("Loading older messages…") : t("Load older messages")}</button>}
-            {activeChannel ? messages.length > 0 ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
+            {activeChannel ? messages.length > 0 || workHubOpen || collaborationTab ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
               {messages.map((msg, index) => (
                 <Fragment key={msg.id}>
                   {(index === 0 || dateKey(messages[index - 1].created_at) !== dateKey(msg.created_at)) && <div className="fc-chat-date"><span>{dateLabel(msg.created_at)}</span></div>}
@@ -1524,21 +1602,35 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                         <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}{!msg.deleted && !msg.locked && <button type="button" className="fc-chat-message-menu" aria-label={t("More message actions")} aria-expanded={messageActionsOpen === msg.id} aria-controls={`message-actions-${msg.id}`} onClick={() => setMessageActionsOpen(current => current === msg.id ? null : msg.id)}><MoreHorizontal size={17} /></button>}</div>
                         <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}>{msg.content}</p>
                         {renderMessageAssist(msg)}
+                        {!msg.deleted && !msg.locked && <ConversationWorkReferences rows={workReferences.byMessage.get(msg.id) || []} onOpen={openReferencedWork} />}
                         {!msg.deleted && !msg.locked && msg.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${activeChannel.id}:${msg.id}`} channelId={activeChannel.id} messageId={msg.id} secure={!!activeChannel.secure} />}
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => { setDecisionSource(message); setCollaborationTab("decisions"); setToolPanel(null); }} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
                   </article>
                 </Fragment>
               ))}
-            </div>{!focusMode && !messageError && <ChatSharedMaterial key={`${workspace?.id}:${activeChannel.id}:${currentUserId}`} channel={activeChannel} workspaceId={workspace?.id} refreshKey={materialRefresh} onAvailabilityChange={available => { if (activeChannelRef.current !== activeChannel.id) return; setMaterialChannelId(available ? activeChannel.id : null); if (available && materialPositionedRef.current !== activeChannel.id) { materialPositionedRef.current = activeChannel.id; if (roomOverviewRef.current) requestAnimationFrame(() => { if (activeChannelRef.current === activeChannel.id && roomOverviewRef.current) { timelineRef.current?.scrollTo({ top: 0, behavior: 'auto' }); handleTimelineScroll(); } }); } }} onOpenFiles={() => { setToolPanel('files'); setThreadMessage(null); }} onOpenDocuments={(documentId, stackId) => openRoomWork('documents', { documentId, stackId })} onOpenTasks={(taskId, projectId) => openRoomWork('tasks', { taskId, projectId })} />}</div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p>{!embeddedChannelId && <button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button>}{!embeddedChannelId && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && !channelError && shouldSuggestWorkspaceLaunch(workspace, channels) && <div className="fc-chat-launch-prompt"><button type="button" className="fc-chat-text-button" onClick={() => setLaunchOpen(true)}><Compass size={16} />{t('Set up this workspace')}<ArrowUpRight size={14} /></button><p>{t('Name your workspace, invite a person and begin a real conversation.')}</p></div>}</div>}
+            </div><div className="fc-chat-room-work" hidden={!workHubOpen && !collaborationTab && (focusMode || materialChannelId !== activeChannel.id)}>
+              {conversationWork || (conversationNotebook && <div className="fc-conversation-work"><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div><button type="button" aria-label={t('Close this work')} onClick={()=>{if(mayLeaveConversationWork())closeWorkHub();}}><X size={20}/></button></header><div className="fc-conversation-work-body">{conversationNotebook}</div></div>)}
+              <div className="fc-chat-room-material" hidden={workHubOpen || !!collaborationTab}>
+                <ChatSharedMaterial key={`${workspace?.id}:${activeChannel.id}:${currentUserId}`} channel={activeChannel} workspaceId={workspace?.id} refreshKey={materialRefresh} onAvailabilityChange={available => { if (activeChannelRef.current !== activeChannel.id) return; setMaterialChannelId(available ? activeChannel.id : null); }} onOpenFiles={() => { setToolPanel('files'); setThreadMessage(null); }} onOpenDocuments={(documentId, stackId) => openRoomWork('documents', { documentId, stackId })} onOpenTasks={(taskId, projectId) => openRoomWork('tasks', { taskId, projectId })} />
+              </div>
+            </div></div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p>{!embeddedChannelId && <button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button>}{!embeddedChannelId && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && !channelError && shouldSuggestWorkspaceLaunch(workspace, channels) && <div className="fc-chat-launch-prompt"><button type="button" className="fc-chat-text-button" onClick={() => setLaunchOpen(true)}><Compass size={16} />{t('Set up this workspace')}<ArrowUpRight size={14} /></button><p>{t('Name your workspace, invite a person and begin a real conversation.')}</p></div>}</div>}
           </div>
-        </div>{(pendingMessages > 0 || !atLatest && messages.length > 0) && <div className="fc-chat-latest-wrap" role="status"><button type="button" className="fc-chat-latest" aria-label={t("Jump to latest messages")} onClick={() => scrollToLatest()}><ArrowDown size={15} />{pendingMessages > 0 && <span>{pendingMessages} {t(" new ")}{pendingMessages === 1 ? t("message") : t("messages")}</span>}<span>{t("Jump to latest")}</span></button></div>}</div>
+        </div>{(pendingMessages > 0 || !atLatest && messages.length > 0) && <div className="fc-chat-latest-wrap" role="status"><button type="button" className="fc-chat-latest" aria-label={t("Jump to latest messages")} onClick={() => { flowConversationMoved.current = true; scrollToLatest(); }}><ArrowDown size={15} />{pendingMessages > 0 && <span>{pendingMessages} {t(" new ")}{pendingMessages === 1 ? t("message") : t("messages")}</span>}<span>{t("Jump to latest")}</span></button></div>}</div>
 
         {activeChannel && <div ref={composerAreaRef} className="fc-chat-composer-area">
+          <div ref={flowActionsRef} className="fc-chat-flow-actions" aria-label={t('Work with this conversation')}>
+            <button type="button" onClick={() => openRoomWork('documents')}><FileText size={14} />{t('Add a document')}</button>
+            <button type="button" onClick={() => openRoomWork('tasks')}><CheckSquare size={14} />{t('Next step')}</button>
+            <button type="button" onClick={() => openConversationDecision()}><ClipboardCheck size={14} />{t('Decision')}</button>
+            <button type="button" onClick={() => openRoomWork('meetings')}><Video size={14} />{t('Meet')}</button>
+            <div className="fc-chat-flow-actions-more"><button ref={flowMoreTrigger} type="button" aria-haspopup="menu" aria-expanded={flowMoreOpen} onClick={() => setFlowMoreOpen(value => !value)} onKeyDown={event=>{if(event.key==='ArrowDown'){event.preventDefault();setFlowMoreOpen(true);requestAnimationFrame(()=>flowActionsRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus());}}}>{t('More')}<ChevronDown size={12} /></button>{flowMoreOpen && <div className="fc-chat-flow-actions-menu" role="menu" aria-label={t('More work in this conversation')} onKeyDown={event => {if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setFlowMoreOpen(false);flowMoreTrigger.current?.focus();}else if(['ArrowDown','ArrowUp','Home','End'].includes(event.key)){event.preventDefault();const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('button'));const i=buttons.indexOf(document.activeElement as HTMLButtonElement);buttons[event.key==='Home'?0:event.key==='End'?buttons.length-1:(i+(event.key==='ArrowDown'?1:-1)+buttons.length)%buttons.length]?.focus();}}}>{([['feed','Channel activity'],['workflows','Workflows'],['cloud','Cloud files'],['external-meetings','Meeting services'],['apps','Apps & automation'],['copilot','AI settings'],['data','Data & retention'],['mobile','Mobile & offline'],['shared-work','Shared work']] as const).filter(([kind])=>kind!=='shared-work'||activeChannel.secure).map(([kind,label])=><button key={kind} type="button" role="menuitem" onClick={()=>openRoomWork(kind)}>{t(label)}</button>)}</div>}</div>
+          </div>
+          {flowNotice && <p role="status" className="fc-chat-muted">{flowNotice}</p>}
           {currentUserId && <div className="fc-chat-typing"><TypingIndicator channelId={activeChannel.id} currentUserId={currentUserId} /></div>}
           {actionError && <p role="alert" className="fc-alert">{actionError}</p>}
           {policyNotice && <p role="status" className="fc-alert">{t('Shared content matched an organization policy. Review it before sharing further.')}<button type="button" className="fc-icon-button" aria-label={t('Dismiss policy notice')} onClick={()=>setPolicyNotice(false)}><X size={14}/></button></p>}
@@ -1557,7 +1649,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       {presenceOpen && <div className="fc-overlay"><section ref={presenceDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('Set your status')} className="fc-dialog"><button type="button" className="fc-icon-button" data-autofocus aria-label={t('Close status settings')} onClick={() => setPresenceOpen(false)}><X size={20} /></button><PresenceStatusSelector onClose={() => setPresenceOpen(false)} /></section></div>}
       {activeChannel && productivity && <ChatProductivityPanel key={activeChannel.id} channel={activeChannel} message={productivity.message} draft={productivity.draft} mentions={productivity.mentions} onClose={()=>setProductivity(null)} onScheduled={()=>{if(draftsRef.current[activeChannel.id]===productivity.draft){setNewMessage('');persistDraft(activeChannel.id,'',!!activeChannel.secure);setSelectedMentions([]);}setProductivity(null);}}/>}
 
-      {activeChannel && collaborationTab && <CollaborationPanel key={`${activeChannel.id}:${collaborationTab}`} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={() => {setCollaborationTab(null); setDecisionSource(undefined);}} onOpenMessage={(channelId,messageId) => { const channel = channels.find(item => item.id === channelId); if (!channel) return; openHistoryMessage({id:messageId,channel_id:channelId,author_id:'',content:'',encrypted:!!channel.secure,created_at:''}); }} />}
+
 
       {threadMessage && <aside ref={threadDialogRef} tabIndex={-1} className="fc-chat-thread" role="dialog" aria-modal="true" aria-label={t("Thread")}>
         <header className="fc-chat-thread-header"><div><span className="fc-kicker">{t("Keep the conversation close")}</span><h2>{t("Thread")}</h2><ThreadWatchButton channelId={threadMessage.channel_id} messageId={threadMessage.id} /></div><button type="button" onClick={() => setThreadMessage(null)} className="fc-icon-button" aria-label={t("Close thread")} data-autofocus><X size={19} /></button></header>
@@ -1572,7 +1664,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       {launchOpen && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <WorkspaceLaunchPanel key={`${workspace.id}:${api.getCurrentUserId()}`} workspace={workspace} channels={channels} onClose={() => setLaunchOpen(false)} onChanged={() => refreshWorkspaces(workspace.id)} onChannelsChanged={async created => { if (created && created.workspace_id === workspaceRef.current) setChannels(records => records.some(row => row.id === created.id) ? records : [...records, created]); await loadChannels(); }} onOpenAppearance={openAppearance} onOpenConnections={channelId => { setIntegrationEntry(previous => ({ tab: 'connections', channelId, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }} onOpenChannelMembers={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel('members'); setLaunchOpen(false); } }} onSelectChannel={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel(null); setLaunchComposerTarget({ channelId: channel.id, workspaceId: channel.workspace_id, token: api.getAccessToken() }); setLaunchOpen(false); } }} />}
       {feedbackOpen && workspace && <WorkspaceFeedbackDialog key={`${workspace.id}:${api.getCurrentUserId()}`} workspaceId={workspace.id} onClose={() => setFeedbackOpen(false)} onOpenLaunch={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => setLaunchOpen(true) : undefined} onOpenConnections={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => { setIntegrationEntry(previous => ({ tab: 'connections', revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); } : undefined} />}
       {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:channels-updated')); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} initialRecipeId={initialConnectionRecipeId} />}
-      {workHubOpen && workspace && activeChannel && <WorkHub key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}`} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={messageId => { void revealStackMessage(messageId); }} onClose={closeWorkHub} />}
+
       {mobileOpen && <div className="fc-overlay"><div ref={mobileDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Mobile and offline")} className="fc-dialog" style={{maxWidth:720,maxHeight:"90dvh",overflowY:"auto"}}><button type="button" className="fc-icon-button" aria-label={t("Close mobile settings")} onClick={() => setMobileOpen(false)}><X size={20} /></button><MobileSettings channel={activeChannel || undefined} /></div></div>}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} channels={channels} activeChannelId={activeChannel?.id || null} messages={messages.filter((message) => message.channel_id === activeChannel?.id && !message.deleted)} hasActiveChannel={!!activeChannel} onChannel={(id) => { const channel = channels.find((item) => item.id === id); if (channel) { selectChannel(channel); requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true })); } }} onMessage={jumpToMessage} onAction={runCommand} />
 

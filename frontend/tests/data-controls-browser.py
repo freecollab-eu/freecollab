@@ -1,3 +1,4 @@
+from ui_navigation import open_conversation_work
 #!/usr/bin/env python3
 """Disposable API/Vite/Chromium proof: exports, retention and identity erasure.
 
@@ -80,9 +81,7 @@ def main():
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click()
                 page.get_by_label('Email',exact=True).fill(owner['email']); page.get_by_label('Password',exact=True).fill(PASSWORD)
                 page.get_by_role('button',name='Sign In',exact=True).click(); expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-                page.get_by_role('button',name='Open workspace tools',exact=True).click()
-                dialog=page.get_by_role('dialog',name='Workspace tools',exact=True)
-                dialog.get_by_role('tab',name='Data & retention',exact=True).click()
+                dialog=open_conversation_work(page,'data')
                 panel=dialog.get_by_role('region',name='Data controls',exact=True)
                 expect(panel.get_by_role('heading',name='Workspace export',exact=True)).to_be_visible()
                 expect(panel.get_by_label('Preservation hold — block permanent erasure')).to_be_checked()

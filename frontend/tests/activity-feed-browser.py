@@ -15,6 +15,8 @@ import sys
 import tempfile
 import traceback
 
+from ui_navigation import open_conversation_work
+
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -31,10 +33,13 @@ def enter(page, app, email, workspace, identity):
     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
     page.get_by_label('Email', exact=True).fill(email); page.get_by_label('Password', exact=True).fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
-    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-    panel = page.get_by_role('dialog', name='Workspace tools', exact=True)
-    panel.get_by_role('tab', name='Activity feed', exact=True).click()
-    expect(panel.get_by_role('heading', name='Activity feed', exact=True)).to_be_visible()
+    panel = open_conversation_work(page, 'feed')
+    expect(panel).to_be_visible()
+    expect(panel).to_have_attribute('data-work-kind', 'feed')
+    expect(panel.get_by_role('tablist')).to_have_count(0)
+    assert not panel.evaluate('element=>!!element.closest("[inert]")||element.getAttribute("aria-modal")==="true"')
+    expect(page.locator('.fc-chat-composer textarea')).to_be_enabled()
+    expect(panel.get_by_role('heading', level=3, name='Activity feed', exact=True)).to_be_visible()
     return panel
 
 
@@ -113,7 +118,7 @@ def main():
                 MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', PUBLIC_APP_URL=app, CORS_ORIGINS=json.dumps([app]), OIDC_ENABLED='false',
                 WEBHOOKS_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', PUSH_ENABLED='false', ACTIVITY_FEEDS_ENABLED='true', PYTHONPATH=str(ROOT / 'backend'))
             environment['NO_PROXY'] = ','.join(filter(None, [environment.get('NO_PROXY', ''), 'localhost', '127.0.0.1', '::1']))
-            if options.secure: environment.update(documents.retained_matrix_environment())
+            if options.secure: environment.update(documents.fixture_matrix_environment())
             python = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
             server = private / 'api.py'; server.write_text('import uvicorn\nfrom app.main import socket_app\nuvicorn.run(socket_app,host="127.0.0.1",port=' + str(api_port) + ',proxy_headers=False,access_log=False)\n')
             frontend = private / 'frontend'; shutil.copytree(ROOT / 'frontend', frontend, ignore=shutil.ignore_patterns('node_modules', 'dist', 'dist-widget', '__pycache__', '.git'))
@@ -182,8 +187,8 @@ def main():
                     results['native_encrypted_at_rest_immutable_history_archive_restore'] = True
                     stage = 'Swedish localized 320px activity composer'
                     pages[0].evaluate('async()=>{(await import("/src/i18n/core.ts")).applyLocale("sv")}')
-                    localized = pages[0].locator('.fc-work-hub')
-                    expect(localized.get_by_role('heading', name='Aktivitetsflöde', exact=True)).to_be_visible()
+                    localized = pages[0].locator('.fc-conversation-work[data-work-kind="feed"]')
+                    expect(localized.get_by_role('heading', level=3, name='Aktivitetsflöde', exact=True)).to_be_visible()
                     pages[0].set_viewport_size({'width': 320, 'height': 900}); localized.get_by_role('button', name='Skriv en uppdatering', exact=True).click()
                     expect(localized.get_by_label('Uppdateringens titel', exact=True)).to_be_visible()
                     assert pages[0].evaluate('()=>document.documentElement.scrollWidth<=innerWidth+1')

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Real visual builder, file trigger, worker restart/reminder, approval and task proof."""
-from ui_navigation import open_chat_tool
+from ui_navigation import open_chat_tool, open_conversation_work
 import base64
 from datetime import datetime, timedelta
 import importlib.util
@@ -33,6 +33,16 @@ def eventually(read, condition, message):
         if condition(value): return value
         time.sleep(.25)
     raise AssertionError(message)
+
+
+def open_workflows(page):
+    panel = open_conversation_work(page, 'workflows')
+    expect(panel).to_be_visible()
+    expect(panel).to_have_attribute('data-work-kind', 'workflows')
+    expect(panel.get_by_role('tablist')).to_have_count(0)
+    assert not panel.evaluate('element => !!element.closest("[inert]") || element.getAttribute("aria-modal") === "true"')
+    expect(page.locator('.fc-chat-composer textarea')).to_be_enabled()
+    return panel
 
 
 def main():
@@ -86,9 +96,7 @@ def main():
                     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
                     page.get_by_label('Email', exact=True).fill(email); page.get_by_label('Password', exact=True).fill(PASSWORD)
                     page.get_by_role('button', name='Sign In', exact=True).click()
-                    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-                    panel = page.get_by_role('dialog', name='Workspace tools', exact=True)
-                    panel.get_by_role('tab', name='Workflows', exact=True).click()
+                    panel = open_workflows(page)
                     panel.get_by_role('button', name='Create workflow', exact=True).click()
                     editor = page.get_by_role('form', name='Workflow editor', exact=True)
                     editor.get_by_label('Workflow name', exact=True).fill('File review and delivery')
@@ -114,7 +122,7 @@ def main():
                     results['visual_three_step_builder_password_confirmed'] = True
 
                     stage = 'actual file picker queues metadata without enabled webhooks'
-                    panel.get_by_role('button', name='Close workspace tools', exact=True).click()
+                    panel.get_by_role('button', name='Close this work', exact=True).click()
                     open_chat_tool(page, 'Channel files')
                     files = page.get_by_role('dialog', name='Channel files', exact=True)
                     with page.expect_response(lambda response: urlsplit(response.url).path == '/api/files/channels/' + channel['id'] and response.request.method == 'POST') as uploaded:
@@ -142,8 +150,7 @@ def main():
                     results['durable_worker_restart_reminder_and_escalation'] = True
 
                     stage = 'actual approval and in-app/task actions with retained run history'
-                    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-                    panel.get_by_role('tab', name='Workflows', exact=True).click()
+                    panel = open_workflows(page)
                     expect(panel.get_by_role('button', name='Approve', exact=True)).to_be_visible()
                     panel.get_by_label('Approval note (optional)', exact=True).fill('Approved from the private browser proof')
                     panel.get_by_role('button', name='Approve', exact=True).click()

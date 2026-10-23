@@ -6,7 +6,7 @@ Underlaget är användarens önskemål om ett fungerande öppet samarbetsverktyg
 
 Status betyder **Genomförd** när det finns en nåbar produktväg och faktisk lagring, transport eller klientexekvering; **Förberedd** när projekt/konfiguration finns men den avsedda leveransen inte är visad; **Saknas** när beteendet inte finns; **Externt overifierad** när implementationen finns men leverantör, driftsättning eller fysisk plattform återstår att acceptera. Befintliga tester anges som spårbara bevis och är inte automatiskt påståenden om att alla kördes om i denna granskning.
 
-Den publika [statiska webbplatsen](../../deploy/website/README.md) visar lokala exempel och startar inte samarbets-API, socket, Matrix eller native-bryggor. Att en knapp fungerar där bevisar inte att motsvarande server- eller telefonfunktion är driftsatt. Fullappen och klientprojekten bedöms nedan mot sin egen verkliga kod.
+Den publika [statiska webbplatsen](../../deploy/website/README.md) bäddar nu in [samma produkt](../PRODUCT_DEMO.md) med tillfälliga exempelkonton och normalt API/Socket.IO i en separat installation. Verkliga native-flöden kan testas där. Externa leverantörer, Matrix och native-bryggor är inte aktiverade i den publika konfigurationen; detta bevisar inte deras driftsättning eller fysisk telefonacceptans.
 
 ## Chatt och personliga flöden
 

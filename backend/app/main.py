@@ -6,6 +6,7 @@ from redis.exceptions import RedisError
 from contextlib import asynccontextmanager
 from contextlib import suppress
 import asyncio
+import logging
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlmodel import Session
@@ -46,6 +47,9 @@ install_capability_log_filter()
 
 @asynccontextmanager
 async def lifespan(app):
+    if settings.demo_instance:
+        from .services.public_demo import require_demo_instance
+        require_demo_instance()
     message_keyring()
     database.init_db()
     init_workspaces(database.engine)
@@ -53,9 +57,27 @@ async def lifespan(app):
     await start_realtime_broker()
     from .services.productivity_relay import run as relay_productivity
     relay = asyncio.create_task(relay_productivity(), name="freecollab-worker-effects")
+    demo_cleanup = None
+    if settings.demo_instance:
+        from .services.public_demo import cleanup_expired_visits
+        def collect_expired_examples():
+            with Session(database.engine) as session:
+                cleanup_expired_visits(session)
+        async def maintain_examples():
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    await asyncio.to_thread(collect_expired_examples)
+                except Exception:
+                    logging.getLogger(__name__).warning("Expired example workspaces could not be collected")
+        demo_cleanup = asyncio.create_task(maintain_examples(), name="freecollab-example-cleanup")
     try:
         yield
     finally:
+        if demo_cleanup:
+            demo_cleanup.cancel()
+            with suppress(asyncio.CancelledError):
+                await demo_cleanup
         relay.cancel()
         with suppress(asyncio.CancelledError):
             await relay
@@ -75,6 +97,11 @@ app.add_middleware(
 app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityAuditMiddleware)
 app.add_middleware(PrivateResponseCacheMiddleware)
+if settings.demo_instance:
+    from .api import public_demo
+    from .services.public_demo_boundary import PublicDemoBoundaryMiddleware
+    app.add_middleware(PublicDemoBoundaryMiddleware)
+    app.include_router(public_demo.router)
 
 # Routes
 app.include_router(auth.router)
@@ -150,6 +177,9 @@ if settings.enable_experimental_features:
 
 # Socket.io
 socket_app = socketio.ASGIApp(sio, app)
+if settings.demo_instance:
+    from .services.public_demo_boundary import PublicDemoSocketBoundaryMiddleware
+    socket_app = PublicDemoSocketBoundaryMiddleware(socket_app)
 
 
 @app.get("/health")
@@ -178,6 +208,7 @@ def capabilities():
     return {
         "version": "0.13.0",
         "experimental_features": settings.enable_experimental_features,
+        "demo_instance": settings.demo_instance,
         "demo_ai": False,
         "max_file_size": files.MAX_FILE_SIZE,
         "file_types": sorted(files.ALLOWED_TYPES),

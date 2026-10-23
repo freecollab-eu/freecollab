@@ -1,18 +1,23 @@
-# Public website and browser-only demo
+# Public website and the actual product demo
 
-The independent website entry reuses FreeCollab's landing page, documentation
-and interactive sample workspace. Demo messages, tasks, documents and appearance
-stay in the current tab and disappear on reload/reset. Guest language can be
-remembered on the device. The website starts no account provider, mobile bridge,
-service worker, provider connection or collaboration API. Its CSP forbids network
-connections; the supplied server rejects `/api`, `/socket.io`, `/embed`, `/native`
-and service-worker requests. Existing credentials stored on this origin are
-preserved and ignored.
+The website entry serves the landing page and documentation. Its Demo route
+embeds a separately deployed [sample installation](../product-demo/README.md)
+of the actual product: same `Chat`, `WorkHub`, providers and API, with isolated
+short-lived sample accounts. There are no alternate demo feature components or
+local AI response templates. Real customer providers are disabled in that instance.
+
+The website itself starts no account provider, mobile bridge or service worker.
+Its CSP forbids direct connections and allows only the configured demo origin
+in a frame; `/api`, `/socket.io`, `/embed`, `/native` and service-worker requests
+remain 404 on the website host. Existing credentials on that origin are ignored
+and preserved. The separate demo uses only its memory-held example credentials.
+Set `VITE_PUBLIC_DEMO_URL` at build time; without it, the entry reports that a
+sample installation is unavailable rather than opening the real stored account.
 
 Build and run the website image from `frontend/`; host Node/npm is not required:
 
 ```sh
-docker build -f website/Dockerfile -t freecollab-website:review .
+docker build --build-arg VITE_PUBLIC_DEMO_URL=https://demo.your-company.example/product-demo/ -f website/Dockerfile -t freecollab-website:review .
 docker run --rm -p 127.0.0.1:8081:8080 freecollab-website:review
 ```
 
@@ -23,7 +28,7 @@ For an optional host asset build, use Node 24 LTS (minimum 22.12) from `frontend
 
 ```sh
 ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci
-npm run build:website
+VITE_PUBLIC_DEMO_URL=https://demo.your-company.example/product-demo/ npm run build:website
 ```
 
 The published Dockerfile uses a plain dependency-install step: Railway's builder

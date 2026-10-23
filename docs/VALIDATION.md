@@ -1,5 +1,53 @@
 # FreeCollab validation record
 
+## Product demo parity — 2026-10-23
+
+The public demo now mounts the actual `Chat`, `WorkHub`, editors, providers and
+settings against the normal backend and native integration worker. The separate
+browser-only `Demo*` feature components, reducers and template AI responses were
+removed. Their old unit/55-group showroom proofs below are historical; they are
+not counted as coverage of the new implementation. [Product demo contract](PRODUCT_DEMO.md)
+describes isolated sample accounts, expiry/reset and disabled external services.
+
+- **16 actual UI/API browser groups passed**, with **533 runtime source hashes**
+  stable through the run: native send/edit/reaction/thread, channel CAS,
+  Yjs editing/comments, stack move/Undo/derived discussion/source navigation,
+  task checklist/status, manual workflow → approval → real worker-created task,
+  exact file upload/download, personal appearance, actual disabled Copilot and
+  Microsoft/Google setup guides, visitor/reset isolation and Swedish at 320 px.
+  Retained credential access, IndexedDB calls, service-worker registrations,
+  third-party requests and page errors were all zero in those interactions.
+- **19 new backend core integration cases passed**, plus **34 existing release
+  and configuration regressions**: exact JWT/ActiveSession expiry, separate
+  visits, files, reset/revocation, capacity concurrency and FK-safe cleanup with
+  over100 threaded messages. Ordinary product startup leaves `/demo/session`
+  absent. A separate actual workflow/worker cycle created exactly one task.
+- **93 boundary/worker/operation cases passed**, including default product
+  behavior, native idempotent outbox, a real scheduled-message worker dispatch,
+  changed/expired/revoked actors, body/budget limits, disabled egress and
+  cross-site bootstrap denial. Independent review found a noncanonical
+  `/socket.io/*` dispatch bypass; **three focused actual Engine.IO cases passed**
+  after rejecting suffixes before dispatch while retaining normal handshakes.
+- Client/session/cache tests and TypeScript passed. The actual-module retained
+  pointer regression verifies that sample auth changes do not open or clear
+  standalone IndexedDB; ordinary and trusted-embed behavior is unchanged.
+- The final broad run passed **2,314 backend cases** across four exhaustive file
+  shards (657 + 486 + 658 + 513). The three focused Engine.IO checks above also
+  passed after the final dispatch regression was added. **416 frontend Node
+  cases**, the application/embed/demo builds, **10 normal-product conversation
+  groups**, **five application handoff groups** and **seven website groups**
+  passed. Website/handoff checks cover the frame and documentation; the 16
+  actual product groups above exercise its contents against a real backend.
+- Real product tests also exposed two shared usability defects: the hover-only
+  message toolbar could become unclickable, and a late initial project load could
+  erase a new editor. The shared controls were corrected and exercised through
+  the same demo/product components.
+
+Publication and exact public bytes require their separate deployment evidence.
+These checks do not establish live customer-provider, Matrix or physical mobile
+acceptance. Public samples intentionally use the product's actual disabled or
+unconfigured provider states, with no fake model answers or connected accounts.
+
 ## Implementation and documentation audit — 2026-10-23
 
 The [current feature audit](FEATURE_AUDIT.md) maps the original requirements and

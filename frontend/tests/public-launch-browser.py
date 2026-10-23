@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Guest landing/#demo proof against the actual built frontend; no provider calls."""
+"""Built public App/landing and real-product demo handoff; no provider calls.
+
+The expected iframe navigation is inspected and stopped before a sample session
+can be created. Actual sample-workspace operations are separately verified by
+product-demo-browser.py against the real application and isolated backend.
+"""
 import hashlib
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import json
@@ -7,12 +12,12 @@ import os
 from pathlib import Path
 import shutil
 from threading import Thread
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
-REPORT = ROOT.parent / '.freecollab/proof-results/open-release-public-browser.json'
+REPORT = Path(os.getenv('PUBLIC_LAUNCH_REPORT', str(ROOT.parent / '.freecollab/proof-results/open-release-public-browser.json')))
 
 
 def main():
@@ -25,7 +30,7 @@ def main():
     server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
     thread = Thread(target=server.serve_forever, daemon=True); thread.start()
     origin = f'http://127.0.0.1:{server.server_port}'
-    checks, errors, unwanted, screenshots = {}, [], [], []
+    checks, errors, unwanted, screenshots, demo_navigations = {}, [], [], [], []
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     try:
         with sync_playwright() as playwright:
@@ -35,6 +40,15 @@ def main():
             page.on('pageerror', lambda error: errors.append(str(error)))
             def route(request):
                 parsed = urlsplit(request.request.url)
+                if request.request.is_navigation_request() and request.request.frame != page.main_frame:
+                    # Inspect only the actual product iframe handoff. Never call
+                    # the public demo backend from a landing/build acceptance.
+                    assert parsed.path.rstrip('/').endswith('/product-demo'), request.request.url
+                    assert parsed.scheme == 'https' or parsed.scheme == 'http' and parsed.hostname in {'localhost', '127.0.0.1', '::1'}
+                    assert not parsed.username and not parsed.password
+                    demo_navigations.append(request.request.url)
+                    request.abort()
+                    return
                 if parsed.hostname != '127.0.0.1' or parsed.path.startswith(('/api/', '/socket.io')):
                     unwanted.append(parsed.scheme + '://' + (parsed.hostname or '') + parsed.path)
                     request.abort()
@@ -71,19 +85,37 @@ def main():
                 page.get_by_text('Är FreeCollab gratis?', exact=True).click()
             checks['saved_guest_swedish_language_faq_and_desktop_390_320_without_horizontal_overflow'] = True
             page.get_by_role('button', name='Utforska demon', exact=True).first.click()
-            expect(page.locator('.fc-showroom')).to_be_visible()
+            expect(page.locator('[data-product-demo-frame]')).to_be_visible()
+            frame = page.get_by_title('FreeCollab produktdemo', exact=True)
+            expect(frame).to_be_visible()
             assert page.evaluate('location.hash') == '#demo'
+            source = frame.get_attribute('src')
+            expected_demo = os.getenv('PUBLIC_LAUNCH_DEMO_URL') or os.getenv('VITE_PUBLIC_DEMO_URL')
+            if expected_demo:
+                actual, expected = urlsplit(source), urlsplit(expected_demo)
+                assert (actual.scheme, actual.netloc, actual.path) == (expected.scheme, expected.netloc, expected.path)
+            assert parse_qs(urlsplit(source).query) == {'section': ['chat'], 'locale': ['sv']}
+            expect(page.locator('.fc-showroom, .fc-demo-desk, [data-demo-assist]')).to_have_count(0)
+            launch = page.get_by_role('link', name='Öppna demon i en ny flik', exact=True)
+            expect(launch).to_have_attribute('href', source)
+            expect(launch).to_have_attribute('target', '_blank')
+            assert 'noopener' in launch.get_attribute('rel')
             capture('open-release-demo-sv-320.png')
-            page.get_by_role('textbox', name='Ditt demomeddelande', exact=True).fill('Only this guest browser tab')
-            page.get_by_role('button', name='Skicka demomeddelande', exact=True).click()
-            expect(page.get_by_role('log').get_by_text('Only this guest browser tab', exact=True)).to_be_visible()
             page.reload(wait_until='networkidle')
-            expect(page.locator('.fc-showroom')).to_be_visible()
-            expect(page.get_by_role('log').get_by_text('Only this guest browser tab', exact=True)).to_have_count(0)
+            expect(page.locator('[data-product-demo-frame]')).to_be_visible()
+            expect(page.get_by_title('FreeCollab produktdemo', exact=True)).to_have_attribute('src', source)
+            for section, provider in [('documents', None), ('projects', None), ('connections', 'microsoft'), ('connections', 'google')]:
+                fragment = '#demo=' + section + ('&provider=' + provider if provider else '')
+                page.goto(origin + '/' + fragment, wait_until='networkidle')
+                frame = page.get_by_title('FreeCollab produktdemo', exact=True)
+                expect(frame).to_be_visible()
+                query = parse_qs(urlsplit(frame.get_attribute('src')).query)
+                assert query == {'section': [section], 'locale': ['sv'], **({'provider': [provider]} if provider else {})}
             page.set_viewport_size({'width':1440, 'height':1050})
             capture('open-release-demo-sv-desktop.png')
-            checks['real_app_hash_demo_guest_entry_reload_clears_content_and_swedish_persists'] = True
-            page.get_by_role('button', name='Tillbaka till FreeCollab', exact=True).click()
+            assert demo_navigations, 'The built app never attempted its real product iframe handoff'
+            checks['real_app_demo_handoff_reload_language_and_document_project_provider_destinations'] = True
+            page.get_by_role('button', name='Till webbplatsen', exact=True).click()
             expect(page.get_by_role('heading', level=1)).to_have_text('Bra arbete.På era villkor.')
             assert page.evaluate('location.hash') == ''
             page.get_by_role('button', name='Dokumentation', exact=True).first.click()
@@ -95,7 +127,7 @@ def main():
             checks['zero_javascript_errors_account_api_calls_and_external_provider_requests'] = True
             context.close(); browser.close()
         hashes = {str(p.relative_to(dist)):hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(dist.rglob('*')) if p.is_file()}
-        REPORT.write_text(json.dumps({'ok':True, 'checks':checks, 'production_dist_sha256':hashes, 'screenshots':screenshots, 'external_requests':0, 'account_api_calls':0, 'cleanup':'Private static HTTP server and browser context closed; no database/accounts/provider configuration created.', 'scope':'Actual built App entry, guest landing and local showroom; no live customer/provider or Railway deployment claim.'}, indent=2)+'\n')
+        REPORT.write_text(json.dumps({'ok':True, 'checks':checks, 'production_dist_sha256':hashes, 'screenshots':screenshots, 'external_requests':0, 'account_api_calls':0, 'inspected_demo_iframe_navigations':len(demo_navigations), 'cleanup':'Private static HTTP server and browser context closed; expected demo iframe navigation was aborted before any sample account/session request.', 'scope':'Actual built App entry, guest landing and exact real-product iframe handoff. Inner sample-workspace behavior is verified separately by product-demo-browser.py; no provider or Railway deployment claim.'}, indent=2)+'\n')
         REPORT.chmod(0o600)
         print(f'Public built-app proof: {len(checks)}/{len(checks)} passed')
     finally:

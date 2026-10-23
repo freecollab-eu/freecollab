@@ -27,9 +27,9 @@ import '../styles/account.css';
 import '../styles/integrations.css';
 
 type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding' | 'connect' | 'apps' | 'governance' | 'slack-import' | 'library' | 'provider-accounts';
-interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations' | 'calendar' | 'provider-accounts'; initialConnectionId?: string | null }
+interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations' | 'calendar' | 'provider-accounts'; initialConnectionId?: string | null; initialRecipeId?: string }
 interface Capabilities { integrations?: { oidc?: boolean; webhooks?: boolean; document_links?: boolean; calendar_ics?: boolean; otrust?: boolean; workforce?: boolean; scim?: boolean; sync?: boolean } }
-export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId }: Props) {
+export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId, initialRecipeId }: Props) {
   useI18n();
   const dialog = useRef<HTMLElement>(null);
   const tabNavigation = useRef<HTMLElement>(null);
@@ -45,7 +45,7 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
   const [scopedSession, setScopedSession] = useState(false);
   const [managedAccount, setManagedAccount] = useState(false);
   const [ssoVersion, setSSOVersion] = useState(0);
-  const [connectionStart, setConnectionStart] = useState<{ recipeId?: string; channelId?: string; revision: number }>({ revision: 0 });
+  const [connectionStart, setConnectionStart] = useState<{ recipeId?: string; channelId?: string; revision: number }>({ revision: 0, recipeId: initialRecipeId });
   const [capabilities, setCapabilities] = useState<Capabilities>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

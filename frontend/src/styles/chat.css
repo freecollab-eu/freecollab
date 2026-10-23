@@ -315,7 +315,8 @@ body[data-density="compact"] .fc-chat-intro { padding-bottom: .5rem; }
 .fc-chat-message-meta { gap: .65rem; align-items: baseline; padding-top: .12rem; min-height: 1.35rem; }
 .fc-chat-message-meta > strong { font-size: .875rem; font-weight: 550; }
 .fc-chat-message-meta > time, .fc-chat-message-meta > span { font-size: .72rem; }
-.fc-chat-message-menu { display: none; }
+.fc-chat-message-menu { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; width: 32px; min-height: 32px; margin: -.25rem 0 -.25rem .15rem; padding: .25rem; border: 0; background: transparent; color: var(--fc-muted); cursor: pointer; }
+.fc-chat-message.has-open-actions .fc-chat-message-actions { opacity: 1; pointer-events: auto; transform: none; }
 .fc-chat-message-content { max-width: 68ch; margin-top: .35rem; font-size: calc(var(--fc-message-size) * 1.1); line-height: 1.65; }
 .fc-chat-message-actions { top: -.65rem; right: 0; max-width: 100%; flex-wrap: wrap; }
 .fc-chat-message-actions .fc-icon-button { width: 2.1rem; min-height: 2.1rem; }

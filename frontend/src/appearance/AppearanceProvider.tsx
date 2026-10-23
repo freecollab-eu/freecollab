@@ -14,7 +14,7 @@ import '../styles/appearance.css';
 const CACHE_PREFIX = 'freecollab.appearance:';
 
 function readCache(userId: string | null): AppearancePreferences {
-  if (!userId) return { ...DEFAULT_APPEARANCE };
+  if (!userId || api.isMemorySession()) return { ...DEFAULT_APPEARANCE };
   try {
     const cached = localStorage.getItem(`${CACHE_PREFIX}${userId}`);
     return cached ? normalizeAppearance(JSON.parse(cached)) : { ...DEFAULT_APPEARANCE };
@@ -24,6 +24,7 @@ function readCache(userId: string | null): AppearancePreferences {
 }
 
 function writeCache(userId: string, preferences: AppearancePreferences) {
+  if (api.isMemorySession()) return;
   try {
     localStorage.setItem(`${CACHE_PREFIX}${userId}`, JSON.stringify(preferences));
   } catch {

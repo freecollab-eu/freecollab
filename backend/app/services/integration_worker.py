@@ -20,6 +20,14 @@ log = logging.getLogger("freecollab.integrations")
 
 
 def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, calendar_batch=None, workflow_batch=None, data_batch=None, push_batch=None, productivity_batch=None, apps_batch=None, recaps_batch=None):
+    demo_instance = bool(getattr(settings, "demo_instance", False))
+    if demo_instance:
+        # The public example uses the same native worker, on its own database.
+        # Always-on app outboxes can perform HTTP even when provider flags are
+        # off, so the demo needs an explicit lane boundary as well as API guards.
+        from .public_demo import require_demo_instance
+        with Session(engine) as session:
+            require_demo_instance(session)
     from .webhooks import deliver_pending
     from .otrust import process_pending
     from .remote_sync import process_pending as sync_pending
@@ -56,8 +64,9 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
         session.add(heartbeat)
         session.commit()
     result = {}
+    demo_lanes = {"chat", "workflows", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup"}
     for name, enabled, batch in batches:
-        if not enabled:
+        if not enabled or demo_instance and name not in demo_lanes:
             result[name] = "disabled"
             continue
         try:

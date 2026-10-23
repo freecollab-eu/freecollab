@@ -1,11 +1,11 @@
 # Production AI Copilot
 
-Production assistance is an opt-in integration; the public demo uses local examples. It has no provider key by default and makes no AI request merely by opening its controls. An installation operator must set `COPILOT_ENABLED=true`, a personal workspace owner must configure a provider with fresh password/MFA, and each member must explicitly opt in to that exact provider configuration. Changes to the destination, key, model or agents invalidate earlier consent.
+Production assistance is an opt-in integration. The public [product demo](PRODUCT_DEMO.md) uses the same components and API with temporary sample accounts, but its AI provider is disabled; it does not fabricate model replies. It has no provider key by default and makes no AI request merely by opening its controls. An installation operator must set `COPILOT_ENABLED=true`, a personal workspace owner must configure a provider with fresh password/MFA, and each member must explicitly opt in to that exact provider configuration. Changes to the destination, key, model or agents invalidate earlier consent.
 
 The earlier anonymous Groq demo endpoints have been retired. `ENABLE_DEMO_AI` is
 an ignored compatibility setting: neither `/demo/chat` nor `/api/demo/chat` becomes
-available when it is true. The public demo remains local; production inference uses
-the authenticated, reviewed Copilot or Apps & automation paths.
+available when it is true. The product demo has a separate temporary sample backend and no AI provider;
+production inference uses the authenticated, reviewed Copilot or Apps & automation paths.
 
 ## Configure a provider and agents
 
@@ -51,7 +51,14 @@ regroups or edits the native material automatically.
 
 ## Public interactive preview
 
-The public demo places **AI help** in six working contexts: messages, the composer, a channel recap, documents, stacks and tasks. Provider/model examples are configured once in **Connections → AI settings** or the workspace's AI-settings shortcut and reused across those contexts. Inspect the selected material and disclosure/cost warnings, then explicitly prepare a local example. Examples quote selected content or use fixed templates; no model is invoked, no API key is collected, and no provider or account request is made. Suggestions can fill a reply draft, revise an unsent draft, append document text, group selected documents or clarify a task only through an explicit reviewed action. Message-based task proposals use the existing editable task review; creating the demo task remains a separate action. Current channel, target, selected source and provider/model snapshots must still match before applying, and a guarded undo is available for an accepted assisted change. All changes stay in the current browser tab and reset/reload clears them. This demonstrates contextual review and local interactions rather than production inference or a multi-step AI runner.
+The public [product demo](PRODUCT_DEMO.md) mounts the same `Chat`, `WorkHub`,
+`ContextualCopilot` and settings components used by an installation. Its real
+API stores temporary example content. AI remains disabled/unconfigured in that
+public environment, so the normal controls show that state and no provider call
+or invented answer is presented. The separate template/extractive demo recipes
+have been retired. A customer installation can explicitly configure its own
+provider and use the reviewed inference flow described here. Native sample
+content and browser interaction do not establish live AI-provider acceptance.
 
 ## Explicit context and citations
 

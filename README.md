@@ -21,7 +21,21 @@ See [local and network self-hosting](docs/SELF_HOSTING.md) and [operations](docs
 
 FreeCollab brings conversations, documents, tasks, files and meetings into a workspace you control. Choose personal colors/type and Swedish or English, use your own customer SSO and prepare your organization's Microsoft 365/Google apps. The MIT-licensed source has no per-seat software fee; you cover hosting and external provider costs. Start with one API process; additional replicas require the shared coordination and storage described in [SCALING.md](docs/SCALING.md).
 
-**Explore the demo** opens a browser-only showroom at `/#demo`, with sample messages, tasks, editable Markdown, appearance and both provider setup guides. Open the shared brief or agree a next step beside the same conversation. On mobile, **Back to conversation** returns to the source with the draft and reading position preserved. The agreed next step also appears beside the conversation. The Microsoft and Google cards open their selected setup guide directly. It requires no account or provider connection. Sample changes and separate channel drafts stay in memory in the current tab; reload or confirm reset to start fresh. The full application supplies **Open App** for its authenticated installation. The [independent public website](deploy/website/README.md) serves only the landing page, documentation and demo. For Railway, start with the [maintained deployment guide](RAILWAY_DEPLOY.md).
+**Explore the demo** opens the same `Chat`, `WorkHub`, editors and settings as
+the product, backed by its normal API. Each visitor receives an isolated,
+temporary example workspace with real messages, Yjs documents, stacks, tasks,
+files, decisions, a calendar and an approval workflow. Reset creates a new
+example visit and revokes the previous one. Visits expire after one hour; this
+is not a place for real passwords, API keys or private files. External providers
+are disabled in the public sample installation. There are no template AI
+responses or separate demo feature components. See [the product demo](docs/PRODUCT_DEMO.md).
+
+The [independent website](deploy/website/README.md) serves the landing page and
+docs and embeds that separately deployed sample installation. An ordinary
+self-hosted installation does not expose anonymous demo bootstrap. Configure
+`VITE_PUBLIC_DEMO_URL` to your separate sample instance; without it, the demo
+entry reports that it is unavailable rather than adopting a real account or
+falling back to a simulated workspace.
 
 ## Start your own installation
 

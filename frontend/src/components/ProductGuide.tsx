@@ -21,7 +21,8 @@ export function ProductGuide() {
   return <div className="space-y-6" data-product-guide>
     <p className="fc-muted">{t('Run FreeCollab on your own computer or a server in your private network. Accounts belong to that installation; no central FreeCollab cloud account is required.')}</p>
     <p><a className="fc-account-link" href={source + 'SELF_HOSTING.md'} target="_blank" rel="noopener noreferrer">{t('Local and network installation')}</a></p>
-    <p className="fc-muted">{t('Use these guides for the implemented product, its configuration and its limits. The public demo uses local examples and makes no account or AI-provider requests.')}</p>
+    <p><a className="fc-account-link" href={source + 'PRODUCT_DEMO.md'} target="_blank" rel="noopener noreferrer">{t('The same product, with example data')}</a></p>
+    <p className="fc-muted">{t('Use these guides for the implemented product, its configuration and its limits. The demo runs the same app and API with temporary example accounts. External providers are disabled in that installation.')}</p>
     <p className="fc-muted">{t('These guides describe the current review branch. Its latest changes are not yet a published release.')}</p>
     <p><a className="fc-account-link" href={source + 'FEATURE_AUDIT.md'} target="_blank" rel="noopener noreferrer">{t('Feature status, code and verification')}</a></p>
     <dl className="space-y-6">{topics.map(([label, description, document]) => <div key={document}>

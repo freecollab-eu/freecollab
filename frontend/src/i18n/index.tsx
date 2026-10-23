@@ -11,8 +11,9 @@ for (const module of Object.values(import.meta.glob<{ default: Catalog }>('./*.s
 export * from './core';
 
 const key = (user: string | null) => `freecollab.language:${user || 'guest'}`;
-function cached(user: string | null): LanguageChoice { try { const value = localStorage.getItem(key(user)); return isLanguageChoice(value) ? value : 'auto'; } catch { return 'auto'; } }
-function cache(user: string | null, choice: LanguageChoice) { try { localStorage.setItem(key(user), choice); } catch { /* Account API remains authoritative. */ } }
+function isExampleDocument() { return typeof document !== 'undefined' && !!document.getElementById('root')?.hasAttribute('data-demo-application'); }
+function cached(user: string | null): LanguageChoice { if (isExampleDocument()) return currentLocale(); try { const value = localStorage.getItem(key(user)); return isLanguageChoice(value) ? value : 'auto'; } catch { return 'auto'; } }
+function cache(user: string | null, choice: LanguageChoice) { if (isExampleDocument()) return; try { localStorage.setItem(key(user), choice); } catch { /* Account API remains authoritative. */ } }
 interface LanguageContext { choice: LanguageChoice; saving: boolean; error: string; saved: boolean; choose: (choice: LanguageChoice) => void; retry: () => void }
 const Context = createContext<LanguageContext | null>(null);
 

@@ -24,7 +24,7 @@ interface AccountContextValue {
 }
 const AccountContext = createContext<AccountContextValue | null>(null);
 const preferenceKey = (userId: string) => `freecollab.workspace:${userId}`;
-function savedWorkspace(userId: string) { try { return localStorage.getItem(preferenceKey(userId)); } catch { return null; } }
+function savedWorkspace(userId: string) { if (api.isMemorySession()) return null; try { return localStorage.getItem(preferenceKey(userId)); } catch { return null; } }
 
 export function AccountProvider({ children }: { children: ReactNode }) {
   useI18n();
@@ -46,7 +46,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     if (userId !== api.getCurrentUserId() || userId !== identityRef.current) return;
     const changed = selectedRef.current !== id;
     selectedRef.current = id; setSelected(id);
-    try { if (id) localStorage.setItem(preferenceKey(userId), id); else localStorage.removeItem(preferenceKey(userId)); } catch { /* Selection remains usable without storage. */ }
+    if (!api.isMemorySession()) {
+      try { if (id) localStorage.setItem(preferenceKey(userId), id); else localStorage.removeItem(preferenceKey(userId)); } catch { /* Selection remains usable without storage. */ }
+    }
     if (changed) window.dispatchEvent(new CustomEvent('freecollab:workspace-changed', { detail: { workspace_id: id } }));
   }, []);
 

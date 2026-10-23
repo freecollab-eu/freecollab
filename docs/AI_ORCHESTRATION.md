@@ -21,7 +21,12 @@ There is one provider endpoint and model per workspace. Named agents vary instru
 
 The authenticated app also offers in-place help for messages, channel recaps, main/thread drafts, shared documents and project/task descriptions. Each foreground request binds the reviewed provider revision, selected source snapshots and target; its private one-off conversation receives no central history and is cleared after completion. Applying text is a separate guarded action in the current editor, including an explicitly synchronized edit when appending to a shared document. It does not approve provider tool proposals or execute an autonomous plan. See [in-place assistance](COPILOT.md#in-place-assistance).
 
-The public demo places local assistance beside messages, the composer, channel recaps, documents, stacks and tasks. One provider/model example in Connections → AI settings is reused across those contexts. Explicitly prepared examples and guarded apply/undo actions use current selected snapshots; their state and extractive/template-based output stay in browser memory. No model, API key or provider connection is used. This does not add production run persistence, model routing or worker execution.
+The public [product demo](PRODUCT_DEMO.md) uses these same product components
+and API with temporary native sample data. It does not maintain a second AI
+workflow or return template answers as model output. External AI is deliberately
+unconfigured in the public instance, and the ordinary UI shows its actual state.
+This still does not add production run persistence, model routing or worker
+execution; those gaps remain below.
 
 ## What remains planned
 

@@ -203,8 +203,9 @@ class FreeCollabAPI {
     return { adapter, channelId };
   }
 
-  // Embedded documents never adopt or modify the standalone application session.
-  private memoryOnly = typeof document !== 'undefined' && !!document.getElementById('root')?.hasAttribute('data-embed-application');
+  // Embedded clients and the real product demo never adopt a stored account.
+  // Decide before the constructor reads storage, including on a demo reload.
+  private memoryOnly = typeof document !== 'undefined' && ['data-embed-application', 'data-demo-application'].some(attribute => document.getElementById('root')?.hasAttribute(attribute));
   private token: string | null = null;
   private userId: string | null = null;
   private publicKey: string | null = null;

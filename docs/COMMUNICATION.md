@@ -1,6 +1,6 @@
 # Samtal, trådar och närvaro
 
-Den autentiserade fullappen använder aktuella konto-, arbetsyte- och kanalrättigheter. Native meddelanden lagras serverkrypterade; [Matrix-klientkryptering](E2EE_IMPLEMENTATION.md) är en separat väg utan serverklartext. Den publika statiska demon är lokala exempel och är inte en driftsatt chattserver eller en native telefonklient.
+Den autentiserade fullappen använder aktuella konto-, arbetsyte- och kanalrättigheter. Native meddelanden lagras serverkrypterade; [Matrix-klientkryptering](E2EE_IMPLEMENTATION.md) är en separat väg utan serverklartext. Den publika [produktdemon](PRODUCT_DEMO.md) använder samma klient och API med isolerade tillfälliga exempelkonton. Den är en riktig avgränsad chattmiljö, men verifierar inte en native telefonklient eller externa leverantörstjänster.
 
 ## Historik och trådar
 
@@ -30,6 +30,6 @@ Native send/edit/delete, trådsvar och tillägg/borttagning av reaktioner kontro
 
 ## Verifiering och plattformsgräns
 
-[Backendregressioner](../backend/tests/test_communication_revocation.py), [native historik](../backend/tests/test_message_history.py), [närvaro/socket](../backend/tests/test_socket_security.py), [privat Valkey/TLS](../backend/tests/test_valkey_runtime.py), [klientnärvaro](../frontend/tests/presence.test.mjs) och [trådprojektion](../frontend/tests/thread-history.test.mjs) verifierar dessa kontrakt. Den isolerade kommunikationsresan använder fullappen, egna konton/API/SQLite/Vite/Chromium och är skild från den publika lokala demon.
+[Backendregressioner](../backend/tests/test_communication_revocation.py), [native historik](../backend/tests/test_message_history.py), [närvaro/socket](../backend/tests/test_socket_security.py), [privat Valkey/TLS](../backend/tests/test_valkey_runtime.py), [klientnärvaro](../frontend/tests/presence.test.mjs) och [trådprojektion](../frontend/tests/thread-history.test.mjs) verifierar dessa kontrakt. Den isolerade kommunikationsresan använder fullappen, egna konton/API/SQLite/Vite/Chromium. [Produktdemons browserproof](../frontend/tests/product-demo-browser.py) kör samma gränssnitt och API med tillfälliga exempelbesök i en separat privat testmiljö; den fastställer inte publik drift.
 
 Kundsignerade Android/iOS-appar, Apple/Firebase-leverans och fysisk bakgrundsringning kräver egen acceptans enligt [native push](NATIVE_PUSH.md), [native calling](NATIVE_CALLING.md) och [native klienter](NATIVE_CLIENTS.md). Ett godkänt browser-/protokolltest ersätter inte dessa kontroller.

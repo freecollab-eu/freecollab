@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 from urllib.request import Request, urlopen
+from urllib.error import HTTPError
 
 from playwright.sync_api import expect, sync_playwright
 
@@ -112,12 +113,16 @@ def main():
         relevant += [str(path.relative_to(source)) for path in source.glob('i18n/*work*hub*')]
         for name in sorted(set(relevant)):
             source_hashes['frontend/src/' + name] = hashlib.sha256((source / name).read_bytes()).hexdigest()
-        demo_dependencies = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in ('components/Demo.tsx', 'styles/demo-showroom.css') if (source / name).is_file()}
+        source_hashes['frontend/tests/conversation-flow-browser.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+        demo_dependencies = {name: hashlib.sha256((source / name).read_bytes()).hexdigest() for name in ('components/Demo.tsx', 'styles/product-demo-frame.css', 'lib/product-demo-url.ts') if (source / name).is_file()}
         api_port, app_port = port(), port()
         base, origin = f'http://127.0.0.1:{api_port}', f'http://127.0.0.1:{app_port}'
         (private / 'controls.json').write_text('{}')
         try:
             environment = os.environ.copy()
+            # This remains the normal installed product proof, separate from
+            # the dedicated sample-data backend exercised by product-demo-browser.
+            environment['DEMO_INSTANCE'] = 'false'
             environment.update(ENVIRONMENT='test', DATABASE_URL='sqlite:///' + str(private / 'flow.db'), STORAGE_PATH=str(private / 'files'), JWT_SECRET=secrets.token_urlsafe(48), ACCOUNT_SECURITY_KEY=base64.b64encode(secrets.token_bytes(32)).decode(), MESSAGE_ENCRYPTION_KEYS=json.dumps({'proof': base64.b64encode(secrets.token_bytes(32)).decode()}), MESSAGE_ENCRYPTION_ACTIVE_KEY_ID='proof', MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', OIDC_ENABLED='false', WEBHOOKS_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', CLOUD_FILES_ENABLED='false', EXTERNAL_MEETINGS_ENABLED='false', COPILOT_ENABLED='false', PUSH_ENABLED='false', PUBLIC_APP_URL=origin, CORS_ORIGINS=json.dumps([origin]), PYTHONPATH=str(ROOT / 'backend'), FLOW_FIXTURE_PRIVATE=str(private))
             environment['NO_PROXY'] = ','.join(filter(None, [environment.get('NO_PROXY', ''), 'localhost', '127.0.0.1', '::1']))
             launcher = private / 'api.py'
@@ -180,6 +185,12 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                 processes.append(subprocess.Popen(command, cwd=cwd, env=environment, stdout=stream, stderr=stream, start_new_session=True))
             ready(base + '/ready', processes)
             ready(origin, processes)
+            try:
+                with urlopen(Request(base + '/demo/session', data=b'{}', headers={'Content-Type': 'application/json'}, method='POST'), timeout=10):
+                    raise AssertionError('The ordinary product exposed public sample-workspace bootstrap')
+            except HTTPError as failure:
+                assert failure.code == 404, failure.code
+            checks['ordinary_installation_does_not_expose_public_demo_bootstrap'] = True
             sessions = json.loads((private / 'sessions.json').read_text())
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'), headless=True, args=['--no-sandbox'])
@@ -372,7 +383,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
     for name, value in source_hashes.items():
         assert hashlib.sha256((ROOT / name).read_bytes()).hexdigest() == value, 'Production source changed during the proof: ' + name
     REPORT.parent.mkdir(parents=True, exist_ok=True)
-    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update; no Matrix or provider acceptance claim. Imported demo dependencies were not visited and have a separate dedicated proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
+    REPORT.write_text(json.dumps({'scope': 'Unedited actual App/Chat/WorkHub source snapshot, private real API/SQLite/Vite, two accounts and workspaces, actual production navigation events, gated real native document update; no Matrix or provider acceptance claim. Imported product-demo frame dependencies were not visited; the actual example-data installation has a separate product-demo-browser proof.', 'checks': checks, 'source_sha256': source_hashes, 'unvisited_demo_compile_dependency_sha256': demo_dependencies, 'cleanup': 'Own API/Vite/browser/database/session keys/private source snapshot removed; no Docker or original pilot service used.'}, indent=2) + '\n')
     print('Conversation-flow browser proof passed: ' + str(len(checks)) + ' groups; scoped tool resume, same conversation, actual pending-document guards, navigation overrides, account isolation and Swedish 320px.')
 
 

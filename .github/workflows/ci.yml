@@ -118,6 +118,7 @@ jobs:
           node --test tests/*.test.mjs
           npm run build:widget
           npm run build:website
+          npm run build:demo
           npm ci --prefix ../packages/components
           npm test --prefix ../packages/components
           npm pack ../packages/components --dry-run
@@ -187,7 +188,7 @@ jobs:
           PY
           npm ci --prefix frontend
           npm ci --prefix packages/components --ignore-scripts
-          npm run build --prefix frontend
+          VITE_PUBLIC_DEMO_URL=http://127.0.0.1:3011/product-demo/ npm run build --prefix frontend
           npm run build:widget --prefix frontend
       - name: Install media integration fixture
         # Slow Ubuntu mirrors can take several minutes for codec dependencies.
@@ -270,8 +271,8 @@ jobs:
           python frontend/tests/workspace-launch-browser.py
           python frontend/tests/workspace-feedback-browser.py
           python frontend/tests/connection-health-browser.py
-          python frontend/tests/demo-showroom-browser.py
-          python frontend/tests/public-launch-browser.py
+          BACKEND_PYTHON=python python frontend/tests/product-demo-browser.py
+          PUBLIC_LAUNCH_DEMO_URL=http://127.0.0.1:3011/product-demo/ python frontend/tests/public-launch-browser.py
           python packages/components/tests/browser-proof.py
       - name: Upload service diagnostics on failure
         if: failure()

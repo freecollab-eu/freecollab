@@ -12,14 +12,14 @@ och versionsanteckningar beskriver sina respektive tidpunkter; denna lista och
 de länkade implementationsavtalen har företräde för dagens status.
 
 **Alla tidigare önskemål är inte färdiglevererade.** Granskningen har rättat
-verkliga luckor och identifierat andra som återstår. En lokal demo, en adapter
+verkliga luckor och identifierat andra som återstår. En visningsmiljö, en adapter
 eller en framtidsplan räknas inte som en fungerande produktfunktion.
 
 - **Implementerat:** produktkod och ett faktiskt UI/API-/lagringsflöde finns
   inom angiven gräns, med länkade tester.
 - **Kundkonfiguration/extern acceptans:** kod finns, men kundens registrering,
   samtycke, infrastruktur eller fysisk enhet behövs för slutlig verifiering.
-- **Demo:** lokala exempel i minnet. De ansluter inga kundkonton eller modeller.
+- **Demo:** samma produktkomponenter och API med tidsbegränsade exempelkonton i en separat installation. Inga kundkonton eller externa modeller ansluts. Se [produktdemon](PRODUCT_DEMO.md).
 - **Saknas:** dokumenterat önskemål eller utbyggnad utan komplett produktflöde.
 
 ## Spårbarhet till beslut och byggda produktdelar
@@ -38,7 +38,7 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
 | Föreslå och koppla kommentarer/dokument/högar | [Aktuell organisation](DOCUMENT_ORGANIZATION.md). Kommentarer hör automatiskt till hög genom dokumentets aktuella placering. Förklarade ordförslag ger granskade dokumentkopplingar. | Ingen autonom semantisk LLM-parning eller dold analys. Explicit Spara krävs för en ny koppling. |
 | AI integrerad i arbetet, leverantörsval, varningar, Grok | [66 AI/app/workflow/orkestreringspunkter](audit/AI_WORKFLOWS.md), [Copilot](COPILOT.md). Inlinehjälp för meddelanden/trådar/utkast, dokument/högar och uppgifter. | Kundägd kompatibel HTTPS-provider; OpenAI-/xAI-preset eller egen kompatibel tjänst kräver egen nyckel/modell. Inlinehjälp finns ännu inte i varje produktpanel. |
 | Inbyggd orkestrering | [Nuvarande motorer och uttrycklig plan](AI_ORCHESTRATION.md), [granskning](audit/AI_WORKFLOWS.md). Källgranskning, fasta verktyg, manuella godkännanden, app-outbox och framtida privata recaps finns. | En generell varaktig AI-run/step-motor, modellrouting och budgetredovisning är ännu inte byggda. De ska inte beskrivas som levererade. |
-| Open source, ren historik, drift och säljbar demo | [MIT](../LICENSE), [repo](https://github.com/freecollab-eu/freecollab), [publik webbplats](../deploy/website/README.md), [Railway](../RAILWAY_DEPLOY.md), [drift](audit/SDK_OPERATIONS.md). | Endast Kris Ledel som commitförfattare/-committer. Granskningsgren och statisk webbplats ersätter inte driftsatt autentiserad produkt. |
+| Open source, ren historik, drift och säljbar demo | [MIT](../LICENSE), [repo](https://github.com/freecollab-eu/freecollab), [publik webbplats](../deploy/website/README.md), [Railway](../RAILWAY_DEPLOY.md), [drift](audit/SDK_OPERATIONS.md). | Endast Kris Ledel som commitförfattare/-committer. Granskningsgren och produktdemo ersätter inte kundens egen installation. Demon är nu samma app/API med separata exempelkonton. |
 
 ## Luckor som åtgärdades i denna granskning
 
@@ -92,6 +92,16 @@ Riktig kund-OAuth/SSO, Office-skrivbordsprogram, fysisk mobilringning,
 appbutikssignering, DNS/TLS, SMTP, offsiteåterställning och belastning är
 separata acceptans-/driftuppgifter. Lokala protokolltester ska inte byta deras
 status till genomförda.
+
+## Samma produkt i demon
+
+Den tidigare separata `Demo*`-implementationen och dess lokala AI-mallar är
+borttagna. Den publika länken öppnar [samma Chat/WorkHub](PRODUCT_DEMO.md) mot
+vanliga produkt-API:er, med en egen temporär exempelarbetsyta per besök.
+Externa integrationer visar produktens verkliga avstängda/okonfigurerade läge.
+Demon bevisar därför faktiska native-flöden inom sin driftkonfiguration, inte
+kundens leverantörsgrants, fysisk push eller aktiverad Matrix. Normalinstallationer
+har ingen anonym `/demo/session`-rutt.
 
 ## Verifiering och underlag
 

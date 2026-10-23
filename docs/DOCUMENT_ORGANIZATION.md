@@ -1,8 +1,9 @@
 # Shared-document stacks and relations
 
 Open **Workspace tools → Documents** in an authenticated native channel. This is
-persistent product functionality; the public showroom's local sample stacks use
-a separate reducer and do not create these records.
+persistent product functionality. The public [product demo](PRODUCT_DEMO.md)
+uses this same panel and API with isolated temporary sample records; there is
+no parallel demo reducer for stacks.
 
 Create named stacks, rename them, and delete an empty stack. Move a page with its
 **Move document** selector or drag its card onto a stack. **Unstacked** is the
@@ -60,9 +61,10 @@ The actions summarize, suggest a reading order or find open questions. Their
 results are read-only: they do not move documents, save links or change content.
 The context identity binds the stack generation/version, current page membership,
 placement and source metadata, selected IDs and locale. Current source/provider
-checks still run at send time. This uses the configured real provider path, not
-the public showroom’s deterministic local example. A configured provider and
-user disclosure are required; no model service or customer credentials are bundled.
+checks still run at send time. A configured provider and user disclosure are
+required; no model service or customer credentials are bundled. The public
+product demo uses these same controls with AI disabled, so it produces no
+model answer.
 
 ## Encryption and scope
 

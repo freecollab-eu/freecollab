@@ -79,11 +79,14 @@ interface ChatProps {
   /** A focused trusted embed cannot navigate to a different channel. */
   embeddedChannelId?: string;
   initialSyncReturn?: { workspaceId: string; connectionId: string } | null;
+  initialWorkHubTab?: WorkHubTab;
+  initialIntegrationTab?: 'connections' | 'health' | 'calendar';
+  initialConnectionRecipeId?: string;
 }
 
 const REACTIONS = ['👍', '❤️', '😂', '😮', '😢', '😡', '🎉', '🚀'];
 
-export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, embeddedChannelId }: ChatProps) {
+export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, embeddedChannelId, initialWorkHubTab, initialIntegrationTab, initialConnectionRecipeId }: ChatProps) {
   useI18n();
   const { openAppearance } = useAppearance();
   const { workspace, workspacesLoading, workspacesError, openAccount, openDirectMessages, openSecureSettings, refreshWorkspaces } = useAccount();
@@ -124,6 +127,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [workHubOpen, setWorkHubOpen] = useState(false);
   const [workHubInitialTab, setWorkHubInitialTab] = useState<WorkHubTab>('tasks');
   const [workHubTask, setWorkHubTask] = useState<{ projectId?: string; taskId?: string } | null>(null);
+  const initialTools = useRef({ token: api.getAccessToken(), work: initialWorkHubTab, integration: initialIntegrationTab, applied: false });
   const [stackMessageEntry, setStackMessageEntry] = useState<{ workspaceId: string; channelId: string; messageId: string; token: string } | null>(null);
   const stackSourceRequest = useRef(0);
   const workHubViews = useRef<ReturnType<typeof createWorkHubViewMemory> | null>(null);
@@ -247,6 +251,14 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     setRoomArrangements({}); setMaterialChannelId(null);
     if (workspace) { setLoading(true); void loadChannels(); } else setLoading(workspacesLoading);
   }, [workspace?.id]);
+
+  useEffect(() => {
+    const entry = initialTools.current;
+    if (entry.applied || entry.token !== api.getAccessToken() || !workspace || !activeChannel || activeChannel.workspace_id !== workspace.id || loading) return;
+    entry.applied = true;
+    if (entry.integration) { setIntegrationEntry({ tab: entry.integration, channelId: activeChannel.id, revision: 0 }); setIntegrationsOpen(true); }
+    else if (entry.work) { setWorkHubInitialTab(entry.work); setWorkHubOpen(true); }
+  }, [workspace?.id, activeChannel?.id, loading]);
 
   useEffect(() => {
     const clear = () => workHubViews.current?.clear();
@@ -1464,7 +1476,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       {myDayOpen && !embeddedChannelId && <MyDay onClose={() => setMyDayOpen(false)} />}
       {launchOpen && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <WorkspaceLaunchPanel key={`${workspace.id}:${api.getCurrentUserId()}`} workspace={workspace} channels={channels} onClose={() => setLaunchOpen(false)} onChanged={() => refreshWorkspaces(workspace.id)} onChannelsChanged={async created => { if (created && created.workspace_id === workspaceRef.current) setChannels(records => records.some(row => row.id === created.id) ? records : [...records, created]); await loadChannels(); }} onOpenAppearance={openAppearance} onOpenConnections={channelId => { setIntegrationEntry(previous => ({ tab: 'connections', channelId, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }} onOpenChannelMembers={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel('members'); setLaunchOpen(false); } }} onSelectChannel={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel(null); setLaunchComposerTarget({ channelId: channel.id, workspaceId: channel.workspace_id, token: api.getAccessToken() }); setLaunchOpen(false); } }} />}
       {feedbackOpen && workspace && <WorkspaceFeedbackDialog key={`${workspace.id}:${api.getCurrentUserId()}`} workspaceId={workspace.id} onClose={() => setFeedbackOpen(false)} onOpenLaunch={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => setLaunchOpen(true) : undefined} onOpenConnections={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => { setIntegrationEntry(previous => ({ tab: 'connections', revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); } : undefined} />}
-      {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:channels-updated')); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} />}
+      {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:channels-updated')); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} initialRecipeId={initialConnectionRecipeId} />}
       {workHubOpen && workspace && activeChannel && <WorkHub key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}`} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={messageId => { void revealStackMessage(messageId); }} onClose={() => { setWorkHubOpen(false); setStackMessageEntry(null); }} />}
       {mobileOpen && <div className="fc-overlay"><div ref={mobileDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Mobile and offline")} className="fc-dialog" style={{maxWidth:720,maxHeight:"90dvh",overflowY:"auto"}}><button type="button" className="fc-icon-button" aria-label={t("Close mobile settings")} onClick={() => setMobileOpen(false)}><X size={20} /></button><MobileSettings channel={activeChannel || undefined} /></div></div>}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} channels={channels} activeChannelId={activeChannel?.id || null} messages={messages.filter((message) => message.channel_id === activeChannel?.id && !message.deleted)} hasActiveChannel={!!activeChannel} onChannel={(id) => { const channel = channels.find((item) => item.id === id); if (channel) { selectChannel(channel); requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true })); } }} onMessage={jumpToMessage} onAction={runCommand} />

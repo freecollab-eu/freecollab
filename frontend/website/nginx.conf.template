@@ -8,7 +8,7 @@ server {
     error_log /dev/null crit;
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
-    add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'none'; frame-src __PRODUCT_DEMO_FRAME_ORIGIN__; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
     location = /healthz { default_type text/plain; return 200 'ready\n'; }
     # This image has no account or collaboration API and accepts no upgrades.
     location ~ ^/(api|socket\.io|embed|native)(/|$) { return 404; }

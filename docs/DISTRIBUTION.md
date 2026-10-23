@@ -184,17 +184,21 @@ signing workflow does not prove those platform/provider behaviors.
 
 ## Public freecollab.eu website and demo
 
-The independent static website has no backend dependency or customer accounts.
-It uses the existing local sample demo, documentation, language selection and
-customer appearance controls. The application image remains separate. Build
-with `npm run build:website` in `frontend/`; deployment files and owner-run
-Railway setup are in [deploy/website](../deploy/website/README.md).
+The independent static website serves the landing page and documentation, and
+opens the separate [product demo](PRODUCT_DEMO.md). That demo runs the actual
+`Chat`/`WorkHub` client and normal API with an isolated temporary sample workspace
+for each visit. It therefore needs its own dedicated demo backend and storage;
+it is no longer a browser-only replacement for product features.
 
-The website's server rejects account/Socket.IO/embed/native routes and service
-workers. Its CSP forbids network connections, so demo interactions cannot
-authorize providers or send workspace data. Existing origin credentials are
-preserved and ignored. Public hosting, DNS and real TLS still require an actual
-owner deployment. Railway remains paused until the owner resumes it.
+The normal customer application image remains separate. Build the public site
+with `npm run build:website` and the sample product entry with the dedicated demo
+Vite configuration. See [deploy/website](../deploy/website/README.md) for the
+maintained delivery paths. The website's own account routes stay unavailable;
+the demo frame uses only its dedicated origin and ephemeral normal session.
+External providers, secrets, mail and irreversible operator actions are blocked
+in the public sample installation. Public hosting, DNS, TLS and exact deployed
+assets still require actual deployment evidence; source configuration alone is
+not evidence of a running service.
 
 ## Executed checks and remaining acceptance
 

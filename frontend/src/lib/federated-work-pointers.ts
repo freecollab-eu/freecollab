@@ -16,4 +16,8 @@ export async function storeWorkPointer(row: PendingWorkPointer) {
   finally { db.close(); }
 }
 export async function removeWorkPointer(key: string) { const db = await database(); try { await new Promise<void>((resolve, reject) => { const transaction = db.transaction('pointers', 'readwrite'); transaction.objectStore('pointers').delete(key); transaction.oncomplete = () => resolve(); transaction.onerror = () => reject(new Error('The discovery retry could not be cleared.')); }); } finally { db.close(); } }
-if (typeof window !== 'undefined') window.addEventListener('freecollab:auth-changed', () => { void database().then(db => { const transaction = db.transaction('pointers', 'readwrite'); transaction.objectStore('pointers').clear(); transaction.oncomplete = transaction.onabort = () => db.close(); }).catch(() => undefined); });
+if (typeof window !== 'undefined') window.addEventListener('freecollab:auth-changed', () => {
+  // A sample session must not open or clear the visitor's retained product data.
+  if (typeof document !== 'undefined' && document.getElementById('root')?.hasAttribute('data-demo-application')) return;
+  void database().then(db => { const transaction = db.transaction('pointers', 'readwrite'); transaction.objectStore('pointers').clear(); transaction.oncomplete = transaction.onabort = () => db.close(); }).catch(() => undefined);
+});

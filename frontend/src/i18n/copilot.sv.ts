@@ -10,7 +10,7 @@ const catalog: Record<string, string> = {
   "AI configuration required": "AI behöver konfigureras",
   "AI is disabled for this installation. An operator must enable it before any provider request can run.": "AI är avstängt för installationen. En operatör måste aktivera det innan någon leverantörsförfrågan kan köras.",
   "A workspace owner must configure a provider and model before AI can be used.": "En arbetsyteägare måste konfigurera en leverantör och modell innan AI kan användas.",
-  "No provider request is made by opening this panel. The demo assistant is separate.": "Ingen AI-förfrågan skickas när panelen öppnas. Demoassistenten är separat.",
+  "No provider request is made by opening this panel.": "Ingen AI-förfrågan skickas när panelen öppnas.",
   "Your chosen destination": "Din valda mottagare",
   "Your prompt, visible native AI history and selected sources are sent to this provider. Its privacy and retention terms apply. AI answers may be wrong; review the sources.": "Din fråga, synlig historik från inbyggda AI-samtal och valda källor skickas till leverantören. Dess villkor för integritet och lagring gäller. AI-svar kan vara fel; kontrollera källorna.",
   "I opt in to this provider configuration for my account.": "Jag godkänner denna leverantörskonfiguration för mitt konto.",

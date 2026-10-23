@@ -4,13 +4,33 @@ FreeCollab is MIT-licensed software. The public website is intended for `freecol
 
 ## Public website and demo
 
-The landing page introduces conversations, files, documents, projects, meetings and personal appearance. It links to the source, setup documentation and an account-free interactive demo at `/#demo`. The independent public website serves only the landing page, documentation and demo; it starts no account provider, collaboration API or service worker. The authenticated application uses its separate frontend build and backend. See [the website deployment guide](../deploy/website/README.md).
+The landing page introduces conversations, files, documents, projects, meetings
+and personal appearance. It links to source, setup documentation and the
+[product demo](PRODUCT_DEMO.md) at `/#demo`. The website opens the real product
+client against its own temporary sample backend. `Chat`, `WorkHub`, providers,
+forms and ordinary APIs are shared with customer installations; there is no
+separate illustrated implementation of documents, tasks or AI.
 
-The demo is a browser-only showroom with synthetic colleagues and sample content. Visitors can open the shared brief and decision beside the same conversation, return to its reading position on mobile, send sample messages, add and complete tasks, edit/download Markdown, explore Microsoft 365/Google setup checklists and change the demo's colors/type. The assigned next step stays visible beside the discussion; revising a decision updates that same task. Changes remain in React memory and disappear on reset or reload. It does not create a server account, invoke AI, authorize a provider, send email or demonstrate live cryptography. Provider callbacks in the showroom are clearly examples; each real installation supplies its exact addresses through its authenticated connection guide.
+Visitors receive an isolated temporary account/workspace containing synthetic
+colleagues and native sample content. Their messages, document updates, task
+changes and files use the normal API/model contracts. A visible banner shows
+expiry and an explicit reset action. Session credentials remain in memory;
+retained customer account storage is ignored. Reload/reset opens a new example
+visit. The demo is unsuitable for private or durable work and has bounded
+session/storage/write quotas.
 
-The provider cards enter the matching preparation guide directly. Share `/#demo=connections&provider=microsoft` or `/#demo=connections&provider=google` to open a specific guide. The independent website ignores existing account credentials and starts no application services. The full application's demo still shares that application's normal account/mobile startup; the demo's own content and actions remain local.
+The public sample instance deliberately has no customer provider credentials,
+SMTP, Matrix, federation, push or external media services. Its real UI shows
+those unconfigured/disabled states or a clear sample-environment restriction.
+It never fabricates successful AI, SSO or provider synchronization. Customers
+configure those optional services in their own installation. See
+[local/LAN/VPN self-hosting](SELF_HOSTING.md) and
+[the website deployment guide](../deploy/website/README.md).
 
-The demo uses no analytics or visitor-content collection. Changing the site's language can save a guest language preference locally; demo content is not persisted. Actual authentication, cloud authorization and encrypted collaboration belong to the real application.
+Provider links may open the existing matching connection-setup guide in the real
+product. Preparing a guide is separate from connecting a service or giving
+consent. Public demo telemetry and logs must not collect bearer tokens or content
+as evidence; browser checks use synthetic data and bounded source/report hashes.
 
 ## A customer's first workspace
 

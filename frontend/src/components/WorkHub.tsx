@@ -20,12 +20,13 @@ import { ExternalMeetingsPanel } from './ExternalMeetingsPanel';
 import { ChannelSyncNotice } from './ChannelSyncNotice';
 import { ChannelApps } from './ChannelApps';
 import { FederatedWorkPanel } from './FederatedWorkPanel';
+import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
 import type { WorkHubTab } from '../lib/work-hub-view';
 import '../styles/work-hub.css';
 
 export type { WorkHubTab } from '../lib/work-hub-view';
 export interface ConversationResourceSelection { kind: 'document' | 'task' | 'decision'; id: string; projectId?: string | null; title?: string }
-interface Props { presentation?: 'dialog' | 'flow'; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
+interface Props { presentation?: 'dialog' | 'flow'; layoutActions?: ConversationWorkLayoutActions; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; onActiveResourceChange?: (resource: ConversationResourceSelection | null) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -41,7 +42,7 @@ const tabs = [
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
 
-export function WorkHub({ presentation = 'dialog', sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
+export function WorkHub({ presentation = 'dialog', layoutActions, sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, onActiveResourceChange, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
@@ -73,6 +74,8 @@ export function WorkHub({ presentation = 'dialog', sourceMessage, initialCommand
   const dialog = useRef<HTMLElement>(null), navigation = useRef<HTMLElement>(null);
   const documentPending = useRef(false), feedPending = useRef(false), sharedPending = useRef(false), taskPending = useRef(false);
   const [selectedResource, setSelectedResource] = useState<ConversationResourceSelection | null>(null);
+  const resourceChanged = useRef(onActiveResourceChange); resourceChanged.current = onActiveResourceChange;
+  useEffect(() => { resourceChanged.current?.(selectedResource); }, [selectedResource]);
   const onTaskPending = useCallback((pending: boolean) => { taskPending.current = pending; }, []);
   const onSelectedDocument = useCallback((row: import('../lib/shared-documents-api').SharedDocumentRecord | null) => { setSelectedResource(row ? { kind: 'document', id: row.id, title: row.title } : null); }, []);
   const onSelectedTask = useCallback((row: import('../lib/project-tasks-api').TaskRecord | null) => { setSelectedResource(row ? { kind: 'task', id: row.id, projectId: row.project_id, title: row.fields?.title } : null); }, []);
@@ -102,8 +105,14 @@ export function WorkHub({ presentation = 'dialog', sourceMessage, initialCommand
   }, [flow, channel.id, initialTab]);
   const selectedLabel = tabs.find(item => item.id === tab)?.label || 'Shared work';
   const content = <>
-    <section ref={dialog} tabIndex={-1} role={flow ? 'region' : 'dialog'} aria-modal={flow ? undefined : true} aria-label={t(flow ? 'Work in this conversation' : 'Workspace tools')} className={flow ? 'fc-conversation-work' : 'fc-work-hub'} data-work-kind={tab} onKeyDown={event => { if (!flow || event.key !== 'Escape' || event.defaultPrevented || (event.target as Element).closest('[role="dialog"]')) return; event.preventDefault(); event.stopPropagation(); close(); }}>
-      <header className={flow ? "fc-conversation-work-header" : "fc-work-hub-header"}><div><span className="fc-kicker">{channel.name || t("Your channel")}</span><h2>{t(flow ? selectedLabel : "Room for good work.")}</h2>{!flow && <p>{t("Plan, create and meet in one shared place.")}</p>}</div><button type="button" className="fc-icon-button" aria-label={t(flow ? "Close this work" : "Close workspace tools")} onClick={close}><X size={20} /></button></header>
+    <section ref={dialog} tabIndex={-1} role={flow ? 'region' : 'dialog'} aria-modal={flow ? undefined : true} aria-label={t(flow ? 'Work in this conversation' : 'Workspace tools')} className={flow ? 'fc-conversation-work' : 'fc-work-hub'} data-work-kind={tab} onKeyDown={event => {
+      if (!flow || event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+      const nested = (event.target as Element).closest('[role="dialog"], [aria-modal="true"]');
+      if (nested && event.currentTarget.contains(nested)) return;
+      event.preventDefault(); event.stopPropagation();
+      if (layoutActions?.expanded) layoutActions.onToggleExpanded(); else close();
+    }}>
+      <header className={flow ? "fc-conversation-work-header" : "fc-work-hub-header"}><div><span className="fc-kicker">{channel.name || t("Your channel")}</span><h2>{t(flow ? selectedLabel : "Room for good work.")}</h2>{!flow && <p>{t("Plan, create and meet in one shared place.")}</p>}</div>{flow && layoutActions ? <ConversationWorkControls layout={layoutActions} onClose={close} /> : <button type="button" className="fc-icon-button" aria-label={t(flow ? "Close this work" : "Close workspace tools")} onClick={close}><X size={20} /></button>}</header>
       {flow && sourceMessage?.channel_id === channel.id && <div className="fc-conversation-work-source"><div><span>{t("From this conversation")}</span><p>{sourceMessage.content}</p>{onRevealSource && <button type="button" onClick={onRevealSource}>{t("Show source message")}</button>}</div></div>}
       {flow && sourceMessage && selectedResource && onResourceSaved && <div className="fc-conversation-work-source"><button type="button" onClick={() => onResourceSaved(selectedResource)}>{t("Link this work to the message")}</button></div>}
       {!flow && <><label className="fc-work-hub-tool-switch"><span>{t('Workspace tool')}</span><select className="fc-input" aria-label={t('Workspace tool')} value={tab} onChange={event => select(event.target.value as WorkHubTab)}>{visibleTabs.map(item => <option key={item.id} value={item.id}>{t(item.label)}</option>)}</select></label>
@@ -132,7 +141,7 @@ export function WorkHub({ presentation = 'dialog', sourceMessage, initialCommand
         </div>}
         {meetingOpened && <div hidden={tab !== 'meetings'} role={flow ? undefined : "tabpanel"} id="work-panel-meetings" aria-labelledby={flow ? undefined : "work-tab-meetings"}><MeetingsPanel key={`${actor}:${channel.id}`} {...props} /></div>}
       </div>
-      <footer className={flow ? "fc-conversation-work-footer" : "fc-work-hub-footer"}><ShieldCheck size={15} /><span>{channel.secure ? t("Messages, tasks and documents use verified device encryption.") : t("Your current channel and workspace permissions apply.")}</span><button type="button" className="fc-button" onClick={close}>{t("Back to conversation")}</button></footer>
+      <footer className={flow ? "fc-conversation-work-footer" : "fc-work-hub-footer"}><ShieldCheck size={15} /><span>{channel.secure ? t("Messages, tasks and documents use verified device encryption.") : t("Your current channel and workspace permissions apply.")}</span><button type="button" className="fc-button" onPointerDown={flow && layoutActions ? layoutActions.onBeforeViewChange : undefined} onClick={flow && layoutActions ? layoutActions.onMinimize : close}>{t("Back to conversation")}</button></footer>
     </section>
   </>;
   return flow ? content : createPortal(<div className="fc-overlay fc-work-hub-overlay">{content}</div>, document.body);

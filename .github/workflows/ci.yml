@@ -229,6 +229,8 @@ jobs:
           python frontend/tests/conversation-flow-browser.py
           BACKEND_PYTHON=python python frontend/tests/slash-commands-browser.py
           BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
+          python frontend/tests/work-surface-layout-browser.py
+          BACKEND_PYTHON=python python frontend/tests/workspace-modes-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
           python frontend/tests/account-race-browser.py
@@ -356,6 +358,7 @@ jobs:
         # Connect deliberately checks the separate reviewed release artifact.
         run: |
           npm run release:artifact --prefix packages/components
+          python packages/components/tests/test_sdk_artifact_binding.py
           python packages/components/tests/connect-browser-proof.py --skip-build
       - name: Verify encrypted messages and files across independent installations
         run: BACKEND_PYTHON=python python frontend/tests/connect-federation-browser.py

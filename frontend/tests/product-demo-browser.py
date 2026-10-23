@@ -472,13 +472,13 @@ def main():
                     expect(inline_tools.get_by_label('Document text',exact=True)).to_be_editable()
                     live_conversation(page,inline_tools)
                     page.screenshot(path=str(REPORT.with_name('flow-document-en-1440.png')))
-                    inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
+                    inline_tools.locator('.fc-conversation-work-header').get_by_role('button',name=CLOSE_FLOW,exact=True).click()
                     expect(inline_tools).to_have_count(0); expect(composer).to_have_value('A draft that stays with this conversation.'); same_reading_anchor(page,anchor)
                     brief_card.locator('.fc-chat-material-stack').scroll_into_view_if_needed()
                     anchor = click_with_reading_anchor(page,brief_card.locator('.fc-chat-material-stack'))
                     inline_tools = flow_region(page)
                     expect(inline_tools.locator('h4[data-document-stack="' + seed_stack['id'] + '"]')).to_be_visible()
-                    inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
+                    inline_tools.locator('.fc-conversation-work-header').get_by_role('button',name=CLOSE_FLOW,exact=True).click()
                     expect(inline_tools).to_have_count(0); same_reading_anchor(page,anchor)
                     passed('inline_native_brief_and_stack_return_with_draft_and_reading_anchor')
 
@@ -503,7 +503,7 @@ def main():
                     assert updated_task['fields']['status'] == 'done' and updated_task['fields']['checklist'][0]['done']
                     passed('native_task_checklist_and_status_write_while_conversation_remains_enabled')
                     composer.fill('A draft that stays with this conversation.')
-                    inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
+                    inline_tools.locator('.fc-conversation-work-header').get_by_role('button',name=CLOSE_FLOW,exact=True).click()
                     expect(inline_tools).to_have_count(0); expect(composer).to_have_value('A draft that stays with this conversation.'); same_reading_anchor(page,anchor)
                     passed('inline_next_step_opens_exact_native_task_and_returns_in_place')
 
@@ -538,7 +538,7 @@ def main():
                     inline_tools = flow_region(page)
                     expect(inline_tools.get_by_role('region',name='Save message in a document stack',exact=True)).to_be_visible()
                     expect(inline_tools.get_by_label('Document text',exact=True)).to_have_count(0)
-                    inline_tools.get_by_role('button',name='Back to conversation',exact=True).click()
+                    inline_tools.locator('.fc-conversation-work-header').get_by_role('button',name=CLOSE_FLOW,exact=True).click()
                     expect(composer).to_have_value('A draft that stays with this conversation.')
                     action_toggle = source_article.get_by_role('button',name='More message actions',exact=True)
                     if action_toggle.get_attribute('aria-expanded') == 'true': action_toggle.click()
@@ -870,7 +870,7 @@ def main():
                     sv_organization_path = '/api/channels/' + sv_visit['channel_id'] + '/shared-document-organization'
                     def return_from_sv_document():
                         with swedish.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == sv_organization_path) as refreshed:
-                            sv_inline.get_by_role('button',name='Tillbaka till samtalet',exact=True).click()
+                            sv_inline.locator('.fc-conversation-work-header').get_by_role('button',name=CLOSE_FLOW,exact=True).click()
                         assert refreshed.value.ok
                         # Let the actual refreshed material commit its layout;
                         # preserve the visible source control even if it grows.

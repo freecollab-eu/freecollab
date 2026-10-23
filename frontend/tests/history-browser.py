@@ -50,12 +50,16 @@ with sync_playwright() as p:
     print('PASS: complete local search, edits synchronized and jump to older context',flush=True)
     composer=page.get_by_role('textbox', name='Message #'+c['name'], exact=True)
     composer.fill('@History')
-    page.get_by_role('option',name='HistoryBob',exact=True).click()
+    person=page.locator('[role="option"][data-reference-kind="person"][data-reference-id='+json.dumps(b['user_id'])+']')
+    expect(person).to_be_visible()
+    expect(person.locator('strong')).to_have_text('HistoryBob')
+    person.click()
     composer.press('End'); composer.press('Space'); composer.press('H'); composer.press('i')
     page.get_by_role('button',name='Send message',exact=True).click()
     expect(composer).to_have_value('')
     latest=api('GET',f"/messages/channels/{c['id']}?limit=1",a['access_token'])[0]
     assert latest['mentions']==[b['user_id']], 'Selected mention must use member ID'
+    assert latest['references']==[{'kind':'person','id':b['user_id'],'start':0,'end':len('@HistoryBob')}], 'Selected typed reference must retain the chosen person ID and visible range'
     mentions=api('GET','/mentions/me',b['access_token'])
     assert any(item['id']==latest['id'] for item in mentions)
     print('PASS: mention picker sends member IDs and recipient inbox receives mention',flush=True)

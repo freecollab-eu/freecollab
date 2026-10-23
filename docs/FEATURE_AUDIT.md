@@ -33,6 +33,7 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
 | Full inbäddning i andra produkter | [SDK-/driftgranskning](audit/SDK_OPERATIONS.md), [SDK](COMPONENT_SDK.md), [kundidentitet](EMBED_IDENTITY.md). | Elva native-moduler/Web Components/React, separat betrodd ram för Matrix. Paketet kan byggas; npm-publicering är separat. |
 | Slack-inspirerat 0.11–0.13: gruppchatt, schemaläggning, påminnelser, klienter, delade kanaler, appar, sök, klipp, styrning, egen lagring och delad koordinering | [0.11](PRODUCT_011.md), [0.12](PRODUCT_012.md), [0.13](PRODUCT_013.md), [69 kommunikationspunkter](audit/COMMUNICATION_CLIENTS.md), [AI/appar/workflows](audit/AI_WORKFLOWS.md), [identitet/styrning](audit/IDENTITY_SECURITY.md). | Detta är ingen allmän Slack-klon eller kapacitetsgaranti. Saknade bredare funktioner listas nedan. |
 | Skandinavisk form, personlig typografi/färg, språk, mobil och mer naturligt flöde | [UX/språkgranskning](audit/UX_LANGUAGES.md), [designsystem](DESIGN_SYSTEM.md), [utseende](APPEARANCE.md), [språk](LANGUAGES.md). | Svenska/engelska. Faktisk användbarhet med olika användargrupper behöver fortsatt undersökas. |
+| Samma arbete i delad, förstorad och minimerad vy | [Arbetsytans tre lägen](WORKSPACE_MODES.md), [gemensamma kontroller](../frontend/src/components/ConversationWorkControls.tsx), [DOM-/fokustillstånd](../frontend/src/lib/useWorkSurfaceLayout.ts). Dokument, uppgifter, beslut, grupper och övriga samtalsverktyg behåller aktiv editor och session när vyn ändras. | Validering pågår; tidigare gröna flödestester bevisar inte dessa nya lägen. Lägesbyte sparar inget och ändrar inga behörigheter. Verklig stängning och navigation behåller skriv-/utkastskydd; vyläget återställs vid scopebyte och omladdning. |
 | Enklare kanalhantering | [Kanalprofil med namn/beskrivning](CHANNELS.md), [verklig UI/API-kod](../frontend/src/components/ChannelMetadataPanel.tsx), [backendtester](../backend/tests/test_channel_metadata.py). | Aktuell administratör, CAS och krypteringsläge kontrolleras. Nativeprofil förseglas; Matrix använder verifierad opak eventreferens. |
 | `@` för personer, grupper och material i samtalet | [Referenser och kanalgrupper](MENTIONS_REFERENCES.md), [verklig katalog-/grupp-API](../backend/app/api/mentions.py), [referens-](../backend/tests/test_message_references.py) och [grupptester](../backend/tests/test_reference_groups.py). Valda person-, grupp-, dokument-, uppgifts-, fil- och kanal-ID:n följer meddelande, tråd, redigering, utkast och köer. | Endast samma kanal och aktuell åtkomst. Grupper är versionsskyddade notislistor för verkliga kanalmedlemmar, utan ACL-ändring. Högst 50 referenser/mottagare; ingen namnparsning eller global katalog. Krypterade resurstitlar verifieras på enheten. |
 | Dokumenthögar, flytta/ångra, kopplingar, samtalets ursprung | [Dokumentorganisation](DOCUMENT_ORGANIZATION.md), [innehållsgranskning](audit/WORK_CONTENT.md), [produktpanel](../frontend/src/components/SharedDocumentOrganization.tsx), [API-tester](../backend/tests/test_document_organization.py). | Verkliga native-sidor, inte bara demon. Meddelanden sparas som referenser; texten kopieras inte. Matrix-högar och generell filtaxonomi saknas. |
@@ -65,6 +66,14 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
   API:er. Krypterade samtal får ingen okrypterad reservkoppling. Historik,
   arkivering och organisation nås genom kontextuella val i samma arbetsyta.
   Se [samtalsflödet och dess gränser](PRODUCT_DEMO.md).
+- Arbetsytan har gemensamma kontroller för delad vy, helskärm inom appen och
+  att lägga arbetet åt sidan. Minimering och **Tillbaka till samtalet** behåller
+  aktuell DOM/editor och session; **Fortsätt arbeta** återställer senaste vy
+  och tillgängliga fält. **X** är fortfarande en skyddad verklig stängning.
+  Lägesbyte gör ingen lagring/servermutation och utlöser inget utkastskydd;
+  pågående skrivningar skyddar fortfarande stängning och navigation. Ingen
+  varaktig vyinställning eller backendmodell läggs till. [Kontraktet](WORKSPACE_MODES.md)
+  anger scope, tangentbord och krypteringsgränser; slutlig verifiering pågår.
 - Kanalnamn/beskrivning har ett riktigt versionsskyddat redigeringsflöde, även
   för verifierad Matrix-metadata. Oregistrerade konkurrerande event får inte
   ersätta den sparade auktoritativa profilen.

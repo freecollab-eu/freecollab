@@ -31,15 +31,12 @@ from urllib.request import Request, urlopen
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, expect, sync_playwright
 import requests
 import socketio
+from sdk_artifact_binding import EXPECTED_PACKAGE, verify_sdk_artifact
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / 'packages/components'
 PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
 REPORT = Path(os.getenv('CONNECT_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/connect-browser-0.13.0.json')))
-# Reviewed canonical release:artifact bytes; all 59 packed public files match
-# the fresh distribution, with sourceDigest bound to the 23 current SDK sources.
-# Rebuild and review this exact artifact when public package inputs change.
-EXPECTED_PACKAGE = '81606a74ccedc2d0de86bf7c30c9f9c1a4546fe897ab5b84acbe684a70d8afca'
 SPEC = importlib.util.spec_from_file_location('owned_embed_proof_helpers', Path(__file__).with_name('embed-browser-proof.py'))
 helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helpers)
@@ -204,7 +201,7 @@ def main():
     container = 'freecollab-connect-proof-' + secrets.token_hex(6)
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     archive = PACKAGE / 'artifacts/freecollab-components-0.13.0.tgz'
-    assert hashlib.sha256(archive.read_bytes()).hexdigest() == EXPECTED_PACKAGE
+    package_binding = verify_sdk_artifact(archive, PACKAGE)
     frontend_dist = ROOT / 'frontend/dist'
     frontend_manifest = {str(path.relative_to(frontend_dist)): hashlib.sha256(path.read_bytes()).hexdigest()
                          for path in sorted(frontend_dist.rglob('*')) if path.is_file()}
@@ -221,8 +218,9 @@ def main():
                 assert all(member.name.startswith('package/') and '..' not in Path(member.name).parts for member in tar.getmembers())
                 tar.extractall(private / 'packed', filter='data')
             release = json.loads((private / 'packed/package/dist/release.json').read_text())
-            assert release['version'] == '0.13.0' and release['apiLine'] == '0.13'
+            assert release == package_binding['release']
             checks['exact_packed_0_13_sdk_and_frozen_trusted_frontend'] = True
+            checks['reviewed_sdk_bytes_match_distribution_and_current_source_digest'] = True
             api_port, app_port, host_a_port, host_b_port = (helpers.port() for _ in range(4))
             api_base, app_base, host_a, host_b = ('http://127.0.0.1:' + str(port) for port in (api_port, app_port, host_a_port, host_b_port))
             environment = dict(os.environ)

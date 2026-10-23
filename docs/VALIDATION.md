@@ -1,5 +1,62 @@
 # FreeCollab validation record
 
+## One workspace, three views — 2026-10-23
+
+[Workspace modes](WORKSPACE_MODES.md) adds shared split, expanded and minimized
+views to the retained conversation work area. Documents, tasks, decisions and
+channel groups use the same controls. The actual editor and session stay
+mounted; the footer sets work aside and the separate X retains its normal
+close guards. Native/encrypted routing and backend data models are unchanged.
+
+Executed for this increment:
+
+- **543 frontend Node cases passed**, together with TypeScript and application/
+  trusted-embed production builds.
+- **Seven isolated real React/Chromium hook groups passed**. They verify retained
+  DOM, pointer and keyboard focus, selection and scroll, both resume modes,
+  nested legacy dialogs, popup/default-prevented Escape, IME, tab containment,
+  scope changes, unmount cancellation and deliberate newer focus. This fixture
+  exercises the hooks; it is not substituted for a real document session.
+- **15 actual product browser groups passed**: 12 native and three genuine
+  example-product groups, with 586 source hashes per fixture matching the final
+  runtime. They retain the same editor nodes through all three views, create
+  and synchronize real Yjs documents, hold and then deliver a genuine pending
+  update, preserve all four editor types, send typed-reference chat while work
+  is parked, reveal real source messages and enforce authoritative account/
+  channel changes. English and saved Swedish at 320 px remain usable. The own
+  example visit was revoked with HTTP204 and all fixtures removed.
+- The **six-group elite**, **15-group conversation**, **seven-group slash** and
+  **18-group typed-reference** regressions passed. Their actual executed-script
+  and runtime manifests match the current source. Four close-intent selectors
+  now use the real header X; every old behavioral assertion remains. An earlier
+  aggregate with unused harness hashes is retained separately and is not the
+  final binding.
+- The complete **33-group example-product regression passed**, with all 579
+  runtime source hashes matching. Five close-intent clicks now use the header
+  X; all 33 original groups and 195 assertions are preserved. It includes
+  visitor isolation/reset, draft and reading anchors, document synchronization,
+  workflows and saved Swedish at 320 px. There were no HTTP429 responses, and
+  the owned fixture processes and temporary data were removed.
+- The earlier CI failures were reproduced and corrected at their actual
+  fixture boundaries. **Four history groups passed** with unchanged search,
+  live-edit/delete, pagination and recipient assertions plus an exact selected
+  person-reference check. The real **14-check two-organization Connect/Matrix
+  proof passed** against the reviewed SDK artifact and current source. It uses
+  real signed managed fixture identities, not live customer IdP popups. All
+  five original containers retained their IDs, start times and running state.
+- **Five artifact-binding cases passed**: the Connect harness retains an
+  explicit reviewed SHA-256 pin and also verifies all packed public bytes and
+  the current SDK source digest. Tampered archives, source drift and stale
+  distributions are rejected. No SDK runtime, version or publication changed.
+- Both new browser proofs and the artifact-binding checks are wired into CI.
+  The workspace contract, design guide, conversation contract, feature audit
+  and README describe the shared view and close behavior.
+
+The conversation keeps its existing order: newest messages sit at the bottom,
+next to the composer. Reading older messages retains the reader's position;
+this increment does not reverse the timeline. All 204 relative documentation
+links checked across the updated guides resolve locally.
+
 ## Command arguments and typed references — 2026-10-23
 
 The conversation composer accepts [command arguments](SLASH_COMMANDS.md) and

@@ -2,9 +2,10 @@
 
 The signed-in product and public example installation use the same `Chat` and
 native editors. Documents, tasks and decisions open in the conversation's work
-area. The message list and composer stay available; there is no daily WorkHub
-dialog or tool tab strip. On narrow screens the same work area follows the
-conversation in one column.
+area. Split view keeps the message list and composer available without a tool
+tab strip. The same editor can fill the application viewport or be minimized
+without unmounting. On narrow screens, split work follows the conversation in
+one column. See [workspace modes](WORKSPACE_MODES.md).
 
 ## Everyday flow
 
@@ -23,10 +24,12 @@ conversation in one column.
 - A saved document or task can be linked to the source message. A decision uses
   its existing native source-message field. The message then offers the actual
   current resource, including its native title and task/decision status.
-- **Show source message** reveals the genuine message or saved reply's thread
-  while keeping the editor mounted. **Back to conversation** restores the
-  opening control and reading position unless the person has already moved on
-  in the conversation.
+- **Full screen / Split view** changes the active work's space. **Minimize**
+  and the footer's **Back to conversation** park it. **Continue work** restores
+  the last view and available field; the same editor, selection and session
+  stay alive. The real **X** remains a guarded close action.
+- **Show source message** restores split view, reveals and focuses the genuine
+  message or saved reply's thread while keeping the editor mounted.
 
 Documents use the existing Yjs session, comments, revisions and export. Document
 options and organization are contextual disclosures. Tasks keep their existing
@@ -35,10 +38,16 @@ options expose management, archived records and filters. These controls use the
 same product APIs as the full standalone components. Personal appearance and
 uploaded profile photos follow the normal account settings.
 
-Pending document synchronization and native writes block navigation. Unsent
-drafts require one discard decision. Guards apply to work, source, channel and
-workspace navigation. Session revocation and authoritative membership changes
-still clear the old account's work rather than allowing a draft to retain access.
+Layout changes alone call no leave guard and perform no save or server mutation,
+even while a write is pending. Pending document synchronization and native
+writes still block actual close or navigation away. Unsent drafts require one
+discard decision. Minimized work retains its guards when changing the target,
+channel or workspace. Revealing the source within the same conversation keeps
+the editor and does not discard its draft. Escape in expanded work restores
+split view first; nested popups handle Escape first. Layout/focus state resets
+on reload or a changed account, credential, workspace, channel, encryption or
+work target. Session revocation and authoritative membership changes still clear
+the old account's work rather than allowing a draft to retain access.
 
 ## Native message-to-work references
 

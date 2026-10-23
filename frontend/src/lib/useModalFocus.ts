@@ -4,6 +4,11 @@ interface ModalEntry {
   element: HTMLElement
   previousFocus: HTMLElement | null
 }
+export interface ModalFocusOptions {
+  preserveInsideFocus?: boolean
+  restoreFocus?: boolean
+  escapePhase?: 'capture' | 'bubble'
+}
 const modalStack: ModalEntry[] = []
 const originalInert = new Map<HTMLElement, boolean>()
 let originalOverflow: string | undefined
@@ -35,9 +40,10 @@ function focusableElements(element: HTMLElement): HTMLElement[] {
 }
 
 /** Isolate, focus and restore dialogs, including dialogs opened above another. */
-export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, active = true): void {
+export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, active = true, options: ModalFocusOptions = {}): void {
   const closeRef = useRef(onClose)
   closeRef.current = onClose
+  const { preserveInsideFocus = false, restoreFocus = true, escapePhase = 'capture' } = options
 
   useLayoutEffect(() => {
     const element = ref.current
@@ -50,15 +56,18 @@ export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, 
     modalStack.push(entry)
     isolateTopModal()
     const first = () => element.querySelector<HTMLElement>('[data-autofocus]') || focusableElements(element)[0] || element
-    first().focus({ preventScroll: true })
+    if (!preserveInsideFocus || !element.contains(document.activeElement)) first().focus({ preventScroll: true })
+
+    const onEscape = (event: KeyboardEvent) => {
+      if (topModal() !== entry || event.key !== 'Escape' || event.defaultPrevented || event.isComposing || event.keyCode === 229) return
+      event.preventDefault()
+      event.stopPropagation()
+      closeRef.current()
+    }
 
     const onKey = (event: KeyboardEvent) => {
-      if (topModal() !== entry || event.isComposing) return
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        event.stopPropagation()
-        closeRef.current()
-      }
+      if (topModal() !== entry || event.isComposing || event.keyCode === 229) return
+      if (escapePhase === 'capture') onEscape(event)
       if (event.key !== 'Tab') return
       const controls = focusableElements(element)
       if (!controls.length) { event.preventDefault(); element.focus(); return }
@@ -73,9 +82,11 @@ export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, 
       if (topModal() === entry && event.target instanceof Node && !element.contains(event.target)) first().focus({ preventScroll: true })
     }
     document.addEventListener('keydown', onKey, true)
+    if (escapePhase === 'bubble') document.addEventListener('keydown', onEscape)
     document.addEventListener('focusin', onFocus)
     return () => {
       document.removeEventListener('keydown', onKey, true)
+      if (escapePhase === 'bubble') document.removeEventListener('keydown', onEscape)
       document.removeEventListener('focusin', onFocus)
       const wasTop = topModal() === entry
       const index = modalStack.indexOf(entry)
@@ -85,7 +96,7 @@ export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, 
         document.body.style.overflow = originalOverflow
         originalOverflow = undefined
       }
-      if (wasTop) {
+      if (wasTop && restoreFocus) {
         const previous = entry.previousFocus
         const visible = previous?.isConnected && !previous.closest('[inert]') && previous.getClientRects().length > 0
         const underlying = topModal()?.element
@@ -96,5 +107,5 @@ export function useModalFocus(ref: RefObject<HTMLElement>, onClose: () => void, 
         if (target && !target.closest('[inert]') && target.getClientRects().length > 0) target.focus({ preventScroll: true })
       }
     }
-  }, [ref, active])
+  }, [ref, active, preserveInsideFocus, restoreFocus, escapePhase])
 }

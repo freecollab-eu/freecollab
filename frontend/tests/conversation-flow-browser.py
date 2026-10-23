@@ -126,7 +126,7 @@ def select(dialog, value):
 
 
 def leave(page, dialog, button=None):
-    dialog.get_by_role('button', name=RETURN).click()
+    dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
     expect(dialog).to_have_count(0)
     if button is not None:
         # Closing unmounts the editor before the next-frame focus restoration.
@@ -376,7 +376,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                         confirmations.append(value.message)
                         value.accept()
                     page.on('dialog', accept_unexpected)
-                    dialog.get_by_role('button', name=RETURN).click()
+                    dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     assert not confirmations, 'Outstanding Yjs work must block leaving before a discard confirmation'
                     expect(dialog).to_be_visible()
                     expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
@@ -427,7 +427,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     def decline_document_draft(value):
                         draft_confirmations.append(value.message); value.dismiss()
                     page.once('dialog', decline_document_draft)
-                    dialog.get_by_role('button', name=RETURN).click()
+                    dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     expect(comment_draft).to_have_value('Keep this unsent native document comment.')
                     page.once('dialog', decline_document_draft)
                     page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
@@ -453,7 +453,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                         task_confirmations.append(value.message)
                         value.dismiss()
                     page.once('dialog', decline_task)
-                    dialog.get_by_role('button', name=RETURN).click()
+                    dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     page.once('dialog', decline_task)
                     page.locator('.fc-chat-flow-actions').get_by_role('button', name='Add a document', exact=True).click()
                     page.once('dialog', decline_task)

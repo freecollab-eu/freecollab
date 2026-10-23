@@ -4,19 +4,21 @@ import { api, type ChannelMember } from '../lib/api';
 import { t, useI18n } from '../i18n';
 import { messageReferencesApi, type NotificationGroup } from '../lib/message-references-api';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
+import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
 import '../styles/message-references.css';
 
 export interface ReferenceGroupsPanelProps {
   channelId: string; workspaceId?: string; canManage: boolean; onClose: () => void; onChanged?: () => void;
   initialDraft?: { key: string; name: string; memberIds?: string[] };
   initialGroupId?: string;
+  layoutActions?: ConversationWorkLayoutActions;
 }
 type Editor = { id?: string; name: string; members: string[]; previous?: NotificationGroup };
 const describe = (failure: unknown) => failure instanceof Error ? failure.message : 'The group could not be saved. Try again.';
 const equalMembers = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 
 /** The group's roster is an explicit notification audience, never an access grant. */
-export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClose, onChanged, initialDraft, initialGroupId }: ReferenceGroupsPanelProps) {
+export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClose, onChanged, initialDraft, initialGroupId, layoutActions }: ReferenceGroupsPanelProps) {
   useI18n();
   const currentToken = api.getAccessToken(), currentActor = api.getCurrentUserId();
   const [groups, setGroups] = useState<NotificationGroup[]>([]), [members, setMembers] = useState<ChannelMember[]>([]);
@@ -98,8 +100,15 @@ export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClos
   };
   if (owner.current.token !== currentToken || owner.current.actor !== currentActor || owner.current.channelId !== channelId || owner.current.workspaceId !== workspaceId)
     return <section className="fc-reference-groups" role="region" aria-label={t('Groups in this conversation')}><p role="status">{t('Loading groups…')}</p></section>;
-  return <section className="fc-reference-groups" role="region" aria-label={t('Groups in this conversation')} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close(); } }}>
-    <header><div><span className="fc-kicker">{t('The people you mean')}</span><h2>{t('Groups in this conversation')}</h2></div><button type="button" className="fc-icon-button" aria-label={t('Close groups')} onClick={close}><X size={20} /></button></header>
+  return <section className="fc-reference-groups" role="region" aria-label={t('Groups in this conversation')} onKeyDown={event => {
+    if (event.key !== 'Escape' || event.defaultPrevented || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    const nested = (event.target as Element).closest('[role="dialog"], [aria-modal="true"]');
+    if (nested && event.currentTarget.contains(nested)) return;
+    event.preventDefault(); event.stopPropagation();
+    if (layoutActions?.expanded) layoutActions.onToggleExpanded(); else close();
+  }}>
+    <header><div><span className="fc-kicker">{t('The people you mean')}</span><h2>{t('Groups in this conversation')}</h2></div>{layoutActions ? <ConversationWorkControls layout={layoutActions} onClose={close} closeLabel="Close groups" /> : <button type="button" className="fc-icon-button" aria-label={t('Close groups')} onClick={close}><X size={20} /></button>}</header>
+    <div className="fc-reference-groups-body">
     <p className="fc-reference-groups-explanation">{t('Mentioning a group notifies its current members in this conversation. It does not add people or grant access.')}</p>
     {error && <p className="fc-alert" role="alert">{t(error)}</p>}{notice && <p role="status" className="fc-reference-list-status">{t(notice)}</p>}
     {loading ? <p className="fc-reference-list-status" role="status"><Loader2 size={15} className="fc-account-spinner" />{t('Loading groups…')}</p> : <>
@@ -116,6 +125,7 @@ export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClos
         <div className="fc-reference-group-editor-actions"><button type="submit" className="fc-button fc-button-primary" disabled={!editor.name.trim() || !editor.members.length || !dirty}><Save size={15} />{editor.previous ? t('Save group') : t('Create group')}</button><button type="button" className="fc-button" onClick={() => { if (mayLeave.current()) setEditor(null); }}>{t('Cancel')}</button>{editor.previous && <button type="button" className="fc-chat-text-button" disabled={dirty} onClick={() => void remove()}><Trash2 size={15} />{t('Delete group')}</button>}</div>
       </fieldset></form> : <div className="fc-reference-group-readonly"><h3>{editor.name}</h3><ul>{members.filter(member => editor.members.includes(member.user_id)).map(member => <li key={member.user_id}>{member.name}</li>)}</ul></div>)}
     </>}
+    </div>
     <footer>{canManage && <button type="button" className="fc-chat-text-button" disabled={loading || busy} onClick={() => choose()}><Plus size={15} />{t('New group')}</button>}<button type="button" className="fc-chat-text-button" disabled={loading || busy} onClick={() => void refresh()}><RefreshCw size={14} />{t('Refresh groups')}</button></footer>
   </section>;
 }

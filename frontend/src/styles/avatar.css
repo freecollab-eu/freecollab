@@ -1,6 +1,6 @@
 .fc-profile-avatar { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; width: 100%; height: 100%; overflow: hidden; border-radius: inherit; font: inherit; color: inherit; background: inherit; vertical-align: middle; }
 .fc-profile-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; }
 .fc-account-photo { display: flex; align-items: flex-start; gap: 20px; }
-.fc-account-photo > .fc-profile-avatar { border-radius: 50%; background: var(--fc-surface-muted, #ede9e2); color: var(--fc-text, #343c36); }
+.fc-account-photo > .fc-profile-avatar { border-radius: 50%; background: var(--fc-sidebar); color: var(--fc-text); }
 .fc-account-photo > div { min-width: 0; }
 @media (max-width: 480px) { .fc-account-photo { gap: 14px; } }

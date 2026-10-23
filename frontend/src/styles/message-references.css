@@ -7,7 +7,8 @@ form:has(> .fc-mention-references) { position: relative; }
 .fc-reference-candidate.is-active > svg { color: var(--fc-accent); }
 .fc-reference-list-status { display: flex; align-items: center; gap: .5rem; margin: 0; padding: .7rem 1rem; color: var(--fc-muted); font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
 .fc-reference-list-error { color: var(--fc-text); }
-.fc-reference-manage-groups { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem 0; min-height: 32px; border: 0; background: transparent; color: var(--fc-accent); font: inherit; cursor: pointer; }
+.fc-reference-manage-groups { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem 0; min-height: 44px; border: 0; background: transparent; color: var(--fc-accent); font: inherit; cursor: pointer; text-underline-offset: .25em; }
+.fc-reference-manage-groups:hover { text-decoration: underline; }
 .fc-reference-manage-groups:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
 .fc-message-reference { display: inline-flex; align-items: baseline; gap: .2em; max-width: 100%; min-width: 0; padding: .06em .28em; margin: -.06em 0; border: 0; border-radius: calc(var(--fc-radius) * .3); color: var(--fc-accent); background: var(--fc-accent-soft); font: inherit; text-align: start; line-height: inherit; text-decoration: none; vertical-align: baseline; cursor: pointer; }
 .fc-message-reference > svg { flex-shrink: 0; align-self: center; }

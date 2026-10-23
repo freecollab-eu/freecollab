@@ -1,3 +1,46 @@
-.fc-contextual-copilot{min-width:0;font:inherit}.fc-contextual-copilot button{font:inherit;cursor:pointer;min-height:44px}.fc-contextual-copilot button:disabled{opacity:.5;cursor:not-allowed}.fc-contextual-copilot-trigger{display:inline-flex;align-items:center;gap:.4rem;padding:.45rem .6rem;border:0;border-radius:6px;background:transparent;color:var(--fc-accent);font-size:11px!important}.fc-contextual-copilot-card{max-width:680px;min-width:0;margin:.5rem 0;padding:1rem;border:1px solid var(--fc-border);border-radius:var(--fc-radius,10px);background:var(--fc-surface);color:var(--fc-text);font-size:12px;line-height:1.7}.fc-contextual-copilot-card>header{display:flex;align-items:center;justify-content:space-between;gap:.5rem}.fc-contextual-copilot-card>header button{display:grid;place-items:center;min-width:44px;border:0;background:transparent;color:inherit}.fc-contextual-copilot-card p{margin:.5rem 0;overflow-wrap:anywhere;white-space:pre-wrap}.fc-contextual-copilot-card fieldset{min-width:0;border:0;margin:0;padding:0}.fc-contextual-copilot-card label{display:flex;gap:.55rem;align-items:flex-start;margin:.75rem 0;cursor:pointer}.fc-contextual-copilot-card input[type=checkbox]{flex-shrink:0;margin-top:.3rem;width:17px;height:17px;accent-color:var(--fc-accent)}.fc-contextual-copilot-card aside{margin:.75rem 0;padding:.6rem .8rem;border-left:2px solid var(--fc-accent);background:var(--fc-accent-soft);font-size:11px}.fc-contextual-copilot-actions{display:flex;flex-wrap:wrap;gap:.4rem;margin:.7rem 0}.fc-contextual-copilot-actions button,.fc-contextual-copilot-result button,.fc-contextual-copilot-send{border:1px solid var(--fc-border);border-radius:6px;padding:.5rem .7rem;background:var(--fc-surface);color:var(--fc-text)}.fc-contextual-copilot-actions button[aria-pressed=true]{border-color:var(--fc-accent);color:var(--fc-accent);background:var(--fc-accent-soft)}.fc-contextual-copilot-card summary{cursor:pointer;min-height:44px;align-content:center}.fc-contextual-copilot-card details>div{max-height:220px;overflow:auto;overscroll-behavior:contain;padding:.6rem 0;border-top:1px solid var(--fc-border)}.fc-contextual-copilot-destination{font-size:11px;color:var(--fc-muted)}.fc-contextual-copilot-secure{padding:.7rem;background:var(--fc-accent-soft);border-radius:6px}.fc-contextual-copilot-result{margin-top:1rem;padding-top:.8rem;border-top:1px solid var(--fc-border)}.fc-contextual-copilot-result>small{display:block;color:var(--fc-muted);font-size:10px;margin-top:.5rem}.fc-contextual-copilot-card>[role=status]{display:flex;align-items:center;gap:.5rem}.fc-contextual-copilot-card>[role=alert]{color:var(--fc-danger)}
-.fc-chat-main>.fc-contextual-copilot,.fc-chat-composer-area>.fc-contextual-copilot{flex-shrink:0}.fc-chat-main>.fc-contextual-copilot .fc-contextual-copilot-card,.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card{max-height:min(60vh,600px);overflow-y:auto;overscroll-behavior:contain}
-@media(max-width:420px){.fc-contextual-copilot-card{padding:.8rem}.fc-contextual-copilot-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.fc-contextual-copilot-actions button{min-width:0;white-space:normal;text-align:left}.fc-contextual-copilot-result button,.fc-contextual-copilot-send{width:100%;white-space:normal}}
+.fc-contextual-copilot { min-width: 0; font: inherit; }
+.fc-contextual-copilot button { font: inherit; cursor: pointer; min-height: 44px; }
+.fc-contextual-copilot button:disabled { opacity: .5; cursor: not-allowed; }
+.fc-contextual-copilot-trigger { display: inline-flex; align-items: center; gap: .5rem; padding: .5rem .65rem; border: 0; border-radius: calc(var(--fc-radius) * .65); background: transparent; color: var(--fc-accent); font-size: var(--fc-detail-size) !important; }
+.fc-contextual-copilot-trigger:hover { background: var(--fc-accent-soft); }
+.fc-contextual-copilot-card { max-width: 680px; min-width: 0; margin: .65rem 0; padding: 1.15rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); font-size: max(.875rem, calc(var(--fc-body-size) * .95)); line-height: 1.75; }
+.fc-contextual-copilot-card > header { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
+.fc-contextual-copilot-card > header button { display: grid; place-items: center; min-width: 44px; flex-shrink: 0; border: 0; background: transparent; color: inherit; }
+.fc-contextual-copilot-card p { margin: .65rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.fc-contextual-copilot-card fieldset { min-width: 0; border: 0; margin: 0; padding: 0; }
+.fc-contextual-copilot-card label { display: flex; gap: .65rem; align-items: flex-start; margin: .85rem 0; cursor: pointer; }
+.fc-contextual-copilot-card input[type=checkbox] { flex-shrink: 0; margin-top: .3rem; width: 17px; height: 17px; accent-color: var(--fc-accent); }
+.fc-contextual-copilot-card aside { margin: .85rem 0; padding: .8rem 1rem; border-left: 2px solid var(--fc-accent); background: var(--fc-accent-soft); font-size: var(--fc-detail-size); line-height: 1.75; }
+.fc-contextual-copilot-actions { display: flex; flex-wrap: wrap; gap: .5rem; margin: .8rem 0; }
+.fc-contextual-copilot-actions button,
+.fc-contextual-copilot-result button,
+.fc-contextual-copilot-send { border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .7); padding: .6rem .8rem; background: var(--fc-surface); color: var(--fc-text); transition: border-color .15s, background-color .15s; }
+.fc-contextual-copilot-actions button:hover:not(:disabled),
+.fc-contextual-copilot-result button:hover:not(:disabled),
+.fc-contextual-copilot-send:hover:not(:disabled) { border-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-contextual-copilot-actions button[aria-pressed=true] { border-color: var(--fc-accent); color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-contextual-copilot-card summary { cursor: pointer; min-height: 44px; align-content: center; }
+.fc-contextual-copilot-card details > div { max-height: 220px; overflow: auto; overscroll-behavior: contain; padding: .75rem 0; border-top: 1px solid var(--fc-border); }
+.fc-contextual-copilot-destination { font-size: var(--fc-caption-size); color: var(--fc-muted); overflow-wrap: anywhere; }
+.fc-contextual-copilot-secure { padding: .85rem; background: var(--fc-accent-soft); border-radius: calc(var(--fc-radius) * .7); }
+.fc-contextual-copilot-result { margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--fc-border); }
+.fc-contextual-copilot-result > small { display: block; color: var(--fc-muted); font-size: var(--fc-caption-size); margin-top: .65rem; }
+.fc-contextual-copilot-card > [role=status] { display: flex; align-items: center; gap: .5rem; }
+.fc-contextual-copilot-card > [role=alert] { color: var(--fc-danger); }
+.fc-chat-main > .fc-contextual-copilot,
+.fc-chat-composer-area > .fc-contextual-copilot { flex-shrink: 0; }
+.fc-chat-main > .fc-contextual-copilot .fc-contextual-copilot-card,
+.fc-chat-composer-area > .fc-contextual-copilot .fc-contextual-copilot-card { max-height: min(60vh, 600px); overflow-y: auto; overscroll-behavior: contain; }
+
+@media (max-width: 420px) {
+  .fc-contextual-copilot-card { padding: .85rem; }
+  .fc-contextual-copilot-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .fc-contextual-copilot-actions button { min-width: 0; white-space: normal; text-align: left; }
+  .fc-contextual-copilot-result button,
+  .fc-contextual-copilot-send { width: 100%; white-space: normal; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-contextual-copilot-actions button,
+  .fc-contextual-copilot-result button,
+  .fc-contextual-copilot-send { transition: none; }
+}

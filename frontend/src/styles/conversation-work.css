@@ -16,30 +16,31 @@
   position: relative;
   min-width: 0;
   padding: 0;
-  border-top: 1px solid var(--fc-border);
+  border: 1px solid var(--fc-border);
+  border-radius: var(--fc-radius);
   background: var(--fc-surface);
   color: var(--fc-text);
-  box-shadow: 0 4px 18px color-mix(in srgb, var(--fc-text) 4%, transparent);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--fc-text) 3%, transparent);
   font-family: var(--fc-font);
   scroll-margin-block: 1rem;
 }
 .fc-conversation-work:focus { outline: none; }
 .fc-conversation-work:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 5px; }
-.fc-conversation-work-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.25rem 1.4rem .85rem; }
+.fc-conversation-work-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.5rem 1rem; }
 .fc-conversation-work-header > div { min-width: 0; }
-.fc-conversation-work-header .fc-kicker { display: block; color: var(--fc-muted); font-size: .62rem; letter-spacing: .07em; }
+.fc-conversation-work-header .fc-kicker { display: block; color: var(--fc-muted); font-size: .6875rem; letter-spacing: .08em; }
 .fc-conversation-work-header h2 { margin: .45rem 0 0; font-family: var(--fc-heading-font); font-size: clamp(1.5rem, 2.25vw, 2.1rem); font-weight: 400; line-height: 1.15; letter-spacing: -.045em; overflow-wrap: anywhere; }
-.fc-conversation-work-header p { margin: .55rem 0 0; color: var(--fc-muted); font-size: .75rem; line-height: 1.65; }
+.fc-conversation-work-header p { margin: .55rem 0 0; color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.65; }
 .fc-conversation-work-header > button { display: grid; flex-shrink: 0; place-items: center; min-width: 44px; min-height: 44px; margin: -.3rem -.55rem 0 0; border: 0; background: transparent; color: var(--fc-muted); cursor: pointer; }
 .fc-conversation-work-header > button:hover { color: var(--fc-accent); }
 .fc-conversation-work-header > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
-.fc-conversation-work-source { display: flex; align-items: flex-start; gap: .65rem; min-width: 0; margin: 0 1.4rem; padding: .7rem 0; border-block: 1px solid var(--fc-border); color: var(--fc-muted); font-size: .68rem; line-height: 1.65; overflow-wrap: anywhere; }
+.fc-conversation-work-source { display: flex; align-items: flex-start; gap: .75rem; min-width: 0; margin: 0 1.5rem; padding: .85rem 0; border-block: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.65; overflow-wrap: anywhere; }
 .fc-conversation-work-source > svg { flex-shrink: 0; margin-top: .15rem; }
 .fc-conversation-work-source > div { flex: 1; min-width: 0; }
 .fc-conversation-work-source p { margin: .2rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fc-conversation-work-source button, .fc-conversation-work-source a { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .35rem 0; border: 0; background: transparent; color: var(--fc-accent); font: inherit; text-align: left; text-underline-offset: .2rem; cursor: pointer; }
 .fc-conversation-work-source button:hover, .fc-conversation-work-source a:hover { text-decoration: underline; }
-.fc-conversation-work-body { min-width: 0; padding: 1.2rem 1.4rem 1.5rem; }
+.fc-conversation-work-body { min-width: 0; padding: 1.25rem 1.5rem 1.6rem; }
 .fc-conversation-work-body > * { min-width: 0; }
 .fc-conversation-work-body input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
 .fc-conversation-work-body select, .fc-conversation-work-body textarea { max-width: 100%; }
@@ -51,10 +52,11 @@
 .fc-conversation-work-body .fc-shared-heading p,
 .fc-conversation-work-body .fc-project-heading p { font-size: .74rem; line-height: 1.7; }
 .fc-conversation-work-body .fc-shared-editor,
-.fc-conversation-work-body .fc-shared-preview { min-height: 18rem; background: transparent; }
-.fc-conversation-work-body .fc-shared-title { border-radius: 0; border-width: 0 0 1px; padding-inline: 0; }
-.fc-conversation-work-body .fc-shared-editor { border-radius: 0; border-color: transparent; padding: .75rem 0; }
-.fc-conversation-work-body .fc-shared-editor:focus { border-color: var(--fc-border); }
+.fc-conversation-work-body .fc-shared-preview { min-height: 20rem; background: color-mix(in srgb, var(--fc-bg) 32%, var(--fc-surface)); }
+.fc-conversation-work-body .fc-shared-title { min-height: 3.5rem; padding: .55rem 0 .85rem; border-radius: 0; border-width: 0 0 1px; background: transparent; font-size: clamp(1.35rem, 4cqi, 2rem) !important; font-weight: 450; letter-spacing: -.035em; line-height: 1.3; }
+.fc-conversation-work-body .fc-shared-title:focus { box-shadow: none; border-bottom-color: var(--fc-accent); }
+.fc-conversation-work-body .fc-shared-editor { padding: 1rem 1.1rem; border-radius: calc(var(--fc-radius) * .65); border-color: var(--fc-border); }
+.fc-conversation-work-body .fc-shared-editor:focus { border-color: var(--fc-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc-accent) 12%, transparent); }
 .fc-conversation-work-body .fc-project-card-description { max-height: none; overflow: visible; }
 .fc-conversation-work-body .fc-account-actions,
 .fc-conversation-work-body .fc-project-actions { flex-wrap: wrap; }
@@ -63,42 +65,42 @@
 .fc-conversation-work .fc-collaboration-flow > .fc-collaboration-body { overflow: visible; padding: 0; }
 .fc-conversation-work .fc-projects-flow { gap: 1rem; }
 .fc-project-flow-projects { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem 1rem; padding-bottom: .65rem; border-bottom: 1px solid var(--fc-border); }
-.fc-project-flow-projects > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .4rem 0; color: var(--fc-muted); font-size: .75rem; }
+.fc-project-flow-projects > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .4rem 0; color: var(--fc-muted); font-size: var(--fc-caption-size); }
 .fc-project-flow-projects > button[aria-pressed="true"] { color: var(--fc-accent); }
 .fc-project-flow-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .7rem; min-width: 0; }
 .fc-project-flow-actions > span { flex: 1; min-width: 0; font-size: .8rem; overflow-wrap: anywhere; }
-.fc-project-flow-actions > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; font-size: .75rem; }
+.fc-project-flow-actions > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; font-size: var(--fc-caption-size); }
 .fc-project-flow-tasks { display: grid; gap: .55rem; min-width: 0; }
 .fc-project-flow-task { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; min-height: 44px; padding: .85rem 0; border: 0; border-bottom: 1px solid var(--fc-border); background: transparent; color: var(--fc-text); font: inherit; text-align: left; cursor: pointer; }
 .fc-project-flow-task > span { flex: 1; min-width: 0; font-size: .9rem; line-height: 1.5; overflow-wrap: anywhere; }
 .fc-project-flow-task > small { flex-shrink: 0; color: var(--fc-muted); font-size: .65rem; }
 .fc-project-flow-task:hover { color: var(--fc-accent); }
 .fc-project-flow-task:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
-.fc-conversation-work-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .65rem; padding: .8rem 1.4rem; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: .68rem; line-height: 1.6; }
+.fc-conversation-work-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .65rem; padding: .75rem 1.5rem; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.6; }
 .fc-conversation-work-footer button { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-accent); font: inherit; cursor: pointer; }
 
 .fc-shared-documents.is-flow .fc-shared-flow-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; min-width: 0; margin: 0 0 1.15rem; }
-.fc-shared-flow-toolbar > button { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-muted); font: inherit; font-size: .72rem; cursor: pointer; }
+.fc-shared-flow-toolbar > button { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-muted); font: inherit; font-size: var(--fc-detail-size); cursor: pointer; }
 .fc-shared-flow-toolbar > button:hover { color: var(--fc-accent); }
-.fc-shared-flow-toolbar .fc-shared-sync { margin-left: auto; font-size: .65rem; }
-.fc-shared-flow-document { min-width: 0; }
-.fc-shared-flow-assistance { min-width: 0; margin-top: .65rem; }
+.fc-shared-flow-toolbar .fc-shared-sync { margin-left: auto; font-size: var(--fc-caption-size); }
+.fc-shared-flow-document { width: 100%; max-width: 52rem; min-width: 0; margin-inline: auto; }
+.fc-shared-flow-assistance { min-width: 0; margin-block: .75rem; }
 .fc-document-organization.is-flow { min-width: 0; }
 .fc-document-flow-context { display: grid; gap: .6rem; min-width: 0; margin-bottom: 1rem; padding-bottom: .7rem; border-bottom: 1px solid var(--fc-border); }
 .fc-document-flow-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; min-width: 0; margin: 0 0 .8rem; }
 .fc-document-flow-heading h3, .fc-document-flow-heading h4 { margin: 0; font-family: var(--fc-heading-font); font-size: 1.2rem; font-weight: 450; line-height: 1.4; letter-spacing: -.03em; overflow-wrap: anywhere; }
 .fc-document-flow-heading > button { flex-shrink: 0; min-height: 44px; }
 .fc-document-flow-stack { min-width: 0; border-top: 1px solid var(--fc-border); }
-.fc-document-flow-stack > summary { display: flex; align-items: center; gap: .6rem; min-width: 0; min-height: 44px; padding: .55rem 0; color: var(--fc-muted); font-size: .72rem; line-height: 1.5; cursor: pointer; list-style: none; }
+.fc-document-flow-stack > summary { display: flex; align-items: center; gap: .6rem; min-width: 0; min-height: 44px; padding: .75rem 0; color: var(--fc-muted); font-size: var(--fc-detail-size); line-height: 1.5; cursor: pointer; list-style: none; }
 .fc-document-flow-stack > summary::-webkit-details-marker { display: none; }
 .fc-document-flow-stack > summary > svg { flex-shrink: 0; }
 .fc-document-flow-stack > summary > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.fc-document-flow-stack > summary > small { margin-left: auto; font-size: .65rem; white-space: nowrap; }
+.fc-document-flow-stack > summary > small { margin-left: auto; font-size: var(--fc-caption-size); white-space: nowrap; }
 .fc-document-flow-stack[open] > summary { color: var(--fc-accent); }
 .fc-document-flow-stack > summary:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
 .fc-document-flow-list { display: grid; gap: .2rem; min-width: 0; margin: 0; padding: 0 0 .5rem; list-style: none; }
 .fc-document-flow-list > li { min-width: 0; }
-.fc-document-flow-list button { display: flex; align-items: center; gap: .65rem; width: 100%; min-width: 0; min-height: 44px; padding: .55rem .65rem; border: 0; border-radius: calc(var(--fc-radius) * .5); background: transparent; color: var(--fc-text); font: inherit; font-size: .8rem; line-height: 1.55; text-align: left; cursor: pointer; }
+.fc-document-flow-list button { display: flex; align-items: center; gap: .75rem; width: 100%; min-width: 0; min-height: 44px; padding: .7rem .75rem; border: 0; border-radius: calc(var(--fc-radius) * .6); background: transparent; color: var(--fc-text); font: inherit; font-size: max(.875rem, calc(var(--fc-body-size) * .95)); line-height: 1.55; text-align: left; cursor: pointer; }
 .fc-document-flow-list button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .fc-document-flow-list button:hover, .fc-document-flow-list button[aria-current="page"] { color: var(--fc-accent); background: var(--fc-accent-soft); }
 .fc-document-flow-list button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -2px; }
@@ -220,11 +222,11 @@
   .fc-conversation-work-body { padding-top: .55rem; }
   .fc-shared-documents.is-flow .fc-shared-flow-toolbar { flex-wrap: nowrap; gap: .5rem; margin-bottom: .45rem; }
   .fc-shared-documents.is-flow .fc-shared-flow-toolbar > button { flex-shrink: 0; }
-  .fc-shared-documents.is-flow .fc-shared-flow-toolbar .fc-shared-sync { flex: 1; min-width: 0; width: auto; margin-left: auto; font-size: .6rem; line-height: 1.5; text-align: right; }
+  .fc-shared-documents.is-flow .fc-shared-flow-toolbar .fc-shared-sync { flex: 1; min-width: 0; width: auto; margin-left: auto; font-size: .6875rem; line-height: 1.5; text-align: right; }
   .fc-shared-documents.is-flow .fc-shared-label { margin: .2rem 0 .3rem; }
   .fc-shared-documents.is-flow .fc-shared-title { min-height: 44px; padding-block: .35rem; line-height: 1.3; }
   .fc-shared-documents.is-flow .fc-shared-editor-heading { margin-top: .55rem; }
-  .fc-conversation-work-body .fc-shared-editor { min-height: 15rem; }
+  .fc-conversation-work-body .fc-shared-editor { min-height: 15rem; padding: .8rem; }
   .fc-conversation-work-body .fc-input { font-size: 1rem; }
   .fc-chat-linked-work-card { flex-basis: 100%; }
 }

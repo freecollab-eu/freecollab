@@ -1,5 +1,48 @@
 # FreeCollab validation record
 
+## Shared interface polish — 2026-10-23
+
+Conversation, documents, stacks, tasks, decisions, account/appearance settings,
+discovery menus, authentication and public surfaces share a refined type and
+control scale. The mobile composer keeps its three labeled discovery controls
+in one row with 44 px targets. Provider accounts, federated work and imported
+history now use the actual personal theme tokens. The existing approved layout,
+message order, editor sessions, permissions and explicit saves remain intact.
+
+Executed against the final styles:
+
+- All **24 changed stylesheets parsed successfully**. TypeScript and the
+  application/trusted-embed production builds passed.
+- All **15 real native/example-product workspace groups passed**, with 586
+  source hashes per installation matching the final runtime. The same editor,
+  pending-write guards, draft/selection/scroll retention, typed references and
+  saved Swedish at 320 px remain covered. The owned example visit was revoked
+  with HTTP204 and its disposable fixture removed.
+- **11 additional real native browser groups passed**, with the same 586-source
+  runtime snapshot. They save and reload custom light/dark palettes and actual
+  Manrope/Source Serif preferences through ordinary account APIs; inspect long
+  content, two real documents placed in one stack, command/reference menus,
+  account keyboard focus, auth/invite forms, and three Swedish mobile work
+  modes. Provider-account views show actual empty/unconfigured states without
+  external consent or customer credentials. All three mobile discovery buttons
+  share one row with targets at least 44 px; tested text pairs have measured
+  contrast above 5.4:1. Reduced-motion behavior, narrow bounds and 34 actual
+  screenshots were reviewed. No browser errors, unintended external requests or
+  HTTP429 responses occurred. This is targeted browser validation, not an
+  independent complete accessibility audit.
+- The previous CI meeting failure was reproduced before readiness: its minimal
+  fixture registered `ScheduledMessageReference` without the `ScheduledMessage`
+  model. An explicit fixture import fixes that metadata dependency; production
+  initialization already imports it. Both services then start, and all **12
+  actual WebRTC/media/guest checks pass**, preserving the original assertions.
+  A private loopback TURN relay supplies media connectivity without changing
+  managed browser policy. Startup errors now report bounded process statuses
+  and exception classes without raw private logs. Original containers remain
+  unchanged and owned fixtures are removed.
+
+No product TypeScript, backend behavior, schema migration or provider consent
+flow changed. The shared design guide documents the type tokens and controls.
+
 ## One workspace, three views — 2026-10-23
 
 [Workspace modes](WORKSPACE_MODES.md) adds shared split, expanded and minimized

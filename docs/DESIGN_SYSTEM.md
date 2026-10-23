@@ -42,6 +42,15 @@ The Appearance panel keeps its preview visible above the **Colors**, **Typograph
 
 Frontend surfaces use the `--fc-*` CSS variables derived in `frontend/src/lib/appearance.ts`. Reuse these variables for text, surfaces, borders, accent, type, spacing and corners when extending the client. The token generator derives readable foreground colors from the selected palette. Bundled fonts avoid a font CDN dependency. Contrast checks cover tested token pairs and do not establish complete accessibility conformance.
 
+Supporting text follows the same personal type scale: `--fc-caption-size` has
+a 12 px floor and `--fc-detail-size` a 13 px floor, and both grow with body
+text. Conversation controls, references, document tools and settings retain
+44 px touch targets. Forms share surface, border and keyboard-focus treatment;
+document writing areas retain the real editor while using the selected type
+and palette. Menus, drawers and the public demo frame use the same restrained
+surface language, with wrapping labels on narrow screens. Reduced-motion and
+forced-color preferences remain part of the shared client styles.
+
 ## Search and switching
 
 **Search & switch**, **Quick switcher** in the tools menu or **Cmd/Ctrl+K** opens the quick switcher. It searches channels already available to the signed-in person, actions and loaded top-level messages in the selected channel. The initial message load is the latest 50. Deleted messages and thread replies are excluded from message suggestions. **Search all history** is a separate tool for the authorized history-search flow.

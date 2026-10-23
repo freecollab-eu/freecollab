@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -29,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('private_meetings_helpers', Path(__file__).with_name('remote-sync-browser.py'))
 helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
 REPORT = Path(os.getenv('MEETINGS_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/meetings-browser.json')))
-SOURCE_FILES = ['backend/app/models/meetings.py','backend/app/services/meetings.py','backend/app/api/meetings.py','backend/tests/test_meetings.py','frontend/src/lib/meetings-api.ts','frontend/src/components/MeetingsPanel.tsx','frontend/src/components/MeetingGuest.tsx','frontend/src/styles/meetings.css','frontend/tests/meetings-browser.py','docs/MEETINGS.md']
+SOURCE_FILES = ['backend/app/models/meetings.py','backend/app/models/chat_productivity.py','backend/app/models/message_references.py','backend/app/services/meetings.py','backend/app/api/meetings.py','backend/tests/test_meetings.py','frontend/src/lib/meetings-api.ts','frontend/src/components/MeetingsPanel.tsx','frontend/src/components/MeetingGuest.tsx','frontend/src/styles/meetings.css','frontend/tests/meetings-browser.py','docs/MEETINGS.md']
 
 
 def create_frontend(private, api_base, app_port):
@@ -108,6 +109,8 @@ from app.database import engine,init_db
 from app.models.user import User
 from app.models.channel import Channel,ChannelMember
 from app.models.workspace import Workspace,WorkspaceMember,WorkspaceChannel
+# Typed message references register a foreign key to the scheduling table.
+from app.models.chat_productivity import ScheduledMessage
 from app.services.auth import create_token
 import uvicorn
 init_db()
@@ -216,6 +219,18 @@ uvicorn.run(app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,
                     browser.close()
         except Exception:
             print('FAILED meetings proof stage: '+stage,file=sys.stderr)
+            if stage == 'private services':
+                # Only bounded exception classes and child status escape this
+                # disposable fixture; raw logs may contain private capabilities.
+                print('Private service exit status: '+json.dumps([{'program':Path(process.args[0]).name,'returncode':process.poll()} for process in processes]),file=sys.stderr)
+                for filename in ('api.log','vite.log','turn-launch.log'):
+                    path=private/filename
+                    if path.is_file():
+                        with path.open('rb') as stream:
+                            stream.seek(max(0,path.stat().st_size-8192));tail=stream.read(8192).decode(errors='replace')
+                        classes=re.findall(r'(?m)^([A-Za-z_][\w.]*(?:Error|Exception)):',tail)
+                        classes+=re.findall(r'\b(ERR_[A-Z_0-9]+)\b',tail)
+                        print(filename+' exception classes: '+json.dumps(classes[-5:]),file=sys.stderr)
             raise
         finally:
             for process in reversed(processes):

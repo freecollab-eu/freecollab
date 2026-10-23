@@ -13,37 +13,41 @@
   --fc-radius: 8px; --fc-space: 1;
   --fc-ease: cubic-bezier(.2,.65,.3,1);
   --fc-shadow: 0 16px 60px color-mix(in srgb, var(--fc-text) 6%, transparent);
+  --fc-caption-size: max(.75rem, calc(var(--fc-body-size) * .8));
+  --fc-detail-size: max(.8125rem, calc(var(--fc-body-size) * .88));
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--fc-bg); color: var(--fc-text); font-family: var(--fc-font); font-size: var(--fc-body-size); line-height: 1.6; }
+body { margin: 0; background: var(--fc-bg); color: var(--fc-text); font-family: var(--fc-font); font-size: var(--fc-body-size); line-height: 1.6; font-kerning: normal; }
 button, input, textarea, select { font: inherit; }
 button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
 button, a { touch-action: manipulation; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .55; }
 button, input, textarea, select { accent-color: var(--fc-accent); }
-::selection { background: var(--fc-accent-soft); color: var(--fc-text); }
+::selection { background: color-mix(in srgb, var(--fc-accent) 22%, var(--fc-bg)); color: var(--fc-text); }
 :focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
 button:focus:not(:focus-visible) { outline: none; }
 .fc-button, .fc-icon-button {
   min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: .55rem;
   border: 1px solid var(--fc-border); border-radius: var(--fc-radius); color: var(--fc-text);
-  background: transparent; padding: .65rem 1rem; font-size: max(.875rem, var(--fc-body-size)); font-weight: 450;
-  text-decoration: none; transition: background .15s, border-color .15s;
+  background: var(--fc-surface); padding: .65rem 1rem; font-size: max(.875rem, var(--fc-body-size)); font-weight: 450;
+  line-height: 1.45; text-decoration: none; transition: background .16s var(--fc-ease), border-color .16s var(--fc-ease), color .16s var(--fc-ease), box-shadow .16s var(--fc-ease);
 }
-.fc-button:hover, .fc-icon-button:hover { background: var(--fc-accent-soft); border-color: var(--fc-accent); }
+.fc-button:hover:not(:disabled), .fc-icon-button:hover:not(:disabled) { background: var(--fc-accent-soft); border-color: color-mix(in srgb, var(--fc-accent) 45%, var(--fc-border)); }
 .fc-button-primary { color: var(--fc-on-accent-original); background: var(--fc-accent-original); border-color: var(--fc-accent); }
-.fc-button-primary:hover { color: var(--fc-on-accent-original); background: var(--fc-accent-original); border-color: var(--fc-accent); box-shadow: inset 0 0 0 1px var(--fc-on-accent-original); }
-.fc-icon-button { width: 44px; flex-shrink: 0; padding: .6rem; }
+.fc-button-primary:hover:not(:disabled) { color: var(--fc-on-accent-original); background: var(--fc-accent-original); border-color: var(--fc-accent); box-shadow: inset 0 0 0 1px var(--fc-on-accent-original); }
+.fc-icon-button { width: 44px; flex-shrink: 0; padding: .6rem; background: transparent; }
 .fc-input {
   width: 100%; min-height: 46px; padding: .75rem .85rem; border: 1px solid var(--fc-border);
-  border-radius: var(--fc-radius); background: transparent; color: var(--fc-text); outline: none;
+  border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); outline: none;
+  transition: border-color .16s var(--fc-ease), box-shadow .16s var(--fc-ease);
 }
 .fc-input:focus { border-color: var(--fc-accent); box-shadow: 0 0 0 2px var(--fc-accent-soft); }
+.fc-input:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
 .fc-input::placeholder { color: var(--fc-muted); opacity: 1; }
 .fc-kicker { color: var(--fc-muted); font-size: .75rem; font-weight: 450; letter-spacing: .13em; text-transform: uppercase; }
 .fc-brand { display: inline-flex; align-items: center; gap: .65rem; color: var(--fc-text); font-size: 1.1rem; font-weight: 650; letter-spacing: -.055em; }
@@ -62,7 +66,7 @@ button:focus:not(:focus-visible) { outline: none; }
   .fc-button, .fc-icon-button, .fc-input { border-color: ButtonText; }
 }
 .fc-badge { display: inline-flex; align-items: center; gap: .35rem; border: 1px solid var(--fc-border); border-radius: 999px; padding: .2rem .55rem; font-size: .75rem; color: var(--fc-muted); }
-.fc-alert { border: 1px solid var(--fc-border); border-radius: var(--fc-radius); padding: .8rem 1rem; color: var(--fc-text); background: var(--fc-accent-soft); font-size: max(.875rem, var(--fc-body-size)); }
+.fc-alert { border: 1px solid var(--fc-border); border-radius: var(--fc-radius); padding: .8rem 1rem; color: var(--fc-text); background: var(--fc-accent-soft); font-size: max(.875rem, var(--fc-body-size)); line-height: 1.65; overflow-wrap: anywhere; }
 .fc-overlay { position: fixed; inset: 0; z-index: 80; display: flex; justify-content: center; align-items: center; background: color-mix(in srgb, var(--fc-text) 24%, transparent); padding: 1rem; }
 .fc-dialog { width: min(100%, 36rem); max-height: calc(100dvh - 2rem); overflow: auto; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-bg); color: var(--fc-text); box-shadow: var(--fc-shadow); padding: clamp(1.4rem, 4vw, 2.5rem); }
 .fc-toast { position: fixed; bottom: 1rem; left: 1rem; right: 1rem; margin: auto; max-width: 34rem; z-index: 100; }
@@ -71,7 +75,7 @@ button:focus:not(:focus-visible) { outline: none; }
 body :is(.fc-account-overlay, .fc-command-overlay) { background: color-mix(in srgb, var(--fc-text) 24%, transparent); backdrop-filter: none; }
 body :is(.fc-account-panel, .fc-command-panel) { border-radius: var(--fc-radius); background: var(--fc-bg); box-shadow: var(--fc-shadow); }
 body :is(.fc-account-panel, .fc-dialog, .fc-command-panel) { font-family: var(--fc-font); font-size: var(--fc-body-size); }
-body :is(.fc-account-panel, .fc-dialog, .fc-command-panel) :where(h1, h2, h3) { font-family: var(--fc-heading-font); font-weight: 400; }
+body :is(.fc-account-panel, .fc-dialog, .fc-command-panel) :where(h1, h2, h3) { font-family: var(--fc-heading-font); font-weight: 400; text-wrap: balance; }
 body :is(.fc-account-panel, .fc-dialog, .fc-command-panel) :where(p, label, small, legend) { font-size: max(.8125rem, calc(var(--fc-body-size) * .9)); }
 body :is(.fc-account-panel, .fc-dialog, .fc-command-panel) :where(button, input, select, textarea) { font-family: var(--fc-font); font-size: max(.875rem, var(--fc-body-size)); }
 @media (max-width: 767px) {

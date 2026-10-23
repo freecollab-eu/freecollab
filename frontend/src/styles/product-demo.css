@@ -1,27 +1,30 @@
 .fc-product-demo { height: 100dvh; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--fc-bg); color: var(--fc-text); }
-.fc-product-demo-banner { flex: none; display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .25rem 1rem; border-bottom: 1px solid var(--fc-border); background: var(--fc-surface); font-size: .75rem; }
+.fc-product-demo-banner { flex: none; display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .3rem clamp(.75rem, 2vw, 1.5rem); border-bottom: 1px solid var(--fc-border); background: var(--fc-surface); font-size: .8125rem; line-height: 1.6; }
 .fc-product-demo-banner > div:first-child { display: flex; align-items: baseline; flex-wrap: wrap; gap: .35rem .75rem; min-width: 0; }
 .fc-product-demo-banner strong { font-size: .72rem; letter-spacing: .06em; text-transform: uppercase; }
 .fc-product-demo-banner span { color: var(--fc-muted); }
 .fc-product-demo-controls { display: flex; flex-shrink: 0; align-items: center; gap: .7rem; }
-.fc-product-demo-controls .fc-button { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; white-space: nowrap; font-size: .75rem; }
+.fc-product-demo-controls .fc-button { display: inline-flex; align-items: center; gap: .4rem; min-height: 2.75rem; white-space: nowrap; font-size: .8125rem; border-color: transparent; color: var(--fc-muted); }
+.fc-product-demo-controls .fc-button:hover { color: var(--fc-text); border-color: var(--fc-border); }
+.fc-product-demo-controls svg { flex-shrink: 0; }
 .fc-product-demo-content { flex: 1; min-height: 0; overflow: hidden; }
 .fc-product-demo-content > .fc-chat { height: 100%; }
 .fc-product-demo-content .fc-chat-loading { height: 100%; min-height: 0; }
 .fc-product-demo-notice { flex: none; margin: 0; padding: .65rem 1rem; font-size: .8rem; border-bottom: 1px solid var(--fc-border); }
 .fc-product-demo-start { height: 100%; min-height: 0; overflow: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1rem; padding: 2rem; text-align: center; }
-.fc-product-demo-start h1 { max-width: 34rem; margin: 0; font-size: clamp(1.25rem, 4vw, 1.85rem); font-weight: 500; line-height: 1.25; letter-spacing: -.035em; }
-.fc-product-demo-start p { max-width: 32rem; margin: 0; color: var(--fc-muted); }
+.fc-product-demo-start h1 { max-width: 34rem; margin: 0; font: 400 clamp(1.5rem, 4vw, 2.25rem)/1.25 var(--fc-heading-font); letter-spacing: -.04em; text-wrap: balance; overflow-wrap: anywhere; }
+.fc-product-demo-start p { max-width: 40ch; margin: 0; color: var(--fc-muted); font-size: max(.9375rem, var(--fc-body-size)); line-height: 1.75; }
 .fc-product-demo-start .fc-button { min-height: 2.75rem; }
 .fc-product-demo-spinner { animation: fc-product-demo-spin 1s linear infinite; color: var(--fc-muted); }
 @keyframes fc-product-demo-spin { to { transform: rotate(360deg); } }
 @media (max-width: 640px) {
   .fc-product-demo-banner { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: .35rem; padding: .45rem .75rem; }
   .fc-product-demo-banner > div:first-child { flex-direction: row; align-items: baseline; gap: .25rem .55rem; }
-  .fc-product-demo-banner > div:first-child > span { flex: 1; min-width: 0; font-size: .65rem; line-height: 1.45; }
+  .fc-product-demo-banner > div:first-child > span { flex: 1; min-width: 0; font-size: .75rem; line-height: 1.55; }
   .fc-product-demo-expiry { display: none; }
   .fc-product-demo-controls { justify-content: flex-end; flex-wrap: wrap; gap: .4rem; }
-  .fc-product-demo-controls .fc-button { gap: .25rem; padding-inline: .55rem; font-size: .68rem; }
+  .fc-product-demo-controls .fc-button { gap: .35rem; padding-inline: .6rem; font-size: .75rem; }
 }
 
 @media (prefers-reduced-motion: reduce) { .fc-product-demo-spinner { animation: none; } }
+@media (forced-colors: active) { .fc-product-demo-controls .fc-button { border-color: ButtonText; } }

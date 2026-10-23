@@ -13,12 +13,17 @@ export interface DemoMessage { id: string; author: string; text: string; time: s
 export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team'; owner?: DemoOwner }
 export type DemoDocumentId = string;
 export interface DemoDocument { id: DemoDocumentId; channel: DemoChannel; stackId: string; title: string; source: string; edited: string | null; sample: boolean; owner: DemoOwner | 'You'; updatedLabel: string }
+export interface DemoDocumentLink { id: string; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId }
 export interface DemoDocumentStack { id: string; title: string; sample: boolean; references: string[] }
-export type DemoStackUndo = { kind: 'document_move'; documentId: DemoDocumentId; fromStackId: string; toStackId: string } | { kind: 'reference_add'; stackId: string; messageId: string } | { kind: 'reference_remove'; stackId: string; messageId: string; index: number };
+export type DemoStackUndo = { kind: 'document_move'; documentId: DemoDocumentId; fromStackId: string; toStackId: string } | { kind: 'reference_add'; stackId: string; messageId: string } | { kind: 'reference_remove'; stackId: string; messageId: string; index: number } | { kind: 'document_link'; linkId: string; stackId: string } | { kind: 'document_unlink'; link: DemoDocumentLink; index: number; stackId: string };
 export const demoStackLimit = 12;
 export const demoDocumentLimit = 30;
 export const demoStackReferenceLimit = 30;
+export const demoDocumentLinkLimit = 100;
+export const demoDismissedConnectionLimit = 1000;
+export const demoConnectionIdLimit = 300;
 const validChannel = (channel: DemoChannel) => demoChannels.includes(channel);
+const sameDocumentPair = (link: DemoDocumentLink, documentId: DemoDocumentId, relatedDocumentId: DemoDocumentId) => (link.documentId === documentId && link.relatedDocumentId === relatedDocumentId) || (link.documentId === relatedDocumentId && link.relatedDocumentId === documentId);
 export function createDemoStacks(): Record<DemoChannel, DemoDocumentStack[]> {
   const stacks = (channel: DemoChannel): DemoDocumentStack[] => [
     { id: channel + '-reference', title: 'Reference material', sample: true, references: [] },
@@ -30,7 +35,7 @@ export function createDemoStacks(): Record<DemoChannel, DemoDocumentStack[]> {
 export type DemoMaterial = 'courtyard' | 'brief';
 export interface DemoLayout { order: DemoMaterial[]; pinned: DemoMaterial[]; side: 'left' | 'right'; focus: boolean }
 export const createDemoLayout = (): DemoLayout => ({ order: ['courtyard', 'brief'], pinned: [], side: 'right', focus: false });
-export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; stacks: Record<DemoChannel, DemoDocumentStack[]>; stackUndo: Partial<Record<DemoChannel, DemoStackUndo>>; nextId: number; layout: DemoLayout; decision: DemoDecision | null }
+export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; stacks: Record<DemoChannel, DemoDocumentStack[]>; documentLinks: Record<DemoChannel, DemoDocumentLink[]>; dismissedConnections: Record<DemoChannel, string[]>; stackUndo: Partial<Record<DemoChannel, DemoStackUndo>>; nextId: number; layout: DemoLayout; decision: DemoDecision | null }
 export function demoChannelDocuments(state: DemoState, channel: DemoChannel): DemoDocument[] {
   return validChannel(channel) ? state.documents.filter(document => document.channel === channel) : [];
 }
@@ -92,10 +97,10 @@ export function createDemoState(): DemoState {
       { id: 'product-walkthrough', channel: 'product', stackId: 'product-decisions', title: 'The next walkthrough', edited: null, sample: true, owner: 'Maja', updatedLabel: '10:08', source: '## Make the next step clear\n\n- Review what is ready\n- Collect the remaining questions\n- Choose one next step and a person to take it forward' },
       { id: 'design-palette', channel: 'design', stackId: 'design-reference', title: 'Colour & materials', edited: null, sample: true, owner: 'Elias', updatedLabel: '11:02', source: '## A warm, quiet palette\n\nUse the colours of timber, paper and the courtyard. Give the work plenty of room and keep the important details easy to find.' },
       { id: 'design-type', channel: 'design', stackId: 'design-sketches', title: 'Type & space', edited: null, sample: true, owner: 'Maja', updatedLabel: '11:07', source: '## Room to read\n\nChoose comfortable type, clear headings and generous spacing. Try your own colours and typeface in My view.' },
-    ], stacks: createDemoStacks(), stackUndo: {}, nextId: 1, layout: createDemoLayout(), decision: null,
+    ], stacks: createDemoStacks(), documentLinks: { studio: [], product: [], design: [] }, dismissedConnections: { studio: [], product: [], design: [] }, stackUndo: {}, nextId: 1, layout: createDemoLayout(), decision: null,
   };
 }
-export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
+export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'document_link'; channel: DemoChannel; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId } | { type: 'document_unlink'; channel: DemoChannel; id: string } | { type: 'connection_dismiss'; channel: DemoChannel; id: string } | { type: 'connection_restore_dismissed'; channel: DemoChannel } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset') return createDemoState();
   if (action.type === 'layout_reset') return { ...state, layout: createDemoLayout() };
@@ -158,6 +163,32 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     if (!document || document.stackId === action.stackId || !state.stacks[action.channel].some(stack => stack.id === action.stackId)) return state;
     return { ...state, documents: state.documents.map(row => row.id === document.id ? { ...row, stackId: action.stackId } : row), stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'document_move', documentId: document.id, fromStackId: document.stackId, toStackId: action.stackId } } };
   }
+  if (action.type === 'document_link') {
+    if (!validChannel(action.channel) || action.documentId === action.relatedDocumentId) return state;
+    const document = state.documents.find(row => row.id === action.documentId && row.channel === action.channel), related = state.documents.find(row => row.id === action.relatedDocumentId && row.channel === action.channel);
+    const links = state.documentLinks[action.channel];
+    if (!document || !related || links.length >= demoDocumentLinkLimit || links.some(link => sameDocumentPair(link, document.id, related.id))) return state;
+    const link: DemoDocumentLink = { id: 'link-' + state.nextId, documentId: document.id, relatedDocumentId: related.id };
+    return { ...state, nextId: state.nextId + 1, documentLinks: { ...state.documentLinks, [action.channel]: [...links, link] }, stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'document_link', linkId: link.id, stackId: document.stackId } } };
+  }
+  if (action.type === 'document_unlink') {
+    if (!validChannel(action.channel)) return state;
+    const links = state.documentLinks[action.channel], index = links.findIndex(link => link.id === action.id), link = links[index];
+    if (!link) return state;
+    const document = state.documents.find(row => row.id === link.documentId && row.channel === action.channel);
+    if (!document || !state.documents.some(row => row.id === link.relatedDocumentId && row.channel === action.channel)) return state;
+    return { ...state, documentLinks: { ...state.documentLinks, [action.channel]: links.filter(row => row.id !== link.id) }, stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'document_unlink', link, index, stackId: document.stackId } } };
+  }
+  if (action.type === 'connection_dismiss') {
+    if (!validChannel(action.channel) || !action.id.trim() || action.id.length > demoConnectionIdLimit) return state;
+    const dismissed = state.dismissedConnections[action.channel];
+    if (dismissed.length >= demoDismissedConnectionLimit || dismissed.includes(action.id)) return state;
+    return { ...state, dismissedConnections: { ...state.dismissedConnections, [action.channel]: [...dismissed, action.id] } };
+  }
+  if (action.type === 'connection_restore_dismissed') {
+    if (!validChannel(action.channel) || !state.dismissedConnections[action.channel].length) return state;
+    return { ...state, dismissedConnections: { ...state.dismissedConnections, [action.channel]: [] } };
+  }
   if (action.type === 'stack_reference') {
     if (!validChannel(action.channel) || !state.messages[action.channel].some(message => message.id === action.messageId)) return state;
     const stack = state.stacks[action.channel].find(row => row.id === action.stackId);
@@ -179,6 +210,17 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
       const document = state.documents.find(row => row.id === undo.documentId && row.channel === action.channel);
       if (!document || document.stackId !== undo.toStackId || !state.stacks[action.channel].some(stack => stack.id === undo.fromStackId)) return state;
       return { ...state, stackUndo, documents: state.documents.map(row => row.id === document.id ? { ...row, stackId: undo.fromStackId } : row) };
+    }
+    if (undo.kind === 'document_link') {
+      const links = state.documentLinks[action.channel];
+      if (!links.some(link => link.id === undo.linkId)) return state;
+      return { ...state, stackUndo, documentLinks: { ...state.documentLinks, [action.channel]: links.filter(link => link.id !== undo.linkId) } };
+    }
+    if (undo.kind === 'document_unlink') {
+      const links = state.documentLinks[action.channel], { link } = undo;
+      if (link.documentId === link.relatedDocumentId || links.length >= demoDocumentLinkLimit || links.some(row => row.id === link.id || sameDocumentPair(row, link.documentId, link.relatedDocumentId)) || !state.documents.some(row => row.id === link.documentId && row.channel === action.channel) || !state.documents.some(row => row.id === link.relatedDocumentId && row.channel === action.channel)) return state;
+      const restored = [...links]; restored.splice(undo.index, 0, link);
+      return { ...state, stackUndo, documentLinks: { ...state.documentLinks, [action.channel]: restored } };
     }
     const stack = state.stacks[action.channel].find(row => row.id === undo.stackId);
     if (undo.kind === 'reference_remove') {

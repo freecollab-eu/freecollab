@@ -6,7 +6,7 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/demo-showroom.ts', import.meta.url), 'utf8');
 const exports = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports, URLSearchParams });
-const { createDemoState, demoReducer, demoMarkdown, readDemoDestination, demoDestinationHash, demoDecisionTaskId, demoChannelDocuments, demoChannelStacks, demoStackDocuments, demoStackReferences, demoStackLimit, demoDocumentLimit, demoStackReferenceLimit } = exports;
+const { createDemoState, demoReducer, demoMarkdown, readDemoDestination, demoDestinationHash, demoDecisionTaskId, demoChannelDocuments, demoChannelStacks, demoStackDocuments, demoStackReferences, demoStackLimit, demoDocumentLimit, demoStackReferenceLimit, demoDocumentLinkLimit, demoDismissedConnectionLimit, demoConnectionIdLimit } = exports;
 
 test('independent demo instances and reset never retain another visitor draft', () => {
   const first = createDemoState(), second = createDemoState();
@@ -291,4 +291,147 @@ test('reset removes every visitor stack, document, reference and undo without af
   assert.equal(Object.keys(reset.stackUndo).length, 0);
   assert.equal(reset.nextId, 1);
   assert.equal(JSON.stringify(reset).includes('My private'), false);
+});
+
+test('confirmed document relationships reject reversed duplicates and foreign endpoints atomically', () => {
+  const initial = createDemoState();
+  const state = demoReducer(initial, { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' });
+  const link = state.documentLinks.studio[0];
+  assert.equal(link.id, 'link-' + initial.nextId);
+  assert.equal(link.documentId, 'brief'); assert.equal(link.relatedDocumentId, 'notes');
+  assert.equal(state.nextId, initial.nextId + 1);
+  assert.equal(state.documents, initial.documents); assert.equal(state.stacks, initial.stacks);
+  assert.equal(state.documentLinks.product, initial.documentLinks.product);
+  assert.equal(state.stackUndo.studio.kind, 'document_link');
+  assert.equal(state.stackUndo.studio.linkId, link.id); assert.equal(state.stackUndo.studio.stackId, 'studio-reference');
+  for (const action of [
+    { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' },
+    { type: 'document_link', channel: 'studio', documentId: 'notes', relatedDocumentId: 'brief' },
+    { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'brief' },
+    { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'missing' },
+    { type: 'document_link', channel: 'studio', documentId: 'missing', relatedDocumentId: 'notes' },
+    { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'product-plan' },
+    { type: 'document_link', channel: 'studio', documentId: 'product-plan', relatedDocumentId: 'brief' },
+    { type: 'document_link', channel: 'constructor', documentId: 'brief', relatedDocumentId: 'notes' },
+    { type: 'document_unlink', channel: 'product', id: link.id },
+    { type: 'document_unlink', channel: 'studio', id: 'missing' },
+    { type: 'document_unlink', channel: 'constructor', id: link.id },
+  ]) assert.equal(demoReducer(state, action), state, JSON.stringify(action));
+  assert.equal(initial.documentLinks.studio.length, 0);
+});
+
+test('undoing a confirmed relationship preserves later document edits, dismissals and another channel', () => {
+  let state = demoReducer(createDemoState(), { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'materials' });
+  state = demoReducer(state, { type: 'document_link', channel: 'product', documentId: 'product-plan', relatedDocumentId: 'product-walkthrough' });
+  state = demoReducer(state, { type: 'document', id: 'brief', text: 'A revision after confirming the relationship' });
+  state = demoReducer(state, { type: 'message', channel: 'design', text: 'An independent conversation', time: '12:05' });
+  state = demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: 'another-suggestion' });
+  const documents = state.documents, messages = state.messages, dismissed = state.dismissedConnections, productLinks = state.documentLinks.product, productUndo = state.stackUndo.product, nextId = state.nextId;
+  state = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  assert.equal(state.documentLinks.studio.length, 0);
+  assert.equal(state.documents, documents); assert.equal(state.messages, messages);
+  assert.equal(state.documents[0].edited, 'A revision after confirming the relationship');
+  assert.equal(state.dismissedConnections, dismissed); assert.equal(state.documentLinks.product, productLinks);
+  assert.equal(state.stackUndo.product, productUndo); assert.equal(state.nextId, nextId);
+  assert.equal(demoReducer(state, { type: 'stack_undo', channel: 'studio' }), state);
+});
+
+test('unlink undo restores the same relationship in order without restoring stale document snapshots', () => {
+  let state = createDemoState();
+  for (const [documentId, relatedDocumentId] of [['brief', 'notes'], ['materials', 'notes'], ['brief', 'decision']]) state = demoReducer(state, { type: 'document_link', channel: 'studio', documentId, relatedDocumentId });
+  const originalLinks = state.documentLinks.studio, removed = originalLinks[1], nextId = state.nextId;
+  state = demoReducer(state, { type: 'document_unlink', channel: 'studio', id: removed.id });
+  assert.deepEqual(Array.from(state.documentLinks.studio, link => link.id), [originalLinks[0].id, originalLinks[2].id]);
+  assert.equal(state.stackUndo.studio.kind, 'document_unlink'); assert.equal(state.stackUndo.studio.stackId, 'studio-sketches');
+  assert.equal(state.nextId, nextId);
+  state = demoReducer(state, { type: 'document', id: 'materials', text: 'A better sketch description' });
+  state = demoReducer(state, { type: 'document', id: 'notes', text: 'New notes after unlinking' });
+  state = demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: 'keep-this-dismissal' });
+  const documents = state.documents, dismissed = state.dismissedConnections;
+  state = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  assert.deepEqual(Array.from(state.documentLinks.studio, link => link.id), Array.from(originalLinks, link => link.id));
+  assert.equal(state.documentLinks.studio[1], removed);
+  assert.equal(state.documents, documents); assert.equal(state.dismissedConnections, dismissed);
+  assert.equal(state.documents.find(row => row.id === 'notes').edited, 'New notes after unlinking');
+  assert.equal(demoReducer(state, { type: 'stack_undo', channel: 'studio' }), state);
+});
+
+test('stale relationship undo never restores a missing endpoint, cross-channel pair or duplicate', () => {
+  const linked = demoReducer(createDemoState(), { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' });
+  const link = linked.documentLinks.studio[0], unlinked = demoReducer(linked, { type: 'document_unlink', channel: 'studio', id: link.id });
+  const staleStates = [
+    { ...unlinked, documents: unlinked.documents.filter(document => document.id !== 'brief') },
+    { ...unlinked, documents: unlinked.documents.map(document => document.id === 'notes' ? { ...document, channel: 'product' } : document) },
+    { ...unlinked, documentLinks: { ...unlinked.documentLinks, studio: [{ id: 'new-link', documentId: 'notes', relatedDocumentId: 'brief' }] } },
+    { ...unlinked, documentLinks: { ...unlinked.documentLinks, studio: [{ id: link.id, documentId: 'materials', relatedDocumentId: 'decision' }] } },
+    { ...linked, documentLinks: { ...linked.documentLinks, studio: [] } },
+  ];
+  for (const stale of staleStates) assert.equal(demoReducer(stale, { type: 'stack_undo', channel: 'studio' }), stale);
+  const foreignLink = { ...linked, documents: linked.documents.map(document => document.id === 'notes' ? { ...document, channel: 'product' } : document) };
+  assert.equal(demoReducer(foreignLink, { type: 'document_unlink', channel: 'studio', id: link.id }), foreignLink);
+});
+
+test('relationship limits allow the final valid pair and reject add or undo overflow independently per channel', () => {
+  let state = createDemoState();
+  while (demoChannelDocuments(state, 'studio').length < 16) state = demoReducer(state, { type: 'document_add', channel: 'studio', stackId: 'studio-reference', title: 'Additional document ' + state.nextId });
+  const documents = demoChannelDocuments(state, 'studio'), pairs = [];
+  for (let first = 0; first < documents.length; first++) for (let second = first + 1; second < documents.length; second++) pairs.push([documents[first].id, documents[second].id]);
+  for (const [documentId, relatedDocumentId] of pairs.slice(0, demoDocumentLinkLimit - 1)) state = demoReducer(state, { type: 'document_link', channel: 'studio', documentId, relatedDocumentId });
+  assert.equal(state.documentLinks.studio.length, demoDocumentLinkLimit - 1);
+  const beforeFinalId = state.nextId, [lastDocumentId, lastRelatedId] = pairs[demoDocumentLinkLimit - 1];
+  state = demoReducer(state, { type: 'document_link', channel: 'studio', documentId: lastDocumentId, relatedDocumentId: lastRelatedId });
+  assert.equal(state.documentLinks.studio.length, demoDocumentLinkLimit); assert.equal(state.nextId, beforeFinalId + 1);
+  const [extraDocumentId, extraRelatedId] = pairs[demoDocumentLinkLimit];
+  assert.equal(demoReducer(state, { type: 'document_link', channel: 'studio', documentId: extraDocumentId, relatedDocumentId: extraRelatedId }), state);
+  const other = demoReducer(state, { type: 'document_link', channel: 'product', documentId: 'product-plan', relatedDocumentId: 'product-walkthrough' });
+  assert.equal(other.documentLinks.product.length, 1); assert.equal(other.documentLinks.studio, state.documentLinks.studio);
+  const removed = demoReducer(state, { type: 'document_unlink', channel: 'studio', id: state.documentLinks.studio[0].id });
+  const fullWithNewPair = { ...removed, documentLinks: { ...removed.documentLinks, studio: [...removed.documentLinks.studio, { id: 'replacement', documentId: extraDocumentId, relatedDocumentId: extraRelatedId }] } };
+  assert.equal(demoReducer(fullWithNewPair, { type: 'stack_undo', channel: 'studio' }), fullWithNewPair);
+  const restored = demoReducer(removed, { type: 'stack_undo', channel: 'studio' });
+  assert.equal(restored.documentLinks.studio.length, demoDocumentLinkLimit);
+  assert.equal(restored.documentLinks.studio[0].id, state.documentLinks.studio[0].id);
+});
+
+test('dismissed suggestions are bounded, opaque and scoped without consuming ids or replacing work undo', () => {
+  const initial = demoReducer(createDemoState(), { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' });
+  for (const action of [
+    { type: 'connection_dismiss', channel: 'studio', id: '' },
+    { type: 'connection_dismiss', channel: 'studio', id: '   ' },
+    { type: 'connection_dismiss', channel: 'studio', id: 'x'.repeat(demoConnectionIdLimit + 1) },
+    { type: 'connection_dismiss', channel: 'constructor', id: 'suggestion' },
+    { type: 'connection_restore_dismissed', channel: 'constructor' },
+    { type: 'connection_restore_dismissed', channel: 'studio' },
+  ]) assert.equal(demoReducer(initial, action), initial);
+  const boundaryId = 'x'.repeat(demoConnectionIdLimit);
+  let state = demoReducer(initial, { type: 'connection_dismiss', channel: 'studio', id: boundaryId });
+  assert.equal(state.dismissedConnections.studio[0], boundaryId);
+  assert.equal(demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: boundaryId }), state);
+  for (let index = 1; index < demoDismissedConnectionLimit; index++) state = demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: 'suggestion-' + index });
+  assert.equal(state.dismissedConnections.studio.length, demoDismissedConnectionLimit);
+  assert.equal(demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: 'one-too-many' }), state);
+  assert.equal(state.nextId, initial.nextId); assert.equal(state.stackUndo, initial.stackUndo);
+  state = demoReducer(state, { type: 'connection_dismiss', channel: 'product', id: boundaryId });
+  assert.equal(state.dismissedConnections.product.length, 1);
+  const productDismissals = state.dismissedConnections.product, links = state.documentLinks, undo = state.stackUndo;
+  state = demoReducer(state, { type: 'connection_restore_dismissed', channel: 'studio' });
+  assert.equal(state.dismissedConnections.studio.length, 0); assert.equal(state.dismissedConnections.product, productDismissals);
+  assert.equal(state.documentLinks, links); assert.equal(state.stackUndo, undo); assert.equal(state.documents, initial.documents);
+  assert.equal(demoReducer(state, { type: 'connection_restore_dismissed', channel: 'studio' }), state);
+});
+
+test('confirmed and dismissed relationships never leak between visitor instances or survive reset', () => {
+  const initial = createDemoState(), second = createDemoState();
+  assert.notEqual(initial.documentLinks.studio, second.documentLinks.studio);
+  assert.notEqual(initial.dismissedConnections.studio, second.dismissedConnections.studio);
+  assert.notEqual(initial.documentLinks.studio, initial.documentLinks.product);
+  assert.notEqual(initial.dismissedConnections.studio, initial.dismissedConnections.product);
+  let state = demoReducer(initial, { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' });
+  state = demoReducer(state, { type: 'connection_dismiss', channel: 'studio', id: 'visitor-only-suggestion' });
+  assert.equal(initial.documentLinks.studio.length, 0); assert.equal(second.documentLinks.studio.length, 0);
+  assert.equal(initial.dismissedConnections.studio.length, 0); assert.equal(second.dismissedConnections.studio.length, 0);
+  const reset = demoReducer(state, { type: 'reset' });
+  assert.equal(JSON.stringify(reset), JSON.stringify(second));
+  assert.equal(reset.nextId, 1); assert.equal(Object.keys(reset.stackUndo).length, 0);
+  assert.equal(JSON.stringify(reset).includes('visitor-only-suggestion'), false);
 });

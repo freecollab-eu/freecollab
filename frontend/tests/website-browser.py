@@ -118,6 +118,15 @@ def main():
         page.get_by_label('Edit demo document',exact=True).fill('Website-only created document')
         expect(page.get_by_role('region',name='Document editor',exact=True)).to_contain_text('Website-only document title')
         checks['built_demo_channel_management_and_document_stack_creation_are_local'] = True
+        page.get_by_role('button',name='Suggested connections',exact=True).click()
+        related=page.locator('.fc-demo-connections:visible')
+        reference=related.locator('[data-connection-kind="message_stack"]').filter(has=page.get_by_text('I’ve shared the new sketch here. The long table can sit by the open doors.',exact=True))
+        reference.get_by_role('button',name='Save reference in Sketches',exact=True).click()
+        expect(reference).to_have_count(0)
+        pair=related.locator('[data-connection-kind="document_link"]').first
+        expect(pair).to_be_visible();pair.get_by_role('button',name=re.compile(r'^Link ')).click()
+        expect(related.locator('.fc-demo-connections-saved')).to_be_visible()
+        checks['built_content_suggestions_create_only_explicit_local_references_and_links'] = True
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Appearance', exact=True).click()
         page.get_by_label('Demo typeface', exact=True).select_option('manrope')
@@ -136,6 +145,10 @@ def main():
         expect(page.get_by_role('button',name='Choose channel',exact=True)).to_contain_text('courtyard')
         expect(page.locator('.fc-demo-desk:visible').get_by_text('Website-only stack',exact=True)).to_have_count(0)
         expect(page.locator('.fc-demo-desk:visible').get_by_text('Website-only document title',exact=True)).to_have_count(0)
+        page.get_by_role('button',name='Suggested connections',exact=True).click()
+        related=page.locator('.fc-demo-connections:visible')
+        expect(related.locator('.fc-demo-connections-saved')).to_have_count(0)
+        expect(related.get_by_role('button',name='Save reference in Sketches',exact=True)).to_be_visible()
         checks['demo_mutations_disappear_on_reload'] = True
         page.get_by_role('button', name='Back to FreeCollab', exact=True).click()
         page.get_by_role('button', name='Documentation', exact=True).first.click()
@@ -155,6 +168,11 @@ def main():
             expect(picker).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Channel picker overflow at{width}'
             page.keyboard.press('Escape');expect(trigger).to_be_focused()
+            page.get_by_role('button',name='Föreslagna samband',exact=True).click()
+            related=page.locator('.fc-demo-connections:visible')
+            expect(related.get_by_role('switch',name='Föreslå samband',exact=True)).to_have_attribute('aria-checked','true')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Swedish suggestions overflow at{width}'
+            page.keyboard.press('Escape')
             page.get_by_role('button', name='Tillbaka till FreeCollab', exact=True).click()
         checks['documentation_swedish_and_390_320px_layout'] = True
         actual = page.evaluate('(keys)=>Object.fromEntries(keys.map(key=>[key,localStorage.getItem(key)]))', list(seed))
@@ -171,9 +189,11 @@ def main():
               'frontend/website/Dockerfile', 'frontend/website/nginx.conf.template', 'frontend/website/19-validate-port.sh',
               'frontend/src/components/Landing.tsx', 'frontend/src/components/Demo.tsx',
               'frontend/src/components/DemoChannelSwitcher.tsx', 'frontend/src/components/DemoDocumentDesk.tsx',
+              'frontend/src/components/DemoConnections.tsx', 'frontend/src/lib/demo-connections.ts',
               'frontend/src/lib/demo-showroom.ts', 'frontend/src/lib/useModalFocus.ts',
               'frontend/src/styles/demo-showroom.css', 'frontend/src/styles/demo-channel-switcher.css',
-              'frontend/src/styles/demo-document-desk.css', 'frontend/tests/website-browser.py']
+              'frontend/src/styles/demo-document-desk.css', 'frontend/src/styles/demo-connections.css',
+              'frontend/src/i18n/demo-showroom.sv.ts', 'frontend/tests/website-browser.py']
     args.report.write_text(json.dumps({'checks': checks, 'groups': len(checks), 'source_sha256': {
         name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in source},
         'limits': ['Read-only acceptance against an owned static server; no Railway, DNS or public TLS deployment is claimed.',

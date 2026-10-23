@@ -19,6 +19,7 @@ from playwright.sync_api import expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
 SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/components/DemoChannelSwitcher.tsx','frontend/src/components/DemoDocumentDesk.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/lib/useModalFocus.ts','frontend/src/styles/demo-showroom.css','frontend/src/styles/demo-channel-switcher.css','frontend/src/styles/demo-document-desk.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+SOURCE += ['frontend/src/components/DemoConnections.tsx','frontend/src/lib/demo-connections.ts','frontend/src/styles/demo-connections.css']
 
 def channel_trigger(page, swedish=False):
     return page.get_by_role('button',name='Välj kanal' if swedish else 'Choose channel',exact=True)
@@ -175,6 +176,142 @@ def usability_checks(browser, app, checks, errors, unexpected):
             expect(composer).to_have_value('')
             assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
             checks[str(width)+'px_channel_scoped_stacks_and_reset_clear_channel_names_documents_references_and_drafts']=True
+        finally:visitor.close()
+    return images
+
+def connection_checks(browser, app, checks, errors, unexpected):
+    """Exercise content-based suggestions through explicit local UI actions."""
+    images=[]
+    for width in [1440,320]:
+        visitor=browser.new_context(viewport={'width':width,'height':1000},reduced_motion='reduce')
+        try:
+            page=visitor.new_page();page.set_default_timeout(20000)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+            page.goto(app,wait_until='networkidle')
+            composer=page.get_by_label('Your demo message',exact=True)
+            transcript=page.locator('.fc-showroom-transcript')
+            trigger=page.get_by_role('button',name='Suggested connections',exact=True)
+            initial_count=trigger.locator('small').text_content()
+            draft='Materials & sketches. Keep this matching thought unsent.'
+            composer.fill(draft);composer.evaluate('(node)=>{window.connectionComposer=node;node.setSelectionRange(3,17)}')
+            expect(trigger.locator('small')).to_have_text(initial_count)
+            transcript.evaluate('(node)=>{window.connectionTranscript=node;window.connectionGeometry={width:node.clientWidth,height:node.clientHeight,scrollHeight:node.scrollHeight,top:node.scrollTop}}')
+            trigger.focus();page.keyboard.press('Enter')
+            context=page.locator('.fc-studio-context-panel')
+            connections=page.locator('.fc-demo-connections:visible')
+            expect(context).to_be_focused()
+            expect(connections).to_contain_text('Suggestions use the words and titles in this channel. You choose what to connect.')
+            expect(connections.get_by_text('A message from You',exact=True)).to_have_count(0)
+            assert transcript.evaluate('(node)=>node===window.connectionTranscript')
+            if width>760:
+                assert transcript.evaluate('(node)=>node.clientWidth===window.connectionGeometry.width&&node.clientHeight===window.connectionGeometry.height&&node.scrollHeight===window.connectionGeometry.scrollHeight&&node.scrollTop===window.connectionGeometry.top')
+            assert composer.evaluate('(node)=>node===window.connectionComposer&&node.selectionStart===3&&node.selectionEnd===17')
+            switch=connections.get_by_role('switch',name='Suggest connections',exact=True)
+            switch.click();expect(switch).to_have_attribute('aria-checked','false')
+            expect(connections.locator('.fc-demo-connection')).to_have_count(0)
+            expect(connections).to_contain_text('Suggestions are paused in this channel.')
+            switch.click();expect(switch).to_have_attribute('aria-checked','true')
+            message='I’ve shared the new sketch here. The long table can sit by the open doors.'
+            card=connections.locator('[data-connection-kind="message_stack"]').filter(has=page.get_by_text(message,exact=True))
+            expect(card).to_contain_text('Sketches')
+            expect(card.locator('.fc-demo-connection-reason')).to_contain_text('sketch')
+            card.get_by_role('button',name=re.compile(r'^Dismiss suggestion')).click()
+            expect(connections.get_by_role('heading',name=re.compile(r'^Suggested connections'))).to_be_focused()
+            expect(card).to_have_count(0)
+            connections.get_by_role('button',name='Restore dismissed (1)',exact=True).click()
+            expect(card).to_be_visible()
+            original=page.locator('.fc-showroom-transcript [data-message-id="studio-3"]')
+            original.evaluate('(node)=>{window.connectionOriginal=node}')
+            card.get_by_role('button',name='Save reference in Sketches',exact=True).click()
+            expect(card).to_have_count(0)
+            expect(connections).to_contain_text('Reference kept with Sketches.')
+            connections.get_by_role('button',name='Undo connection',exact=True).click()
+            expect(card).to_be_visible()
+            card.get_by_role('button',name='Save reference in Sketches',exact=True).click()
+            assert original.evaluate('(node)=>node===window.connectionOriginal')
+            page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents')).click()
+            expect(expand_stack(page,'Sketches').locator('blockquote')).to_have_text(message)
+            expect(original).to_have_count(1)
+            page.get_by_role('button',name='Back to conversation',exact=True).click()
+            expect(trigger).to_be_focused();expect(composer).to_have_value(draft)
+            checks[str(width)+'px_suggestions_ignore_drafts_explain_current_content_and_confirm_reference_dismiss_restore_pause_undo_without_remount']=True
+
+            trigger.click()
+            pair=connections.locator('[data-connection-kind="document_link"]').filter(has=page.get_by_text('Project brief',exact=True)).filter(has=page.get_by_text('The direction we agreed',exact=True))
+            expect(pair).to_be_visible()
+            pair.get_by_role('button',name=re.compile(r'^Link ')).click()
+            expect(pair).to_have_count(0)
+            expect(connections).to_contain_text('Documents linked. The originals stay in place.')
+            connections.get_by_role('button',name='Undo connection',exact=True).click()
+            expect(pair).to_be_visible()
+            pair.get_by_role('button',name=re.compile(r'^Link ')).click()
+            page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents')).click()
+            saved=connections.locator('.fc-demo-connections-saved')
+            saved.get_by_role('button',name='The direction we agreed',exact=True).click()
+            expect(page.get_by_role('region',name='Document editor',exact=True)).to_contain_text('The direction we agreed')
+            expect(page.get_by_label('Edit demo document',exact=True)).to_be_focused()
+            saved.get_by_role('button',name='Unlink Project brief',exact=True).click()
+            expect(saved).to_have_count(0)
+            connections.get_by_role('button',name='Undo connection',exact=True).click()
+            expect(saved.get_by_role('button',name='Project brief',exact=True)).to_be_visible()
+            expect(page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents'))).to_contain_text('4')
+            expect(composer).to_have_value(draft)
+            checks[str(width)+'px_explicit_document_links_keep_originals_in_place_open_related_documents_and_support_unlink_undo']=True
+
+            expand_stack(page,'Sketches').get_by_role('button',name='Materials & sketches',exact=True).click()
+            editor=page.get_by_label('Edit demo document',exact=True)
+            editor.fill('## Moonstone acoustic lantern\n\nMoonstone acoustic lantern.')
+            page.get_by_role('button',name='Back to conversation',exact=True).click()
+            matching='Moonstone acoustic lantern needs a careful review.'
+            composer.fill(matching);page.get_by_role('button',name='Send demo message',exact=True).click()
+            composer.fill(draft);composer.evaluate('(node)=>node.setSelectionRange(3,17)')
+            trigger.click()
+            actual=connections.locator('[data-connection-kind="message_stack"]').filter(has=page.get_by_text(matching,exact=True))
+            expect(actual).to_be_visible();expect(actual.locator('.fc-demo-connection-reason')).to_contain_text('Moonstone')
+            page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents')).click()
+            expand_stack(page,'Sketches').get_by_role('button',name='Materials & sketches',exact=True).click()
+            editor.fill('## Cedar pottery\n\nOnly cedar pottery belongs here now.')
+            trigger.click();expect(actual).to_have_count(0)
+            expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.connectionComposer&&node.selectionStart===3&&node.selectionEnd===17')
+            page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents')).click()
+            desk=page.locator('.fc-demo-desk:visible')
+            desk.get_by_role('button',name='New',exact=True).click()
+            moving_title='Sketches for the acoustics'
+            desk.get_by_label('Document title',exact=True).fill(moving_title)
+            desk.get_by_role('combobox',name='In this stack',exact=True).select_option(label='Reference material')
+            desk.get_by_role('button',name='Create document',exact=True).click()
+            trigger.click()
+            move=connections.locator('[data-connection-kind="document_stack"]').filter(has=page.get_by_text(moving_title,exact=True))
+            expect(move).to_be_visible()
+            move.get_by_role('button',name='Move '+moving_title+' to Sketches',exact=True).click()
+            expect(move).to_have_count(0)
+            connections.get_by_role('button',name='Undo connection',exact=True).click()
+            expect(move).to_be_visible()
+            page.get_by_role('navigation',name='Follow the courtyard project',exact=True).get_by_role('button',name=re.compile(r'^Documents')).click()
+            expect(expand_stack(page,'Reference material').get_by_role('button',name=moving_title,exact=True)).to_be_visible()
+            trigger.click()
+            checks[str(width)+'px_stack_title_suggestion_requires_explicit_move_and_undo_restores_original_stack']=True
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            image=REPORT.with_name('demo-connections-'+str(width)+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            choose_channel(page,'design');trigger.click()
+            expect(connections.get_by_text(matching,exact=True)).to_have_count(0)
+            expect(connections.get_by_text('Project brief',exact=True)).to_have_count(0)
+            connections.get_by_role('switch',name='Suggest connections',exact=True).click()
+            choose_channel(page,'studio');trigger.click()
+            expect(connections.get_by_role('switch',name='Suggest connections',exact=True)).to_have_attribute('aria-checked','true')
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='Reset demo',exact=True).click()
+            page.get_by_role('button',name='Reset this demo',exact=True).click()
+            trigger.click()
+            expect(connections.get_by_role('button',name=re.compile(r'^Restore dismissed'))).to_have_count(0)
+            expect(connections.locator('.fc-demo-connections-saved')).to_have_count(0)
+            expect(page.locator('.fc-showroom-transcript').get_by_text(matching,exact=True)).to_have_count(0)
+            expect(composer).to_have_value('')
+            choose_channel(page,'design');trigger.click()
+            expect(connections.get_by_role('switch',name='Suggest connections',exact=True)).to_have_attribute('aria-checked','true')
+            assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
+            checks[str(width)+'px_content_edits_remove_stale_matches_channel_settings_and_content_stay_isolated_and_reset_clears_links']=True
         finally:visitor.close()
     return images
 
@@ -660,11 +797,12 @@ def main():
                 natural_images=natural_flow_checks(browser,app,checks,errors,unexpected)
                 stage='visible channels, local management, paper stacks, move undo and reference continuity'
                 usability_images=usability_checks(browser,app,checks,errors,unexpected)
+                stage='content-derived suggestions, explicit links, stale matches, privacy and continuity'
+                connection_images=connection_checks(browser,app,checks,errors,unexpected)
                 assert not errors,errors
                 assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images,'source_sha256':source_hashes},indent=2)+'\n')
-            print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
+            REPORT.write_text(json.dumps({'ok':False,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images+connection_images,'source_sha256':source_hashes},indent=2)+'\n')
         except Exception:
             print('Failed stage: '+stage)
             print((private/'vite.log').read_text()[-3500:]);raise
@@ -677,7 +815,8 @@ def main():
     assert process is not None and process.poll() is not None and not private.exists()
     final_hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCE}
     assert final_hashes==source_hashes,'Bound demo source changed during the proof; repeat after source freeze.'
-    result=json.loads(REPORT.read_text());result['source_unchanged_after_run']=True;result['cleanup']='Own Vite process exited; private source snapshot/cache/browser contexts removed; no API/database/container fixture or builds used.'
+    result=json.loads(REPORT.read_text());result['ok']=True;result['source_unchanged_after_run']=True;result['cleanup']='Own Vite process exited; private source snapshot/cache/browser contexts removed; no API/database/container fixture or builds used.'
     REPORT.write_text(json.dumps(result,indent=2)+'\n')
+    print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
 
 if __name__=='__main__':main()

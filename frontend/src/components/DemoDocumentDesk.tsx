@@ -181,7 +181,7 @@ export function DemoDocumentDesk({ state, channel, dispatch, t, onOpenDocument, 
       const undo = state.stackUndo[channel];
       dispatch({ type: 'stack_undo', channel });
       if (undo?.kind === 'document_move') setExpanded(undo.fromStackId);
-      setStatus(t('Last move or reference undone.'));
+      setStatus(t('Last change undone.'));
       const stackId = undo?.kind === 'document_move' ? undo.fromStackId : undo?.stackId;
       requestAnimationFrame(() => { if (stackId) (view === 'stacks' ? stackButtons.current[stackId] : renameButtons.current[stackId])?.focus({ preventScroll: true }); });
     }}><Undo2 size={14} aria-hidden="true" />{t('Undo')}</button>}</div>

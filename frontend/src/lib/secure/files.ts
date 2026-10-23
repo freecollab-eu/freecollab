@@ -90,6 +90,17 @@ async function boundedCiphertext(response: Response, signal?: AbortSignal): Prom
   return bytes.buffer;
 }
 
+/** Only IDs already verified in this encrypted room may become file references. */
+export async function verifiedSecureFileReferenceIds(channelId: string, ids: string[]): Promise<Set<string>> {
+  const requested = new Set(ids), state = await index(channelId);
+  return new Set(state.files.filter(file => requested.has(file.id)).map(file => file.id));
+}
+
+/** Return the exact authenticated version, including older versions in this room. */
+export async function getVerifiedSecureFileReference(channelId: string, id: string): Promise<ManagedFile | undefined> {
+  return (await index(channelId)).files.find(file => file.id === id);
+}
+
 export const secureFileProvider: ChannelFileProvider = {
   handles: channelId => secureMessaging.handles(channelId),
   async list(channelId) {

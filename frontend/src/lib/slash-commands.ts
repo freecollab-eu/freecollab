@@ -1,7 +1,7 @@
 import { t } from '../i18n/core';
 
 export type SlashAction =
-  | 'document' | 'task' | 'decision' | 'meetings' | 'files' | 'members' | 'channel'
+  | 'document' | 'task' | 'decision' | 'meetings' | 'files' | 'members' | 'groups' | 'channel'
   | 'bookmarks' | 'pins' | 'notification-settings' | 'search' | 'activity' | 'workflows'
   | 'cloud' | 'external-meetings' | 'apps' | 'copilot' | 'data' | 'mobile' | 'shared-work'
   | 'schedule' | 'focus' | 'appearance' | 'account' | 'my-day' | 'integrations'
@@ -51,6 +51,7 @@ const definitions: readonly Definition[] = [
   { id: 'meetings', command: 'meet', label: 'Meet here', description: 'Start or join a conversation with voice, video and screen sharing.', group: 'conversation', keywords: 'meeting meetings call huddle video audio screen mote moten ring samtal ljud skarm dela', available: channelWork },
   { id: 'files', command: 'files', label: 'Channel files', description: 'Upload, preview and manage shared file versions.', group: 'conversation', keywords: 'file attachment upload download preview version fil filer bilaga ladda hamta forhandegranska', available: context => context.hasChannel },
   { id: 'members', command: 'members', label: 'Channel members', description: 'People, invitations and access in this conversation.', group: 'conversation', keywords: 'people invite team membership access medlem medlemmar person personer bjud in team behorighet', available: context => context.hasChannel },
+  { id: 'groups', command: 'groups', label: 'Mention groups', description: 'Name a group of people to mention in this conversation.', group: 'conversation', keywords: 'group groups mention team grupp grupper team omnamnanden', available: channelWork },
   { id: 'channel', command: 'channel', label: 'Channel details', description: 'View the name, description and settings of this channel.', group: 'conversation', keywords: 'rename topic description settings channel kanal namn byt beskrivning amne installningar', available: context => context.hasChannel && !isDirect(context) },
   { id: 'bookmarks', command: 'saved', label: 'Saved messages', description: 'Your private saved messages and completed follow-ups.', group: 'conversation', keywords: 'bookmark saved complete follow up spara sparat sparade bokmarke folj upp', available: context => context.hasChannel },
   { id: 'pins', command: 'pins', label: 'Pinned messages', description: 'References pinned for everyone in the conversation.', group: 'conversation', keywords: 'pin pinned reference fast fastnalt fastnalade referens', available: context => context.hasChannel },

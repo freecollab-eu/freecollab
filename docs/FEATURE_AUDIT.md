@@ -34,6 +34,7 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
 | Slack-inspirerat 0.11–0.13: gruppchatt, schemaläggning, påminnelser, klienter, delade kanaler, appar, sök, klipp, styrning, egen lagring och delad koordinering | [0.11](PRODUCT_011.md), [0.12](PRODUCT_012.md), [0.13](PRODUCT_013.md), [69 kommunikationspunkter](audit/COMMUNICATION_CLIENTS.md), [AI/appar/workflows](audit/AI_WORKFLOWS.md), [identitet/styrning](audit/IDENTITY_SECURITY.md). | Detta är ingen allmän Slack-klon eller kapacitetsgaranti. Saknade bredare funktioner listas nedan. |
 | Skandinavisk form, personlig typografi/färg, språk, mobil och mer naturligt flöde | [UX/språkgranskning](audit/UX_LANGUAGES.md), [designsystem](DESIGN_SYSTEM.md), [utseende](APPEARANCE.md), [språk](LANGUAGES.md). | Svenska/engelska. Faktisk användbarhet med olika användargrupper behöver fortsatt undersökas. |
 | Enklare kanalhantering | [Kanalprofil med namn/beskrivning](CHANNELS.md), [verklig UI/API-kod](../frontend/src/components/ChannelMetadataPanel.tsx), [backendtester](../backend/tests/test_channel_metadata.py). | Aktuell administratör, CAS och krypteringsläge kontrolleras. Nativeprofil förseglas; Matrix använder verifierad opak eventreferens. |
+| `@` för personer, grupper och material i samtalet | [Referenser och kanalgrupper](MENTIONS_REFERENCES.md), [verklig katalog-/grupp-API](../backend/app/api/mentions.py), [referens-](../backend/tests/test_message_references.py) och [grupptester](../backend/tests/test_reference_groups.py). Valda person-, grupp-, dokument-, uppgifts-, fil- och kanal-ID:n följer meddelande, tråd, redigering, utkast och köer. | Endast samma kanal och aktuell åtkomst. Grupper är versionsskyddade notislistor för verkliga kanalmedlemmar, utan ACL-ändring. Högst 50 referenser/mottagare; ingen namnparsning eller global katalog. Krypterade resurstitlar verifieras på enheten. |
 | Dokumenthögar, flytta/ångra, kopplingar, samtalets ursprung | [Dokumentorganisation](DOCUMENT_ORGANIZATION.md), [innehållsgranskning](audit/WORK_CONTENT.md), [produktpanel](../frontend/src/components/SharedDocumentOrganization.tsx), [API-tester](../backend/tests/test_document_organization.py). | Verkliga native-sidor, inte bara demon. Meddelanden sparas som referenser; texten kopieras inte. Matrix-högar och generell filtaxonomi saknas. |
 | Föreslå och koppla kommentarer/dokument/högar | [Aktuell organisation](DOCUMENT_ORGANIZATION.md). Kommentarer hör automatiskt till hög genom dokumentets aktuella placering. Förklarade ordförslag ger granskade dokumentkopplingar. | Ingen autonom semantisk LLM-parning eller dold analys. Explicit Spara krävs för en ny koppling. |
 | AI integrerad i arbetet, leverantörsval, varningar, Grok | [66 AI/app/workflow/orkestreringspunkter](audit/AI_WORKFLOWS.md), [Copilot](COPILOT.md). Inlinehjälp för meddelanden/trådar/utkast, dokument/högar och uppgifter. | Kundägd kompatibel HTTPS-provider; OpenAI-/xAI-preset eller egen kompatibel tjänst kräver egen nyckel/modell. Inlinehjälp finns ännu inte i varje produktpanel. |
@@ -48,6 +49,15 @@ eller en framtidsplan räknas inte som en fungerande produktfunktion.
   verifierad anslutning och inbäddning styr vilka ingångar som visas. Valet
   öppnar produktens vanliga funktion; inget meddelande eller externt kommando
   skickas automatiskt. Se [funktionslistans kontrakt](SLASH_COMMANDS.md).
+- `@` söker personer, verkliga kanalgrupper, dokument, uppgifter, filer och det
+  aktuella samtalet vid markören. Valet sparar stabilt ID och UTF-16-spann,
+  utan att gissa identitet från ett namn. Kanaladministratörer hanterar
+  versionsskyddade grupper; medlemmar och behörighet kontrolleras igen vid
+  sändning, offlineleverans och faktisk schemalagd leverans. Redigering tar
+  bort ändrade bindningar. Native-referenser ingår i export/radering;
+  Matrix-text och referenser ligger i det krypterade eventet och använder
+  verifierade klienter för resursnamn. Sökning och val skickar inget meddelande,
+  skapar inget innehåll och ger ingen ny åtkomst. Se [kontrakt och gränser](MENTIONS_REFERENCES.md).
 - Dokument, nästa steg och beslut öppnas i samtalets egen arbetsyta, med
   meddelanden och skrivfält kvar. Sparat arbete kan öppnas från sitt
   ursprungsmeddelande. Native-kopplingar lagrar endast behörighetskontrollerade

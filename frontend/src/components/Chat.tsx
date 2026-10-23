@@ -47,7 +47,16 @@ import { applyChannelMetadata, nativeChannelMetadata, retainChannelMetadata, typ
 import { useAppearance } from '../appearance/AppearanceProvider';
 import { CommandPalette, type CommandAction } from './CommandPalette';
 import { SlashCommands } from './SlashCommands';
-import { getSlashCommands, getSlashQuery, type SlashCommand, type SlashContext } from '../lib/slash-commands';
+import { getSlashCommands, type SlashCommand, type SlashContext, type SlashAction } from '../lib/slash-commands';
+import { parseComposerCommand, isComposerCommandDraft, prepareCommandPeople, type ComposerWorkDraft, type ComposerDecisionDraft } from '../lib/composer-commands';
+import { useComposerReferences } from '../lib/useComposerReferences';
+import { normalizeMessageReferences, reconcileReferences, referenceOptionId, type MessageReference, type ReferenceEdit, type ResolvedReference } from '../lib/message-references';
+import { MentionReferences } from './MentionReferences';
+import { ReferencedMessage } from './ReferencedMessage';
+import { ReferenceGroupsPanel } from './ReferenceGroupsPanel';
+import { FilePreview } from './FilePreview';
+import { getVerifiedSecureFileReference } from '../lib/secure/files';
+import { listChannelFiles, type ManagedFile } from '../lib/files-api';
 import { nextCommandIndex } from '../lib/commands';
 import { useAccount } from '../account/AccountProvider';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
@@ -129,7 +138,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [decisionSource, setDecisionSource] = useState<Message | undefined>();
   const [historyOpen, setHistoryOpen] = useState(false);
   const [myDayOpen, setMyDayOpen] = useState(false);
-  const [productivity, setProductivity] = useState<{message?:Message;draft?:string;mentions?:string[]}|null>(null);
+  const [productivity, setProductivity] = useState<{message?:Message;draft?:string;mentions?:string[];references?:MessageReference[]}|null>(null);
   const [integrationsOpen, setIntegrationsOpen] = useState(false);
   const [launchOpen, setLaunchOpen] = useState(false);
   const [launchComposerTarget, setLaunchComposerTarget] = useState<{ channelId: string; workspaceId: string; token: string | null } | null>(null);
@@ -167,8 +176,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [policyNotice, setPolicyNotice] = useState(false);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [selectedMentions, setSelectedMentions] = useState<string[]>([]);
-  const [mentionOpen, setMentionOpen] = useState(false);
+  const [draftReferences, setDraftReferences] = useState<MessageReference[]>([]);
+  const selectedMentions = [...new Set(draftReferences.filter(reference => reference.kind === 'person').map(reference => reference.id))];
   const [secureAvailable, setSecureAvailable] = useState(false);
   const [createSecure, setCreateSecure] = useState(true);
   const [loggingOut, setLoggingOut] = useState(false);
@@ -180,19 +189,23 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [messageActionsOpen, setMessageActionsOpen] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [editReferences, setEditReferences] = useState<MessageReference[]>([]);
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadReplies, setThreadReplies] = useState<Message[]>([]);
   const [threadReplyContent, setThreadReplyContent] = useState('');
+  const [threadReferences, setThreadReferences] = useState<MessageReference[]>([]);
   const [presenceOpen, setPresenceOpen] = useState(false);
   const presenceDialog = useRef<HTMLElement>(null);
   const [threadHasMore, setThreadHasMore] = useState(false), [threadLoading, setThreadLoading] = useState(false), [threadError, setThreadError] = useState('');
   const threadRequest = useRef(0), threadLoadingRef = useRef(false), threadCursor = useRef<string | undefined>(undefined);
   const threadDrafts = useRef(new Map<string, string>()), threadScroller = useRef<HTMLDivElement>(null);
+  const threadReferenceDrafts = useRef(new Map<string, MessageReference[]>());
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [showNotifications, setShowNotifications] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
   const [slashPalette, setSlashPalette] = useState<{ channelId: string; workspaceId: string; token: string; mode: 'typed' | 'browse'; query: string } | null>(null);
-  const [slashIndex, setSlashIndex] = useState(0);
+  const [slashSelected, setSlashSelected] = useState<SlashAction | null>(null);
+  const [commandError, setCommandError] = useState('');
   const [slashSharedWork, setSlashSharedWork] = useState<{ channelId: string; workspaceId: string; token: string } | null>(null);
   const [slashStaff, setSlashStaff] = useState<{ token: string; allowed: boolean } | null>(null);
   const slashId = useId();
@@ -203,8 +216,22 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     embedded: !!embeddedChannelId, nativeSession, workspaceRole: workspace?.role, hasWorkspace: !!workspace,
     hasAdmin: !!onAdmin && !!slashStaff?.allowed && slashStaff.token === api.getAccessToken(),
     sharedWork: !!slashSharedWork && slashSharedWork.channelId === activeChannel?.id && slashSharedWork.workspaceId === workspace?.id && slashSharedWork.token === api.getAccessToken() };
-  const slashCommands = slashVisible ? getSlashCommands(slashContext, slashPalette.query) : [];
-  const slashActiveIndex = slashCommands.length ? Math.min(slashIndex, slashCommands.length - 1) : -1;
+  const rawCommand = slashVisible && slashPalette.mode === 'typed' ? parseComposerCommand(newMessage, slashContext) : null;
+  const parsedCommand = rawCommand?.command && ['task', 'decision', 'groups'].includes(rawCommand.command.id)
+    ? parseComposerCommand(prepareCommandPeople(newMessage, draftReferences).text, slashContext) : rawCommand;
+  // Once arguments belong to an exact command, a newly revealed menu under
+  // the pointer must not switch that command after selecting an @ reference.
+  const slashCommands = slashVisible ? rawCommand?.command && rawCommand.arguments?.trim()
+    ? [rawCommand.command] : getSlashCommands(slashContext, parsedCommand?.query ?? slashPalette.query) : [];
+  const slashActiveIndex = slashCommands.length ? Math.max(0, slashCommands.findIndex(command => command.id === slashSelected)) : -1;
+  const [workHubCommandDraft, setWorkHubCommandDraft] = useState<ComposerWorkDraft | null>(null);
+  const [decisionCommandDraft, setDecisionCommandDraft] = useState<ComposerDecisionDraft | null>(null);
+  const [historyInitialQuery, setHistoryInitialQuery] = useState('');
+  const [groupsOpen, setGroupsOpen] = useState(false);
+  const [groupCommandDraft, setGroupCommandDraft] = useState<{ key: string; name: string; memberIds?: string[] } | undefined>();
+  const [referenceGroupId, setReferenceGroupId] = useState<string | undefined>();
+  const [referenceMemberId, setReferenceMemberId] = useState<string | undefined>();
+  const [referencedFile, setReferencedFile] = useState<{ file: ManagedFile; token: string; workspaceId: string } | null>(null);
   const [pendingMessages, setPendingMessages] = useState(0);
   const [atLatest, setAtLatest] = useState(true);
   const [highlightedMessage, setHighlightedMessage] = useState<string | null>(null);
@@ -234,6 +261,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const nativeSyncRef=useRef<{channelId:string;token:string|null;cursor:number}|null>(null);
   const messagesRef = useRef<Message[]>([]);
   const draftsRef = useRef<Record<string, string>>({});
+  const draftReferenceCache = useRef<Record<string, MessageReference[]>>({});
+  const draftVersions = useRef<Record<string, number>>({});
+  const mainBeforeEdit = useRef<ReferenceEdit>();
+  const threadBeforeEdit = useRef<ReferenceEdit>();
+  const editBeforeEdit = useRef<ReferenceEdit>();
+  const editLive = useRef({ id: editingMessage, text: editContent, references: editReferences });
+  editLive.current = { id: editingMessage, text: editContent, references: editReferences };
   const threadRepliesRef = useRef(threadReplies); threadRepliesRef.current = threadReplies;
   const assistLive = useRef({ workspaceId: workspace?.id, channel: activeChannel, draft: newMessage, thread: threadMessage, threadDraft: threadReplyContent, locale: currentLocale(), token: api.getAccessToken() });
   assistLive.current = { workspaceId: workspace?.id, channel: activeChannel, draft: newMessage, thread: threadMessage, threadDraft: threadReplyContent, locale: currentLocale(), token: api.getAccessToken() };
@@ -257,6 +291,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const composerAreaRef = useRef<HTMLDivElement>(null);
   const threadInputRef = useRef<HTMLInputElement>(null);
+  const editInputRef = useRef<HTMLTextAreaElement>(null);
   const createDialogRef = useRef<HTMLDivElement>(null);
   const threadDialogRef = useRef<HTMLElement>(null);
   useModalFocus(channelDialogRef, () => setSidebarOpen(false), sidebarOpen);
@@ -264,6 +299,15 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useModalFocus(createDialogRef, () => setShowNewChannel(false), showNewChannel);
   useModalFocus(threadDialogRef, () => setThreadMessage(null), !!threadMessage);
   useModalFocus(presenceDialog, () => setPresenceOpen(false), presenceOpen);
+  const mainReferencePicker = useComposerReferences({ channelId: activeChannel?.id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
+    text: newMessage, references: draftReferences, input: inputRef, disabled: sending,
+    onInsert: (text, references) => { setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
+  const threadReferencePicker = useComposerReferences({ channelId: threadMessage?.channel_id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
+    text: threadReplyContent, references: threadReferences, input: threadInputRef,
+    onInsert: (text, references) => updateThreadDraft(text, references) });
+  const editReferencePicker = useComposerReferences({ channelId: editingMessage ? activeChannel?.id : undefined, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
+    text: editContent, references: editReferences, input: editInputRef,
+    onInsert: (text, references) => { setEditContent(text); setEditReferences(references); } });
   useEffect(() => { setSlashPalette(null); setSlashSharedWork(null); }, [activeChannel?.id, workspace?.id, workHubIdentity.credential]);
   useEffect(() => {
     const clear = () => { setSlashPalette(null); setSlashSharedWork(null); };
@@ -293,10 +337,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     return () => { live = false; clearTimeout(timer); abort.abort(); };
   }, [slashVisible, activeChannel?.id, activeChannel?.secure, workspace?.id, workHubIdentity.credential]);
   useEffect(() => {
-    if (threadMessage) threadDrafts.current.set(threadMessage.id, threadReplyContent);
-  }, [threadMessage?.id, threadReplyContent]);
+    if (threadMessage) { threadDrafts.current.set(threadMessage.id, threadReplyContent); threadReferenceDrafts.current.set(threadMessage.id, threadReferences); }
+  }, [threadMessage?.id, threadReplyContent, threadReferences]);
   useEffect(() => {
-    const clear = () => { ++threadRequest.current; threadDrafts.current.clear(); setThreadMessage(null); setThreadReplies([]); setThreadReplyContent(''); setThreadHasMore(false); setThreadLoading(false); setThreadError(''); setPresenceOpen(false); };
+    const clear = () => { ++threadRequest.current; threadDrafts.current.clear(); threadReferenceDrafts.current.clear(); setThreadMessage(null); setThreadReplies([]); setThreadReplyContent(''); setThreadReferences([]); setThreadHasMore(false); setThreadLoading(false); setThreadError(''); setPresenceOpen(false); setReferencedFile(null); };
     window.addEventListener('freecollab:auth-changed', clear);
     return () => { ++threadRequest.current; window.removeEventListener('freecollab:auth-changed', clear); };
   }, []);
@@ -325,8 +369,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useEffect(() => {
     setActiveChannel(null); setChannels([]); setMessages([]); setHistoryOpen(false); setIntegrationsOpen(false); setWorkHubOpen(false); setCollaborationTab(null); setLaunchOpen(false); setFeedbackOpen(false); setIntegrationEntry(null);
     workHubViews.current?.clear(); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubSource(null); setFlowNotice(''); setFlowMoreOpen(false);
-    draftsRef.current = {}; readingPositionsRef.current.clear(); roomOverviewRef.current = false;
-    setRoomArrangements({}); setMaterialChannelId(null);
+    draftsRef.current = {}; draftReferenceCache.current = {}; draftVersions.current = {}; setDraftReferences([]); readingPositionsRef.current.clear(); roomOverviewRef.current = false;
+    setRoomArrangements({}); setMaterialChannelId(null); setGroupsOpen(false); setGroupCommandDraft(undefined); setReferenceGroupId(undefined); setReferenceMemberId(undefined); setReferencedFile(null); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setHistoryInitialQuery('');
     if (workspace) { setLoading(true); void loadChannels(); } else setLoading(workspacesLoading);
   }, [workspace?.id]);
 
@@ -344,12 +388,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     return () => { clear(); window.removeEventListener('freecollab:auth-changed', clear); };
   }, []);
 
-  const persistDraft = (channelId: string, content: string, secure: boolean) => {
+  const persistDraft = (channelId: string, content: string, secure: boolean, references?: MessageReference[]) => {
+    const bound = normalizeMessageReferences(content, references ?? reconcileReferences(draftsRef.current[channelId] || '', content, draftReferenceCache.current[channelId] || []));
     draftsRef.current[channelId] = content;
+    draftReferenceCache.current[channelId] = bound;
+    draftVersions.current[channelId] = (draftVersions.current[channelId] || 0) + 1;
+    if (activeChannelRef.current === channelId) setDraftReferences(bound);
     const token = api.getAccessToken();
     const previous = draftWrites.current.get(channelId) || Promise.resolve();
     const pending = previous.catch(() => {}).then(async () => {
-      if (token === api.getAccessToken()) await mobileDrafts.save(channelId, content, secure);
+      if (token === api.getAccessToken()) await mobileDrafts.saveRich(channelId, { text: content, references: bound }, secure);
     }).catch(() => { if (token === api.getAccessToken() && activeChannelRef.current === channelId) setActionError('This draft could not be saved on this device. Keep this page open until it is sent.'); });
     draftWrites.current.set(channelId, pending);
   };
@@ -358,7 +406,15 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const openActivity = () => { setShowNotifications(true); if (window.location.hash === '#mobile=activity') window.history.replaceState(null, '', window.location.pathname + window.location.search); };
     const message = (event: MessageEvent) => { if (event.data?.type === 'open_activity') openActivity(); };
     const sent = (event: Event) => { const record = (event as CustomEvent<Message>).detail; if (record?.channel_id === activeChannelRef.current) void loadMessages(record.channel_id); };
-    const restored = (event: Event) => { const channelId = (event as CustomEvent<{channelId:string}>).detail?.channelId; const token = api.getAccessToken(), previous = draftsRef.current[channelId]; if (channelId === activeChannelRef.current) void mobileDrafts.load(channelId).then(value => { if (token === api.getAccessToken() && activeChannelRef.current === channelId && draftsRef.current[channelId] === previous) { draftsRef.current[channelId] = value; setNewMessage(value); } }).catch(() => {}); };
+    const restored = (event: Event) => {
+      const channelId = (event as CustomEvent<{channelId:string}>).detail?.channelId;
+      const token = api.getAccessToken(), revision = draftVersions.current[channelId] || 0;
+      if (channelId === activeChannelRef.current) void mobileDrafts.loadRich(channelId).then(value => {
+        if (token === api.getAccessToken() && activeChannelRef.current === channelId && (draftVersions.current[channelId] || 0) === revision) {
+          draftsRef.current[channelId] = value.text; draftReferenceCache.current[channelId] = value.references; setNewMessage(value.text); setDraftReferences(value.references);
+        }
+      }).catch(() => {});
+    };
     if (window.location.hash === '#mobile=activity') openActivity();
     navigator.serviceWorker?.addEventListener('message', message);
     window.addEventListener('freecollab:offline-message-sent', sent);
@@ -516,8 +572,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useEffect(() => {
     const dismiss = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || commandOpen || document.querySelector('.appearance-panel')) return;
-      if (mentionOpen) setMentionOpen(false);
-      else if (showNewChannel) setShowNewChannel(false);
+      if (showNewChannel) setShowNewChannel(false);
       else if (showReactionPicker) setShowReactionPicker(null);
       else if (messageActionsOpen) setMessageActionsOpen(null);
       else if (showNotifications) setShowNotifications(false);
@@ -527,7 +582,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     };
     document.addEventListener('keydown', dismiss);
     return () => document.removeEventListener('keydown', dismiss);
-  }, [commandOpen, showNewChannel, showReactionPicker, showNotifications, threadMessage, toolPanel, mentionOpen, sidebarOpen, messageActionsOpen]);
+  }, [commandOpen, showNewChannel, showReactionPicker, showNotifications, threadMessage, toolPanel, sidebarOpen, messageActionsOpen]);
 
   useEffect(() => {
     const openCommands = (event: KeyboardEvent) => {
@@ -550,7 +605,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   useEffect(() => {
     setMessages([]);
-    setHasOlder(false); setLoadingOlder(false); setSelectedMentions([]); setMentionOpen(false);
+    setHasOlder(false); setLoadingOlder(false); setDraftReferences([]);
     setPendingMessages(0); setAtLatest(true);
     // Explicit navigation clears the old editor synchronously, before setting
     // its new exact target. Authoritative channel changes still purge it here.
@@ -570,15 +625,20 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     setThreadMessage(null);
     setThreadReplies([]);
     ++threadRequest.current; threadLoadingRef.current = false; threadCursor.current = undefined;
-    threadDrafts.current.clear(); setThreadReplyContent(''); setThreadHasMore(false); setThreadLoading(false); setThreadError('');
-    setEditingMessage(null);
+    threadDrafts.current.clear(); threadReferenceDrafts.current.clear(); setThreadReplyContent(''); setThreadReferences([]); setThreadHasMore(false); setThreadLoading(false); setThreadError('');
+    setEditingMessage(null); setEditReferences([]); setReferencedFile(null); setReferenceMemberId(undefined);
     setShowReactionPicker(null); setMessageActionsOpen(null);
     setMessageError(''); setEncryptionLocked(false); setActionError(''); setToolPanel(null);
     setMemberNames({});
     setNewMessage(activeChannel ? draftsRef.current[activeChannel.id] || '' : '');
+    setDraftReferences(activeChannel ? draftReferenceCache.current[activeChannel.id] || [] : []);
     if (activeChannel && !(activeChannel.id in draftsRef.current)) {
-      const id = activeChannel.id, token = api.getAccessToken();
-      void mobileDrafts.load(id).then(value => { if (token === api.getAccessToken() && activeChannelRef.current === id && !(id in draftsRef.current)) { draftsRef.current[id] = value; setNewMessage(value); } }).catch(() => {});
+      const id = activeChannel.id, token = api.getAccessToken(), revision = draftVersions.current[activeChannel.id] || 0;
+      void mobileDrafts.loadRich(id).then(value => {
+        if (token === api.getAccessToken() && activeChannelRef.current === id && !(id in draftsRef.current) && (draftVersions.current[id] || 0) === revision) {
+          draftsRef.current[id] = value.text; draftReferenceCache.current[id] = value.references; setNewMessage(value.text); setDraftReferences(value.references);
+        }
+      }).catch(() => {});
     }
     if (!activeChannel) return;
 
@@ -786,14 +846,14 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       }
       setMessages((prev) => prev.some((message) => message.id === msg.id) ? prev : [...prev, msg]);
     };
-    const onEdited = (data: { id: string; content: string; edited_at: string }) => {
-      const update = (message: Message) => message.id === data.id ? { ...message, content: data.content, edited_at: data.edited_at } : message;
+    const onEdited = (data: { id: string; content: string; edited_at: string; references?: MessageReference[] }) => {
+      const update = (message: Message) => message.id === data.id ? { ...message, content: data.content, edited_at: data.edited_at, references: normalizeMessageReferences(data.content, data.references) } : message;
       setMessages((prev) => prev.map(update));
       setThreadReplies((prev) => prev.map(update));
       setThreadMessage((prev) => prev ? update(prev) : prev);
     };
     const onDeleted = (data: { id: string }) => {
-      const update = (message: Message) => message.id === data.id ? { ...message, deleted: true, content: '[Message deleted]' } : message;
+      const update = (message: Message) => message.id === data.id ? { ...message, deleted: true, content: '[Message deleted]', references: [] } : message;
       setMessages((prev) => prev.map(update));
       setThreadReplies((prev) => prev.map(update));
       if (threadMessageRef.current?.id === data.id) {
@@ -817,6 +877,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const onChannelRemoved = (data: { channel_id: string }) => {
       setChannels((records) => records.filter((record) => record.id !== data.channel_id));
       delete draftsRef.current[data.channel_id];
+      delete draftReferenceCache.current[data.channel_id]; delete draftVersions.current[data.channel_id];
       if (activeChannelRef.current === data.channel_id) {
         setActiveChannel(null); setMessages([]); setToolPanel(null); setNewMessage('');
       }
@@ -830,7 +891,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       if (disposed) return;
       unsubscribeSecure = secure.subscribe((event, data) => {
         if (event === 'new_message') onMessage(data as unknown as Message);
-        else if (event === 'message_updated') onEdited({ id: String(data.id), content: String(data.content), edited_at: String(data.edited_at || new Date().toISOString()) });
+        else if (event === 'message_updated') onEdited({ id: String(data.id), content: String(data.content), edited_at: String(data.edited_at || new Date().toISOString()), references: normalizeMessageReferences(String(data.content), data.references) });
         else if (event === 'message_deleted') onDeleted({ id: String(data.id || data.message_id) });
         else if (event === 'reaction_updated') onReaction({ message_id: String(data.message_id) });
         else if (event === 'thread_reply') onThreadReply(data as unknown as { parent_id: string; reply: Message; thread_count: number });
@@ -1051,6 +1112,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     threadMessageRef.current = message;
     setThreadReplies([]);
     setThreadReplyContent(threadDrafts.current.get(message.id) || '');
+    setThreadReferences(threadReferenceDrafts.current.get(message.id) || []);
     threadCursor.current = undefined; threadLoadingRef.current = true; setThreadLoading(true); setThreadHasMore(false); setThreadError('');
     try {
       let found = false, before: string | undefined;
@@ -1109,16 +1171,18 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     // A slash query is navigation, never a message. Escape restores literal sending.
-    if (slashVisible && slashPalette?.mode === 'typed') return;
+    if (composingRef.current || mainReferencePicker.open || slashVisible && slashPalette?.mode === 'typed') return;
     if (!newMessage.trim() || !activeChannel || sending) return;
     const channelId = activeChannel.id;
     setSending(true); setActionError('');
     try {
       const content = newMessage;
       const token = api.getAccessToken();
-      const result = await mobileOutbox.sendOrQueue(channelId, content, selectedMentions.filter(id => content.includes('@' + memberNames[id])), !!activeChannel.secure);
+      const references = normalizeMessageReferences(content, draftReferenceCache.current[channelId] || []);
+      const result = await mobileOutbox.sendOrQueue(channelId, content, references.filter(reference => reference.kind === 'person').map(reference => reference.id), !!activeChannel.secure, references);
       if (token !== api.getAccessToken()) return;
-      if (draftsRef.current[channelId] === content) persistDraft(channelId, '', !!activeChannel.secure);
+      const unchanged = draftsRef.current[channelId] === content && JSON.stringify(draftReferenceCache.current[channelId] || []) === JSON.stringify(references);
+      if (unchanged) persistDraft(channelId, '', !!activeChannel.secure, []);
       setMobileNotice(result.kind === 'queued' ? 'Saved in your encrypted outbox. It will sync when this sign-in reconnects.' : '');
       if (activeChannelRef.current === channelId) {
         if (result.kind === 'sent') {
@@ -1126,8 +1190,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           setMessages((prev) => prev.some((message) => message.id === result.message.id) ? prev : [...prev, result.message]);
           requestAnimationFrame(() => { if (token === api.getAccessToken() && activeChannelRef.current === channelId) scrollToLatest('auto'); });
         }
-        setNewMessage((current) => current === content ? '' : current);
-        setSelectedMentions([]); setMentionOpen(false);
+        if (unchanged) { setNewMessage(''); assistLive.current.draft = ''; mainReferencePicker.close(); }
       }
       stopTyping(); // Stop typing indicator when message is sent
     } catch (err) {
@@ -1155,13 +1218,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const handleEditMessage = async (messageId: string) => {
-    if (!editContent.trim()) return;
+    if (!editContent.trim() || composingRef.current || editReferencePicker.open) return;
+    const token = api.getAccessToken(), channelId = activeChannelRef.current;
+    const content = editContent, references = normalizeMessageReferences(content, editReferences);
     try {
-      await api.editMessage(messageId, editContent);
-      setEditingMessage(null);
-      setEditContent('');
+      await api.editMessage(messageId, content, references);
+      if (token === api.getAccessToken() && channelId === activeChannelRef.current && editLive.current.id === messageId && editLive.current.text === content && JSON.stringify(editLive.current.references) === JSON.stringify(references)) {
+        setEditingMessage(null); setEditContent(''); setEditReferences([]);
+      }
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Could not edit message.');
+      if (token === api.getAccessToken() && channelId === activeChannelRef.current) setActionError(err instanceof Error ? err.message : 'Could not edit message.');
     }
   };
 
@@ -1175,35 +1241,41 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const handleThreadReply = async () => {
-    if (!threadReplyContent.trim() || !threadMessage) return;
+    if (!threadReplyContent.trim() || !threadMessage || composingRef.current || threadReferencePicker.open) return;
     try {
-      const parentId = threadMessage.id;
+      const parentId = threadMessage.id, token = api.getAccessToken();
       const content = threadReplyContent;
-      const reply = await api.replyToMessage(parentId, content);
-      if (threadMessageRef.current?.id === parentId) {
+      const references = normalizeMessageReferences(content, threadReferences);
+      const reply = await api.replyToMessage(parentId, content, references.filter(reference => reference.kind === 'person').map(reference => reference.id), references);
+      if (token === api.getAccessToken() && threadMessageRef.current?.id === parentId) {
         setThreadReplies((prev) => prev.some((message) => message.id === reply.id) ? prev : [...prev, reply]);
-        setThreadReplyContent((current) => current === content ? '' : current);
+        if (threadDrafts.current.get(parentId) === content && JSON.stringify(threadReferenceDrafts.current.get(parentId) || []) === JSON.stringify(references)) updateThreadDraft('', []);
       }
     } catch (err) {
       setActionError(err instanceof Error ? err.message : 'Reply was not sent. Please try again.');
     }
   };
 
+  function updateThreadDraft(text: string, references: MessageReference[]) {
+    const parent = threadMessageRef.current;
+    if (!parent) return;
+    const bound = normalizeMessageReferences(text, references);
+    threadDrafts.current.set(parent.id, text); threadReferenceDrafts.current.set(parent.id, bound);
+    assistLive.current.threadDraft = text; setThreadReplyContent(text); setThreadReferences(bound);
+  }
+
   // Typing emitter hook
   const { startTyping, stopTyping } = useTypingEmitter(activeChannel?.id || '');
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const value = e.target.value;
+    const references = reconcileReferences(newMessage, value, draftReferences, mainBeforeEdit.current);
+    mainBeforeEdit.current = undefined;
     assistLive.current.draft = value;
     setNewMessage(value);
-    if (activeChannel) persistDraft(activeChannel.id, value, !!activeChannel.secure);
-    setMentionOpen(/(?:^|\s)@[^@\n]*$/.test(value));
-    const slashQuery = getSlashQuery(value), token = api.getAccessToken();
-    if (slashQuery !== null && activeChannel && workspace && token && !composingRef.current) {
-      if (!slashVisible) setSlashSharedWork(null);
-      setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, mode: 'typed', query: slashQuery });
-      setSlashIndex(0); setMentionOpen(false); setFlowMoreOpen(false);
-    } else setSlashPalette(null);
+    if (activeChannel) persistDraft(activeChannel.id, value, !!activeChannel.secure, references);
+    if (!composingRef.current) mainReferencePicker.update(value, e.currentTarget.selectionStart, references, true);
+    updateCommandPalette(value);
     
     // Emit typing event
     if (value.trim()) {
@@ -1213,6 +1285,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
     
   };
+
+  function updateCommandPalette(value: string) {
+    setCommandError('');
+    const token = api.getAccessToken();
+    if (isComposerCommandDraft(value, slashContext) && activeChannel && workspace && token && !composingRef.current) {
+      if (!slashVisible) setSlashSharedWork(null);
+      setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, mode: 'typed', query: value });
+      setSlashSelected(null); setFlowMoreOpen(false);
+    } else setSlashPalette(null);
+  }
 
   type AssistDraftTarget = 'main' | 'thread';
   function draftAssistKey(target: AssistDraftTarget, messageId?: string): string | null {
@@ -1233,14 +1315,15 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (after.length > 10000 || after === before) return false;
     const stillCurrent = () => token === api.getAccessToken() && activeChannelRef.current === channel.id && workspaceRef.current === live.workspaceId;
     if (target === 'thread') {
-      assistLive.current = { ...live, threadDraft: after };
-      setThreadReplyContent(current => stillCurrent() && threadMessageRef.current?.id === live.thread?.id && current === before ? after : current);
+      if (!stillCurrent() || threadMessageRef.current?.id !== live.thread?.id || (threadDrafts.current.get(live.thread!.id) || '') !== before) return false;
+      updateThreadDraft(after, reconcileReferences(before, after, threadReferenceDrafts.current.get(live.thread!.id) || []));
+      threadReferencePicker.close();
     } else {
       if ((draftsRef.current[channel.id] ?? '') !== before) return false;
       assistLive.current = { ...live, draft: after };
       setNewMessage(current => stillCurrent() && current === before ? after : current);
       persistDraft(channel.id, after, !!channel.secure);
-      setMentionOpen(false);
+      mainReferencePicker.close();
     }
     requestAnimationFrame(() => {
       if (!stillCurrent()) return;
@@ -1305,6 +1388,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     setWorkHubOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setWorkHubSource(null);
     setCollaborationTab(null); setDecisionSource(undefined); setFocusDecisionId(undefined);
     workHubOrigin.current = null; setFlowMoreOpen(false); setFlowNotice('');
+    setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null);
   };
   const selectChannel = (channel: Channel, preflightDone = false) => {
     const token = api.getAccessToken(), actor = api.getCurrentUserId();
@@ -1330,14 +1414,14 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     openRoomWork(workHubViews.current?.recall({ ...workHubIdentity, workspaceId: workspace.id, channelId: activeChannel.id, secure: !!activeChannel.secure }) ?? 'documents');
   };
 
-  const openRoomWork = (tab: WorkHubTab, target: { documentId?: string; stackId?: string; taskId?: string; projectId?: string } = {}, source?: Message) => {
+  const openRoomWork = (tab: WorkHubTab, target: { documentId?: string; stackId?: string; taskId?: string; projectId?: string } = {}, source?: Message, commandDraft?: ComposerWorkDraft) => {
     if (!mayLeaveConversationWork()) return false;
     const token = api.getAccessToken();
     if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id ||
         (activeChannel.workspace_id && activeChannel.workspace_id !== workspace.id) || workHubIdentity.credential !== token || workHubIdentity.userId !== api.getCurrentUserId()) return false;
     roomOverviewRef.current = false; flowConversationMoved.current = false;
     setWorkHubSource(source && source.channel_id === activeChannel.id && !source.deleted && !source.locked ? { message: source, token, workspaceId: workspace.id } : null);
-    setCollaborationTab(null); setFlowMoreOpen(false); setFlowNotice('');
+    setCollaborationTab(null); setGroupsOpen(false); setDecisionCommandDraft(null); setWorkHubCommandDraft(commandDraft || null); setFlowMoreOpen(false); setFlowNotice('');
     workHubOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
       top: timelineRef.current?.scrollTop || 0, token, workspaceId: workspace.id, channelId: activeChannel.id };
     setWorkHubDocument(tab === 'documents' ? { documentId: target.documentId, stackId: target.stackId, token, workspaceId: workspace.id, channelId: activeChannel.id } : null);
@@ -1349,7 +1433,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const closeWorkHub = () => {
     const origin = workHubOrigin.current; workHubOrigin.current = null;
     const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
-    setWorkHubOpen(false); setCollaborationTab(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
+    setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
     requestAnimationFrame(() => {
       if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
       if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
@@ -1393,11 +1477,11 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       if (token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current) setFlowNotice(t('The work is saved. Its message link could not be saved. Use Link this work to the message to retry.'));
     }
   };
-  const openConversationDecision = (source?: Message, decisionId?: string, tab: 'decisions' | 'pins' | 'bookmarks' | 'notifications' = 'decisions') => {
+  const openConversationDecision = (source?: Message, decisionId?: string, tab: 'decisions' | 'pins' | 'bookmarks' | 'notifications' = 'decisions', commandDraft?: ComposerDecisionDraft) => {
     if (!activeChannel || !workspace || !mayLeaveConversationWork()) return false;
     workHubOrigin.current = {element: document.activeElement instanceof HTMLElement ? document.activeElement : null, top: timelineRef.current?.scrollTop || 0, token: api.getAccessToken()!, workspaceId: workspace.id, channelId: activeChannel.id};
     flowConversationMoved.current = false;
-    setWorkHubOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setFlowMoreOpen(false); setFlowNotice('');
+    setWorkHubOpen(false); setGroupsOpen(false); setWorkHubCommandDraft(null); setDecisionCommandDraft(commandDraft || null); setWorkHubDocument(null); setWorkHubTask(null); setFlowMoreOpen(false); setFlowNotice('');
     setDecisionSource(source?.channel_id === activeChannel.id && !source.deleted && !source.locked ? source : undefined);
     setFocusDecisionId(decisionId || undefined); setCollaborationTab(tab); setToolPanel(null); setThreadMessage(null);
     return true;
@@ -1457,6 +1541,41 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
   };
 
+  const openGroups = (draft?: { key: string; name: string; memberIds?: string[] }, groupId?: string) => {
+    const token = api.getAccessToken();
+    if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id || !mayLeaveConversationWork()) return false;
+    workHubOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+      top: timelineRef.current?.scrollTop || 0, token, workspaceId: workspace.id, channelId: activeChannel.id };
+    flowConversationMoved.current = false;
+    setWorkHubOpen(false); setCollaborationTab(null); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setWorkHubSource(null);
+    setGroupCommandDraft(draft); setReferenceGroupId(groupId); setGroupsOpen(true); setThreadMessage(null); setToolPanel(null); setFlowMoreOpen(false);
+    return true;
+  };
+
+  const openMessageReference = async (reference: ResolvedReference) => {
+    const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
+    if (!token || !channelId || !workspaceId || !activeChannel || activeChannel.id !== channelId || !reference.available || reference.channel_id !== channelId) return;
+    if (reference.kind === 'document') { openRoomWork('documents', { documentId: reference.id }); return; }
+    if (reference.kind === 'task') { openRoomWork('tasks', { taskId: reference.id, projectId: reference.project_id }); return; }
+    if (reference.kind === 'group') { openGroups(undefined, reference.id); return; }
+    if (reference.kind === 'channel') { setChannelDetailsOpen(true); return; }
+    if (reference.kind === 'person') { setReferenceMemberId(reference.id); setThreadMessage(null); setToolPanel('members'); return; }
+    try {
+      const files = await listChannelFiles(channelId);
+      let file = files.find(row => row.id === reference.id);
+      if (!file && activeChannel.secure) file = await getVerifiedSecureFileReference(channelId, reference.id);
+      if (!file && !activeChannel.secure) {
+        const versions = await api.request<ManagedFile[]>('/files/' + encodeURIComponent(reference.id) + '/versions');
+        file = versions.find(row => row.id === reference.id && row.channel_id === channelId);
+      }
+      if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
+      if (!file || file.channel_id !== channelId) throw new Error(t('This referenced file is no longer available.'));
+      setReferencedFile({ file, token, workspaceId });
+    } catch (failure) {
+      if (token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current) setActionError(failure instanceof Error ? failure.message : t('This referenced file is no longer available.'));
+    }
+  };
+
   const closeSlashCommands = () => {
     setSlashPalette(null);
     inputRef.current?.focus({ preventScroll: true });
@@ -1465,23 +1584,56 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const browseSlashCommands = () => {
     const token = api.getAccessToken();
     if (!token || !activeChannel || !workspace || sending) return;
-    setMentionOpen(false); setFlowMoreOpen(false); setSlashIndex(0);
+    mainReferencePicker.close(); setFlowMoreOpen(false); setSlashSelected(null); setCommandError('');
     if (!slashVisible) setSlashSharedWork(null);
     setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, mode: 'browse', query: '' });
+  };
+
+  const beginReference = () => {
+    const input = inputRef.current;
+    if (!input || !activeChannel || sending || !api.getAccessToken()) return;
+    const start = input.selectionStart, end = input.selectionEnd;
+    const marker = start && !/\s/.test(newMessage[start - 1]) ? ' @' : '@';
+    const text = newMessage.slice(0, start) + marker + newMessage.slice(end);
+    if (text.length > 10000) return;
+    const references = reconcileReferences(newMessage, text, draftReferences, { start, end });
+    const caret = start + marker.length;
+    setNewMessage(text); assistLive.current.draft = text;
+    persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text);
+    mainReferencePicker.update(text, caret, references, true);
+    requestAnimationFrame(() => { if (inputRef.current === input && input.value === text) { input.focus({ preventScroll: true }); input.setSelectionRange(caret, caret); } });
   };
 
   const selectSlashCommand = (command: SlashCommand) => {
     const entry = slashPalette;
     if (!slashVisible || !entry || entry.token !== api.getAccessToken() || !activeChannel || !workspace || activeChannelRef.current !== entry.channelId ||
       workspaceRef.current !== entry.workspaceId || !getSlashCommands(slashContext).some(item => item.id === command.id)) return;
+    const people = prepareCommandPeople(newMessage, draftReferences);
+    const parsed = entry.mode === 'typed' ? parseComposerCommand(['task', 'decision', 'groups'].includes(command.id) ? people.text : newMessage, slashContext, command.id) : null;
+    if (parsed && (parsed.status !== 'ready' || !parsed.intent)) { setCommandError(parsed.error || parsed.usage || t('Choose a command and complete its arguments.')); return; }
+    if (entry.mode === 'typed' && ['task', 'decision'].includes(command.id) && people.personIds.length > 1) {
+      setCommandError(t('Choose one person to own this work. Other people can be mentioned in its context.')); return;
+    }
+    if (entry.mode === 'typed' && ['task', 'decision'].includes(command.id) && people.personIds.length && parsed?.intent?.kind === 'open') {
+      setCommandError(t('Give this work a title before choosing its owner.')); return;
+    }
+    if (parsed?.intent?.kind === 'groups' && parsed.intent.memberText.trim()) {
+      setCommandError(t('Choose group members from the @ suggestions, or add them in the group form.')); return;
+    }
+    if (parsed?.intent?.kind === 'groups' && !['owner', 'admin'].includes(activeChannel.role || '')) {
+      setCommandError(t('A channel administrator can create and change groups.')); return;
+    }
+    const intent = parsed?.intent;
+    const draftKey = crypto.randomUUID();
     // Remember a lasting return target before the picker itself unmounts.
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     inputRef.current?.focus({ preventScroll: true });
     let opened = true;
     switch (command.id) {
-      case 'document': opened = openRoomWork('documents'); break;
-      case 'task': opened = openRoomWork('tasks'); break;
-      case 'decision': opened = openConversationDecision(); break;
+      case 'document': opened = openRoomWork('documents', {}, undefined, intent?.kind === 'document' ? { key: draftKey, title: intent.title, text: intent.text } : undefined); break;
+      case 'task': opened = openRoomWork('tasks', {}, undefined, intent?.kind === 'task' ? { key: draftKey, title: intent.title, text: intent.text, assigneeUserId: people.personIds[0] } : undefined); break;
+      case 'decision': opened = openConversationDecision(undefined, undefined, 'decisions', intent?.kind === 'decision' ? { key: draftKey, title: intent.title, content: intent.content, responsibleUserId: people.personIds[0] } : undefined); break;
+      case 'groups': opened = openGroups(intent?.kind === 'groups' ? { key: draftKey, name: intent.name, memberIds: people.personIds } : undefined); break;
       case 'meetings': opened = openRoomWork('meetings'); break;
       case 'activity': opened = openRoomWork('feed'); break;
       case 'workflows': opened = openRoomWork('workflows'); break;
@@ -1496,9 +1648,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       case 'notification-settings': opened = openConversationDecision(undefined, undefined, 'notifications'); break;
       case 'files': case 'members': setThreadMessage(null); setToolPanel(command.id); break;
       case 'channel': setToolPanel(null); setChannelDetailsOpen(true); break;
-      case 'search': setHistoryOpen(true); break;
+      case 'search': setHistoryInitialQuery(intent?.kind === 'search' ? intent.query : ''); setHistoryOpen(true); break;
       case 'mobile': setMobileOpen(true); break;
-      case 'schedule': setProductivity({ draft: entry.mode === 'typed' ? '' : newMessage, mentions: entry.mode === 'typed' ? [] : selectedMentions }); break;
+      case 'schedule': setProductivity({ draft: entry.mode === 'typed' ? '' : newMessage, mentions: entry.mode === 'typed' ? [] : selectedMentions, references: entry.mode === 'typed' ? [] : draftReferences }); break;
       case 'focus': setFocusMode(value => !value); break;
       case 'appearance': openAppearance(); break;
       case 'account': openAccount(); break;
@@ -1518,9 +1670,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     // A rejected navigation must keep both the command and the current editor.
     if (entry.token !== api.getAccessToken() || activeChannelRef.current !== entry.channelId || workspaceRef.current !== entry.workspaceId) return;
     if (!opened) { if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); return; }
-    if (entry.mode === 'typed' && getSlashQuery(newMessage) === entry.query) {
-      setNewMessage(''); assistLive.current.draft = ''; setSelectedMentions([]);
-      persistDraft(entry.channelId, '', !!activeChannel.secure); stopTyping();
+    if (entry.mode === 'typed' && newMessage === entry.query) {
+      setNewMessage(''); assistLive.current.draft = '';
+      persistDraft(entry.channelId, '', !!activeChannel.secure, []); stopTyping();
     }
     setSlashPalette(null);
   };
@@ -1530,7 +1682,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSlashCommands(); return true; }
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
-      setSlashIndex(event.key === 'Home' ? 0 : event.key === 'End' ? Math.max(0, slashCommands.length - 1) : nextCommandIndex(slashActiveIndex, event.key === 'ArrowDown' ? 1 : -1, slashCommands.length));
+      const next = event.key === 'Home' ? 0 : event.key === 'End' ? slashCommands.length - 1 : nextCommandIndex(slashActiveIndex, event.key === 'ArrowDown' ? 1 : -1, slashCommands.length);
+      setSlashSelected(slashCommands[next]?.id || null);
       return true;
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -1543,11 +1696,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+    if (mainReferencePicker.handleKeyDown(event)) return;
     if (handleSlashKeyDown(event)) return;
-    if (mentionOpen && event.key === 'ArrowDown') {
-      const option = document.querySelector<HTMLButtonElement>('.fc-chat-mention-picker button');
-      if (option) { event.preventDefault(); option.focus(); return; }
-    }
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
     event.preventDefault();
     flowConversationMoved.current = true;
@@ -1590,8 +1741,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     );
   }
 
-  const conversationWork = workHubOpen && workspace && activeChannel ? <WorkHub presentation="flow" sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}` } workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
-  const conversationNotebook = activeChannel && collaborationTab ? <CollaborationPanel presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}`} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
+  const conversationWork = workHubOpen && workspace && activeChannel ? <WorkHub presentation="flow" sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}:${workHubCommandDraft?.key || ""}` } initialCommandDraft={workHubCommandDraft || undefined} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
+  const conversationNotebook = activeChannel && collaborationTab ? <CollaborationPanel presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}:${decisionCommandDraft?.key || ''}`} initialDraft={decisionCommandDraft || undefined} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
+  const conversationGroups = groupsOpen && activeChannel && workspace ? <ReferenceGroupsPanel key={`${workspace.id}:${activeChannel.id}:${groupCommandDraft?.key || ""}:${referenceGroupId || ""}`} channelId={activeChannel.id} workspaceId={workspace.id} canManage={["owner", "admin"].includes(activeChannel.role || "")} initialDraft={groupCommandDraft} initialGroupId={referenceGroupId} onClose={closeWorkHub} onChanged={() => setMaterialRefresh(value => value + 1)} /> : null;
   return (
     <div key="chat-shell" className={`fc-chat ${focusMode ? 'is-focus-mode' : ''} ${spaciousRoom ? 'is-spacious-room' : ''} ${activeChannel && materialChannelId === activeChannel.id ? 'has-shared-material' : ''} ${activeChannel && roomArrangements[activeChannel.id] === 'left' ? 'has-material-left' : ''}`}>
       {sidebarOpen && <div ref={channelDialogRef} id="chat-channel-drawer" className="fc-chat-channel-layer" role="dialog" aria-modal="true" aria-label={t("Workspace channels")} tabIndex={-1}>
@@ -1604,7 +1756,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           </div>
           <button type="button" onClick={() => setCommandOpen(true)} className="fc-chat-switcher" aria-label={t("Quick switcher")} aria-haspopup="dialog"><Search size={16} /><span>{t("Search & switch")}</span><kbd className="fc-shortcut">{/Mac|iPhone|iPad/.test(navigator.platform) ? '⌘' : t("Ctrl")} {t(" K")}</kbd></button>
 
-          <button type="button" onClick={() => setHistoryOpen(true)} className="fc-chat-text-button fc-chat-history-button"><Search size={15} />{t("Search all history")}</button>
+          <button type="button" onClick={() => { setHistoryInitialQuery(''); setHistoryOpen(true); }} className="fc-chat-text-button fc-chat-history-button"><Search size={15} />{t("Search all history")}</button>
           {!embeddedChannelId && <button type="button" onClick={() => { setMyDayOpen(true); setSidebarOpen(false); }} className="fc-chat-text-button fc-chat-history-button"><ClipboardCheck size={15} />{t('My day')}</button>}
           <button type="button" onClick={openDirectMessages} className="fc-chat-text-button fc-chat-history-button"><MessageCircle size={15} />{t("Direct messages")}</button>
           <button type="button" onClick={() => { setIntegrationEntry(null); setIntegrationsOpen(true); }} className="fc-chat-text-button fc-chat-history-button" aria-label={t("Integrations")}><Plug size={15} />{t("Integrations")}</button>
@@ -1658,7 +1810,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
             <button type="button" onClick={() => { closeMobileTools(); setSidebarOpen(true); }} aria-label={t("Toggle channels")} aria-describedby={activeChannel ? "chat-channel-name" : undefined} title={activeChannel ? activeChannel.name || t("Unnamed Channel") : undefined} aria-haspopup="dialog" aria-controls="chat-channel-drawer" aria-expanded={sidebarOpen} className="fc-chat-topbar-channel fc-chat-sidebar-toggle">{activeChannel ? <>{['direct', 'group_direct'].includes(activeChannel.type) ? <MessageCircle size={17} aria-hidden="true" /> : <Hash size={17} aria-hidden="true" />}<strong id="chat-channel-name">{activeChannel.name || t("Unnamed Channel")}</strong></> : <><Menu size={18} /><strong>{t("Channels")}</strong></>}<ChevronDown size={14} aria-hidden="true" /></button>
           </div>
           <div className="fc-chat-topbar-actions">
-            <button type="button" className="fc-chat-topbar-action fc-chat-search-action" aria-label={t("Search all history")} onClick={() => setHistoryOpen(true)}><Search size={19} /></button>
+            <button type="button" className="fc-chat-topbar-action fc-chat-search-action" aria-label={t("Search all history")} onClick={() => { setHistoryInitialQuery(''); setHistoryOpen(true); }}><Search size={19} /></button>
             {activeChannel && <button type="button" aria-label={t("Work in this conversation")} data-conversation-work-return className="fc-chat-topbar-action fc-chat-work-action" onClick={openWorkHub}><Layers size={17} /><span>{t("Shared work")}</span></button>}
             <div ref={mobileToolsRef} className="fc-chat-mobile-tools" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) closeMobileTools(); }} onKeyDown={event => {
               if (event.key === 'Escape' && mobileToolsOpen) { event.preventDefault(); event.stopPropagation(); closeMobileTools(true); }
@@ -1735,31 +1887,60 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
             {messageError && <div role="alert" className="fc-alert">{messageError}{encryptionLocked ? <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && openSecureSettings(activeChannel.id)}>{t("Unlock encrypted messaging")}</button> : <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && void loadMessages(activeChannel.id)}>{t("Retry messages")}</button>}</div>}
             {messagesLoading && messages.length === 0 && <div className="fc-chat-history-loading" role="status"><span className="fc-chat-loader" /><span>{t("Loading your conversation…")}</span></div>}
             {hasOlder && <button type="button" className="fc-button fc-chat-load-older" disabled={loadingOlder} onClick={() => void loadOlderMessages()}>{loadingOlder ? t("Loading older messages…") : t("Load older messages")}</button>}
-            {activeChannel ? messages.length > 0 || workHubOpen || collaborationTab ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
+            {activeChannel ? messages.length > 0 || workHubOpen || collaborationTab || groupsOpen ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
               {messages.map((msg, index) => (
                 <Fragment key={msg.id}>
                   {(index === 0 || dateKey(messages[index - 1].created_at) !== dateKey(msg.created_at)) && <div className="fc-chat-date"><span>{dateLabel(msg.created_at)}</span></div>}
                   <article id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${msg.id === leadMessageId ? 'is-lead' : ''} ${messageActionsOpen === msg.id ? 'has-open-actions' : ''} ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
                     <div className="fc-chat-message-avatar"><div className={`fc-chat-avatar ${avatarTone(msg.author_id)} ${msg.author_id === currentUserId ? 'fc-chat-avatar-self' : ''}`}><Avatar userId={msg.author_id} name={memberNames[msg.author_id] || authorName(msg.author_id)} workspaceId={workspace?.id} /></div><div className="fc-chat-presence"><PresenceIndicator userId={msg.author_id} size="sm" /></div></div>
                     <div className="fc-chat-message-body">
-                      {editingMessage === msg.id ? <div className="fc-chat-edit"><textarea value={editContent} onChange={(e) => setEditContent(e.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') { event.stopPropagation(); setEditingMessage(null); } else if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void handleEditMessage(msg.id); } }} aria-label={t("Edit message")} maxLength={10000} rows={2} className="fc-input" autoFocus /><button type="button" onClick={() => handleEditMessage(msg.id)} className="fc-icon-button" aria-label={t("Save edit")}><Check size={17} /></button><button type="button" onClick={() => setEditingMessage(null)} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button></div> : <>
+                      {editingMessage === msg.id ? <div className="fc-chat-edit">
+                        {editReferencePicker.open && <MentionReferences id={editReferencePicker.id} candidates={editReferencePicker.candidates} activeIndex={editReferencePicker.activeIndex}
+                          onActiveIndex={editReferencePicker.setActiveIndex} onSelect={editReferencePicker.choose} onClose={() => { editReferencePicker.close(); editInputRef.current?.focus({ preventScroll: true }); }}
+                          query={editReferencePicker.query?.query || ''} loading={editReferencePicker.loading} error={editReferencePicker.error} />}
+                        <textarea ref={editInputRef} value={editContent}
+                          onBeforeInput={event => { editBeforeEdit.current = { start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd }; }}
+                          onChange={event => {
+                            const content = event.target.value;
+                            const references = reconcileReferences(editContent, content, editReferences, editBeforeEdit.current);
+                            editBeforeEdit.current = undefined; setEditContent(content); setEditReferences(references);
+                            if (!composingRef.current) editReferencePicker.update(content, event.target.selectionStart, references, true);
+                          }}
+                          onSelect={event => { if (!composingRef.current) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
+                          onClick={event => { if (!composingRef.current) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
+                          onKeyUp={event => { if (!composingRef.current && ['ArrowLeft', 'ArrowRight'].includes(event.key)) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
+                          onCompositionStart={() => { composingRef.current = true; editReferencePicker.close(); }}
+                          onCompositionEnd={event => { composingRef.current = false; editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart, editLive.current.references, true); }}
+                          onKeyDown={event => {
+                            if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
+                            if (editReferencePicker.handleKeyDown(event)) return;
+                            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); editReferencePicker.close(); setEditingMessage(null); }
+                            else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleEditMessage(msg.id); }
+                          }}
+                          role={editReferencePicker.open ? 'combobox' : undefined} aria-autocomplete={editReferencePicker.open ? 'list' : undefined}
+                          aria-expanded={editReferencePicker.open ? true : undefined} aria-controls={editReferencePicker.open ? editReferencePicker.id : undefined}
+                          aria-activedescendant={editReferencePicker.open && editReferencePicker.candidates[editReferencePicker.activeIndex] ? referenceOptionId(editReferencePicker.id, editReferencePicker.candidates[editReferencePicker.activeIndex]) : undefined}
+                          aria-label={t("Edit message")} maxLength={10000} rows={2} className="fc-input" autoFocus />
+                        <button type="button" disabled={!editContent.trim() || editReferencePicker.open} onClick={() => handleEditMessage(msg.id)} className="fc-icon-button" aria-label={t("Save edit")}><Check size={17} /></button>
+                        <button type="button" onClick={() => { editReferencePicker.close(); setEditingMessage(null); }} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button>
+                      </div> : <>
                         <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}{!msg.deleted && !msg.locked && <button type="button" className="fc-chat-message-menu" aria-label={t("More message actions")} aria-expanded={messageActionsOpen === msg.id} aria-controls={`message-actions-${msg.id}`} onClick={() => setMessageActionsOpen(current => current === msg.id ? null : msg.id)}><MoreHorizontal size={17} /></button>}</div>
-                        <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}>{msg.content}</p>
+                        <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}><ReferencedMessage content={msg.content} references={msg.deleted || msg.locked ? [] : msg.references} channelId={msg.channel_id} workspaceId={workspace?.id} secure={!!activeChannel.secure} onOpen={openMessageReference} /></p>
                         {renderMessageAssist(msg)}
                         {!msg.deleted && !msg.locked && <ConversationWorkReferences rows={workReferences.byMessage.get(msg.id) || []} onOpen={openReferencedWork} />}
                         {!msg.deleted && !msg.locked && msg.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${activeChannel.id}:${msg.id}`} channelId={activeChannel.id} messageId={msg.id} secure={!!activeChannel.secure} />}
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { setEditingMessage(msg.id); setEditContent(msg.content); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { editReferencePicker.close(); editBeforeEdit.current = undefined; setEditingMessage(msg.id); setEditContent(msg.content); setEditReferences(normalizeMessageReferences(msg.content, msg.references)); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
                   </article>
                 </Fragment>
               ))}
-            </div><div className="fc-chat-room-work" hidden={!workHubOpen && !collaborationTab && (focusMode || materialChannelId !== activeChannel.id)}>
-              {conversationWork || (conversationNotebook && <div className="fc-conversation-work"><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div><button type="button" aria-label={t('Close this work')} onClick={()=>{if(mayLeaveConversationWork())closeWorkHub();}}><X size={20}/></button></header><div className="fc-conversation-work-body">{conversationNotebook}</div></div>)}
-              <div className="fc-chat-room-material" hidden={workHubOpen || !!collaborationTab}>
+            </div><div className="fc-chat-room-work" hidden={!workHubOpen && !collaborationTab && !groupsOpen && (focusMode || materialChannelId !== activeChannel.id)}>
+              {conversationGroups || conversationWork || (conversationNotebook && <div className="fc-conversation-work"><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div><button type="button" aria-label={t('Close this work')} onClick={()=>{if(mayLeaveConversationWork())closeWorkHub();}}><X size={20}/></button></header><div className="fc-conversation-work-body">{conversationNotebook}</div></div>)}
+              <div className="fc-chat-room-material" hidden={workHubOpen || !!collaborationTab || groupsOpen}>
                 <ChatSharedMaterial key={`${workspace?.id}:${activeChannel.id}:${currentUserId}`} channel={activeChannel} workspaceId={workspace?.id} refreshKey={materialRefresh} onAvailabilityChange={available => { if (activeChannelRef.current !== activeChannel.id) return; setMaterialChannelId(available ? activeChannel.id : null); }} onOpenFiles={() => { setToolPanel('files'); setThreadMessage(null); }} onOpenDocuments={(documentId, stackId) => openRoomWork('documents', { documentId, stackId })} onOpenTasks={(taskId, projectId) => openRoomWork('tasks', { taskId, projectId })} />
               </div>
             </div></div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p>{!embeddedChannelId && <button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button>}{!embeddedChannelId && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && !channelError && shouldSuggestWorkspaceLaunch(workspace, channels) && <div className="fc-chat-launch-prompt"><button type="button" className="fc-chat-text-button" onClick={() => setLaunchOpen(true)}><Compass size={16} />{t('Set up this workspace')}<ArrowUpRight size={14} /></button><p>{t('Name your workspace, invite a person and begin a real conversation.')}</p></div>}</div>}
@@ -1779,51 +1960,86 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           {actionError && <p role="alert" className="fc-alert">{actionError}</p>}
           {policyNotice && <p role="status" className="fc-alert">{t('Shared content matched an organization policy. Review it before sharing further.')}<button type="button" className="fc-icon-button" aria-label={t('Dismiss policy notice')} onClick={()=>setPolicyNotice(false)}><X size={14}/></button></p>}
           {mobileNotice && <p role="status" className="fc-chat-muted">{mobileNotice}</p>}
-          {mentionOpen && <div className="fc-chat-mention-picker" role="listbox" aria-label={t("Mention a teammate")}>{Object.entries(memberNames).filter(([id,name]) => id !== currentUserId && name.toLocaleLowerCase().includes((/(?:^|\s)@([^@\n]*)$/.exec(newMessage)?.[1] || "").toLocaleLowerCase())).slice(0,8).map(([id,name]) => <button type="button" role="option" aria-selected={selectedMentions.includes(id)} key={id} onClick={() => { const value = newMessage.replace(/(?:^|\s)@[^@\n]*$/, match => (match.startsWith(" ") ? " " : "") + "@" + name + " "); setNewMessage(value); persistDraft(activeChannel.id, value, !!activeChannel.secure); setSelectedMentions(old => [...new Set([...old,id])]); setMentionOpen(false); inputRef.current?.focus(); }}>{name}</button>)}</div>}
           <div ref={slashRootRef} className="fc-chat-composer-row">
-            {slashVisible && <SlashCommands id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={setSlashIndex}
-              onSelect={selectSlashCommand} onClose={closeSlashCommands} query={slashPalette.query}
-              onQueryChange={slashPalette.mode === 'browse' ? query => { setSlashPalette(previous => previous ? { ...previous, query } : null); setSlashIndex(0); } : undefined}
+            {mainReferencePicker.open && <MentionReferences id={mainReferencePicker.id} candidates={mainReferencePicker.candidates} activeIndex={mainReferencePicker.activeIndex} onActiveIndex={mainReferencePicker.setActiveIndex} onSelect={mainReferencePicker.choose} onClose={() => { mainReferencePicker.close(); inputRef.current?.focus({ preventScroll: true }); }} query={mainReferencePicker.query?.query || ''} loading={mainReferencePicker.loading} error={mainReferencePicker.error} onManageGroups={() => openGroups()} />}
+            {slashVisible && !mainReferencePicker.open && <SlashCommands id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={index => setSlashSelected(slashCommands[index]?.id || null)}
+              onSelect={selectSlashCommand} onClose={closeSlashCommands} query={parsedCommand?.query ?? slashPalette.query}
+              usage={parsedCommand?.usage} argumentPreview={parsedCommand?.arguments} error={commandError || parsedCommand?.error}
+              onQueryChange={slashPalette.mode === 'browse' ? query => { setSlashPalette(previous => previous ? { ...previous, query } : null); setSlashSelected(null); } : undefined}
               onKeyDown={handleSlashKeyDown} />}
             <form onSubmit={handleSendMessage} className="fc-chat-composer">
               <button type="button" className="fc-icon-button fc-chat-attach" aria-label={t('Add or open shared files')} title={t('Channel files')} onClick={() => { setThreadMessage(null); setToolPanel('files'); }}><Paperclip size={21} /></button>
-              <textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown} onCompositionStart={() => { composingRef.current = true; setSlashPalette(null); }} onCompositionEnd={() => { composingRef.current = false; }} rows={1} data-modal-return-focus maxLength={10000}
+              <textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown}
+                onBeforeInput={event => { mainBeforeEdit.current = { start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd }; }}
+                onSelect={event => { if (!composingRef.current) mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
+                onClick={event => { if (!composingRef.current) mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
+                onKeyUp={event => { if (['ArrowLeft', 'ArrowRight'].includes(event.key) && !composingRef.current) mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }} onCompositionStart={() => { composingRef.current = true; setSlashPalette(null); mainReferencePicker.close(); }} onCompositionEnd={event => { composingRef.current = false; mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart, draftReferenceCache.current[activeChannel.id] || [], true); updateCommandPalette(event.currentTarget.value); }} rows={1} data-modal-return-focus maxLength={10000}
                 aria-label={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} aria-describedby="message-composer-hint"
-                role={slashVisible && slashPalette.mode === 'typed' ? 'combobox' : undefined} aria-autocomplete={slashVisible && slashPalette.mode === 'typed' ? 'list' : undefined}
-                aria-expanded={slashVisible && slashPalette.mode === 'typed' ? true : undefined} aria-controls={slashVisible && slashPalette.mode === 'typed' ? slashId : undefined}
-                aria-activedescendant={slashVisible && slashPalette.mode === 'typed' && slashCommands[slashActiveIndex] ? `${slashId}-${slashCommands[slashActiveIndex].id}` : undefined}
+                role={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? 'combobox' : undefined} aria-autocomplete={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? 'list' : undefined}
+                aria-expanded={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? true : undefined} aria-controls={mainReferencePicker.open ? mainReferencePicker.id : slashVisible && slashPalette.mode === 'typed' ? slashId : undefined}
+                aria-activedescendant={mainReferencePicker.open ? mainReferencePicker.candidates[mainReferencePicker.activeIndex] ? referenceOptionId(mainReferencePicker.id, mainReferencePicker.candidates[mainReferencePicker.activeIndex]) : undefined : slashVisible && slashPalette.mode === 'typed' && slashCommands[slashActiveIndex] ? `${slashId}-${slashCommands[slashActiveIndex].id}` : undefined}
                 placeholder={t('What are you thinking?')} />
-              <button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending || slashVisible && slashPalette.mode === 'typed'} className="fc-button fc-button-primary" title={sending ? t('Sending…') : t('Send message')}><span>{sending ? t("Sending…") : t("Send")}</span><Send size={19} /></button>
+              <button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending || mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed'} className="fc-button fc-button-primary" title={sending ? t('Sending…') : t('Send message')}><span>{sending ? t("Sending…") : t("Send")}</span><Send size={19} /></button>
             </form>
             <button type="button" className="fc-chat-focus-toggle" aria-label={t('Focus mode')} aria-pressed={focusMode} title={t('A quieter reading layout. All messages stay visible.')} onClick={() => setFocusMode(value => !value)}><ScanLine size={17} /><span>{t('Focus')}</span></button>
           </div>
           <div className="fc-chat-composer-footer">
             <button ref={slashLauncherRef} type="button" className="fc-chat-text-button fc-chat-slash-trigger" aria-label={t('Show all features')} aria-haspopup="listbox" aria-expanded={slashVisible} aria-controls={slashVisible ? slashId : undefined} disabled={sending} title={t('Type / to find a feature')} onClick={browseSlashCommands}><span aria-hidden="true">/</span><span>{t('All features')}</span></button>
-            <button type="button" className="fc-chat-text-button" disabled={sending} onClick={() => setProductivity({draft:newMessage,mentions:selectedMentions})}><Clock size={14}/>{t("Schedule & reminders")}</button>
+            <button type="button" className="fc-chat-text-button" aria-label={t('Mention or reference')} title={t('Mention or reference')} disabled={sending} onClick={beginReference}>@</button>
+            <button type="button" className="fc-chat-text-button" disabled={sending} onClick={() => setProductivity({draft:newMessage,mentions:selectedMentions,references:draftReferences})}><Clock size={14}/>{t("Schedule & reminders")}</button>
             <div id="message-composer-hint" className="fc-chat-composer-hint"><span>{t("Enter to send ")}<span aria-hidden="true">·</span> {t(" Shift + Enter for a new line")}</span><span>{newMessage.length >= 9000 ? `${newMessage.length.toLocaleString(currentLocale())} / 10,000` : ''}</span></div>
           </div>
           {renderDraftAssist('main')}
         </div>}
       </main>
 
-      {activeChannel && toolPanel && <ChannelTools key={`${activeChannel.id}:${toolPanel}`} channel={activeChannel} tab={toolPanel} onClose={() => { setToolPanel(null); setMaterialRefresh(value => value + 1); }} onManage={() => { setToolPanel(null); setChannelDetailsOpen(true); }} onRoleChange={(role) => { if (activeChannelRef.current === activeChannel.id) setActiveChannel((current) => current ? { ...current, role } : current); }} onLeave={() => { setChannels((records) => records.filter((record) => record.id !== activeChannel.id)); if (activeChannelRef.current === activeChannel.id) { setActiveChannel(null); setToolPanel(null); } void loadChannels(); }} />}
+      {activeChannel && toolPanel && <ChannelTools key={`${activeChannel.id}:${toolPanel}`} channel={activeChannel} tab={toolPanel} focusMemberId={toolPanel === 'members' ? referenceMemberId : undefined} onClose={() => { setToolPanel(null); setMaterialRefresh(value => value + 1); }} onManage={() => { setToolPanel(null); setChannelDetailsOpen(true); }} onRoleChange={(role) => { if (activeChannelRef.current === activeChannel.id) setActiveChannel((current) => current ? { ...current, role } : current); }} onLeave={() => { setChannels((records) => records.filter((record) => record.id !== activeChannel.id)); if (activeChannelRef.current === activeChannel.id) { setActiveChannel(null); setToolPanel(null); } void loadChannels(); }} />}
       {activeChannel && channelDetailsOpen && <ChannelMetadataPanel key={`${workspace?.id}:${activeChannel.id}:${!!activeChannel.secure}:${api.getAccessToken()}`} channel={activeChannel} onClose={() => setChannelDetailsOpen(false)} onSaved={channelMetadataSaved} />}
 
+      {referencedFile && referencedFile.token === api.getAccessToken() && referencedFile.workspaceId === workspace?.id && referencedFile.file.channel_id === activeChannel?.id && <FilePreview file={referencedFile.file} onClose={() => setReferencedFile(null)} />}
       <MeetingDock />
       {presenceOpen && <div className="fc-overlay"><section ref={presenceDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('Set your status')} className="fc-dialog"><button type="button" className="fc-icon-button" data-autofocus aria-label={t('Close status settings')} onClick={() => setPresenceOpen(false)}><X size={20} /></button><PresenceStatusSelector onClose={() => setPresenceOpen(false)} /></section></div>}
-      {activeChannel && productivity && <ChatProductivityPanel key={activeChannel.id} channel={activeChannel} message={productivity.message} draft={productivity.draft} mentions={productivity.mentions} onClose={()=>setProductivity(null)} onScheduled={()=>{if(draftsRef.current[activeChannel.id]===productivity.draft){setNewMessage('');persistDraft(activeChannel.id,'',!!activeChannel.secure);setSelectedMentions([]);}setProductivity(null);}}/>}
+      {activeChannel && productivity && <ChatProductivityPanel key={activeChannel.id} channel={activeChannel} message={productivity.message} draft={productivity.draft} mentions={productivity.mentions} references={productivity.references} onClose={()=>setProductivity(null)} onScheduled={()=>{if(draftsRef.current[activeChannel.id]===productivity.draft && JSON.stringify(draftReferenceCache.current[activeChannel.id] || [])===JSON.stringify(productivity.references || [])){setNewMessage('');persistDraft(activeChannel.id,'',!!activeChannel.secure,[]);}setProductivity(null);}}/>}
 
 
 
       {threadMessage && <aside ref={threadDialogRef} tabIndex={-1} className="fc-chat-thread" role="dialog" aria-modal="true" aria-label={t("Thread")}>
         <header className="fc-chat-thread-header"><div><span className="fc-kicker">{t("Keep the conversation close")}</span><h2>{t("Thread")}</h2><ThreadWatchButton channelId={threadMessage.channel_id} messageId={threadMessage.id} /></div><button type="button" onClick={() => setThreadMessage(null)} className="fc-icon-button" aria-label={t("Close thread")} data-autofocus><X size={19} /></button></header>
-        <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p>{threadMessage.content}</p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
+        <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
         {!threadMessage.deleted && !threadMessage.locked && threadMessage.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${threadMessage.channel_id}:${threadMessage.id}`} channelId={threadMessage.channel_id} messageId={threadMessage.id} secure={!!activeChannel?.secure} />}
-        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p>{reply.content}</p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{renderDraftAssist('thread')}</div>
-        <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); void handleThreadReply(); }}><input ref={threadInputRef} type="text" value={threadReplyContent} onChange={(event) => { assistLive.current.threadDraft = event.target.value; setThreadReplyContent(event.target.value); }} maxLength={10000} aria-label={t("Reply in thread")} placeholder={t("Reply...")} className="fc-input" /><button type="submit" disabled={!threadReplyContent.trim()} aria-label={t("Send reply")} className="fc-icon-button fc-button-primary"><Send size={17} /></button></form>
+        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{renderDraftAssist('thread')}</div>
+        <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); if (!composingRef.current && !threadReferencePicker.open) void handleThreadReply(); }}>
+          {threadReferencePicker.open && <MentionReferences id={threadReferencePicker.id} candidates={threadReferencePicker.candidates} activeIndex={threadReferencePicker.activeIndex}
+            onActiveIndex={threadReferencePicker.setActiveIndex} onSelect={threadReferencePicker.choose} onClose={() => { threadReferencePicker.close(); threadInputRef.current?.focus({ preventScroll: true }); }}
+            query={threadReferencePicker.query?.query || ''} loading={threadReferencePicker.loading} error={threadReferencePicker.error} />}
+          <input ref={threadInputRef} type="text" value={threadReplyContent}
+            onBeforeInput={event => { threadBeforeEdit.current = { start: event.currentTarget.selectionStart ?? 0, end: event.currentTarget.selectionEnd ?? 0 }; }}
+            onChange={event => {
+              const text = event.currentTarget.value;
+              const references = reconcileReferences(threadReplyContent, text, threadReferences, threadBeforeEdit.current);
+              threadBeforeEdit.current = undefined;
+              updateThreadDraft(text, references);
+              if (!composingRef.current) threadReferencePicker.update(text, event.currentTarget.selectionStart ?? text.length, references, true);
+            }}
+            onSelect={event => { if (!composingRef.current) threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences); }}
+            onClick={event => { if (!composingRef.current) threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences); }}
+            onKeyUp={event => { if (!event.nativeEvent.isComposing && !composingRef.current && ['ArrowLeft', 'ArrowRight'].includes(event.key)) threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences); }}
+            onKeyDown={event => {
+              if (event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
+              if (threadReferencePicker.handleKeyDown(event)) return;
+              if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleThreadReply(); }
+            }}
+            onCompositionStart={() => { composingRef.current = true; threadReferencePicker.close(); }}
+            onCompositionEnd={event => { composingRef.current = false; threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences, true); }}
+            maxLength={10000} aria-label={t("Reply in thread")} placeholder={t("Reply...")} className="fc-input"
+            role={threadReferencePicker.open ? 'combobox' : undefined} aria-autocomplete={threadReferencePicker.open ? 'list' : undefined}
+            aria-expanded={threadReferencePicker.open ? true : undefined} aria-controls={threadReferencePicker.open ? threadReferencePicker.id : undefined}
+            aria-activedescendant={threadReferencePicker.open && threadReferencePicker.candidates[threadReferencePicker.activeIndex] ? referenceOptionId(threadReferencePicker.id, threadReferencePicker.candidates[threadReferencePicker.activeIndex]) : undefined} />
+          <button type="submit" disabled={!threadReplyContent.trim() || threadReferencePicker.open} aria-label={t("Send reply")} className="fc-icon-button fc-button-primary"><Send size={17} /></button>
+        </form>
       </aside>}
 
-      {historyOpen && <HistorySearchPanel channels={channels} onClose={() => setHistoryOpen(false)} onMessage={openHistoryMessage} />}
+      {historyOpen && <HistorySearchPanel initialQuery={historyInitialQuery} channels={channels} onClose={() => setHistoryOpen(false)} onMessage={openHistoryMessage} />}
       {myDayOpen && !embeddedChannelId && <MyDay onClose={() => setMyDayOpen(false)} />}
       {launchOpen && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <WorkspaceLaunchPanel key={`${workspace.id}:${api.getCurrentUserId()}`} workspace={workspace} channels={channels} onClose={() => setLaunchOpen(false)} onChanged={() => refreshWorkspaces(workspace.id)} onChannelsChanged={async created => { if (created && created.workspace_id === workspaceRef.current) setChannels(records => records.some(row => row.id === created.id) ? records : [...records, created]); await loadChannels(); }} onOpenAppearance={openAppearance} onOpenConnections={channelId => { setIntegrationEntry(previous => ({ tab: 'connections', channelId, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }} onOpenChannelMembers={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel('members'); setLaunchOpen(false); } }} onSelectChannel={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel(null); setLaunchComposerTarget({ channelId: channel.id, workspaceId: channel.workspace_id, token: api.getAccessToken() }); setLaunchOpen(false); } }} />}
       {feedbackOpen && workspace && <WorkspaceFeedbackDialog key={`${workspace.id}:${api.getCurrentUserId()}`} workspaceId={workspace.id} onClose={() => setFeedbackOpen(false)} onOpenLaunch={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => setLaunchOpen(true) : undefined} onOpenConnections={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => { setIntegrationEntry(previous => ({ tab: 'connections', revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); } : undefined} />}

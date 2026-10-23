@@ -29,6 +29,7 @@ from ..services.crypto import encrypt_message
 from ..services.direct_messages import restore_direct_inbox
 from ..services.workspaces import require_direct_message_writable
 from ..services.request_guard import recheck_actor
+from ..services.message_references import ReferenceInput, validate_references, store_references
 
 
 def private(response: Response):
@@ -55,6 +56,7 @@ class OfflineMessageInput(BaseModel):
     content: MessageText
     mentions: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=50)
     parent_id: str | None = Field(default=None, min_length=1, max_length=128)
+    references: list[ReferenceInput] = Field(default_factory=list, max_length=50)
 
 
 def details(row, token_hash):
@@ -152,8 +154,12 @@ def unsubscribe(subscription_id: str, user=Depends(get_current_user), session=De
 
 
 def offline_digest(user_id, channel_id, data):
-    body = json.dumps({"user": user_id, "channel": channel_id, "content": data.content,
-                       "mentions": data.mentions, "parent": data.parent_id}, sort_keys=True, separators=(",", ":")).encode()
+    payload = {"user": user_id, "channel": channel_id, "content": data.content,
+               "mentions": data.mentions, "parent": data.parent_id}
+    # Keep existing receipts valid for old queued messages without references.
+    if data.references:
+        payload['references'] = [reference.model_dump() for reference in data.references]
+    body = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     return hmac.new(_secret_key(), body, hashlib.sha256).hexdigest()
 
 
@@ -181,7 +187,7 @@ async def offline_message(channel_id: str, data: OfflineMessageInput, user=Depen
         if not message:
             raise HTTPException(409, "The queued message receipt is unavailable")
         return {**message_data(message), "client_id": data.client_id, "replayed": True}
-    mention_ids = validate_mentions(session, channel_id, data.mentions)
+    references, mention_ids = validate_references(session, channel_id, current.id, data.content, data.references, data.mentions)
     parent = session.get(Message, data.parent_id) if data.parent_id else None
     if data.parent_id and (not parent or parent.deleted or parent.channel_id != channel_id):
         raise HTTPException(404, "Parent message not found in channel")
@@ -191,6 +197,7 @@ async def offline_message(channel_id: str, data: OfflineMessageInput, user=Depen
         content=encrypt_message(data.content, channel_id), encrypted=True,
         parent_id=data.parent_id, mentions=json.dumps(mention_ids))
     session.add(message)
+    store_references(session, message, references)
     if parent:
         parent.thread_count = (parent.thread_count or 0) + 1
         subscribe_participant(session, current.id, parent)

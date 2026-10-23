@@ -6,6 +6,7 @@ import { api, type Channel, type ChannelMember, type Message } from '../lib/api'
 import { collaborationApi, type ChannelNotificationSettings, type CollaborationTab, type Decision, type DecisionFields, type SavedItem } from '../lib/collaboration-api';
 import { useModalFocus } from '../lib/useModalFocus';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
+import type { ComposerDecisionDraft } from '../lib/composer-commands';
 import { VersionProofs } from './VersionProofs';
 import { chatProductivity } from '../lib/chat-productivity';
 import '../styles/panels.css';
@@ -22,6 +23,7 @@ interface CollaborationPanelProps {
   workspaceId?: string;
   onPendingChange?: (pending: boolean) => void;
   onDecisionSaved?: (decision: Decision) => void;
+  initialDraft?: ComposerDecisionDraft;
 }
 const tabs: Array<{ id: CollaborationTab; label: string; icon: typeof Pin }> = [
   { id: 'pins', label: 'Pinned', icon: Pin }, { id: 'bookmarks', label: 'Saved', icon: Bookmark },
@@ -30,9 +32,12 @@ const tabs: Array<{ id: CollaborationTab; label: string; icon: typeof Pin }> = [
 const describe = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 const dateLabel = (value: string) => new Date(value).toLocaleDateString(currentLocale(), { day: 'numeric', month: 'short', year: 'numeric' });
 const emptyFields = (source?: Message | null): DecisionFields => ({ title: '', content: source?.content || '', status: 'proposed', responsible_user_id: null, decision_date: null, source_message_id: source?.id || null });
+const decisionCommandFields = (draft?: ComposerDecisionDraft): DecisionFields | null => draft && draft.key && typeof draft.title === 'string' && !!draft.title.trim()
+  && draft.title.length <= 200 && typeof draft.content === 'string' && !!draft.content.trim() && draft.content.length <= 20000
+  ? { ...emptyFields(), title: draft.title, content: draft.content, responsible_user_id: draft.responsibleUserId || null } : null;
 const announceSaved = (channelId: string) => window.dispatchEvent(new CustomEvent('freecollab:saved-changed', { detail: { channelId } }));
 
-export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourceMessage, focusDecisionId, presentation = 'full', workspaceId, onPendingChange, onDecisionSaved }: CollaborationPanelProps) {
+export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourceMessage, focusDecisionId, presentation = 'full', workspaceId, onPendingChange, onDecisionSaved, initialDraft }: CollaborationPanelProps) {
   useI18n();
   const flow = presentation === 'flow';
   const [active, setActive] = useState<CollaborationTab>(tab);
@@ -50,6 +55,8 @@ export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourc
   const generation = useRef(0);
   const identity = useRef(api.getAccessToken());
   const focusedDecision = useRef('');
+  const appliedCommandDraft = useRef('');
+  const loadedEditorScope = useRef('');
   const previousFields = editor?.previous ? {
     title: editor.previous.title || '', content: editor.previous.content || '', status: editor.previous.status || 'proposed',
     responsible_user_id: editor.previous.responsible_user_id || null, decision_date: editor.previous.decision_date || null,
@@ -101,7 +108,13 @@ export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourc
   useEffect(() => {
     const request = ++generation.current;
     setItems([]); setRecords([]); setMembers([]); setHistory(null); setError(''); setNotice(''); setBusy('');
-    setEditor(sourceMessage?.channel_id === channel.id && !sourceMessage.deleted && !sourceMessage.locked && active === 'decisions' ? { fields: emptyFields(sourceMessage) } : null);
+    const editorScope = channel.id + ':' + active + ':' + (initialDraft?.key || '');
+    const repeatedScope = loadedEditorScope.current === editorScope; loadedEditorScope.current = editorScope;
+    const commandKey = initialDraft ? channel.id + ':' + initialDraft.key : '';
+    const commandFields = !focusDecisionId && active === 'decisions' && commandKey !== appliedCommandDraft.current ? decisionCommandFields(initialDraft) : null;
+    if (commandFields) appliedCommandDraft.current = commandKey;
+    if (commandFields) setEditor({ fields: commandFields });
+    else if (!repeatedScope) setEditor(sourceMessage?.channel_id === channel.id && !sourceMessage.deleted && !sourceMessage.locked && active === 'decisions' ? { fields: emptyFields(sourceMessage) } : null);
     void load(request);
     const changed = (event: Event) => {
       const changedChannel = (event as CustomEvent<{ channelId: string }>).detail?.channelId;
@@ -109,7 +122,7 @@ export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourc
     };
     window.addEventListener('freecollab:saved-changed', changed);
     return () => { ++generation.current; window.removeEventListener('freecollab:saved-changed', changed); };
-  }, [channel.id, active]);
+  }, [channel.id, active, initialDraft?.key]);
 
   async function load(request = generation.current) {
     setLoading(true); setError('');
@@ -185,7 +198,7 @@ export function CollaborationPanel({ channel, tab, onClose, onOpenMessage, sourc
               <label htmlFor="decision-title">{t("Title")}</label><input id="decision-title" className="fc-input" required maxLength={200} value={editor.fields.title} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, title: event.target.value } })} placeholder={t("What did we agree?")} />
               <label htmlFor="decision-content">{t("Decision and context")}</label><textarea id="decision-content" className="fc-input" required rows={5} maxLength={20000} value={editor.fields.content} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, content: event.target.value } })} placeholder={t("The choice, the reason, and what happens next.")} />
               <div className="fc-decision-fields"><div><label htmlFor="decision-status">{t("Status")}</label><select id="decision-status" className="fc-input" value={editor.fields.status} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, status: event.target.value as DecisionFields['status'] } })}><option value="proposed">{t("Proposed")}</option><option value="accepted">{t("Accepted")}</option><option value="superseded">{t("Superseded")}</option></select></div><div><label htmlFor="decision-date">{t("Decision date")}</label><input id="decision-date" className="fc-input" type="date" value={editor.fields.decision_date || ''} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, decision_date: event.target.value || null } })} /></div></div>
-              <label htmlFor="decision-responsible">{t("Responsible person")}</label><select id="decision-responsible" className="fc-input" value={editor.fields.responsible_user_id || ''} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, responsible_user_id: event.target.value || null } })}><option value="">{t("No one assigned")}</option>{members.map(member => <option key={member.user_id} value={member.user_id}>{member.name}</option>)}</select>
+              <label htmlFor="decision-responsible">{t("Responsible person")}</label><select id="decision-responsible" className="fc-input" value={editor.fields.responsible_user_id || ''} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, responsible_user_id: event.target.value || null } })}><option value="">{t("No one assigned")}</option>{members.map(member => <option key={member.user_id} value={member.user_id}>{member.name}</option>)}{editor.fields.responsible_user_id && !members.some(member => member.user_id === editor.fields.responsible_user_id) && <option value={editor.fields.responsible_user_id}>{t('Unavailable member — choose again')}</option>}</select>
               {editor.fields.source_message_id && <p className="fc-decision-source"><ClipboardCheck size={14} />{t("Linked to the original message.")}</p>}
               <p className="fc-collaboration-caption">{editor.previous ? t("This adds a revision. The earlier record remains available.") : t("Visible to the current members of this conversation.")}</p><button type="submit" className="fc-button fc-button-primary" disabled={!!busy || !editor.fields.title.trim() || !editor.fields.content.trim()}>{busy === 'decision' ? <Loader2 size={15} className="fc-collaboration-spinner" /> : <Check size={15} />}{editor.previous ? t("Save revision") : t("Record decision")}</button>
             </form>}

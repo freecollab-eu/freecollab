@@ -1,5 +1,63 @@
 # FreeCollab validation record
 
+## Command arguments and typed references — 2026-10-23
+
+The conversation composer accepts [command arguments](SLASH_COMMANDS.md) and
+[typed references](MENTIONS_REFERENCES.md). Task, document, decision and search
+commands prefill their actual native interfaces. `@` chooses people, real
+channel notification groups, documents, tasks, files or the current channel in
+messages, thread replies and message edits. Creation and changes still require
+normal explicit saves.
+
+Executed for this increment:
+
+- **543 frontend Node cases passed**, including command parsing, explicit
+  person identity, typed UTF-16 spans, secure resource resolution, rich draft,
+  outbox, edit and encrypted payload checks. TypeScript and application/trusted
+  embed production builds passed.
+- **53 focused backend cases passed** against frozen source, covering current
+  authority, UTF-16 validation, same-channel isolation, actual group membership,
+  native writes/threads/offline idempotency, scheduled delivery, export and
+  erasure. **180 related backend regression cases passed** before the final
+  small reference-label/scheduling cleanup; the 53-case run covers the final
+  backend source. These are targeted runs, not a new complete backend suite.
+- **56 focused transport cases passed**, including exact historical encrypted
+  file lookup, actor changes during routing, reference-preserving edits and
+  queue payloads. Unit fixtures isolate external Matrix and storage boundaries;
+  they do not substitute for a real customer Matrix/device acceptance run.
+- **18 actual browser groups passed** in independent disposable native and
+  example-product installations, with **582 source hashes per installation**
+  matching the final runtime. They exercise actual prefilled command saves,
+  first-project continuation, all six reference types, group CRUD/current
+  recipients, thread replies, edits, exact resource opening, unavailable
+  targets, rich draft reload, real offline delivery, genuine account changes,
+  and saved Swedish command/reference interaction at 320 px. IndexedDB
+  inspection confirms AES-GCM-256 draft ciphertext, a 12-byte IV and a
+  nonextractable key; the same draft then reloads and sends with its bound IDs.
+  All owned fixtures were removed and the owned example visit revoked204.
+- The unchanged **six-group elite**, **15-group conversation** and
+  **seven-group slash-discovery** browser suites also passed against the final
+  runtime, each with 579 bound sources and no mismatch. Their existing IME,
+  reading-position, profile-photo, draft, permission and appearance checks remain.
+- The public component SDK exposes optional reference types and arguments on
+  send/reply/edit while preserving old call signatures. **30 SDK checks passed**,
+  including actual build, consumer declarations, serialized identities and
+  account changes during authorization. No SDK version or publication changed.
+- The self-contained new browser proof is included in CI. README, design,
+  command and reference contracts and feature audit are updated; 203 local
+  documentation links resolved during review.
+- Read-only integration review corrected stale edit acknowledgements, IME
+  selection fences, unauthorized group-draft consumption and genuine encrypted
+  historical-file opening. A recognized command keeps its identity while
+  arguments are entered, including after a mouse selection from `@`.
+  Reference selection binds stable IDs, and group
+  recipients are expanded from current membership at actual delivery.
+
+The existing secure-device/provider acceptance requirements remain. Native
+channels retain server encryption at rest; these references do not turn them
+into E2EE channels or grant resource access. See the reference contract for
+same-channel scope, current limits and on-device encrypted scheduling.
+
 ## Composer feature discovery — 2026-10-23
 
 The shared product composer now opens the [available feature list](SLASH_COMMANDS.md)

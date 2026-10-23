@@ -415,6 +415,10 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "pushdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notificationdelivery", "notification_id", service._ids(notification_rows))
     _delete_rows(session, "notification", "user_id", [actor.id])
+    scheduled = service._table('scheduledmessage')
+    own_scheduled = service._records(session, 'scheduledmessage', scheduled.c.user_id == actor.id) if scheduled is not None else []
+    _delete_rows(session, 'scheduledmessagereference', 'schedule_id', service._ids(own_scheduled))
+    _delete_rows(session, 'mentiongroupmember', 'user_id', [actor.id])
     for name in ("userappearance", "userlanguage", "notificationpreference", "bookmark", "threadsubscription", "encryptedthreadsubscription", "enterprisesearchconnection", "scheduledmessage", "messagereminder", "saveditemcompletion", "organizationmember",
                  "channelnotificationsetting", "notificationdelivery", "directmessagestate", "offlinemessagereceipt"):
         _delete_rows(session, name, "user_id", [actor.id])

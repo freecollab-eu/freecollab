@@ -1,4 +1,5 @@
 // FreeCollab API client. Secure channels use the client-side Matrix adapter.
+import type { MessageReference } from './message-references';
 
 const getSecureMessaging = async () => (await import('./secure-client')).getSecureMessaging();
 
@@ -77,6 +78,7 @@ interface Message {
   parent_id?: string;
   thread_count?: number;
   mentions?: string[];
+  references?: MessageReference[];
   locked?: boolean;
 }
 
@@ -435,12 +437,15 @@ class FreeCollabAPI {
   }
 
   // Messages
-  async sendMessage(channelId: string, content: string, mentions: string[] = []): Promise<Message> {
+  async sendMessage(channelId: string, content: string, mentions: string[] = [], references: MessageReference[] = []): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedMentions = [...mentions], selectedReferences = references.map(reference => ({ ...reference }));
     const secure = await this.secureChannel(channelId);
-    if (secure) return this.rememberMessage(await secure.sendMessage(channelId, content, undefined, mentions));
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) return this.rememberMessage(await secure.sendMessage(channelId, content, undefined, selectedMentions, selectedReferences));
     return this.request<Message>(`/messages/channels/${channelId}`, {
       method: 'POST',
-      body: JSON.stringify({ content, mentions }),
+      body: JSON.stringify({ content, mentions: selectedMentions, references: selectedReferences }),
     });
   }
 
@@ -558,12 +563,15 @@ class FreeCollabAPI {
   }
 
   // Threads
-  async replyToMessage(messageId: string, content: string): Promise<Message> {
+  async replyToMessage(messageId: string, content: string, mentions: string[] = [], references: MessageReference[] = []): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedMentions = [...mentions], selectedReferences = references.map(reference => ({ ...reference }));
     const secure = await this.secureMessage(messageId);
-    if (secure) return this.rememberMessage(await secure.adapter.sendMessage(secure.channelId, content, messageId));
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) return this.rememberMessage(await secure.adapter.sendMessage(secure.channelId, content, messageId, selectedMentions, selectedReferences));
     return this.request<Message>(`/threads/messages/${messageId}/reply`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, mentions: selectedMentions, references: selectedReferences }),
     });
   }
 
@@ -595,12 +603,15 @@ class FreeCollabAPI {
   }
 
   // Edit/Delete Messages
-  async editMessage(messageId: string, content: string): Promise<Message> {
+  async editMessage(messageId: string, content: string, references?: MessageReference[]): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedReferences = references?.map(reference => ({ ...reference }));
     const secure = await this.secureMessage(messageId);
-    if (secure) { await secure.adapter.editMessage(secure.channelId, messageId, content); return { id: messageId, channel_id: secure.channelId, author_id: this.userId!, content, encrypted: true, created_at: new Date().toISOString(), edited_at: new Date().toISOString() }; }
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) { const updated = await secure.adapter.editMessage(secure.channelId, messageId, content, selectedReferences); return { id: messageId, channel_id: secure.channelId, author_id: this.userId!, content, ...updated, encrypted: true, created_at: new Date().toISOString(), edited_at: new Date().toISOString() }; }
     return this.request<Message>(`/messages/${messageId}`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, references: selectedReferences || [], ...(selectedReferences !== undefined ? { mentions: [] } : {}) }),
     });
   }
 

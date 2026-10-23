@@ -15,7 +15,10 @@ export interface ClientConfig extends CollaborationScope {
   fetch?: typeof globalThis.fetch;
 }
 export interface ChannelMetadata { id: string; workspace_id: string | null; secure: boolean; name: string | null }
-export interface CollaborationMessage { id: string; channel_id: string; author_id: string; content: string; created_at: string; deleted?: boolean; parent_id?: string | null; edited_at?: string | null; thread_count?: number }
+export type ReferenceKind = 'person' | 'group' | 'document' | 'task' | 'file' | 'channel';
+/** Explicitly selected identity bound to a UTF-16 range in the current content. */
+export interface MessageReference { kind: ReferenceKind; id: string; start: number; end: number }
+export interface CollaborationMessage { id: string; channel_id: string; author_id: string; content: string; created_at: string; deleted?: boolean; parent_id?: string | null; edited_at?: string | null; thread_count?: number; references?: MessageReference[] }
 export interface CollaborationFile { id: string; channel_id: string; filename: string; content_type: string; size: number; created_at: string; version_number?: number }
 export interface CollaborationPost { id: string; kind: 'post'; channel_id: string; created_by: string; created_at: string; content_mode: 'server'; revision: number; fields: { title: string; body: string; poll: null | unknown } }
 export interface CollaborationNotification { id: string; channel_id: string; type: string; title: string; body: string | null; read: boolean; entity_type: string | null; entity_id: string | null; created_at: string }

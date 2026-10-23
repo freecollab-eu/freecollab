@@ -1,0 +1,56 @@
+.fc-chat-composer-row:has(> .fc-mention-references),
+.fc-chat-edit:has(> .fc-mention-references),
+form:has(> .fc-mention-references) { position: relative; }
+.fc-mention-references .fc-slash-commands-header > div > svg { color: var(--fc-accent); flex-shrink: 0; }
+.fc-reference-candidate { justify-content: flex-start; gap: .8rem; }
+.fc-reference-candidate > svg { flex-shrink: 0; color: var(--fc-muted); margin-top: .1rem; }
+.fc-reference-candidate.is-active > svg { color: var(--fc-accent); }
+.fc-reference-list-status { display: flex; align-items: center; gap: .5rem; margin: 0; padding: .7rem 1rem; color: var(--fc-muted); font-size: .75rem; line-height: 1.6; overflow-wrap: anywhere; }
+.fc-reference-list-error { color: var(--fc-text); }
+.fc-reference-manage-groups { display: inline-flex; align-items: center; gap: .35rem; padding: .35rem 0; min-height: 32px; border: 0; background: transparent; color: var(--fc-accent); font: inherit; cursor: pointer; }
+.fc-reference-manage-groups:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-message-reference { display: inline-flex; align-items: baseline; gap: .2em; max-width: 100%; min-width: 0; padding: .06em .28em; margin: -.06em 0; border: 0; border-radius: calc(var(--fc-radius) * .3); color: var(--fc-accent); background: var(--fc-accent-soft); font: inherit; text-align: start; line-height: inherit; text-decoration: none; vertical-align: baseline; cursor: pointer; }
+.fc-message-reference > svg { flex-shrink: 0; align-self: center; }
+.fc-message-reference > span { min-width: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.fc-message-reference:hover { text-decoration: underline; text-underline-offset: .15em; }
+.fc-message-reference:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-message-reference:disabled { cursor: wait; }
+.fc-message-reference.is-unavailable { display: inline; padding: 0; margin: 0; color: inherit; background: transparent; cursor: default; overflow-wrap: anywhere; }
+.fc-message-reference-notice { display: block; color: var(--fc-muted); font-size: .75rem; line-height: 1.6; margin-top: .4rem; }
+.fc-reference-groups { min-width: 0; padding: 1.4rem; color: var(--fc-text); background: var(--fc-surface); border: 1px solid var(--fc-border); border-radius: var(--fc-radius); }
+.fc-reference-groups > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.fc-reference-groups h2 { font-family: var(--fc-heading-font); font-weight: 450; font-size: 1.75rem; line-height: 1.25; letter-spacing: -.03em; margin: .3rem 0 .8rem; overflow-wrap: anywhere; }
+.fc-reference-groups .fc-icon-button { flex-shrink: 0; }
+.fc-reference-groups-explanation { color: var(--fc-muted); font-size: .8rem; line-height: 1.65; margin: 0 0 1.25rem; max-width: 48rem; }
+.fc-reference-groups-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr)); gap: .5rem; }
+.fc-reference-groups-list > button { display: flex; align-items: center; gap: .65rem; min-width: 0; min-height: 62px; padding: .7rem .8rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .55); color: var(--fc-text); background: transparent; text-align: start; font: inherit; cursor: pointer; }
+.fc-reference-groups-list > button > svg { flex-shrink: 0; color: var(--fc-muted); }
+.fc-reference-groups-list > button > span { display: flex; flex-direction: column; gap: .25rem; min-width: 0; }
+.fc-reference-groups-list strong { font-size: .85rem; font-weight: 550; overflow-wrap: anywhere; }
+.fc-reference-groups-list small { color: var(--fc-muted); font-size: .7rem; line-height: 1.4; }
+.fc-reference-groups-list > button[aria-pressed="true"] { border-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-reference-groups-list > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-reference-group-editor { margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid var(--fc-border); }
+.fc-reference-group-editor > fieldset { display: grid; gap: 1rem; min-width: 0; padding: 0; border: 0; margin: 0; }
+.fc-reference-group-editor label { color: var(--fc-text); font-size: .8rem; line-height: 1.5; }
+.fc-reference-group-editor > fieldset > label { display: grid; gap: .45rem; }
+.fc-reference-group-editor input[type="text"], .fc-reference-group-editor input:not([type]) { width: 100%; min-width: 0; min-height: 44px; padding: .65rem .75rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .45); color: var(--fc-text); background: var(--fc-surface); font: inherit; }
+.fc-reference-group-editor input:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-reference-group-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .3rem .8rem; min-width: 0; padding: .6rem 0 0; border: 0; margin: 0; }
+.fc-reference-group-members > legend { color: var(--fc-muted); font-size: .7rem; padding: 0; }
+.fc-reference-group-members > label { display: flex; align-items: flex-start; gap: .6rem; min-width: 0; min-height: 44px; padding: .6rem 0; cursor: pointer; }
+.fc-reference-group-members input { width: 17px; height: 17px; margin-top: .1rem; accent-color: var(--fc-accent); flex-shrink: 0; }
+.fc-reference-group-members label > span { min-width: 0; overflow-wrap: anywhere; }
+.fc-reference-group-members small { display: block; margin-top: .2rem; color: var(--fc-muted); font-size: .65rem; }
+.fc-reference-group-editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: .6rem; }
+.fc-reference-groups > footer { display: flex; align-items: center; flex-wrap: wrap; gap: .7rem 1.2rem; margin-top: 1.3rem; padding-top: 1rem; border-top: 1px solid var(--fc-border); }
+.fc-reference-group-readonly { margin-top: 1.1rem; color: var(--fc-text); font-size: .85rem; }
+.fc-reference-group-readonly h3 { margin-bottom: .6rem; font-weight: 550; }
+.fc-reference-group-readonly li { padding-block: .25rem; overflow-wrap: anywhere; }
+@media (max-width: 480px) {
+  .fc-reference-groups { padding: 1rem; }
+  .fc-reference-groups h2 { font-size: 1.45rem; }
+  .fc-reference-candidate { gap: .55rem; }
+  .fc-reference-groups-list { grid-template-columns: 1fr; }
+  .fc-reference-group-members { grid-template-columns: 1fr; }
+}

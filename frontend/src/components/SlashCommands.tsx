@@ -12,6 +12,10 @@ export interface SlashCommandsProps {
   onSelect: (command: SlashCommand) => void;
   onClose: () => void;
   query: string;
+  /** Help for the typed command; omitted when browsing all features. */
+  usage?: string;
+  argumentPreview?: string;
+  error?: string;
   /** The explicit launcher searches here without replacing an existing draft. */
   onQueryChange?: (query: string) => void;
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
@@ -24,7 +28,7 @@ const GROUP_LABELS = {
 } as const;
 
 /** A local suggestion list. Focus stays in the composer (or its explicit search). */
-export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSelect, onClose, query, onQueryChange, onKeyDown }: SlashCommandsProps) {
+export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSelect, onClose, query, usage, argumentPreview, error, onQueryChange, onKeyDown }: SlashCommandsProps) {
   useI18n();
   const panelRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -33,6 +37,8 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
   const activeCommand = commands[currentIndex];
   const titleId = id + '-title';
   const helpId = id + '-help';
+  const commandHelpId = id + '-command-help';
+  const hasCommandHelp = Boolean(usage || argumentPreview || error);
 
   useLayoutEffect(() => {
     const panel = panelRef.current;
@@ -78,6 +84,7 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
 
   return <section ref={panelRef} className={`fc-slash-commands${availableHeight !== undefined && availableHeight < 220 ? ' is-compact' : ''}`}
     aria-labelledby={titleId}
+    aria-describedby={hasCommandHelp ? commandHelpId : undefined}
     style={availableHeight === undefined ? undefined : { '--fc-slash-available-height': availableHeight + 'px' } as CSSProperties}
     onKeyDown={event => {
       if (event.key === 'Escape' && !event.nativeEvent.isComposing) {
@@ -88,11 +95,16 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
       <div><span className="fc-slash-commands-mark" aria-hidden="true">/</span><h2 id={titleId}>{t('Everything you can do here')}</h2></div>
       <button type="button" aria-label={t('Close feature list')} onClick={onClose}><X size={17} aria-hidden="true" /></button>
     </header>
+    {hasCommandHelp && <div id={commandHelpId} className="fc-slash-commands-argument-help">
+      {usage && <p className="fc-slash-commands-usage"><span>{t('Command format')}</span><code>{usage}</code></p>}
+      {argumentPreview && <p className="fc-slash-commands-preview"><span>{t('Draft preview')}</span><span>{argumentPreview}</span></p>}
+      {error && <p className="fc-slash-commands-error" role="status" aria-live="polite" aria-atomic="true">{error}</p>}
+    </div>}
     {onQueryChange && <div className="fc-slash-commands-search">
       <Search size={16} aria-hidden="true" />
       <input autoFocus type="text" role="combobox" autoComplete="off" spellCheck={false} maxLength={128}
         aria-label={t('Search features')} placeholder={t('Search features')} value={query}
-        aria-autocomplete="list" aria-expanded="true" aria-controls={id} aria-describedby={helpId}
+        aria-autocomplete="list" aria-expanded="true" aria-controls={id} aria-describedby={hasCommandHelp ? `${commandHelpId} ${helpId}` : helpId}
         aria-activedescendant={activeCommand ? id + '-' + activeCommand.id : undefined}
         onChange={event => onQueryChange(event.target.value)} onKeyDown={onKeyDown} />
     </div>}

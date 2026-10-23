@@ -7,6 +7,10 @@ const transactionRetry = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/secure/transaction-retry.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: transactionRetry });
 const channelMetadata = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/channel-metadata.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: channelMetadata });
+const messageReferences = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/message-references.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: messageReferences });
+const messageContent = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/secure/message-content.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: messageContent, require: name => { assert.equal(name, '../message-references'); return messageReferences; } });
 
 function fixture({ joined = false, allowed = true, status = 'active', federated = false, unexpected = false } = {}) {
   const calls = [], callbacks = new Map();
@@ -39,6 +43,7 @@ function fixture({ joined = false, allowed = true, status = 'active', federated 
     '../api': { APIError: class extends Error {} },
     './transaction-retry': transactionRetry,
     '../channel-metadata': channelMetadata,
+    './message-content': messageContent,
   };
   vm.runInNewContext(compiled, { exports, URL, Headers, Uint8Array, setTimeout, clearTimeout,
     location: { origin: 'https://trusted.example.test' },

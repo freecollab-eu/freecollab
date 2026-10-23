@@ -104,8 +104,14 @@ Use the topbar channel name to open the channel drawer. Open **Quick switcher** 
 Type **`/`** in the message composer, or choose **/ All features**, to search all
 available feature entry points in English or Swedish. Documents, tasks and
 decisions open in the conversation; normal save and consent controls remain.
-The feature button preserves an existing message draft. See the
-[command list and permissions](docs/SLASH_COMMANDS.md).
+The feature button preserves an existing message draft. Commands also accept
+arguments: `/task "Review budget" @Ada` opens a reviewed task draft with the
+chosen person, and `/document "Meeting notes"` prepares a real document.
+Type **`@`** anywhere in a message, reply or edit to choose people, channel
+groups, documents, tasks, files or the current channel. References keep stable
+identities, and groups notify their current members without granting access.
+See the [command list](docs/SLASH_COMMANDS.md) and
+[references and groups](docs/MENTIONS_REFERENCES.md).
 
 In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. When you scroll back, incoming messages preserve your reading position; **Jump to latest** takes you to the new messages and updates the read receipt. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
 

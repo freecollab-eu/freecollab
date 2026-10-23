@@ -17,12 +17,13 @@ interface Props {
   onLeave: () => void;
   onRoleChange: (role: 'admin' | 'member') => void;
   onManage?: () => void;
+  focusMemberId?: string;
 }
 
 const button = 'fc-button fc-panel-button';
 const describe = (error: unknown) => error instanceof Error ? error.message : 'Something went wrong. Please try again.';
 
-export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onManage }: Props) {
+export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onManage, focusMemberId }: Props) {
   useI18n();
   const [members, setMembers] = useState<ChannelMember[]>([]);
   const [files, setFiles] = useState<ManagedFile[]>([]);
@@ -34,6 +35,8 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
   const [busy, setBusy] = useState('');
   const generation = useRef(0);
   const fileRevision = useRef(0);
+  const memberScope = useRef<{ channelId: string; token: string | null; userId: string | null } | null>(null);
+  const focusedMember = useRef('');
   const dialog = useRef<HTMLDivElement>(null);
   useModalFocus(dialog, onClose);
   const currentUser = api.getCurrentUserId();
@@ -44,6 +47,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
 
   useEffect(() => {
     ++generation.current;
+    memberScope.current = null; focusedMember.current = '';
     setInviteLink(''); setNotice(''); setError(''); setMembers([]); setFiles([]); setInvites([]);
     void load();
     const changed = (data: { channel_id: string }) => { if (data.channel_id === channel.id) void load(); };
@@ -51,6 +55,19 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
     if (tab === 'members') socket.on('members_changed', changed);
     return () => { ++generation.current; socket.off('members_changed', changed); };
   }, [channel.id, tab, currentUser]);
+
+  useEffect(() => {
+    const scope = memberScope.current;
+    if (tab !== 'members' || loading || !focusMemberId || !scope || scope.channelId !== channel.id ||
+      scope.token !== api.getAccessToken() || scope.userId !== currentUser || !members.some(member => member.user_id === focusMemberId)) return;
+    const target = JSON.stringify([scope.channelId, scope.token, focusMemberId]);
+    if (focusedMember.current === target) return;
+    const row = [...(dialog.current?.querySelectorAll<HTMLLIElement>('[data-member-id]') || [])]
+      .find(element => element.dataset.memberId === focusMemberId);
+    if (!row) return;
+    focusedMember.current = target;
+    row.scrollIntoView({ block: 'nearest' }); row.focus({ preventScroll: true });
+  }, [channel.id, tab, currentUser, focusMemberId, loading, members]);
 
   async function load() {
     const current = generation.current;
@@ -63,8 +80,10 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
         const data = await listChannelFiles(channel.id);
         if (valid() && revision === fileRevision.current) setFiles(data);
       } else {
+        memberScope.current = null;
         const data = await api.getChannelMembers(channel.id);
         if (!valid()) return;
+        memberScope.current = { channelId: channel.id, token, userId: currentUser };
         setMembers(data);
         const own = data.find((member) => member.user_id === currentUser);
         if (own?.role) onRoleChange(own.role as 'admin' | 'member');
@@ -136,7 +155,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
               {members.map(member => {
                 const lastAdmin = member.role === 'admin' && adminCount <= 1;
                 const self = member.user_id === currentUser;
-                return <li key={member.user_id} className="fc-member-row">
+                return <li key={member.user_id} data-member-id={member.user_id} tabIndex={-1} className="fc-member-row">
                   <div className="fc-member-identity">
                     <span className={`fc-member-avatar ${self ? 'is-self' : ''}`} aria-hidden="true"><Avatar userId={member.user_id} name={member.name} workspaceId={channel.workspace_id} /></span>
                     <div className="fc-member-copy"><p>{member.name}{self ? t(" (you)") : ''}</p><span>{member.role === 'admin' ? <><ShieldCheck size={12} />{t("Channel admin")}</> : t("Member")}</span></div>

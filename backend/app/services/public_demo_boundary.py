@@ -56,6 +56,7 @@ def assert_public_demo_safe_configuration():
 # Explicit native operations. New product routes remain unavailable until their
 # sample scope and side effects have been reviewed. No endpoint is emulated.
 _READ = (
+    r"/mentions/channels/" + _ID + r"/(?:members|suggestions|groups)",
     r"/channels/" + _ID + r"/conversation-work",
     r"/users/" + _ID + r"/avatar",
     r"/auth/me", r"/auth/users/" + _ID + r"/public-key", r"/account/(?:security|sessions)",
@@ -85,6 +86,7 @@ _READ = (
 )
 _WRITE = {
     "POST": (
+        r"/mentions/channels/" + _ID + r"/(?:groups|references/resolve)",
         r"/channels/" + _ID + r"/conversation-work",
         r"/auth/logout", r"/channels", r"/direct-messages", r"/group-conversations",
         r"/messages/channels/" + _ID, r"/threads/messages/" + _ID + r"/reply",
@@ -111,6 +113,7 @@ _WRITE = {
         r"/channels/" + _ID + r"/calendar/" + _ID + r"/(?:attendees|response)",
     ),
     "PATCH": (
+        r"/mentions/channels/" + _ID + r"/groups/" + _ID,
         r"/channels/" + _ID + r"/metadata", r"/workspaces/" + _ID,
         r"/direct-messages/" + _ID, r"/reminders/" + _ID,
         r"/bookmarks/" + _ID + r"/" + _ID + r"/completion",
@@ -118,6 +121,7 @@ _WRITE = {
         r"/channels/" + _ID + r"/shared-document-organization/stacks/" + _ID,
     ),
     "DELETE": (
+        r"/mentions/channels/" + _ID + r"/groups/" + _ID,
         r"/channels/" + _ID + r"/conversation-work/" + _ID,
         r"/demo/session", r"/scheduled-messages/" + _ID,
         r"/messages/" + _ID, r"/files/" + _ID,

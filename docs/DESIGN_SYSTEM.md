@@ -59,6 +59,21 @@ moves to another channel or account. It never publishes a command query or
 starts an external action. Escape preserves literal text; a cancelled work
 navigation preserves both drafts. See [the full command contract](SLASH_COMMANDS.md).
 
+Commands accept titles and context directly: `/task "Review budget" @Ada`
+opens the actual task editor with the selected person's stable ID. Creation
+still requires its normal Save action. The command list keeps usage help and
+argument previews compact beside its results.
+
+`@` opens a caret-aware reference list in messages, thread replies and edits.
+People, channel groups and shared work have distinct icons and stable IDs;
+duplicate names include an account hint. Arrow keys choose, Enter inserts,
+Escape dismisses and Tab continues normal focus traversal. The selected text
+stays readable, while typed spans carry its exact identity through encrypted
+drafts and delivery. Editing a reference's text removes its binding. Clicking
+a saved reference checks current access before opening its exact native
+resource. Group management opens in the conversation with explicit Save and
+unsaved-change protection. See [reference behavior](MENTIONS_REFERENCES.md).
+
 The composer grows for multiline text. **Enter** sends, **Shift+Enter** inserts a line break, and input-method composition prevents Enter from sending prematurely. Message editing also preserves line breaks. In ordinary personal-account sessions, per-channel drafts are serialized into an account-bound AES-GCM browser vault and survive channel changes, failed sends and reloads. The Mobile dialog exposes drafts and the separately opted-in [offline history/file library](MOBILE_OFFLINE.md), including after an offline reload without loaded channels. Chosen history, file downloads and durable attachment queues use the same appearance settings and clearly label local-copy freshness. Reconnection rechecks the current sign-in, membership and encryption mode; native receipts prevent duplicate delivery after a lost response. New typing takes precedence over an asynchronous restored draft. Sign-out purges the local vault and its device keys. The public demo keeps its draft state in the current visit and does not use that persistent browser vault.
 
 Incoming messages follow the latest conversation when the reader is already near the bottom. While reading earlier messages, the view stays in place and shows a new-message count with **Jump to latest**. Those arrivals alone do not advance the latest-message read receipt while the reader remains scrolled back. Reaching the bottom, choosing the jump action or sending your own message returns to the latest conversation. Scroll transitions respect the device's reduced-motion preference.

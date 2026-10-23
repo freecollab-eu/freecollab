@@ -1,4 +1,4 @@
-import { createClient, type TokenContext, type MountedComponent } from '@freecollab/components';
+import { createClient, type TokenContext, type MountedComponent, type ReferenceKind, type MessageReference, type CollaborationMessage } from '@freecollab/components';
 import { mountChat } from '@freecollab/components/chat';
 import { mountFiles } from '@freecollab/components/files';
 import { mountFeed } from '@freecollab/components/feed';
@@ -20,6 +20,21 @@ const client = createClient({
   },
 });
 const views: MountedComponent[] = [mountChat(document.body, client, {locale:'sv'}), mountFiles(document.body, client), mountFeed(document.body, client), mountNotifications(document.body, client)];
+async function messageReferences(): Promise<void> {
+  const kind: ReferenceKind = 'person';
+  const references: readonly MessageReference[] = [{kind, id: 'selected-user', start: 3, end: 7}];
+  const signal = new AbortController().signal;
+  const sent: CollaborationMessage = await client.sendMessage('🚀 @Åsa', signal, references);
+  await client.replyMessage(sent.id, '🚀 @Åsa', signal, sent.references);
+  await client.editMessage(sent.id, '🚀 @Åsa', signal, references);
+  await client.sendMessage('Legacy call', signal);
+  await client.replyMessage(sent.id, 'Legacy call', signal);
+  await client.editMessage(sent.id, 'Legacy call', signal);
+  // @ts-expect-error Display text alone is not a typed reference identity.
+  const invalid: MessageReference = {kind: 'person', start: 0, end: 4};
+  void invalid;
+}
+void messageReferences;
 defineCustomElements();
 const element: CollaborationElement = document.createElement('freecollab-chat'); element.client = client;
 views.push(mountTasks(document.body,client),mountDocuments(document.body,client),mountMeetings(document.body,client),mountCalendar(document.body,client),mountWorkflows(document.body,client),mountDecisions(document.body,client),mountSearch(document.body,client));

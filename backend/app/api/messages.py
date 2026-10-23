@@ -21,6 +21,7 @@ from ..realtime.socket import broadcast_to_channel
 from ..api.mentions import process_message_mentions
 from ..services.chat_notifications import require_native_channel, validate_mentions, message_mentions, record_message_change, subscribe_participant
 from uuid import uuid4
+from ..services.message_references import ReferenceInput, validate_references, store_references, stored_references
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -29,11 +30,13 @@ class SendMessage(BaseModel):
     content: MessageText
     parent_id: Optional[str] = None  # For thread replies
     mentions: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=50)
+    references: list[ReferenceInput] = Field(default_factory=list, max_length=50)
 
 
 class EditMessage(BaseModel):
     content: MessageText
     mentions: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] | None = Field(default=None, max_length=50)
+    references: list[ReferenceInput] = Field(default_factory=list, max_length=50)
 
 
 def message_data(message: Message):
@@ -44,7 +47,8 @@ def message_data(message: Message):
     return {"id": message.id, "channel_id": message.channel_id, "author_id": message.author_id,
             "content": content, "created_at": message.created_at, "edited_at": message.edited_at,
             "encrypted": message.encrypted, "deleted": message.deleted, "parent_id": message.parent_id,
-            "thread_count": message.thread_count or 0, "mentions": message_mentions(message)}
+            "thread_count": message.thread_count or 0, "mentions": message_mentions(message),
+            "references": [] if message.deleted else stored_references(message)}
 
 
 @router.post("/channels/{channel_id}")
@@ -59,7 +63,7 @@ async def send_message(
     require_channel_member(session, channel_id, user.id)
     require_direct_message_writable(session, channel_id, user.id)
     require_native_channel(session, channel_id)
-    mention_ids = validate_mentions(session, channel_id, data.mentions)
+    references, mention_ids = validate_references(session, channel_id, user.id, data.content, data.references, data.mentions)
 
     # A reply must never reference or mutate a message in another channel.
     parent = None
@@ -82,6 +86,7 @@ async def send_message(
         mentions=json.dumps(mention_ids),
     )
     session.add(message)
+    store_references(session, message, references)
 
     # Update thread count if replying
     if parent:
@@ -111,11 +116,13 @@ async def send_message(
         "parent_id": message.parent_id,
         "thread_count": message.thread_count,
         "mentions": mention_ids,
+        "references": references,
     }
     result = {
         **message.model_dump(),
         "content": data.content,
         "mentions": mention_ids,
+        "references": references,
         "policy_warnings": warnings,
     }
     # Notification checks and expired ORM attributes can reopen a read
@@ -218,7 +225,11 @@ async def edit_message(
     if message.deleted:
         raise HTTPException(400, "Cannot edit deleted message")
 
-    mention_ids = validate_mentions(session, message.channel_id, data.mentions) if data.mentions is not None else message_mentions(message)
+    # An unaware editor must not preserve invisible typed recipients after it
+    # removes their spans. Pure legacy mention messages retain their old rule.
+    inherited_mentions = [] if stored_references(message) else message_mentions(message)
+    references, mention_ids = validate_references(session, message.channel_id, user.id, data.content, data.references,
+        data.mentions if data.mentions is not None else inherited_mentions)
     assert_deletion_allowed(session, message.channel_id, author_id=message.author_id)
     warnings = enforce_native_content(session, message.channel_id, user.id, data.content)
 
@@ -228,6 +239,7 @@ async def edit_message(
     message.content = encrypted_content
     message.edited_at = datetime.utcnow()
     message.mentions = json.dumps(mention_ids)
+    store_references(session, message, references)
     record_message_change(session, message, "edited")
     session.commit()
 
@@ -241,6 +253,7 @@ async def edit_message(
         "content": data.content,
         "edited_at": message.edited_at.isoformat(),
         "mentions": mention_ids,
+        "references": references,
     }
     result = {**payload, "policy_warnings": warnings}
     session.commit()
@@ -276,6 +289,7 @@ async def delete_message(
     message.content = "[Message deleted]"
     message.edited_at = datetime.utcnow()
     message.mentions = "[]"
+    store_references(session, message, [])
     record_message_change(session, message, "deleted")
     channel_id = message.channel_id
     payload = {"id": message.id}

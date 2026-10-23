@@ -19,6 +19,7 @@ from ..models.file import File
 from ..models.file_version import FileDocument, FileVersion
 from ..models.integration_content import IntegrationContent, IntegrationContentRevision
 from ..models.message import Message
+from ..models.message_references import MentionGroup, MentionGroupMember
 from ..models.notification import Notification
 from ..models.project_tasks import ProjectBoard, TaskCard
 from ..models.reaction import Reaction
@@ -247,6 +248,11 @@ def seed_demo_workspace(session, *, visit_id: str, user_id: str, workspace_id: s
         channels.append(channel)
     session.flush()
     studio, design, table = channels
+    mention_group = MentionGroup(channel_id=studio.id, name='Design team', name_key='design team', created_by=visitor,
+        created_at=now - timedelta(days=2), updated_at=now - timedelta(days=2))
+    session.add(mention_group); session.flush()
+    for identifier in (maja, noor, elias):
+        session.add(MentionGroupMember(group_id=mention_group.id, user_id=identifier))
     messages = []
     conversation = (
         (maja, "Shall we open up to the courtyard?"),
@@ -298,7 +304,7 @@ def seed_demo_workspace(session, *, visit_id: str, user_id: str, workspace_id: s
     try:
         _seed_files(session, studio.id, visitor, elias, now, storage, file_ids)
         examples = {"message_id": messages[0].id, "own_message_id": messages[2].id, "reply_id": messages[6].id,
-                    "channel_ids": [channel.id for channel in channels]}
+                    "channel_ids": [channel.id for channel in channels], 'mention_group_id': mention_group.id}
         examples.update(_seed_pages(session, studio.id, visitor, maja, messages[0].id, now))
         examples.update(_seed_work(session, studio.id, visitor, maja, noor, messages[4].id, now, file_ids))
         examples["workflow_id"] = _seed_workflow(session, workspace_id, studio.id, visitor, examples["project_id"], now)

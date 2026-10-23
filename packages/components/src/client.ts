@@ -1,5 +1,5 @@
 import { SDKError, type ChannelMetadata, type ClientConfig, type ClientEvents, type CollaborationFile, type CollaborationMessage, type CollaborationNotification, type CollaborationPost, type CollaborationScope, type SessionState, type TokenReason } from './types.js';
-import type { CalendarFields, CollaborationCalendarEvent, CollaborationDecision, CollaborationMeeting, CollaborationProject, CollaborationTask, DecisionFields, FileComment, MessageReaction, ProjectFields, SharedDocument, SharedDocumentPage, SharedDocumentUpdate, TaskFields, WorkflowDefinition, WorkflowRun } from './types.js';
+import type { CalendarFields, CollaborationCalendarEvent, CollaborationDecision, CollaborationMeeting, CollaborationProject, CollaborationTask, DecisionFields, FileComment, MessageReaction, MessageReference, ProjectFields, SharedDocument, SharedDocumentPage, SharedDocumentUpdate, TaskFields, WorkflowDefinition, WorkflowRun } from './types.js';
 
 const id = (value: string) => { if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(value)) throw new SDKError('invalid-scope', 'Workspace and channel identifiers must be explicit identifiers.'); return value; };
 const escaped = encodeURIComponent;
@@ -133,9 +133,9 @@ export class CollaborationClient {
       return rows.slice(0, 50).filter(row => !row.deleted && !row.parent_id).reverse();
     });
   }
-  sendMessage(content: string, signal?: AbortSignal): Promise<CollaborationMessage> {
+  sendMessage(content: string, signal?: AbortSignal, references?: readonly MessageReference[]): Promise<CollaborationMessage> {
     if (!content.trim() || content.length > 20000) return Promise.reject(new SDKError('invalid-content', 'Write a message of at most 20,000 characters.'));
-    return this.request('/messages/channels/' + escaped(this.scopeValue.channelId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) }, signal);
+    return this.request('/messages/channels/' + escaped(this.scopeValue.channelId), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content, ...(references !== undefined ? { references } : {}) }) }, signal);
   }
   async listPosts(signal?: AbortSignal): Promise<CollaborationPost[]> {
     return this.request<{ items: CollaborationPost[] }, CollaborationPost[]>('/channels/' + escaped(this.scopeValue.channelId) + '/activity-feed?limit=50', {}, signal, response => {
@@ -284,8 +284,8 @@ export class CollaborationClient {
       if (page.parent_id !== messageId || page.replies.some(row => row.channel_id !== this.scopeValue.channelId || row.parent_id !== messageId)) throw new SDKError('scope-mismatch', 'The replies belong to a different conversation.'); return page.replies;
     }, guard);
   }
-  replyMessage(messageId: string, content: string, signal?: AbortSignal) { const guard = this.guard('message', messageId); return this.request<CollaborationMessage>('/threads/messages/' + escaped(messageId) + '/reply', this.json('POST', {content}), signal, undefined, guard); }
-  editMessage(messageId: string, content: string, signal?: AbortSignal) { const guard = this.guard('message', messageId); return this.request('/messages/' + escaped(messageId), this.json('PUT', {content}), signal, undefined, guard); }
+  replyMessage(messageId: string, content: string, signal?: AbortSignal, references?: readonly MessageReference[]) { const guard = this.guard('message', messageId); return this.request<CollaborationMessage>('/threads/messages/' + escaped(messageId) + '/reply', this.json('POST', {content, ...(references !== undefined ? {references} : {})}), signal, undefined, guard); }
+  editMessage(messageId: string, content: string, signal?: AbortSignal, references?: readonly MessageReference[]) { const guard = this.guard('message', messageId); return this.request('/messages/' + escaped(messageId), this.json('PUT', {content, ...(references !== undefined ? {references} : {})}), signal, undefined, guard); }
   deleteMessage(messageId: string, signal?: AbortSignal) { const guard = this.guard('message', messageId); return this.request('/messages/' + escaped(messageId), {method: 'DELETE'}, signal, undefined, guard); }
   listReactions(messageId: string, signal?: AbortSignal) { const guard = this.guard('message', messageId); return this.request<MessageReaction[]>('/reactions/messages/' + escaped(messageId), {}, signal, undefined, guard); }
   reactMessage(messageId: string, emoji: string, remove = false, signal?: AbortSignal) { const guard = this.guard('message', messageId); return this.request('/reactions/messages/' + escaped(messageId) + (remove ? '/' + escaped(emoji) : ''), remove ? {method: 'DELETE'} : this.json('POST', {emoji}), signal, undefined, guard); }

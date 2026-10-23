@@ -369,7 +369,7 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
     # A conversation routing reference is not a hold on either resource. Its
     # own age or an authorized source/target purge can remove the reference.
     add("conversationworkreference", [row for row in _channel_records(session, "conversationworkreference", channel_ids) if _old(row, cutoff)])
-    allowed_dependents = {"reaction", "readreceipt", "messagechange", "threadsubscription", "fileversion", "fileuploadreceipt",
+    allowed_dependents = {"reaction", "readreceipt", "messagechange", "messagereference", "scheduledmessagereference", "threadsubscription", "fileversion", "fileuploadreceipt",
         "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
         "shareddocumentcomment", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
         "calendarproviderpublication", "calendarproviderjob", "nativecallsession", "nativecallconsent"}
@@ -532,6 +532,9 @@ EXPORT_FIELDS = {
     "externalmeeting": "id channel_id created_by state revision secure calendar_item_id created_at updated_at",
     "channel": "id name type created_at",
     "message": "id channel_id author_id content encrypted parent_id thread_count mentions edited_at deleted created_at",
+    "messagereference": "message_id start end kind target_id",
+    "mentiongroup": "id channel_id name created_by version created_at updated_at",
+    "mentiongroupmember": "group_id user_id",
     "slackimportmessage": "message_id import_id source_channel source_timestamp",
     "slackimportdetail": "message_id encrypted_details",
     "file": "id channel_id uploader_id filename content_type size created_at",
@@ -596,14 +599,14 @@ def export_data(session, job, request):
     records = {"channel": [{"id": row.id, "name": None if row.id in secure_ids else row.name,
                 "type": row.type, "created_at": row.created_at, "content_mode": "matrix" if row.id in secure_ids else "server"} for row in channels]}
     parents = {}
-    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "shareddocumentstack", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "channelmetadata", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
+    for name in ("message", "mentiongroup", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "shareddocumentstack", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "channelmetadata", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
         rows = _channel_records(session, name, channel_ids)
         if name in {"message", "file", "filedocument", "appcard"}:
             # Matrix messages/media are not represented by native file bytes.
             rows = [row for row in rows if row["channel_id"] not in secure_ids]
         records[name] = rows
         parents[name] = {row["id"]: row["channel_id"] for row in rows if "id" in row}
-    for name, parent, field in (("slackimportmessage", "message", "message_id"), ("slackimportdetail", "message", "message_id"),
+    for name, parent, field in (("messagereference", "message", "message_id"), ("mentiongroupmember", "mentiongroup", "group_id"), ("slackimportmessage", "message", "message_id"), ("slackimportdetail", "message", "message_id"),
         ("fileversion", "filedocument", "document_id"), ("decisionrevision", "decision", "decision_id"),
         ("integrationcontentrevision", "integrationcontent", "item_id"), ("calendarattendee", "integrationcontent", "item_id"), ("shareddocumentupdate", "shareddocument", "document_id"),
         ("shareddocumentsnapshot", "shareddocument", "document_id"), ("shareddocumentcomment", "shareddocument", "document_id"),

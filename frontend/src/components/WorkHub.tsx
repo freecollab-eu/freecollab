@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import { CheckSquare, FileText, GitBranch, Globe, ShieldCheck, Smartphone, Video, X, Newspaper, Sparkles, Cloud } from 'lucide-react';
 import type { Channel, Message } from '../lib/api';
 import { registerConversationNavigationGuard, mayLeaveConversationWork } from '../lib/conversation-navigation';
+import type { ComposerWorkDraft } from '../lib/composer-commands';
 import { api } from '../lib/api';
 import { useModalFocus } from '../lib/useModalFocus';
 import { ProjectTasksPanel } from './ProjectTasksPanel';
@@ -24,7 +25,7 @@ import '../styles/work-hub.css';
 
 export type { WorkHubTab } from '../lib/work-hub-view';
 export interface ConversationResourceSelection { kind: 'document' | 'task' | 'decision'; id: string; projectId?: string | null; title?: string }
-interface Props { presentation?: 'dialog' | 'flow'; sourceMessage?: Message | null; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
+interface Props { presentation?: 'dialog' | 'flow'; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -40,7 +41,7 @@ const tabs = [
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
 
-export function WorkHub({ presentation = 'dialog', sourceMessage, onRevealSource, onResourceSaved, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
+export function WorkHub({ presentation = 'dialog', sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
@@ -122,8 +123,8 @@ export function WorkHub({ presentation = 'dialog', sourceMessage, onRevealSource
           {tab === 'copilot' && <CopilotPanel {...props} isAdmin={dataAdmin && unrestricted} />}
           {tab === 'cloud' && <><ChannelSyncNotice channelId={channel.id} kind="files" /><CloudFilesPicker workspaceId={workspaceId} channelId={channel.id} /></>}
           {tab === 'external-meetings' && <ExternalMeetingsPanel {...props} isAdmin={integrationAdmin && unrestricted && channel.role === 'admin'} />}
-          {tab === 'tasks' && <ProjectTasksPanel {...props} presentation={flow ? "flow" : "full"} initialProjectId={initialProjectId} focusTaskId={focusTaskId} sourceMessage={sourceMessage} onPendingChange={onTaskPending} onSelectedTask={onSelectedTask} onOpenMessage={onRevealMessage ? (_channelId, messageId) => onRevealMessage(messageId) : undefined} onTaskSaved={row => onResourceSaved?.({ kind: "task", id: row.id, projectId: row.project_id, title: row.fields?.title })} />}
-          {tab === 'documents' && <SharedDocumentsPanel {...props} presentation={flow ? "flow" : "full"} initialDraft={flow && sourceMessage && !initialDocumentId && !initialStackId ? { key: sourceMessage.id, title: sourceMessage.content.trim().split("\n")[0].slice(0, 120), text: sourceMessage.content } : undefined} onSelectedDocument={onSelectedDocument} onCreatedDocument={row => onResourceSaved?.({ kind: "document", id: row.id, title: row.title })} initialDocumentId={initialDocumentId} initialStackId={initialStackId} onPendingChange={onDocumentPending} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage ? id => { if (flow || mayLeaveDocument()) onRevealMessage(id); } : undefined} />}
+          {tab === 'tasks' && <ProjectTasksPanel key={initialCommandDraft?.key || 'tasks'} {...props} presentation={flow ? "flow" : "full"} initialProjectId={initialProjectId} focusTaskId={focusTaskId} initialDraft={!focusTaskId ? initialCommandDraft : undefined} sourceMessage={sourceMessage} onPendingChange={onTaskPending} onSelectedTask={onSelectedTask} onOpenMessage={onRevealMessage ? (_channelId, messageId) => onRevealMessage(messageId) : undefined} onTaskSaved={row => onResourceSaved?.({ kind: "task", id: row.id, projectId: row.project_id, title: row.fields?.title })} />}
+          {tab === 'documents' && <SharedDocumentsPanel key={initialCommandDraft?.key || 'documents'} {...props} presentation={flow ? "flow" : "full"} initialDraft={!initialDocumentId && !initialStackId ? initialCommandDraft || (flow && sourceMessage ? { key: sourceMessage.id, title: sourceMessage.content.trim().split("\n")[0].slice(0, 120), text: sourceMessage.content } : undefined) : undefined} onSelectedDocument={onSelectedDocument} onCreatedDocument={row => onResourceSaved?.({ kind: "document", id: row.id, title: row.title })} initialDocumentId={initialDocumentId} initialStackId={initialStackId} onPendingChange={onDocumentPending} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage ? id => { if (flow || mayLeaveDocument()) onRevealMessage(id); } : undefined} />}
           {tab === 'workflows' && <WorkflowsPanel {...props} />}
           {tab === 'apps' && <ChannelApps workspaceId={workspaceId} channelId={channel.id} />}
           {tab === 'data' && <DataControlsPanel {...props} isAdmin={dataAdmin && unrestricted} />}

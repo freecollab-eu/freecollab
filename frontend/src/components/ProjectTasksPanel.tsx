@@ -7,11 +7,12 @@ import { downloadChannelFile, listChannelFiles, type ManagedFile } from '../lib/
 import { projectTasksApi, type ProjectFields, type ProjectRecord, type ProjectTaskRecord, type TaskFields, type TaskRecord } from '../lib/project-tasks-api';
 import { ContextualCopilot } from './ContextualCopilot';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
+import type { ComposerWorkDraft } from '../lib/composer-commands';
 import '../styles/project-tasks.css';
 
 interface Props {
   workspaceId: string; channelId: string; isAdmin?: boolean; initialProjectId?: string; focusTaskId?: string;
-  presentation?: 'full' | 'flow'; sourceMessage?: Message | null;
+  presentation?: 'full' | 'flow'; sourceMessage?: Message | null; initialDraft?: ComposerWorkDraft;
   onPendingChange?: (pending: boolean) => void; onSelectedTask?: (task: TaskRecord | null) => void;
   onTaskSaved?: (task: TaskRecord) => void; onOpenMessage?: (channelId: string, messageId: string) => void;
 }
@@ -21,6 +22,8 @@ type Editor = ProjectEditor | TaskEditor;
 const statuses = { todo: 'To do', doing: 'In progress', done: 'Done' } as const;
 const freshTask = (): TaskFields => ({ title: '', description: '', status: 'todo', priority: 'normal', assignee_user_id: null, due_date: null, checklist: [], file_ids: [], decision_ids: [] });
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+const taskCommandDraft = (value?: ComposerWorkDraft) => value && typeof value.key === 'string' && value.key && typeof value.title === 'string'
+  && !!value.title.trim() && value.title.length <= 200 && typeof value.text === 'string' && value.text.length <= 12000 ? value : null;
 const describe = (value: unknown) => value instanceof Error ? value.message : 'This project action could not be completed.';
 const due = (value: string) => new Date(value + 'T00:00:00Z').toLocaleDateString(currentLocale(), { timeZone: 'UTC', dateStyle: 'medium' });
 // The reviewed prompt contains valid JSON and labels an exact excerpt when the full draft does not fit.
@@ -36,7 +39,7 @@ function boundedItemJson(kind: Editor['kind'], fields: ProjectFields | TaskField
   }
 }
 
-export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, initialProjectId, focusTaskId, presentation = 'full', sourceMessage, onPendingChange, onSelectedTask, onTaskSaved, onOpenMessage }: Props) {
+export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, initialProjectId, focusTaskId, presentation = 'full', sourceMessage, initialDraft, onPendingChange, onSelectedTask, onTaskSaved, onOpenMessage }: Props) {
   useI18n();
   const flow = presentation === 'flow';
   const panel = useRef<HTMLElement>(null);
@@ -47,6 +50,7 @@ export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, ini
   const [loading, setLoading] = useState(true), [tasksLoading, setTasksLoading] = useState(false);
   const [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [editor, setEditor] = useState<Editor | null>(null), [search, setSearch] = useState(''), [mine, setMine] = useState(false), [showArchived, setShowArchived] = useState(false);
+  const [commandDraft, setCommandDraft] = useState<ComposerWorkDraft | null>(() => taskCommandDraft(initialDraft));
   const [archiving, setArchiving] = useState<ProjectRecord | TaskRecord | null>(null);
   const [history, setHistory] = useState<{ kind: 'project' | 'task'; title: string; rows: ProjectTaskRecord<ProjectFields | TaskFields>[] } | null>(null);
   const [linkedDecision, setLinkedDecision] = useState<Decision | null>(null);
@@ -62,11 +66,11 @@ export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, ini
   const editorDirty = !!editor && JSON.stringify(editor.fields) !== JSON.stringify(editor.previous?.fields || (editor.kind === 'project' ? { title: '', description: '', color: 'sage' } : freshTask()));
   const callbacks = useRef({ onPendingChange, onSelectedTask, onTaskSaved });
   callbacks.current = { onPendingChange, onSelectedTask, onTaskSaved };
-  useLayoutEffect(() => { callbacks.current.onPendingChange?.(editorDirty || !!busy); }, [editorDirty, busy]);
+  useLayoutEffect(() => { callbacks.current.onPendingChange?.(editorDirty || !!commandDraft || !!busy); }, [editorDirty, commandDraft, busy]);
   useLayoutEffect(() => { callbacks.current.onSelectedTask?.(selectedTask); }, [selectedTask]);
   useEffect(() => () => { callbacks.current.onPendingChange?.(false); callbacks.current.onSelectedTask?.(null); }, []);
-  function mayDiscardEditor() {
-    return !busy && (!editorDirty || window.confirm(t('Changes have not saved yet. Leaving may discard them. Leave anyway?')));
+  function mayDiscardEditor(preserveCommand = false) {
+    return !busy && (!(editorDirty || commandDraft && !preserveCommand) || window.confirm(t('Changes have not saved yet. Leaving may discard them. Leave anyway?')));
   }
   const canLeave = useRef(mayDiscardEditor); canLeave.current = mayDiscardEditor;
   useEffect(() => {
@@ -74,21 +78,23 @@ export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, ini
     return registerConversationNavigationGuard({ userId: api.getCurrentUserId(), credential: api.getAccessToken(), workspaceId }, () => canLeave.current());
   }, [flow, workspaceId, channelId]);
   function beginEditor(next: Editor) {
-    if (!mayDiscardEditor()) return;
+    const preparingProject = next.kind === 'project' && !!commandDraft;
+    if (!mayDiscardEditor(preparingProject)) return;
+    if (!preparingProject) setCommandDraft(null);
     setEditor(next); setHistory(null); setLinkedDecision(null); setArchiving(null);
   }
-  function cancelEditor() { if (mayDiscardEditor()) setEditor(null); }
+  function cancelEditor() { if (mayDiscardEditor(editor?.kind === 'project' && !!commandDraft)) setEditor(null); }
   function chooseProject(id: string) {
-    if (!projects.some(row => row.id === id) || !mayDiscardEditor()) return;
+    if (!projects.some(row => row.id === id) || !mayDiscardEditor(!!commandDraft)) return;
     setEditor(null); setFlowTaskId(null); setSelected(id);
   }
   function newTask() {
     const source = sourceMessage?.channel_id === channelId && !sourceMessage.deleted && !sourceMessage.locked ? sourceMessage : null;
-    beginEditor({ kind: 'task', id: crypto.randomUUID(), fields: { ...freshTask(), description: source?.content.slice(0, 12000) || '' } });
+    beginEditor({ kind: 'task', id: crypto.randomUUID(), fields: { ...freshTask(), title: commandDraft?.title || '', description: commandDraft?.text || source?.content.slice(0, 12000) || '', assignee_user_id: commandDraft?.assigneeUserId || null } });
   }
   function refresh() {
     if (!mayDiscardEditor()) return;
-    setEditor(null); setHistory(null); setLinkedDecision(null); setArchiving(null);
+    setEditor(null); setCommandDraft(null); setHistory(null); setLinkedDecision(null); setArchiving(null);
     void run('refresh', async () => { await load(); await loadTasks(); });
   }
   const canArchive = (row: ProjectRecord | TaskRecord) => isAdmin || row.created_by === api.getCurrentUserId();
@@ -127,13 +133,20 @@ export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, ini
   }
   useEffect(() => {
     const request = ++generation.current; token.current = api.getAccessToken(); ++taskGeneration.current;
+    setCommandDraft(taskCommandDraft(initialDraft));
     setProjects([]); setSelected(''); setTasks([]); setMembers([]); setFiles([]); setDecisions([]); setEditor(null); setHistory(null); setLinkedDecision(null); setArchiving(null); setError(''); setNotice(''); setBusy(''); setSearch(''); setMine(false); setShowArchived(false); setFlowTaskId(null); focusedTask.current = null;
     void load(request);
-    const changed = () => { ++generation.current; ++taskGeneration.current; clearTransfers(); setProjects([]); setTasks([]); setMembers([]); setFiles([]); setDecisions([]); setEditor(null); setHistory(null); setLinkedDecision(null); setArchiving(null); setLoading(false); setTasksLoading(false); };
+    const changed = () => { ++generation.current; ++taskGeneration.current; clearTransfers(); setProjects([]); setTasks([]); setMembers([]); setFiles([]); setDecisions([]); setEditor(null); setCommandDraft(null); setHistory(null); setLinkedDecision(null); setArchiving(null); setLoading(false); setTasksLoading(false); };
     window.addEventListener('freecollab:auth-changed', changed);
     return () => { ++generation.current; ++taskGeneration.current; clearTransfers(); window.removeEventListener('freecollab:auth-changed', changed); };
   }, [workspaceId, channelId]);
   useEffect(() => { setTasks([]); setEditor(null); setHistory(null); setLinkedDecision(null); setArchiving(null); void loadTasks(selected); }, [selected]);
+  useEffect(() => {
+    if (!commandDraft || loading || busy || editor || !project || project.archived || !project.fields || !current(generation.current)) return;
+    setEditor({ kind: 'task', id: crypto.randomUUID(), fields: { ...freshTask(), title: commandDraft.title, description: commandDraft.text, assignee_user_id: commandDraft.assigneeUserId || null } });
+    if (commandDraft.assigneeUserId && !members.some(member => member.user_id === commandDraft.assigneeUserId)) setError(t('The selected person is no longer in this conversation. Choose another assignee.'));
+    setCommandDraft(null); setHistory(null); setLinkedDecision(null); setArchiving(null);
+  }, [commandDraft, loading, busy, editor, selected, projects, members]);
   useEffect(() => {
     if (!flow || !focusTaskId || editorDirty || busy) return;
     const targetProject = projects.find(row => row.id === initialProjectId && row.channel_id === channelId);
@@ -274,6 +287,7 @@ export function ProjectTasksPanel({ workspaceId, channelId, isAdmin = false, ini
     <header className="fc-project-heading"><div><span className="fc-kicker">{t("Make progress, together")}</span><h3>{flow ? t("Next step") : t("Projects & tasks")}</h3>{!flow && <p>{t("Give work a clear owner, a next step and a place in the conversation.")}</p>}</div><button className="fc-icon-button" type="button" aria-label={t("Refresh projects and tasks")} disabled={!!busy} onClick={refresh}><RefreshCw size={17} /></button></header>
     {error && <div ref={errorRef} tabIndex={-1} className="fc-alert fc-project-error" role="alert"><p>{error}</p>{editor && <p>{t("Your draft is still open. Reloading closes it and discards unsaved edits.")}</p>}<button className="fc-text-button" type="button" onClick={refresh}>{t("Reload current revisions")}</button></div>}
     {notice && <p className="fc-project-notice" role="status">{notice}</p>}
+    {commandDraft && <p className="fc-project-caption" role="status"><strong>{commandDraft.title}</strong><br />{t('Review this task draft after choosing or creating a project.')}</p>}
     {!flow && projectToolbar}
     {flow && <details className="fc-project-flow-project-options"><summary>{t("Project options")}</summary>{!focusTaskId && projectToolbar}{projectSummary}</details>}
     {flow && !focusTaskId && <details className="fc-project-flow-options"><summary>{t("Task options")}</summary><div className="fc-project-toolbar">{taskFilters}</div></details>}

@@ -26,6 +26,7 @@ from ..services.sso_scope import require_channel_scope
 from ..services.workspaces import require_direct_message_writable, require_workspace_member
 from ..schemas import MessageText
 from .saved_items import SavedTarget, validate_target
+from ..services.message_references import ReferenceInput, validate_references, store_references
 
 router = APIRouter(tags=["chat productivity"])
 Identifier = Annotated[str, StringConstraints(min_length=1, max_length=128)]
@@ -44,6 +45,7 @@ class Schedule(BaseModel):
     due_at: datetime
     mentions: list[Identifier] = Field(default_factory=list, max_length=50)
     parent_id: Identifier | None = None
+    references: list[ReferenceInput] = Field(default_factory=list, max_length=50)
 
 
 class Reminder(SavedTarget):
@@ -99,8 +101,11 @@ def schedule_message(channel_id: str, data: Schedule, user=Depends(get_current_u
     require_direct_message_writable(session, channel_id, user.id)
     require_native_channel(session, channel_id)
     from ..services.account_security import _secret_key
+    fingerprint_payload = data.model_dump(mode='json')
+    if not fingerprint_payload['references']:
+        fingerprint_payload.pop('references')  # Existing empty-reference receipt compatibility.
     fingerprint = hmac.new(_secret_key(), b"scheduled-message-v1\0" + json.dumps(
-        {"channel_id": channel_id, **data.model_dump(mode="json")}, sort_keys=True,
+        {"channel_id": channel_id, **fingerprint_payload}, sort_keys=True,
         separators=(",", ":")).encode(), sha256).hexdigest()
     existing = session.exec(select(ScheduledMessage).where(ScheduledMessage.user_id == user.id,
                                                            ScheduledMessage.client_id == data.client_id)).first()
@@ -110,7 +115,7 @@ def schedule_message(channel_id: str, data: Schedule, user=Depends(get_current_u
         return schedule_data(existing, content=True)
     due = utc_due(data.due_at)
     digest, claims = authority(session, due)
-    mention_ids = validate_mentions(session, channel_id, data.mentions)
+    references, mention_ids = validate_references(session, channel_id, user.id, data.content, data.references, data.mentions)
     if data.parent_id:
         parent = session.get(Message, data.parent_id)
         if not parent or parent.deleted or parent.channel_id != channel_id:
@@ -124,8 +129,9 @@ def schedule_message(channel_id: str, data: Schedule, user=Depends(get_current_u
     row = ScheduledMessage(user_id=user.id, channel_id=channel_id, client_id=data.client_id,
         request_digest=fingerprint,
         encrypted_content=encrypt_message(data.content, channel_id), due_at=due, session_hash=digest,
-        claims_json=claims, mentions_json=json.dumps(mention_ids), parent_id=data.parent_id)
+        claims_json=claims, mentions_json=json.dumps(data.mentions), parent_id=data.parent_id)
     session.add(row)
+    store_references(session, row, references, scheduled=True)
     session.commit()
     return schedule_data(row, content=True)
 
@@ -148,6 +154,8 @@ def cancel_scheduled(identifier: str, user=Depends(get_current_user), session=De
     cancelled = session.execute(update(ScheduledMessage).where(ScheduledMessage.id == identifier,
         ScheduledMessage.status == "pending").values(status="cancelled", encrypted_content="", claims_json="{}",
                                                       finished_at=datetime.utcnow()))
+    if cancelled.rowcount:
+        store_references(session, row, [], scheduled=True)
     session.commit()
     return {"cancelled": bool(cancelled.rowcount)}
 

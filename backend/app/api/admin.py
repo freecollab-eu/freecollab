@@ -347,6 +347,9 @@ async def delete_message(
     staff = session.get(User, staff.id, populate_existing=True)
     require_staff(staff, session)
     message.deleted = True
+    from ..services.message_references import store_references
+    store_references(session, message, [])
+    message.mentions = '[]'
     message.content = "[Message deleted]"
     message.encrypted = False
     session.add(message)

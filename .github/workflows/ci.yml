@@ -228,6 +228,7 @@ jobs:
           python frontend/tests/open-studio-browser.py
           python frontend/tests/conversation-flow-browser.py
           BACKEND_PYTHON=python python frontend/tests/slash-commands-browser.py
+          BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
           python frontend/tests/account-race-browser.py

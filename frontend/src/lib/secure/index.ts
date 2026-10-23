@@ -3,6 +3,8 @@ import { CryptoEvent } from 'matrix-js-sdk/lib/crypto-api/CryptoEvent';
 import { decodeRecoveryKey } from 'matrix-js-sdk/lib/crypto-api/recovery-key';
 import { storageKeyFor, loadPendingNotices, savePendingNotices } from './device-store';
 import { sendOrResumeEncryptedTransaction } from './transaction-retry';
+import { encryptedMessageContent, encryptedContentReferences, prepareMessageReferences, type ReferenceResolution } from './message-content';
+import type { MessageReference } from '../message-references';
 import { APIError, type Message, type Reaction, type ReadReceipt } from '../api';
 import { channelMetadataFields, legacyChannelName, verifiedChannelMetadata, type ChannelMetadata, type ChannelMetadataRecord } from '../channel-metadata';
 const quietLogger = { trace() {}, debug() {}, info() {}, warn() {}, error() {}, getChild() { return this; } };
@@ -77,8 +79,10 @@ async function request<T>(path: string, body?: unknown, method?: 'PATCH'): Promi
   return response.json();
 }
 function asMessage(channelId: string, e: MatrixEvent): Message {
-  const content = e.getContent(), relation = e.getOriginalContent()['m.relates_to'];
-  return { id: e.getId()!, channel_id: channelId, author_id: accountId(e.getSender()!), content: e.isDecryptionFailure() ? 'Encrypted content is unavailable on this device. Verify the device or unlock recovery.' : typeof content.body === 'string' ? content.body : '', encrypted: true, created_at: new Date(e.getTs()).toISOString(), deleted: e.isRedacted(), ...(e.isDecryptionFailure() ? { locked: true } : {}), ...(relation?.rel_type === 'm.thread' ? { parent_id: relation.event_id } : {}), mentions: Array.isArray(content['eu.freecollab.mentions']) ? content['eu.freecollab.mentions'] : [] };
+  const outer = e.getContent(), relation = e.getOriginalContent()['m.relates_to'];
+  const content = relation?.rel_type === 'm.replace' && outer['m.new_content'] && typeof outer['m.new_content'] === 'object' ? outer['m.new_content'] : outer;
+  const body = e.isDecryptionFailure() ? 'Encrypted content is unavailable on this device. Verify the device or unlock recovery.' : typeof content.body === 'string' ? content.body : '';
+  return { id: e.getId()!, channel_id: channelId, author_id: accountId(e.getSender()!), content: body, encrypted: true, created_at: new Date(e.getTs()).toISOString(), deleted: e.isRedacted(), ...(e.isDecryptionFailure() ? { locked: true } : {}), ...(relation?.rel_type === 'm.thread' ? { parent_id: relation.event_id } : {}), mentions: Array.isArray(content['eu.freecollab.mentions']) ? content['eu.freecollab.mentions'] : [], references: e.isDecryptionFailure() || e.isRedacted() ? [] : encryptedContentReferences(body, content) };
 }
 async function processEvent(e: MatrixEvent, c: MatrixClient) {
   const eventGeneration = generation;
@@ -288,16 +292,37 @@ async function getMessages(channelId: string, before?: string, limit = 100, root
   for (const e of rows) { const relation = e.getOriginalContent()['m.relates_to']; if (e.getType() === EventType.RoomMessage && relation?.rel_type === 'm.replace' && relation.event_id) changes.set(relation.event_id, e); }
   return older().slice(-boundedLimit).reverse().map(e => {
     const item = asMessage(channelId, e), edit = changes.get(item.id);
-    if (edit && edit.getSender() === e.getSender()) { item.content = edit.getContent()['m.new_content']?.body || ''; item.edited_at = new Date(edit.getTs()).toISOString(); }
+    if (edit && edit.getSender() === e.getSender()) { const replacement = asMessage(channelId, edit); item.content = replacement.content; item.references = replacement.references; item.mentions = replacement.mentions; item.edited_at = new Date(edit.getTs()).toISOString(); }
     item.thread_count = rows.filter(reply => reply.getOriginalContent()['m.relates_to']?.rel_type === 'm.thread' && reply.getOriginalContent()['m.relates_to']?.event_id === item.id).length;
     return item;
   });
 }
 
-async function sendMessage(channelId: string, content: string, parentId?: string, mentions: string[] = []): Promise<Message> {
-  const result = await sendEvent(channelId, EventType.RoomMessage, { msgtype: MsgType.Text, body: content, 'eu.freecollab.mentions': mentions, ...(parentId ? { 'm.relates_to': { rel_type: 'm.thread', event_id: parentId, is_falling_back: true, 'm.in_reply_to': { event_id: parentId } } } : {}) });
-  void queueNotice({ channelId, eventId: result.event_id, mentions, parentId }).catch(() => undefined);
-  return { id: result.event_id, channel_id: channelId, author_id: configuration!.getUserId()!, content, encrypted: true, created_at: new Date().toISOString(), ...(parentId ? { parent_id: parentId } : {}) };
+async function messageRecipients(channelId: string, content: string, references: MessageReference[], mentions: string[]) {
+  const token = configuration?.getAccessToken(), owner = configuration?.getUserId();
+  const prepared = await prepareMessageReferences(content, references, mentions, async identities => {
+    const fileIds = identities.filter(identity => identity.kind === 'file').map(identity => identity.id);
+    const other = identities.filter(identity => identity.kind !== 'file');
+    const resolved = other.length ? await request<ReferenceResolution>('/mentions/channels/' + encodeURIComponent(channelId) + '/references/resolve', { references: other }) : { items: [] };
+    // Secure files have no native index. Verify their genuine encrypted events
+    // locally instead of claiming that a server can validate their contents.
+    if (fileIds.length) {
+      const available = await (await import('./files')).verifiedSecureFileReferenceIds(channelId, fileIds);
+      resolved.items.push(...fileIds.map(id => ({ kind: 'file' as const, id, available: available.has(id) })));
+    }
+    return resolved;
+  });
+  if (!token || token !== configuration?.getAccessToken() || owner !== configuration?.getUserId()) throw new Error('The signed-in account changed.');
+  const c = await ensureSession();
+  if (token !== configuration?.getAccessToken() || owner !== configuration?.getUserId()) throw new Error('The signed-in account changed.');
+  const domain = c.getUserId()!.split(':').slice(1).join(':');
+  return { ...prepared, matrixUserIds: prepared.mentions.map(id => id.startsWith('@') ? id : '@fc_' + id + ':' + domain) };
+}
+async function sendMessage(channelId: string, content: string, parentId?: string, mentions: string[] = [], references: MessageReference[] = [], transactionId?: string): Promise<Message> {
+  const prepared = await messageRecipients(channelId, content, references, mentions);
+  const result = await sendEvent(channelId, EventType.RoomMessage, encryptedMessageContent(content, prepared.mentions, prepared.references, parentId, prepared.matrixUserIds), transactionId);
+  void queueNotice({ channelId, eventId: result.event_id, mentions: prepared.mentions, parentId }).catch(() => undefined);
+  return { id: result.event_id, channel_id: channelId, author_id: configuration!.getUserId()!, content, references: prepared.references, mentions: prepared.mentions, encrypted: true, created_at: new Date().toISOString(), ...(parentId ? { parent_id: parentId } : {}) };
 }
 async function getReactions(channelId: string, messageId: string): Promise<Reaction[]> {
   const rows = (await events(channelId)).filter(e => e.getType() === REACTION && !e.isRedacted() && e.getContent().event_id === messageId), grouped = new Map<string, Set<string>>();
@@ -406,7 +431,13 @@ export const secureMessaging = {
   async getChannelTitle(channelId: string) { return (await readChannelMetadata(channelId)).name; },
   setChannelMetadata: writeChannelMetadata,
   async setChannelName(channelId: string, name: string) { const current = await readChannelMetadata(channelId); return writeChannelMetadata(channelId, name, current.description, current.version); },
-  async editMessage(channelId: string, messageId: string, content: string) { await sendEvent(channelId, EventType.RoomMessage, { msgtype: MsgType.Text, body: '* ' + content, 'm.new_content': { msgtype: MsgType.Text, body: content }, 'm.relates_to': { rel_type: 'm.replace', event_id: messageId } }); },
+  async editMessage(channelId: string, messageId: string, content: string, references: MessageReference[] = []) {
+    const prepared = await messageRecipients(channelId, content, references, []);
+    const next = encryptedMessageContent(content, prepared.mentions, prepared.references, undefined, prepared.matrixUserIds);
+    const result = await sendEvent(channelId, EventType.RoomMessage, { msgtype: MsgType.Text, body: '* ' + content, 'm.new_content': next, 'm.relates_to': { rel_type: 'm.replace', event_id: messageId } });
+    void queueNotice({ channelId, eventId: result.event_id, mentions: prepared.mentions }).catch(() => undefined);
+    return { references: prepared.references, mentions: prepared.mentions };
+  },
   async deleteMessage(channelId: string, messageId: string) { const { c, roomId } = await roomFor(channelId, true); await c.redactEvent(roomId, messageId); },
   async getThread(channelId: string, parentId: string) {
     const { c, room } = await roomFor(channelId);
@@ -419,7 +450,7 @@ export const secureMessaging = {
     for (const event of rows) { const relation = event.getOriginalContent()['m.relates_to']; if (event.getType() === EventType.RoomMessage && relation?.rel_type === 'm.replace' && relation.event_id) edits.set(relation.event_id, event); }
     return rows.filter(event => event.getType() === EventType.RoomMessage && event.getOriginalContent()['m.relates_to']?.rel_type === 'm.thread' && event.getOriginalContent()['m.relates_to']?.event_id === parentId).map(event => {
       const message = asMessage(channelId, event), edit = edits.get(message.id);
-      if (edit && edit.getSender() === event.getSender()) { message.content = edit.getContent()['m.new_content']?.body || ''; message.edited_at = new Date(edit.getTs()).toISOString(); }
+      if (edit && edit.getSender() === event.getSender()) { const replacement = asMessage(channelId, edit); message.content = replacement.content; message.references = replacement.references; message.mentions = replacement.mentions; message.edited_at = new Date(edit.getTs()).toISOString(); }
       return message;
     });
   },

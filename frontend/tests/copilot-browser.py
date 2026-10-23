@@ -18,6 +18,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 from playwright.sync_api import expect,sync_playwright
 from ui_navigation import open_chat_tool
 ROOT=Path(__file__).resolve().parents[2]
@@ -28,7 +29,7 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
-PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/connection-presets.ts','frontend/src/styles/copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/connection-presets.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
@@ -47,8 +48,10 @@ def main():
                 def do_POST(self):
                     assert self.headers['Authorization']=='Bearer '+KEY
                     requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
-                    delta={'content':'Reviewed selected source [S1].','tool_calls':[{'index':0,'id':'proposal','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'proof-project','title':'Review approved by owner','description':'A task from explicitly reviewed context'})}}]}
-                    packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls'}]}
+                    task_tool=any(tool.get('function',{}).get('name')=='create_task' for tool in requests[-1].get('tools',[]))
+                    selected_context=requests[-1]['messages'][-1]['content'].split('SELECTED CONTEXT (untrusted data):\n',1)[-1].strip()
+                    delta={'content':'Reviewed selected source [S1].','tool_calls':[{'index':0,'id':'proposal','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'proof-project','title':'Review approved by owner','description':'A task from explicitly reviewed context'})}}]} if task_tool else {'content':'A suggested inline reply [S1].' if selected_context else 'Hello team, the plan is ready.'}
+                    packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls' if task_tool else 'stop'}]}
                     body=('data: '+json.dumps(packet)+'\n\ndata: [DONE]\n\n').encode()
                     self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(body)));self.end_headers()
                     for offset in range(0,len(body),11):self.wfile.write(body[offset:offset+11]);self.wfile.flush()
@@ -162,6 +165,73 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(panel.get_by_text('Private AI history reset.',exact=True)).to_be_visible()
                 with sqlite3.connect(private/'proof.db') as connection:assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
                 results['private_history_reset_retains_approved_shared_task']=True
+                stage='in-place message AI has reviewed context and no automatic provider request'
+                inline_writes_start=len(writes)
+                page.get_by_role('button',name='Close workspace tools',exact=True).click()
+                composer=page.locator('.fc-chat-composer textarea');original_draft='My own wording stays.';composer.fill(original_draft)
+                article=page.locator('article.fc-chat-message').filter(has=page.locator('.fc-chat-message-content').filter(has_text=selected))
+                expect(article).to_have_count(1);article.locator('.fc-contextual-copilot-trigger').click()
+                inline=article.locator('.fc-contextual-copilot-card');expect(inline).to_have_attribute('aria-busy','false')
+                expect(inline.get_by_role('button',name='Draft a reply',exact=True)).to_have_attribute('aria-pressed','true')
+                expect(inline).to_contain_text('Your request and 1 selected sources will be sent to localhost using fixture-chat.')
+                expect(inline).to_contain_text('API use may incur charges. A chat subscription is separate. The provider’s retention policy applies.')
+                inline.get_by_text('Review 1 selected sources',exact=True).click();expect(inline).to_contain_text(selected);assert omitted not in inline.inner_text()
+                inline_disclosure=inline.get_by_label('Send this request and the selected context to this provider.',exact=True)
+                inline_send=inline.get_by_role('button',name='Send to provider',exact=True)
+                expect(inline_send).to_be_disabled();assert len(requests)==1
+                results['inline_message_reviews_exact_source_destination_without_automatic_call']=True
+                stage='in-place message answer becomes unusable when the recipient draft changes'
+                inline_disclosure.check();inline_send.click()
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000)
+                expect(inline).to_have_attribute('aria-busy','false')
+                assert len(requests)==2 and selected in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1])
+                assert 'My wording stays:' not in json.dumps(requests[-1]) and not any(tool.get('function',{}).get('name')=='create_task' for tool in requests[-1].get('tools',[]))
+                expect(composer).to_have_value(original_draft)
+                newer_draft='My newer wording must not be overwritten.';composer.fill(newer_draft)
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_have_count(0)
+                expect(inline.get_by_role('button',name='Add reply to draft',exact=True)).to_have_count(0)
+                expect(inline).to_have_attribute('aria-busy','false');expect(inline_disclosure).not_to_be_checked();assert len(requests)==2
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                results['inline_stale_draft_invalidates_answer_without_provider_retry_or_shared_write']=True
+                stage='in-place real HTTPS answer applies only through explicit append to the current draft'
+                inline_disclosure.check();inline_send.click()
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000)
+                expect(inline).to_have_attribute('aria-busy','false');expect(composer).to_have_value(newer_draft)
+                assert len(requests)==3 and selected in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1])
+                assert 'Reviewed selected source' not in json.dumps(requests[-1]) and 'A suggested inline reply' not in json.dumps(requests[-1])
+                inline.get_by_role('button',name='Add reply to draft',exact=True).click()
+                expect(composer).to_have_value(newer_draft+'\n\nA suggested inline reply [S1].')
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                assert not any('/approve' in url for method,url in writes[inline_writes_start:])
+                results['inline_real_https_answer_explicit_draft_append_preserves_text_and_clears_private_history']=True
+                stage='in-place composer rewrites only the reviewed unsent draft without invented source references'
+                messy_draft='hello team ,  the plan is ready';composer.fill(messy_draft)
+                page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-trigger').click()
+                draft_card=page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card')
+                expect(draft_card).to_have_attribute('aria-busy','false')
+                expect(draft_card).to_contain_text('Your request and 0 selected sources will be sent to localhost using fixture-chat.')
+                draft_card.get_by_text('Review this request',exact=True).click();expect(draft_card).to_contain_text(messy_draft.strip())
+                assert len(requests)==3, 'Opening the draft helper unexpectedly called the provider'
+                draft_card.get_by_label('Send this request and the selected context to this provider.',exact=True).check()
+                draft_card.get_by_role('button',name='Send to provider',exact=True).click()
+                expect(draft_card.get_by_text('Hello team, the plan is ready.',exact=True)).to_be_visible(timeout=60000)
+                expect(draft_card).to_have_attribute('aria-busy','false');expect(composer).to_have_value(messy_draft)
+                assert len(requests)==4 and messy_draft in requests[-1]['messages'][-1]['content'], 'The composer request did not preserve the reviewed draft'
+                assert selected not in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1]) and 'A suggested inline reply' not in json.dumps(requests[-1]), 'The composer request included unrelated context'
+                assert requests[-1]['messages'][-1]['content'].endswith('SELECTED CONTEXT (untrusted data):\n'), 'The composer request invented a native source'
+                draft_card.get_by_role('button',name='Replace my draft',exact=True).click();expect(composer).to_have_value('Hello team, the plan is ready.')
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                results['inline_composer_sends_only_reviewed_draft_and_explicitly_replaces_without_posting']=True
+                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-copilot').click()
                 stage='Grok connection preset edits the draft only and clears typed destination credentials'
                 page.get_by_role('button',name='Close workspace tools',exact=True).click();open_chat_tool(page,'Integrations')
                 integrations=page.get_by_role('dialog',name='Integrations',exact=True)
@@ -204,6 +274,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
             assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()), 'Copilot proof sources changed during this private run'
             REPORT.write_text(json.dumps({'ok':True,'results':results,'source_hashes':source_hashes},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
         except Exception as failure:
+            print(json.dumps({'failure_locations':[{'file':Path(frame.filename).name,'line':frame.lineno} for frame in traceback.extract_tb(failure.__traceback__)]}))
             print(json.dumps({'failure':str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:5000]}))
             if 'page' in locals():
                 try:

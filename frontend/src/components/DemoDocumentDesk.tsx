@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type Dispatch, type DragEvent, type FormEvent } from 'react';
+import { useEffect, useId, useRef, useState, type Dispatch, type DragEvent, type FormEvent, type ReactNode } from 'react';
 import { ArrowUpRight, Check, ChevronDown, FileText, GripVertical, Layers, List, MessageSquare, Plus, Undo2, X } from 'lucide-react';
 import { demoChannelDocuments, demoChannelStacks, demoDocumentLimit, demoStackDocuments, demoStackLimit, demoStackReferenceLimit, demoStackReferences, type DemoAction, type DemoChannel, type DemoDocument, type DemoDocumentStack, type DemoMessage, type DemoState } from '../lib/demo-showroom';
 import '../styles/demo-document-desk.css';
@@ -18,12 +18,13 @@ export interface DemoDocumentDeskProps {
   onReferenceSaved?: () => void;
   onCancelReference?: () => void;
   compact?: boolean;
+  renderAssist?: (scope: { kind: 'stack' | 'document'; id: string }) => ReactNode;
 }
 
 type NewItem = { kind: 'document' | 'stack'; stackId: string };
 
 /** Paper stacks for the public sample. All changes live in the parent's memory. */
-export function DemoDocumentDesk({ state, channel, dispatch, t, onOpenDocument, onRevealMessage, pendingReference, onReferenceSaved, onCancelReference, compact = false }: DemoDocumentDeskProps) {
+export function DemoDocumentDesk({ state, channel, dispatch, t, onOpenDocument, onRevealMessage, pendingReference, onReferenceSaved, onCancelReference, compact = false, renderAssist }: DemoDocumentDeskProps) {
   const uid = useId();
   const [view, setView] = useState<'stacks' | 'list'>('stacks');
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -154,6 +155,7 @@ export function DemoDocumentDesk({ state, channel, dispatch, t, onOpenDocument, 
         <span>{ownerName(document.owner)}<span aria-hidden="true"> · </span>{t(document.updatedLabel)}{document.edited !== null && <span className="fc-demo-desk-local">{t('Edited here')}</span>}</span>
       </div>
       <label className="fc-demo-desk-move"><span>{t('Move to')}</span><select ref={element => { moveSelects.current[document.id] = element; }} aria-label={t('Move {document} to', { document: documentTitle(document) })} value={document.stackId} onChange={event => moveDocument(document, event.target.value, true)}>{stacks.map(stack => <option key={stack.id} value={stack.id}>{stackTitle(stack)}</option>)}</select></label>
+      {renderAssist && <div className="fc-demo-desk-assist fc-demo-desk-document-assist" data-assist-document={document.id}>{renderAssist({ kind: 'document', id: document.id })}</div>}
     </li>;
   }
 
@@ -169,6 +171,7 @@ export function DemoDocumentDesk({ state, channel, dispatch, t, onOpenDocument, 
           {formError && <p id={uid + '-rename-error'} role="alert">{formError}</p>}
         </form> : <><div><span className="fc-demo-desk-eyebrow">{t('Inside the stack')}</span><h4>{stackTitle(stack)}</h4></div><div className="fc-demo-desk-stack-actions"><button ref={element => { renameButtons.current[stack.id] = element; }} type="button" onClick={() => { setRenaming(stack.id); setRenameTitle(stackTitle(stack)); setFormError(''); setNewItem(null); }}>{t('Rename')}</button>{view === 'stacks' && <button type="button" onClick={() => { setExpanded(null); stackButtons.current[stack.id]?.focus({ preventScroll: true }); }} aria-label={t('Close {stack}', { stack: stackTitle(stack) })}><X size={16} aria-hidden="true" /></button>}</div></>}
       </header>
+      {renderAssist && <div className="fc-demo-desk-assist fc-demo-desk-stack-assist" data-assist-stack={stack.id}>{renderAssist({ kind: 'stack', id: stack.id })}</div>}
       {stackDocuments.length > 0 ? <ul className="fc-demo-desk-document-list">{stackDocuments.map(renderDocument)}</ul> : <p className="fc-demo-desk-empty">{t('Room for the next idea. Add a document or save a message from the conversation.')}</p>}
       {references.length > 0 && <div className="fc-demo-desk-references"><h5><MessageSquare size={14} aria-hidden="true" />{t('From the conversation')}</h5><ul>{references.map(message => <li key={message.id}><blockquote>{messageText(message)}</blockquote><div><span>{ownerName(message.author)}<span aria-hidden="true"> · </span>{message.time}</span><div className="fc-demo-desk-reference-actions"><button type="button" onClick={event => onRevealMessage(message.id, event.currentTarget)}>{t('Show original')}<ArrowUpRight size={13} aria-hidden="true" /></button><button type="button" aria-label={t('Remove reference from {stack}', { stack: stackTitle(stack) })} onClick={() => { dispatch({ type: 'stack_reference_remove', channel, stackId: stack.id, messageId: message.id }); setStatus(t('Reference removed. The original message is unchanged.')); requestAnimationFrame(() => undoButton.current?.focus({ preventScroll: true })); }}>{t('Remove')}</button></div></div></li>)}</ul></div>}
       <footer><button type="button" disabled={documents.length >= demoDocumentLimit} onClick={() => beginCreate('document', stack.id)}><Plus size={14} aria-hidden="true" />{t('Add document')}</button><span>{t('Drag a document here, or use Move to.')}</span></footer>

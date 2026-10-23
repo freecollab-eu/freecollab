@@ -110,39 +110,44 @@ def main():
         page.get_by_label('Your demo message',exact=True).fill(ai_message)
         page.get_by_role('button',name='Send demo message',exact=True).click()
         ai_source=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(ai_message,exact=True))
-        ai_source_id=ai_source.get_attribute('data-message-id')
-        page.get_by_role('button',name='Try AI',exact=True).click()
-        ai=page.locator('[data-ai-preview="local"]:visible')
-        expect(ai.get_by_text('Selected text is reused locally. No model inference takes place.',exact=True)).to_be_visible()
-        ai.get_by_role('combobox',name='AI provider',exact=True).select_option('openai')
-        ai.get_by_role('textbox',name='AI model',exact=True).fill('website-local-model')
-        expect(ai.locator('.fc-demo-ai-warning')).to_contain_text('api.openai.com')
-        expect(ai.locator('.fc-demo-ai-warning')).to_contain_text('website-local-model')
-        ai.locator('[data-ai-source-picker]').get_by_text('Change sources',exact=True).click()
-        for box in ai.locator('[data-ai-source-picker]').get_by_role('checkbox').all():
-            if box.is_checked():box.uncheck()
-        ai.locator('[data-ai-source-key="message:'+ai_source_id+'"]').get_by_role('checkbox').check()
-        ai.get_by_role('button',name='Task',exact=True).click()
-        ai.get_by_role('button',name='Prepare local example',exact=True).click()
-        output=ai.locator('[data-ai-result="current"]')
-        expect(output).to_contain_text(ai_message)
-        expect(output.locator('.fc-demo-ai-citations button')).to_have_count(1)
+        draft='   Keep   my draft.   Review   the bridge.  '
+        composer=page.get_by_label('Your demo message',exact=True);composer.fill(draft)
+        composer_help=page.locator('[data-demo-assist][data-assist-scope="composer"]:visible')
+        composer_help.locator('[data-assist-trigger]').click()
+        card=composer_help.locator('.fc-inline-assist-card')
+        expect(card.get_by_text('Uses selected text; no AI request.',exact=True)).to_be_visible()
+        card.get_by_role('button',name='Prepare example',exact=True).click()
+        expect(card.locator('[data-assist-preview="current"]')).to_be_visible();expect(composer).to_have_value(draft)
+        card.get_by_role('button',name=re.compile(r'^Use tidy draft\b')).click()
+        expect(composer).to_have_value('Keep my draft. Review the bridge.')
+        page.get_by_role('button',name='Undo last assisted change',exact=True).click();expect(composer).to_have_value(draft)
+        card.get_by_role('button',name='Cancel',exact=True).click()
+        expect(page.get_by_role('log').get_by_text('Keep my draft. Review the bridge.',exact=True)).to_have_count(0)
+        message_help=ai_source.locator('[data-demo-assist][data-assist-scope="message"]')
+        message_help.locator('[data-assist-trigger]').click();card=message_help.locator('.fc-inline-assist-card')
+        card.get_by_text('What is shared?',exact=True).click()
+        expect(card.locator('.fc-inline-assist-sharing')).to_contain_text('api.x.ai')
+        card.get_by_role('button',name='Prepare a task',exact=True).click()
+        card.get_by_role('button',name='Prepare example',exact=True).click()
+        output=card.locator('[data-assist-preview="current"]')
+        expect(output).to_contain_text(ai_message);expect(output).not_to_contain_text(draft)
+        expect(output.locator('.fc-inline-assist-citations button')).to_have_count(1)
         expect(page.get_by_role('checkbox',name=ai_message,exact=True)).to_have_count(0)
-        ai.get_by_role('button',name='Continue to task review',exact=True).click()
+        output.get_by_role('button',name=re.compile(r'^Review task from this message\b')).click()
         expect(review.get_by_label('Task title',exact=True)).to_have_value(ai_message)
         expect(review.get_by_role('button',name='Unassigned',exact=True)).to_have_attribute('aria-pressed','true')
         expect(page.get_by_role('checkbox',name=ai_message,exact=True)).to_have_count(0)
         review.get_by_role('button',name='Create task',exact=True).click()
         expect(page.get_by_role('checkbox',name=ai_message,exact=True)).to_have_count(1)
-        review.get_by_role('button',name='View original message',exact=True).click()
-        expect(ai_source).to_be_focused()
-        page.get_by_role('button',name='Try AI',exact=True).click()
-        expect(ai.get_by_role('textbox',name='AI model',exact=True)).to_have_value('website-local-model')
-        ai.get_by_role('button',name='Continue to task review',exact=True).click()
+        review.get_by_role('button',name='View original message',exact=True).click();expect(ai_source).to_be_focused()
+        if message_help.locator('[data-assist-trigger]').get_attribute('aria-expanded')!='true':message_help.locator('[data-assist-trigger]').click()
+        card.get_by_role('button',name='Prepare example',exact=True).click()
+        card.get_by_role('button',name=re.compile(r'^Review task from this message\b')).click()
         expect(page.get_by_role('checkbox',name=ai_message,exact=True)).to_have_count(1)
         expect(review.get_by_role('button',name='Create task',exact=True)).to_have_count(0)
         review.get_by_role('button',name='View original message',exact=True).click()
-        checks['built_public_ai_selected_source_local_output_requires_explicit_task_review_and_creation_without_duplicates'] = True
+        expect(composer).to_have_value(draft)
+        checks['built_contextual_ai_draft_edits_require_approval_and_undo_message_task_requires_review_without_duplicates_or_autopost'] = True
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Projects', exact=True).click()
         page.get_by_label('New demo task', exact=True).fill('Website-only task')
@@ -205,11 +210,11 @@ def main():
         expect(related.locator('.fc-demo-connections-saved')).to_have_count(0)
         expect(related.get_by_role('button',name='Save reference in Sketches',exact=True)).to_be_visible()
         checks['demo_mutations_disappear_on_reload'] = True
-        page.get_by_role('button',name='Try AI',exact=True).click()
-        ai=page.locator('[data-ai-preview="local"]:visible')
-        expect(ai.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
-        expect(ai.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
-        expect(ai.locator('[data-ai-result]')).to_have_count(0)
+        page.get_by_role('button',name='AI settings',exact=True).click()
+        settings=page.locator('[data-demo-ai-settings]')
+        expect(settings.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
+        expect(settings.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+        expect(page.locator('[data-assist-preview]')).to_have_count(0)
         page.get_by_role('button', name='Back to FreeCollab', exact=True).click()
         page.get_by_role('button', name='Documentation', exact=True).first.click()
         expect(page.locator('.fc-docs')).to_be_visible()
@@ -233,13 +238,14 @@ def main():
             expect(related.get_by_role('switch',name='Föreslå samband',exact=True)).to_have_attribute('aria-checked','true')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Swedish suggestions overflow at{width}'
             page.keyboard.press('Escape')
-            page.get_by_role('button',name='Prova AI',exact=True).click()
-            ai=page.locator('[data-ai-preview="local"]:visible')
-            expect(ai.get_by_role('combobox',name='AI-leverantör',exact=True)).to_have_value('grok')
-            ai.get_by_role('button',name='Förbered lokalt exempel',exact=True).click()
-            expect(ai.locator('[data-ai-result="current"]')).to_be_visible()
-            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Swedish AI overflow at{width}'
-            page.keyboard.press('Escape')
+            helper=page.locator('[data-demo-assist][data-assist-scope="channel"]:visible')
+            helper.locator('[data-assist-trigger]').click()
+            card=helper.locator('.fc-inline-assist-card')
+            expect(card.get_by_text('Använder vald text; inget AI-anrop.',exact=True)).to_be_visible()
+            card.get_by_role('button',name='Förbered exempel',exact=True).click()
+            expect(card.locator('[data-assist-preview="current"]')).to_be_visible()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Swedish contextual AI overflow at{width}'
+            card.get_by_role('button',name='Avbryt',exact=True).click()
             page.get_by_role('button', name='Tillbaka till FreeCollab', exact=True).click()
         checks['documentation_swedish_and_390_320px_layout'] = True
         actual = page.evaluate('(keys)=>Object.fromEntries(keys.map(key=>[key,localStorage.getItem(key)]))', list(seed))
@@ -258,12 +264,14 @@ def main():
               'frontend/src/components/DemoChannelSwitcher.tsx', 'frontend/src/components/DemoDocumentDesk.tsx',
               'frontend/src/components/DemoConnections.tsx', 'frontend/src/lib/demo-connections.ts',
               'frontend/src/components/DemoMessageActions.tsx', 'frontend/src/components/DemoTaskFromMessage.tsx',
-              'frontend/src/components/DemoAiFlow.tsx', 'frontend/src/lib/demo-ai.ts',
+              'frontend/src/lib/demo-ai.ts',
+              'frontend/src/components/DemoInlineAssist.tsx', 'frontend/src/lib/demo-assist.ts',
               'frontend/src/lib/demo-showroom.ts', 'frontend/src/lib/useModalFocus.ts',
               'frontend/src/styles/demo-showroom.css', 'frontend/src/styles/demo-channel-switcher.css',
               'frontend/src/styles/demo-document-desk.css', 'frontend/src/styles/demo-connections.css',
               'frontend/src/styles/demo-message-actions.css',
-              'frontend/src/styles/demo-ai-flow.css', 'frontend/src/i18n/demo-ai.sv.ts',
+              'frontend/src/i18n/demo-ai.sv.ts',
+              'frontend/src/styles/demo-inline-assist.css', 'frontend/src/i18n/demo-assist.sv.ts',
               'frontend/src/i18n/demo-showroom.sv.ts', 'frontend/tests/website-browser.py']
     args.report.write_text(json.dumps({'checks': checks, 'groups': len(checks), 'source_sha256': {
         name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in source},

@@ -80,7 +80,7 @@ export function CopilotPanel({ workspaceId, channelId, isAdmin = false, setupMod
     const sources = await Promise.all(choices.filter(choice => selected.includes(choice.key)).map(choice => prepareCopilotSource(choice, channelId, secure)));
     if (!current(version)) return;
     const chat = conversation || await copilotApi.create(workspaceId, channelId); if (!current(version)) return; setConversation(chat);
-    const result = await copilotApi.send(workspaceId, chat.id, { request_id: crypto.randomUUID(), expected_revision: chat.revision, prompt: prompt.startsWith('@') ? prompt : '@' + agent + ' ' + prompt, sources, disclose_to_provider: disclose, disclose_decrypted_content: discloseSecure, ...(targetProject && !secure ? { target_project_id: targetProject } : {}) });
+    const result = await copilotApi.send(workspaceId, chat.id, { request_id: crypto.randomUUID(), expected_revision: chat.revision, expected_config_revision: state.config_revision, prompt: prompt.startsWith('@') ? prompt : '@' + agent + ' ' + prompt, sources, disclose_to_provider: disclose, disclose_decrypted_content: discloseSecure, ...(targetProject && !secure ? { target_project_id: targetProject } : {}) });
     if (current(version)) { setTurns(previous => [...previous, result]); setConversation({ ...chat, revision: result.revision }); setPrompt(''); setSelected([]); setDisclose(false); setDiscloseSecure(false); setReview(''); }
   }
   async function reviewCitation(turn: CopilotTurn, id: string, version: number) {

@@ -21,7 +21,8 @@ REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proo
 SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/components/DemoChannelSwitcher.tsx','frontend/src/components/DemoDocumentDesk.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/lib/useModalFocus.ts','frontend/src/styles/demo-showroom.css','frontend/src/styles/demo-channel-switcher.css','frontend/src/styles/demo-document-desk.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 SOURCE += ['frontend/src/components/DemoConnections.tsx','frontend/src/lib/demo-connections.ts','frontend/src/styles/demo-connections.css']
 SOURCE += ['frontend/src/components/DemoMessageActions.tsx','frontend/src/components/DemoTaskFromMessage.tsx','frontend/src/styles/demo-message-actions.css']
-SOURCE += ['frontend/src/components/DemoAiFlow.tsx','frontend/src/lib/demo-ai.ts','frontend/src/styles/demo-ai-flow.css','frontend/src/i18n/demo-ai.sv.ts']
+SOURCE += ['frontend/src/lib/demo-ai.ts','frontend/src/i18n/demo-ai.sv.ts']
+SOURCE += ['frontend/src/components/DemoInlineAssist.tsx','frontend/src/lib/demo-assist.ts','frontend/src/styles/demo-inline-assist.css','frontend/src/i18n/demo-assist.sv.ts']
 
 def channel_trigger(page, swedish=False):
     return page.get_by_role('button',name='Välj kanal' if swedish else 'Choose channel',exact=True)
@@ -454,7 +455,7 @@ def message_task_checks(browser, app, checks, errors, unexpected):
     return images
 
 def public_ai_checks(browser, app, checks, errors, unexpected):
-    """The public AI preview reuses explicitly selected text without calling a model."""
+    """Assistance stays with its exact source; every write is deliberately approved."""
     images=[]
     for width,swedish in [(1440,False),(320,True)]:
         visitor=browser.new_context(viewport={'width':width,'height':1000},reduced_motion='reduce')
@@ -465,144 +466,169 @@ def public_ai_checks(browser, app, checks, errors, unexpected):
             page.goto(app,wait_until='networkidle')
             if swedish:
                 page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape')
-            names={'entry':'Prova AI' if swedish else 'Try AI','provider':'AI-leverantör' if swedish else 'AI provider','model':'AI-modell' if swedish else 'AI model','picker':'Ändra källor' if swedish else 'Change sources','prepare':'Förbered lokalt exempel' if swedish else 'Prepare local example','summary':'Sammanfattning' if swedish else 'Summary','reply':'Svar' if swedish else 'Reply','task':'Uppgift' if swedish else 'Task','continue':'Granska uppgiften' if swedish else 'Continue to task review','inspect':'Granska källan' if swedish else 'Inspect source','original':'Visa original' if swedish else 'View original','message':'Ditt demomeddelande' if swedish else 'Your demo message','send':'Skicka demomeddelande' if swedish else 'Send demo message','back':'Tillbaka till samtalet' if swedish else 'Back to conversation','task_title':'Uppgiftens titel' if swedish else 'Task title','unassigned':'Ingen ansvarig' if swedish else 'Unassigned','create':'Skapa uppgift' if swedish else 'Create task','cancel':'Avbryt' if swedish else 'Cancel'}
-            edited='Cobalt bridge review: the exact current document. '+('A selected material detail stays literal. '*10)+'TAIL_A <img src="https://invalid.example/ai-source">'
-            page.get_by_label('Redigera gårdens projektbeskrivning' if swedish else 'Edit courtyard brief',exact=True).fill(edited)
-            composer=page.get_by_label(names['message'],exact=True)
-            for index in range(6):
-                composer.fill('AI reading fixture '+str(index)+'. '+('A neutral observation keeps its place. '*4));page.get_by_role('button',name=names['send'],exact=True).click()
+            def text(en,sv):return sv if swedish else en
+            def scope(kind,container=None):return (container or page).locator('[data-demo-assist][data-assist-scope="'+kind+'"]:visible')
+            def open_help(help):
+                trigger=help.locator('[data-assist-trigger]')
+                expect(trigger).to_be_visible();assert trigger.bounding_box()['height']>=44
+                if trigger.get_attribute('aria-expanded')!='true':trigger.evaluate('(button)=>button.click()')
+                card=help.locator('.fc-inline-assist-card')
+                expect(card).to_be_visible();expect(card.locator('header h4')).to_be_focused()
+                expect(card.get_by_text(text('Uses selected text; no AI request.','Använder vald text; inget AI-anrop.'),exact=True)).to_be_visible()
+                return card
+            def prepare(card,en,sv):
+                card.get_by_role('button',name=text(en,sv),exact=True).click()
+                card.get_by_role('button',name=text('Prepare example','Förbered exempel'),exact=True).click()
+                result=card.locator('[data-assist-preview="current"]')
+                expect(result).to_be_visible();expect(result.locator('h5')).to_be_focused()
+                return result
+            def apply(result,en,sv):
+                button=result.get_by_role('button',name=re.compile('^'+re.escape(text(en,sv))+r'\b'))
+                expect(button).to_be_enabled();button.click()
+            def close_help(card,help):
+                card.get_by_role('button',name=text('Cancel','Avbryt'),exact=True).click()
+                expect(help.locator('[data-assist-trigger]')).to_be_focused()
+            def undo(help=None):(help.locator('..') if help is not None else scope('composer').locator('..')).get_by_role('button',name=text('Undo last assisted change','Ångra senast använda förslag'),exact=True).click()
+            def journey(en,sv):page.get_by_role('navigation',name=text('Follow the courtyard project','Följ gårdsprojektet'),exact=True).get_by_role('button',name=re.compile('^'+re.escape(text(en,sv)))).click()
+            composer=page.get_by_label(text('Your demo message','Ditt demomeddelande'),exact=True)
             source_text='Please bring cobalt bridge samples to the walkthrough.'
-            composer.fill(source_text);page.get_by_role('button',name=names['send'],exact=True).click()
+            composer.fill(source_text);page.get_by_role('button',name=text('Send demo message','Skicka demomeddelande'),exact=True).click()
             original=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(source_text,exact=True))
-            message_id=original.get_attribute('data-message-id')
-            draft='DO NOT INCLUDE this unsent private thought. Åäö.'
-            composer.fill(draft);composer.evaluate('(node)=>{window.aiComposer=node;node.setSelectionRange(3,15)}')
-            transcript=page.locator('.fc-showroom-transcript')
-            transcript.evaluate('(node)=>{window.aiTranscript=node;if(innerWidth>760)node.scrollTop=120;window.aiReading={top:node.scrollTop,width:node.clientWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}}')
-            entry=page.get_by_role('button',name=names['entry'],exact=True)
-            expect(entry).to_be_visible();assert entry.bounding_box()['height']>=44
-            entry.evaluate('(button)=>button.click()')
-            ai=page.locator('[data-ai-preview="local"]:visible')
-            expect(ai).to_be_visible()
-            expect(ai.get_by_text('Vald text återanvänds lokalt. Ingen AI-modell körs.' if swedish else 'Selected text is reused locally. No model inference takes place.',exact=True)).to_be_visible()
-            assert ai.locator('input[type=password]').count()==0
-            provider=ai.get_by_role('combobox',name=names['provider'],exact=True)
-            model=ai.get_by_role('textbox',name=names['model'],exact=True)
-            warning=ai.locator('.fc-demo-ai-warning')
-            expect(provider).to_have_value('grok');expect(warning).to_contain_text('Grok');expect(warning).to_contain_text('api.x.ai')
-            expect(warning).to_contain_text(model.input_value())
-            provider.select_option('openai');expect(model).to_have_value('gpt-4.1-mini');expect(warning).to_contain_text('api.openai.com')
-            provider.select_option('custom');model.fill('invalid model')
-            expect(model).to_have_attribute('aria-invalid','true');expect(ai.get_by_role('button',name=names['prepare'],exact=True)).to_be_disabled()
-            model.fill('workspace-model-2026');expect(model).to_have_attribute('aria-invalid','false');expect(warning).to_contain_text('workspace-model-2026')
-            picker=ai.locator('[data-ai-source-picker]')
-            def open_picker():
-                if picker.get_attribute('open') is None:picker.get_by_text(names['picker'],exact=True).click()
-            open_picker()
-            for box in picker.get_by_role('checkbox').all():
-                if box.is_checked():box.uncheck()
-            expect(ai.get_by_role('button',name=names['prepare'],exact=True)).to_be_disabled()
-            own_source=picker.locator('[data-ai-source-key="message:'+message_id+'"]')
-            document_source=picker.locator('[data-ai-source-key="document:brief"]')
-            own_source.get_by_role('checkbox').check();document_source.get_by_role('checkbox').check()
-            expect(picker.locator('[data-ai-source-key="document:design-palette"]')).to_have_count(0)
-            expect(ai.get_by_text(draft,exact=True)).to_have_count(0)
-            ai.get_by_role('button',name=names['summary'],exact=True).click()
-            ai.get_by_role('button',name=names['prepare'],exact=True).click()
-            result=ai.locator('[data-ai-result="current"]')
-            expect(result.get_by_role('heading')).to_be_focused()
-            expect(result).to_contain_text(source_text);expect(result).to_contain_text('Cobalt bridge review: the exact current document.')
-            expect(result.get_by_text(draft,exact=True)).to_have_count(0)
-            expect(result).not_to_contain_text('Shall we open up to the courtyard?')
-            expect(result.locator('.fc-demo-ai-citations button')).to_have_count(2)
-            assert ai.locator('img').count()==0
+            source_id=original.get_attribute('data-message-id')
+            dirty='   Keep   cobalt samples   ready.   Ask   the team about the bridge.  '
+            composer.fill(dirty);composer.evaluate('(node)=>{window.inlineComposer=node;node.setSelectionRange(3,15)}')
+            transcript=page.locator('.fc-showroom-transcript');transcript.evaluate('(node)=>{window.inlineTranscript=node}')
+            sent_count=transcript.locator('article').count()
+            helper=scope('composer');card=open_help(helper)
+            result=prepare(card,'Tidy my draft','Putsa mitt utkast')
+            expect(composer).to_have_value(dirty)
+            expect(result.locator('.fc-inline-assist-recipe blockquote')).to_have_text('Keep cobalt samples ready. Ask the team about the bridge.')
+            changed=dirty+' Updated.';composer.fill(changed)
+            expect(card.locator('[data-assist-preview="stale"]')).to_be_visible()
+            expect(card.locator('.fc-inline-assist-recipe>button')).to_be_disabled()
+            result=prepare(card,'Tidy my draft','Putsa mitt utkast')
+            apply(result,'Use tidy draft','Använd det putsade utkastet')
+            expect(composer).to_have_value('Keep cobalt samples ready. Ask the team about the bridge. Updated.')
+            assert transcript.locator('article').count()==sent_count
+            undo();expect(composer).to_have_value(changed)
+            result=prepare(card,'Shorten my draft','Korta mitt utkast')
+            expect(composer).to_have_value(changed)
+            apply(result,'Use shorter draft','Använd kortare utkast')
+            expect(composer).to_have_value('Keep cobalt samples ready.')
+            assert transcript.locator('article').count()==sent_count
+            undo();expect(composer).to_have_value(changed)
+            close_help(card,helper)
+            assert composer.evaluate('(node)=>node===window.inlineComposer') and transcript.evaluate('(node)=>node===window.inlineTranscript')
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
-            checks[str(width)+'px_public_ai_is_discoverable_provider_model_warnings_follow_choices_and_selected_local_output_ignores_drafts_and_foreign_sources']=True
+            checks[str(width)+'px_contextual_composer_preview_is_local_stale_safe_explicit_undoable_and_never_sends_a_draft']=True
 
-            document_source.get_by_text(names['inspect'],exact=True).click()
-            expect(document_source.locator('blockquote')).to_have_text(edited)
-            document_source.get_by_role('button',name=names['original'],exact=True).click()
-            expect(page.get_by_label('Redigera demodokument' if swedish else 'Edit demo document',exact=True)).to_have_value(edited)
-            page.get_by_role('button',name=names['back'],exact=True).click();expect(entry).to_be_focused()
-            entry.evaluate('(button)=>button.click()')
-            expect(provider).to_have_value('custom');expect(model).to_have_value('workspace-model-2026')
-            expect(result).to_be_visible()
-            expect(composer).to_have_value(draft)
-            assert composer.evaluate('(node)=>node===window.aiComposer&&node.selectionStart===3&&node.selectionEnd===15')
-            assert transcript.evaluate('(node)=>node===window.aiTranscript')
-            if width>760:assert transcript.evaluate('(node)=>node.scrollTop===window.aiReading.top&&node.clientWidth===window.aiReading.width&&node.clientHeight===window.aiReading.height&&node.scrollHeight===window.aiReading.scrollHeight')
-            result.locator('.fc-demo-ai-citations button').first.click()
-            expect(original).to_be_focused();expect(composer).to_have_value(draft)
-            entry.evaluate('(button)=>button.click()')
-            expect(result).to_be_visible();expect(model).to_have_value('workspace-model-2026')
-            checks[str(width)+'px_public_ai_full_edited_source_inspection_and_real_citations_preserve_session_composer_caret_and_conversation_reading']=True
-
-            ai.get_by_role('button',name=names['task'],exact=True).click();ai.get_by_role('button',name=names['prepare'],exact=True).click()
-            continuation=ai.get_by_role('button',name=names['continue'],exact=True)
-            expect(continuation).to_be_enabled()
-            open_picker();document_source.get_by_text(names['inspect'],exact=True).click()
-            document_source.get_by_role('button',name=names['original'],exact=True).click()
-            page.get_by_label('Redigera demodokument' if swedish else 'Edit demo document',exact=True).fill(edited.replace('TAIL_A','TAIL_B'))
-            entry.evaluate('(button)=>button.click()')
-            stale=ai.locator('[data-ai-result="stale"]')
-            expect(stale).to_be_visible();expect(continuation).to_be_disabled()
-            for citation in stale.locator('.fc-demo-ai-citations button').all():expect(citation).to_be_disabled()
-            ai.get_by_role('button',name=names['prepare'],exact=True).click();expect(continuation).to_be_enabled()
-            model.fill('workspace-model-next');expect(ai.locator('[data-ai-result]')).to_have_count(0)
-            ai.get_by_role('button',name=names['prepare'],exact=True).click();expect(continuation).to_be_enabled()
-            open_picker();own_source.get_by_role('checkbox').uncheck()
-            ai.get_by_role('button',name=names['prepare'],exact=True).click()
-            expect(continuation).to_have_count(0)
-            expect(ai.locator('[data-ai-result="current"]')).to_contain_text('Välj ett skickat meddelande' if swedish else 'Select a sent message')
-            own_source.get_by_role('checkbox').check();ai.get_by_role('button',name=names['prepare'],exact=True).click()
-            expect(continuation).to_be_enabled()
-            choose_channel(page,'design',swedish);entry.evaluate('(button)=>button.click()')
-            expect(provider).to_have_value('grok')
-            open_picker();expect(picker.locator('[data-ai-source-key="document:brief"]')).to_have_count(0)
-            expect(picker.locator('[data-ai-source-key="message:'+message_id+'"]')).to_have_count(0)
-            provider.select_option('openai');model.fill('design-model-2026')
-            ai.get_by_role('button',name=names['reply'],exact=True).click();ai.get_by_role('button',name=names['prepare'],exact=True).click()
-            expect(ai.locator('.fc-demo-ai-reply')).to_be_visible()
-            choose_channel(page,'studio',swedish);entry.evaluate('(button)=>button.click()')
-            expect(provider).to_have_value('custom');expect(model).to_have_value('workspace-model-next')
-            expect(ai.get_by_role('button',name=names['task'],exact=True)).to_have_attribute('aria-pressed','true')
-            expect(continuation).to_be_enabled();expect(composer).to_have_value(draft)
-            assert composer.evaluate('(node)=>node===window.aiComposer')
-            composer.evaluate('(node)=>node.setSelectionRange(3,15)')
-            checks[str(width)+'px_public_ai_blocks_stale_fulltext_and_setting_changes_document_only_task_and_restores_independent_channel_sessions']=True
-
-            image=REPORT.with_name('demo-public-ai-'+str(width)+('.sv' if swedish else '')+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            helper=scope('message',original);card=open_help(helper)
+            result=prepare(card,'Summarize this message','Sammanfatta meddelandet')
+            expect(result).to_contain_text(source_text);expect(result).not_to_contain_text(changed)
+            expect(result.locator('.fc-inline-assist-citations button')).to_have_count(1)
+            card.get_by_text(text('What is shared?','Vad delas?'),exact=True).click()
+            expect(card.locator('.fc-inline-assist-sharing')).to_contain_text('api.x.ai')
+            expect(card.locator('.fc-inline-assist-sharing')).to_contain_text(text('No service receives your sources.','Ingen tjänst tar emot dina källor.'))
+            result=prepare(card,'Draft a reply','Skriv ett svarsutkast')
+            expect(composer).to_have_value(changed)
+            apply(result,'Add reply to my draft','Lägg till svaret i mitt utkast')
+            reply=composer.input_value();assert reply.startswith(changed) and source_text in reply
+            assert transcript.locator('article').count()==sent_count
+            undo();expect(composer).to_have_value(changed)
+            result=prepare(card,'Prepare a task','Förbered en uppgift')
             expect(page.locator('.fc-demo-task-from-message')).to_have_count(0)
-            continuation.click()
+            apply(result,'Review task from this message','Granska uppgiften från meddelandet')
             review=page.locator('.fc-demo-task-from-message:visible')
-            expect(review.get_by_role('heading')).to_be_focused()
-            expect(review.get_by_label(names['task_title'],exact=True)).to_have_value(source_text)
-            expect(review.get_by_role('button',name=names['unassigned'],exact=True)).to_have_attribute('aria-pressed','true')
-            expect(review.get_by_role('button',name=names['create'],exact=True)).to_be_enabled()
-            review.get_by_role('button',name=names['cancel'],exact=True).click();expect(entry).to_be_focused()
-            expect(composer).to_have_value(draft)
-            entry.evaluate('(button)=>button.click()');expect(continuation).to_be_enabled();continuation.click()
-            review.get_by_role('button',name=names['create'],exact=True).click()
-            expect(page.get_by_role('checkbox',name=source_text,exact=True)).to_have_count(1)
-            expect(review.get_by_role('button',name=names['create'],exact=True)).to_have_count(0)
-            expect(composer).to_have_value(draft)
-            assert composer.evaluate('(node)=>node===window.aiComposer&&node.selectionStart===3&&node.selectionEnd===15')
-            entry.evaluate('(button)=>button.click()');continuation.click()
-            expect(page.get_by_role('checkbox',name=source_text,exact=True)).to_have_count(1)
-            expect(review.get_by_role('button',name=names['create'],exact=True)).to_have_count(0)
-            page.get_by_role('button',name='Verktyg' if swedish else 'Tools',exact=True).click();page.get_by_role('button',name='Återställ demo' if swedish else 'Reset demo',exact=True).click();page.get_by_role('button',name='Återställ den här demon' if swedish else 'Reset this demo',exact=True).click()
-            page.get_by_role('button',name='Try AI',exact=True).click()
-            fresh=page.locator('[data-ai-preview="local"]:visible')
-            expect(fresh.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
-            expect(fresh.locator('[data-ai-result]')).to_have_count(0)
+            expect(review.get_by_label(text('Task title','Uppgiftens titel'),exact=True)).to_have_value(source_text)
+            expect(review.get_by_role('button',name=text('Unassigned','Ingen ansvarig'),exact=True)).to_have_attribute('aria-pressed','true')
+            expect(page.get_by_role('checkbox',name=source_text,exact=True)).to_have_count(0)
+            task_title='  Review   cobalt samples  '
+            review.get_by_label(text('Task title','Uppgiftens titel'),exact=True).fill(task_title)
+            review.get_by_role('button',name='Noor',exact=True).click()
+            review.get_by_role('button',name=text('Create task','Skapa uppgift'),exact=True).click()
+            expect(page.get_by_role('checkbox',name=task_title.strip(),exact=True)).to_have_count(1)
+            review.get_by_role('button',name=text('Back to tasks','Tillbaka till uppgifter'),exact=True).click()
+            task_row=page.locator('[data-demo-task-id]').filter(has=page.get_by_role('checkbox',name=task_title.strip(),exact=True))
+            task_id=task_row.get_attribute('data-demo-task-id')
+            task_row.get_by_role('button',name=text('View source message','Visa källmeddelandet'),exact=True).click();expect(original).to_be_focused()
+            expect(composer).to_have_value(changed)
+            assert composer.evaluate('(node)=>node===window.inlineComposer')
+            checks[str(width)+'px_contextual_message_uses_only_its_cited_text_appends_reply_without_sending_and_requires_real_task_review']=True
+
+            edited='## Cobalt bridge\n\nThe exact current document.\n\n### Material review\n\n'+('Keep this material detail literal. '*12)+'TAIL_A <img src="https://invalid.example/inline-source">'
+            page.get_by_label(text('Edit courtyard brief','Redigera gårdens projektbeskrivning'),exact=True).fill(edited)
+            journey('Documents','Dokument')
+            stack_title=text('Reference material','Underlag')
+            stack=expand_stack(page,stack_title)
+            document_help=stack.locator('[data-assist-document="brief"] [data-demo-assist]')
+            card=open_help(document_help);result=prepare(card,'Outline this document','Skapa en dokumentöversikt')
+            editor=page.get_by_label(text('Edit demo document','Redigera demodokument'),exact=True)
+            expect(editor).to_have_value(edited)
+            expected=edited+'\n\n## '+text('Outline from this document','Översikt från dokumentet')+'\n\n- Cobalt bridge\n- Material review'
+            expect(result.locator('.fc-inline-assist-recipe blockquote')).to_contain_text('Cobalt bridge')
+            modified=edited.replace('TAIL_A','TAIL_B');editor.fill(modified)
+            expect(card.locator('[data-assist-preview="stale"]')).to_be_visible()
+            expect(card.locator('.fc-inline-assist-recipe>button')).to_be_disabled()
+            for citation in card.locator('.fc-inline-assist-citations button').all():expect(citation).to_be_disabled()
+            result=prepare(card,'Outline this document','Skapa en dokumentöversikt')
+            apply(result,'Append this outline','Lägg till översikten')
+            expect(editor).to_have_value(expected.replace('TAIL_A','TAIL_B'))
+            assert editor.input_value().startswith(modified) and page.locator('.fc-demo-desk img').count()==0
+            undo(document_help);expect(editor).to_have_value(modified)
+            close_help(card,document_help)
+            stack_help=stack.locator('[data-assist-stack="studio-reference"] [data-demo-assist]')
+            card=open_help(stack_help);result=prepare(card,'Summarize this stack','Sammanfatta högen')
+            expect(result).to_contain_text('Cobalt bridge');expect(result).not_to_contain_text(changed)
+            before=stack.locator('.fc-demo-desk-move select').evaluate_all('(nodes)=>nodes.map(node=>node.value)')
+            result=prepare(card,'Suggest a reading order','Föreslå läsordning')
+            expect(result.locator('.fc-inline-assist-recipe')).to_have_count(0)
+            assert stack.locator('.fc-demo-desk-move select').evaluate_all('(nodes)=>nodes.map(node=>node.value)')==before
+            image=REPORT.with_name('demo-inline-ai-'+str(width)+('.sv' if swedish else '')+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            result.locator('.fc-inline-assist-citations button').first.click()
+            expect(editor).to_be_focused();expect(composer).to_have_value(changed)
+            assert composer.evaluate('(node)=>node===window.inlineComposer')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_contextual_document_outline_preserves_original_checks_full_text_and_undo_while_stack_reading_order_never_moves_files']=True
+
+            journey('Tasks','Uppgifter')
+            task_row=page.locator('[data-demo-task-id="'+task_id+'"]')
+            helper=scope('task',task_row);card=open_help(helper)
+            result=prepare(card,'Find a next step','Hitta nästa steg')
+            expect(result).to_contain_text(source_text);expect(result.locator('.fc-inline-assist-recipe')).to_have_count(0)
+            result=prepare(card,'Clarify this task','Förtydliga uppgiften')
+            apply(result,'Use the source wording','Använd källans formulering')
+            expect(task_row.get_by_role('checkbox',name=source_text,exact=True)).not_to_be_checked();expect(task_row).to_contain_text('Noor')
+            undo(helper);expect(task_row.get_by_role('checkbox',name=task_title.strip(),exact=True)).not_to_be_checked();expect(task_row).to_contain_text('Noor')
+            page.get_by_role('button',name=text('Back to conversation','Tillbaka till samtalet'),exact=True).click()
+            helper=scope('channel');card=open_help(helper);result=prepare(card,'Recap this channel','Sammanfatta kanalen')
+            expect(result).to_contain_text(source_text);expect(result).not_to_contain_text(changed)
+            choose_channel(page,'design',swedish)
+            helper=scope('channel');card=open_help(helper);result=prepare(card,'Recap this channel','Sammanfatta kanalen')
+            expect(result).not_to_contain_text(source_text);expect(result).not_to_contain_text('Cobalt bridge')
+            choose_channel(page,'studio',swedish);expect(composer).to_have_value(changed)
+            page.get_by_role('button',name=text('Tools','Verktyg'),exact=True).click();page.get_by_role('tab',name=text('Connections','Anslutningar'),exact=True).click()
+            settings=page.locator('[data-demo-ai-settings]')
+            provider=settings.get_by_role('combobox',name=text('AI provider','AI-leverantör'),exact=True)
+            model=settings.get_by_role('textbox',name=text('AI model','AI-modell'),exact=True)
+            expect(provider).to_have_value('grok');provider.select_option('openai');expect(model).to_have_value('gpt-4.1-mini')
+            provider.select_option('custom');model.fill('workspace-inline-model')
+            settings.get_by_role('button',name=text('Use AI settings','Använd AI-inställningarna'),exact=True).click()
+            page.get_by_role('button',name=text('Tools','Verktyg'),exact=True).click();page.get_by_role('tab',name=text('Conversation','Samtal'),exact=True).click()
+            helper=scope('channel');card=open_help(helper)
+            expect(card.locator('.fc-inline-assist-provider')).to_contain_text('workspace-inline-model')
+            card.get_by_text(text('What is shared?','Vad delas?'),exact=True).click()
+            expect(card.locator('.fc-inline-assist-sharing')).to_contain_text(text('Your own installation (placeholder)','Din egen installation (platshållare)'))
+            close_help(card,helper)
+            page.get_by_role('button',name=text('Tools','Verktyg'),exact=True).click();page.get_by_role('button',name=text('Reset demo','Återställ demo'),exact=True).click();page.get_by_role('button',name=text('Reset this demo','Återställ den här demon'),exact=True).click()
             expect(page.locator('.fc-showroom-transcript').get_by_text(source_text,exact=True)).to_have_count(0)
-            fresh.get_by_role('textbox',name='AI model',exact=True).fill('not-persisted-model')
-            page.reload(wait_until='networkidle');page.get_by_role('button',name='Try AI',exact=True).click()
-            expect(fresh.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
-            expect(fresh.locator('[data-ai-result]')).to_have_count(0)
+            expect(scope('channel').locator('.fc-inline-assist-card')).to_have_count(0)
+            page.reload(wait_until='networkidle')
+            fresh=scope('channel');fresh.locator('[data-assist-trigger]').click();card=fresh.locator('.fc-inline-assist-card')
+            expect(card.locator('.fc-inline-assist-provider')).to_contain_text('grok-4.20-0309-non-reasoning')
+            expect(card.locator('[data-assist-preview]')).to_have_count(0)
             assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
-            checks[str(width)+'px_public_ai_hands_selected_message_to_review_without_automatic_creation_deduplicates_explicit_tasks_and_reset_reload_clear_previews']=True
+            checks[str(width)+'px_contextual_task_edits_are_cited_explicit_and_undoable_channel_sources_stay_separate_provider_preferences_and_reset_are_local']=True
         finally:visitor.close()
     return images
 
@@ -842,6 +868,11 @@ def main():
                 expect(page.get_by_role('heading',name='Shall we open up to the courtyard?',exact=True)).to_be_visible()
                 expect(page.get_by_text('Sample workspace · fictional people · changes stay in this tab',exact=True)).to_be_visible()
                 expect(page.get_by_role('img',name='A sunlit brick courtyard with trees, an open doorway and a shared table',exact=True)).to_be_visible()
+                page.evaluate('document.fonts.ready')
+                fresh_log=page.get_by_role('log',name='Sample conversation',exact=True)
+                opening=page.get_by_role('heading',name='Shall we open up to the courtyard?',exact=True)
+                assert fresh_log.evaluate('(node)=>node.scrollTop')==0,'A fresh conversation must start at its opening.'
+                assert opening.bounding_box()['y']>=fresh_log.bounding_box()['y']-1,'The opening heading must not be clipped above the conversation.'
                 stage='real focus and accessible bounded personal layout'
                 materials=page.locator('.fc-studio-materials')
                 page.get_by_role('button',name='Focus',exact=True).click();expect(materials).not_to_be_visible()
@@ -1082,19 +1113,18 @@ def main():
                             assert visitor.evaluate('localStorage.length')==0 and visitor.evaluate('sessionStorage.length')==0
                         checks[entry+'_actual_entry_provider_buttons_history_direct_hash_reload_and_shared_local_state']=True
                         visitor.goto(address+'#demo=assistant&provider=grok',wait_until='networkidle')
-                        direct_ai=visitor.locator('[data-ai-preview="local"]:visible')
-                        expect(direct_ai).to_be_visible()
-                        expect(direct_ai.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
-                        expect(direct_ai.get_by_text('Selected text is reused locally. No model inference takes place.',exact=True)).to_be_visible()
+                        direct_ai=visitor.locator('[data-demo-assist][data-assist-scope="channel"]:visible')
+                        expect(visitor.get_by_role('log')).to_be_visible()
+                        expect(visitor.locator('[data-ai-preview]')).to_have_count(0)
+                        direct_ai.locator('[data-assist-trigger]').click()
+                        expect(direct_ai.get_by_text('Uses selected text; no AI request.',exact=True)).to_be_visible()
                         expect(visitor.get_by_role('button',name='Microsoft 365 Preparation guide',exact=True)).to_have_count(0)
-                        direct_ai.get_by_role('textbox',name='AI model',exact=True).fill('direct-entry-local-model')
-                        direct_ai.get_by_role('button',name='Prepare local example',exact=True).click()
-                        expect(direct_ai.locator('[data-ai-result="current"]')).to_be_visible()
+                        direct_ai.get_by_role('button',name='Prepare example',exact=True).click()
+                        expect(direct_ai.locator('[data-assist-preview="current"]')).to_be_visible()
                         visitor.reload(wait_until='networkidle')
                         expect(direct_ai).to_be_visible()
-                        expect(direct_ai.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
-                        expect(direct_ai.locator('[data-ai-result]')).to_have_count(0)
-                        checks[entry+'_actual_direct_ai_hash_is_discoverable_local_ignores_sso_provider_and_reload_discards_preview']=True
+                        expect(direct_ai.locator('.fc-inline-assist-card')).to_have_count(0)
+                        checks[entry+'_legacy_ai_hash_returns_to_conversation_with_contextual_help_no_sso_misroute_and_no_persisted_result']=True
                     finally:routed.close()
                 assert not errors,errors
                 assert not unexpected,unexpected

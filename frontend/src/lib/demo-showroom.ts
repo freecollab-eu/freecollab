@@ -1,7 +1,7 @@
 /** Public showroom data. Every mutation is local and disappears on reset/reload. */
 export type DemoChannel = 'studio' | 'product' | 'design';
 export const demoChannels: readonly DemoChannel[] = ['studio', 'product', 'design'];
-export type DemoSection = 'chat' | 'projects' | 'documents' | 'assistant' | 'connections' | 'appearance';
+export type DemoSection = 'chat' | 'projects' | 'documents' | 'connections' | 'appearance';
 export type DemoProvider = 'microsoft' | 'google';
 export interface DemoDestination { section?: DemoSection; provider?: DemoProvider }
 export type DemoOwner = 'Maja' | 'Noor' | 'Elias' | 'Nora';
@@ -49,7 +49,7 @@ export function demoStackReferences(state: DemoState, channel: DemoChannel, stac
   const stack = demoChannelStacks(state, channel).find(row => row.id === stackId);
   return stack ? stack.references.map(id => state.messages[channel].find(message => message.id === id)).filter((message): message is DemoMessage => !!message) : [];
 }
-export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'assistant', 'connections', 'appearance'];
+export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'connections', 'appearance'];
 export function readDemoDestination(hash: string): DemoDestination | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   if (!params.has('demo')) return null;
@@ -100,7 +100,7 @@ export function createDemoState(): DemoState {
     ], stacks: createDemoStacks(), documentLinks: { studio: [], product: [], design: [] }, dismissedConnections: { studio: [], product: [], design: [] }, stackUndo: {}, nextId: 1, layout: createDemoLayout(), decision: null,
   };
 }
-export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_from_message'; channel: DemoChannel; messageId: string; text: string; owner?: DemoOwner } | { type: 'task_undo_created'; channel: DemoChannel; id: string; text: string; owner?: DemoOwner } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'document_link'; channel: DemoChannel; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId } | { type: 'document_unlink'; channel: DemoChannel; id: string } | { type: 'connection_dismiss'; channel: DemoChannel; id: string } | { type: 'connection_restore_dismissed'; channel: DemoChannel } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
+export type DemoAction = { type: 'document_compare'; channel: DemoChannel; id: string; expected: string | null; text: string | null } | { type: 'task_text_compare'; channel: DemoChannel; id: string; expected: DemoTask; text: string; sample: boolean } | { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_from_message'; channel: DemoChannel; messageId: string; text: string; owner?: DemoOwner } | { type: 'task_undo_created'; channel: DemoChannel; id: string; text: string; owner?: DemoOwner } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'document_link'; channel: DemoChannel; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId } | { type: 'document_unlink'; channel: DemoChannel; id: string } | { type: 'connection_dismiss'; channel: DemoChannel; id: string } | { type: 'connection_restore_dismissed'; channel: DemoChannel } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset') return createDemoState();
   if (action.type === 'layout_reset') return { ...state, layout: createDemoLayout() };
@@ -125,6 +125,20 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'task_add') {
     const text = action.text.trim(); if (!text || text.length > 180 || state.tasks.length >= 50) return state;
     return { ...state, nextId: state.nextId + 1, tasks: [...state.tasks, { id: 'local-' + state.nextId, text, done: false, sample: false, group: 'Team' }] };
+  }
+  if (action.type === 'document_compare') {
+    const document = state.documents.find(row => row.id === action.id && row.channel === action.channel);
+    if (!validChannel(action.channel) || !document || document.edited !== action.expected || (action.text !== null && (typeof action.text !== 'string' || action.text.length > 20000))) return state;
+    if (document.edited === action.text) return state;
+    return { ...state, documents: state.documents.map(row => row === document ? { ...row, edited: action.text } : row) };
+  }
+  if (action.type === 'task_text_compare') {
+    if (typeof action.text !== 'string') return state;
+    const task = state.tasks.find(row => row.id === action.id), expected = action.expected, text = action.text.trim();
+    if (!validChannel(action.channel) || !task || !expected || (task.source && task.source.channel !== action.channel) || !text || text.length > 180 || typeof action.sample !== 'boolean') return state;
+    if (task.id !== expected.id || task.text !== expected.text || task.sample !== expected.sample || task.done !== expected.done || task.owner !== expected.owner || task.group !== expected.group || task.source?.channel !== expected.source?.channel || task.source?.messageId !== expected.source?.messageId) return state;
+    if (task.text === text && task.sample === action.sample) return state;
+    return { ...state, tasks: state.tasks.map(row => row === task ? { ...row, text, sample: action.sample } : row) };
   }
   if (action.type === 'task_from_message') {
     if (!validChannel(action.channel) || !state.messages[action.channel].some(message => message.id === action.messageId) || state.tasks.some(task => task.source?.channel === action.channel && task.source.messageId === action.messageId)) return state;

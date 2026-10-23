@@ -89,8 +89,8 @@ test('explicit demo destinations round-trip both providers without taking over a
   assert.equal(readDemoDestination('#demo=connections&provider=untrusted').provider, undefined);
   assert.equal(readDemoDestination('#demo=untrusted&provider=google').section, 'chat');
   assert.equal(readDemoDestination('#demo=documents&provider=google').provider, undefined);
-  assert.equal(demoDestinationHash({ section: 'assistant' }), '#demo=assistant');
-  assert.equal(readDemoDestination('#demo=assistant&provider=google').section, 'assistant');
+  assert.equal(demoDestinationHash({ section: 'assistant' }), '#demo');
+  assert.equal(readDemoDestination('#demo=assistant&provider=google').section, 'chat');
   assert.equal(readDemoDestination('#demo=assistant&provider=google').provider, undefined);
 });
 
@@ -568,4 +568,85 @@ test('source tasks and their citation objects stay local to one visitor and disa
   assert.equal(JSON.stringify(reset), JSON.stringify(initial));
   assert.equal(JSON.stringify(reset).includes('Visitor-only follow-up'), false);
   assert.equal(secondDerived.tasks.at(-1).text, 'Another visitor follow-up');
+});
+
+test('document compare applies and undoes only the reviewed text while preserving newer work and stack membership', () => {
+  const initial = createDemoState(), text = 'The explicitly reviewed outline';
+  let state = demoReducer(initial, { type: 'document_compare', channel: 'studio', id: 'brief', expected: null, text });
+  assert.equal(state.documents[0].edited, text); assert.equal(initial.documents[0].edited, null);
+  assert.equal(state.nextId, initial.nextId); assert.equal(state.documents[0].source, initial.documents[0].source);
+  state = demoReducer(state, { type: 'message', channel: 'product', text: 'Keep this newer conversation', time: '12:15' });
+  state = demoReducer(state, { type: 'document_move', channel: 'studio', id: 'brief', stackId: 'studio-sketches' });
+  const messages = state.messages, tasks = state.tasks, stacks = state.stacks, stackUndo = state.stackUndo, nextId = state.nextId;
+  const restored = demoReducer(state, { type: 'document_compare', channel: 'studio', id: 'brief', expected: text, text: null });
+  assert.equal(restored.documents[0].edited, null); assert.equal(restored.documents[0].stackId, 'studio-sketches');
+  assert.equal(restored.messages, messages); assert.equal(restored.tasks, tasks); assert.equal(restored.stacks, stacks);
+  assert.equal(restored.stackUndo, stackUndo); assert.equal(restored.nextId, nextId);
+  assert.equal(restored.documents[0].owner, state.documents[0].owner); assert.equal(restored.documents[0].updatedLabel, state.documents[0].updatedLabel);
+  assert.equal(demoReducer(restored, { type: 'document_compare', channel: 'studio', id: 'brief', expected: text, text: null }), restored);
+});
+
+test('stale or foreign document comparisons cannot overwrite later edits, including a deliberate empty document', () => {
+  const initial = createDemoState();
+  const applied = demoReducer(initial, { type: 'document_compare', channel: 'studio', id: 'brief', expected: null, text: 'Reviewed text' });
+  const edited = demoReducer(applied, { type: 'document', id: 'brief', text: 'My newer writing' });
+  assert.equal(demoReducer(edited, { type: 'document_compare', channel: 'studio', id: 'brief', expected: 'Reviewed text', text: null }), edited);
+  assert.equal(demoReducer(edited, { type: 'document_compare', channel: 'studio', id: 'brief', expected: null, text: 'Outdated proposal' }), edited);
+  for (const action of [
+    { channel: 'product', id: 'brief', expected: null, text: 'Foreign write' },
+    { channel: 'studio', id: 'product-plan', expected: null, text: 'Foreign write' },
+    { channel: 'constructor', id: 'brief', expected: null, text: 'Invalid channel' },
+    { channel: 'studio', id: 'missing', expected: null, text: 'Missing target' },
+    { channel: 'studio', id: 'brief', expected: null, text: 'x'.repeat(20001) },
+    { channel: 'studio', id: 'brief', expected: null, text: 42 },
+  ]) assert.equal(demoReducer(initial, { type: 'document_compare', ...action }), initial);
+  const cleared = demoReducer(initial, { type: 'document_compare', channel: 'studio', id: 'brief', expected: null, text: '' });
+  assert.equal(cleared.documents[0].edited, '');
+  assert.equal(demoReducer(cleared, { type: 'document_compare', channel: 'studio', id: 'brief', expected: null, text: 'Do not replace an empty edit' }), cleared);
+  const boundary = demoReducer(cleared, { type: 'document_compare', channel: 'studio', id: 'brief', expected: '', text: 'x'.repeat(20000) });
+  assert.equal(boundary.documents[0].edited.length, 20000);
+});
+
+test('task text compare can restore a translated sample flag without undoing unrelated newer work', () => {
+  const initial = createDemoState(), original = initial.tasks.find(task => task.id === 'task-2');
+  let state = demoReducer(initial, { type: 'task_text_compare', channel: 'studio', id: original.id, expected: original, text: '  Granska materialet tillsammans  ', sample: false });
+  const applied = state.tasks.find(task => task.id === original.id);
+  assert.equal(applied.text, 'Granska materialet tillsammans'); assert.equal(applied.sample, false);
+  assert.equal(applied.group, original.group); assert.equal(applied.done, original.done); assert.equal(applied.owner, original.owner);
+  state = demoReducer(state, { type: 'task_from_message', channel: 'product', messageId: 'product-1', text: 'Keep the product task', owner: 'Noor' });
+  state = demoReducer(state, { type: 'document', id: 'brief', text: 'Keep the newer brief edit' });
+  const documents = state.documents, messages = state.messages, nextId = state.nextId, other = state.tasks.at(-1);
+  const restored = demoReducer(state, { type: 'task_text_compare', channel: 'studio', id: original.id, expected: applied, text: original.text, sample: original.sample });
+  assert.equal(restored.tasks.find(task => task.id === original.id).text, original.text);
+  assert.equal(restored.tasks.find(task => task.id === original.id).sample, true);
+  assert.equal(restored.tasks.at(-1), other); assert.equal(restored.documents, documents); assert.equal(restored.messages, messages); assert.equal(restored.nextId, nextId);
+  assert.equal(initial.tasks.find(task => task.id === original.id), original);
+  assert.equal(demoReducer(restored, { type: 'task_text_compare', channel: 'studio', id: original.id, expected: applied, text: original.text, sample: true }), restored);
+});
+
+test('task text compare protects every reviewed task field and its source citation from stale undo', () => {
+  const initial = demoReducer(createDemoState(), { type: 'task_from_message', channel: 'studio', messageId: 'studio-3', text: 'Review the sketch', owner: 'Maja' });
+  const original = initial.tasks.at(-1), appliedState = demoReducer(initial, { type: 'task_text_compare', channel: 'studio', id: original.id, expected: original, text: 'Use the actual source wording', sample: false });
+  const applied = appliedState.tasks.at(-1);
+  assert.equal(applied.source, original.source); assert.equal(applied.owner, original.owner);
+  const undo = { type: 'task_text_compare', channel: 'studio', id: original.id, expected: applied, text: original.text, sample: original.sample };
+  for (const patch of [{ text: 'A newer title' }, { done: true }, { owner: 'Noor' }, { group: 'Design' }, { sample: true }, { source: undefined }, { source: { channel: 'studio', messageId: 'studio-1' } }, { source: { channel: 'product', messageId: 'product-1' } }]) {
+    const changed = { ...appliedState, tasks: appliedState.tasks.map(task => task.id === applied.id ? { ...task, ...patch } : task) };
+    assert.equal(demoReducer(changed, undo), changed, JSON.stringify(patch));
+  }
+  assert.equal(demoReducer(appliedState, { ...undo, expected: { ...applied, id: 'another-task' } }), appliedState);
+  assert.equal(demoReducer(appliedState, { ...undo, channel: 'product' }), appliedState);
+  assert.equal(demoReducer(appliedState, { ...undo, channel: 'constructor' }), appliedState);
+  assert.equal(demoReducer(appliedState, { ...undo, id: 'missing' }), appliedState);
+  assert.equal(demoReducer(appliedState, { ...undo, expected: null }), appliedState);
+});
+
+test('task compare enforces title bounds and literal/sample transitions without consuming ids', () => {
+  const initial = createDemoState(), task = initial.tasks[1], action = { type: 'task_text_compare', channel: 'studio', id: task.id, expected: task, sample: false };
+  for (const patch of [{ text: ' ' }, { text: 'x'.repeat(181) }, { text: 'A title', sample: 'false' }]) assert.equal(demoReducer(initial, { ...action, ...patch }), initial);
+  assert.equal(demoReducer(initial, { ...action, text: task.text, sample: task.sample }), initial);
+  const literal = demoReducer(initial, { ...action, text: task.text });
+  assert.equal(literal.tasks[1].text, task.text); assert.equal(literal.tasks[1].sample, false); assert.equal(literal.nextId, initial.nextId);
+  const boundary = demoReducer(initial, { ...action, text: '  ' + 'x'.repeat(180) + '  ' });
+  assert.equal(boundary.tasks[1].text.length, 180); assert.equal(boundary.nextId, initial.nextId);
 });

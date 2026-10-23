@@ -63,10 +63,12 @@ class Source(Strict):
     text: str | None = Field(default=None, max_length=12000)
     event_ids: list[str] = Field(default_factory=list, max_length=4)
     revision: int | None = Field(default=None, ge=0)
+    expected_text_sha256: str | None = Field(default=None, pattern=r'^[a-f0-9]{64}$')
 
 class TurnInput(Strict):
     request_id: str = Field(pattern=r'^[A-Za-z0-9_-]{8,80}$')
     expected_revision: int = Field(ge=0, le=MAX_HISTORY)
+    expected_config_revision: int = Field(ge=1, strict=True)
     prompt: str = Field(min_length=1, max_length=4000)
     sources: list[Source] = Field(default_factory=list, max_length=8)
     disclose_to_provider: bool
@@ -133,6 +135,8 @@ def source_text(session, conversation, source, user_id, *, content=True):
             clip = session.get(ChannelClip, source.id, populate_existing=True)
             if not clip or clip.channel_id != conversation.channel_id or clip.content_mode != 'matrix' or clip.matrix_event_id not in source.event_ids:
                 raise HTTPException(409, 'Selected encrypted clip is unavailable or its event changed')
+        if source.expected_text_sha256 is not None and hashlib.sha256(source.text.encode('utf-8')).hexdigest()!=source.expected_text_sha256:
+            raise HTTPException(409,'Selected source changed; review it again before sending')
         ref['fingerprint'] = hashlib.sha256(dump(ref).encode()).hexdigest()
         return ref, source.text if content else ''
     if source.event_ids: raise HTTPException(422, 'Matrix references require an encrypted channel')
@@ -174,6 +178,8 @@ def source_text(session, conversation, source, user_id, *, content=True):
         # A trusted Yjs client supplies the reviewed text; server binds it to
         # the current authorized document revision rather than parsing CRDT.
         text=source.text; ref['fingerprint']=hashlib.sha256(dump([row.id,row.version]).encode()).hexdigest()
+    if source.expected_text_sha256 is not None and hashlib.sha256(text.encode('utf-8')).hexdigest()!=source.expected_text_sha256:
+        raise HTTPException(409,'Selected source changed; review it again before sending')
     return ref, text if content else ''
 
 

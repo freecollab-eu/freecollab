@@ -3,9 +3,7 @@
 FROM node:24-bookworm-slim AS builder
 WORKDIR /app
 COPY package*.json ./
-RUN --mount=type=secret,id=proxy_ca,required=false \
-    if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
-    ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --strict-ssl=true --no-audit --no-fund
+RUN ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --strict-ssl=true --no-audit --no-fund
 COPY . .
 RUN npx vite build --config vite.website.config.ts \
     && find dist-website -type d -exec chmod 0755 {} + \

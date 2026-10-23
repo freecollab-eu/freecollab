@@ -26,18 +26,30 @@ ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci
 npm run build:website
 ```
 
-For managed proxy/CA environments, pass the public trust bundle as the BuildKit
-secret `proxy_ca`; preserve the platform proxy and TLS verification. The normal
-customer application continues to use `frontend/Dockerfile` with its own backend.
+The published Dockerfile uses a plain dependency-install step: Railway's builder
+does not support BuildKit secret mounts. For a local build in a managed proxy/CA
+environment, use a temporary copy of the Dockerfile that adds
+`--mount=type=secret,id=proxy_ca,required=true` to that `RUN` and sets
+`NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca` for the same command. Pass the public
+trust bundle with `docker build --secret id=proxy_ca,src="$CODEX_PROXY_CERT"`.
+Preserve the platform proxy and TLS verification; keep the temporary Dockerfile
+outside the upload directory and never copy the certificate into an image layer.
+The customer application uses `frontend/Dockerfile` with its own backend.
 
 ## Railway preparation
 
-Railway deployment remains paused. These files create no project, service,
-domain, certificates or DNS changes. When the owner resumes deployment:
+These files create no project, service, domain, certificates or DNS changes.
+Verify the current Railway status and deployment result in your own project:
 
-1. Use a separate website service with repository root `frontend` and config
-   `/frontend/website/railway.json`; verify that its build context is `frontend`
-   and Dockerfile is `website/Dockerfile` in Railway's plan.
+1. Use a separate website service with repository root `/frontend` and Dockerfile
+   `website/Dockerfile`, relative to that build context. Set healthcheck `/healthz`
+   with timeout 120 seconds, one replica, restart on failure (five retries), and
+   leave build/start command overrides empty. Verify that the deployment actually
+   selects the Dockerfile builder. Railway no longer lets new services opt into
+   `railway.json`/`railway.toml`; configure these service settings directly or use
+   its current Infrastructure as Code workflow. The tracked
+   `/frontend/website/railway.json` is a legacy reference; do not substitute the
+   customer app's `/frontend/railway.json`.
 2. Set `PORT=8080`, then build the reviewed source. This service needs no volume,
    database URL, OAuth registration, API keys or signing material.
 3. Check `/healthz`, the landing page, `/#demo`, `/#docs`, EN/SV and a 320px

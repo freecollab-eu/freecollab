@@ -21,6 +21,7 @@ REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proo
 SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/components/DemoChannelSwitcher.tsx','frontend/src/components/DemoDocumentDesk.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/lib/useModalFocus.ts','frontend/src/styles/demo-showroom.css','frontend/src/styles/demo-channel-switcher.css','frontend/src/styles/demo-document-desk.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 SOURCE += ['frontend/src/components/DemoConnections.tsx','frontend/src/lib/demo-connections.ts','frontend/src/styles/demo-connections.css']
 SOURCE += ['frontend/src/components/DemoMessageActions.tsx','frontend/src/components/DemoTaskFromMessage.tsx','frontend/src/styles/demo-message-actions.css']
+SOURCE += ['frontend/src/components/DemoAiFlow.tsx','frontend/src/lib/demo-ai.ts','frontend/src/styles/demo-ai-flow.css','frontend/src/i18n/demo-ai.sv.ts']
 
 def channel_trigger(page, swedish=False):
     return page.get_by_role('button',name='Välj kanal' if swedish else 'Choose channel',exact=True)
@@ -449,6 +450,159 @@ def message_task_checks(browser, app, checks, errors, unexpected):
             assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
             checks[str(width)+'px_source_tasks_remain_channel_scoped_and_optional_owner_reset_reload_discard_tasks_reviews_and_drafts']=True
+        finally:visitor.close()
+    return images
+
+def public_ai_checks(browser, app, checks, errors, unexpected):
+    """The public AI preview reuses explicitly selected text without calling a model."""
+    images=[]
+    for width,swedish in [(1440,False),(320,True)]:
+        visitor=browser.new_context(viewport={'width':width,'height':1000},reduced_motion='reduce')
+        try:
+            page=visitor.new_page();page.set_default_timeout(20000)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+            page.goto(app,wait_until='networkidle')
+            if swedish:
+                page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape')
+            names={'entry':'Prova AI' if swedish else 'Try AI','provider':'AI-leverantör' if swedish else 'AI provider','model':'AI-modell' if swedish else 'AI model','picker':'Ändra källor' if swedish else 'Change sources','prepare':'Förbered lokalt exempel' if swedish else 'Prepare local example','summary':'Sammanfattning' if swedish else 'Summary','reply':'Svar' if swedish else 'Reply','task':'Uppgift' if swedish else 'Task','continue':'Granska uppgiften' if swedish else 'Continue to task review','inspect':'Granska källan' if swedish else 'Inspect source','original':'Visa original' if swedish else 'View original','message':'Ditt demomeddelande' if swedish else 'Your demo message','send':'Skicka demomeddelande' if swedish else 'Send demo message','back':'Tillbaka till samtalet' if swedish else 'Back to conversation','task_title':'Uppgiftens titel' if swedish else 'Task title','unassigned':'Ingen ansvarig' if swedish else 'Unassigned','create':'Skapa uppgift' if swedish else 'Create task','cancel':'Avbryt' if swedish else 'Cancel'}
+            edited='Cobalt bridge review: the exact current document. '+('A selected material detail stays literal. '*10)+'TAIL_A <img src="https://invalid.example/ai-source">'
+            page.get_by_label('Redigera gårdens projektbeskrivning' if swedish else 'Edit courtyard brief',exact=True).fill(edited)
+            composer=page.get_by_label(names['message'],exact=True)
+            for index in range(6):
+                composer.fill('AI reading fixture '+str(index)+'. '+('A neutral observation keeps its place. '*4));page.get_by_role('button',name=names['send'],exact=True).click()
+            source_text='Please bring cobalt bridge samples to the walkthrough.'
+            composer.fill(source_text);page.get_by_role('button',name=names['send'],exact=True).click()
+            original=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(source_text,exact=True))
+            message_id=original.get_attribute('data-message-id')
+            draft='DO NOT INCLUDE this unsent private thought. Åäö.'
+            composer.fill(draft);composer.evaluate('(node)=>{window.aiComposer=node;node.setSelectionRange(3,15)}')
+            transcript=page.locator('.fc-showroom-transcript')
+            transcript.evaluate('(node)=>{window.aiTranscript=node;if(innerWidth>760)node.scrollTop=120;window.aiReading={top:node.scrollTop,width:node.clientWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}}')
+            entry=page.get_by_role('button',name=names['entry'],exact=True)
+            expect(entry).to_be_visible();assert entry.bounding_box()['height']>=44
+            entry.evaluate('(button)=>button.click()')
+            ai=page.locator('[data-ai-preview="local"]:visible')
+            expect(ai).to_be_visible()
+            expect(ai.get_by_text('Vald text återanvänds lokalt. Ingen AI-modell körs.' if swedish else 'Selected text is reused locally. No model inference takes place.',exact=True)).to_be_visible()
+            assert ai.locator('input[type=password]').count()==0
+            provider=ai.get_by_role('combobox',name=names['provider'],exact=True)
+            model=ai.get_by_role('textbox',name=names['model'],exact=True)
+            warning=ai.locator('.fc-demo-ai-warning')
+            expect(provider).to_have_value('grok');expect(warning).to_contain_text('Grok');expect(warning).to_contain_text('api.x.ai')
+            expect(warning).to_contain_text(model.input_value())
+            provider.select_option('openai');expect(model).to_have_value('gpt-4.1-mini');expect(warning).to_contain_text('api.openai.com')
+            provider.select_option('custom');model.fill('invalid model')
+            expect(model).to_have_attribute('aria-invalid','true');expect(ai.get_by_role('button',name=names['prepare'],exact=True)).to_be_disabled()
+            model.fill('workspace-model-2026');expect(model).to_have_attribute('aria-invalid','false');expect(warning).to_contain_text('workspace-model-2026')
+            picker=ai.locator('[data-ai-source-picker]')
+            def open_picker():
+                if picker.get_attribute('open') is None:picker.get_by_text(names['picker'],exact=True).click()
+            open_picker()
+            for box in picker.get_by_role('checkbox').all():
+                if box.is_checked():box.uncheck()
+            expect(ai.get_by_role('button',name=names['prepare'],exact=True)).to_be_disabled()
+            own_source=picker.locator('[data-ai-source-key="message:'+message_id+'"]')
+            document_source=picker.locator('[data-ai-source-key="document:brief"]')
+            own_source.get_by_role('checkbox').check();document_source.get_by_role('checkbox').check()
+            expect(picker.locator('[data-ai-source-key="document:design-palette"]')).to_have_count(0)
+            expect(ai.get_by_text(draft,exact=True)).to_have_count(0)
+            ai.get_by_role('button',name=names['summary'],exact=True).click()
+            ai.get_by_role('button',name=names['prepare'],exact=True).click()
+            result=ai.locator('[data-ai-result="current"]')
+            expect(result.get_by_role('heading')).to_be_focused()
+            expect(result).to_contain_text(source_text);expect(result).to_contain_text('Cobalt bridge review: the exact current document.')
+            expect(result.get_by_text(draft,exact=True)).to_have_count(0)
+            expect(result).not_to_contain_text('Shall we open up to the courtyard?')
+            expect(result.locator('.fc-demo-ai-citations button')).to_have_count(2)
+            assert ai.locator('img').count()==0
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_public_ai_is_discoverable_provider_model_warnings_follow_choices_and_selected_local_output_ignores_drafts_and_foreign_sources']=True
+
+            document_source.get_by_text(names['inspect'],exact=True).click()
+            expect(document_source.locator('blockquote')).to_have_text(edited)
+            document_source.get_by_role('button',name=names['original'],exact=True).click()
+            expect(page.get_by_label('Redigera demodokument' if swedish else 'Edit demo document',exact=True)).to_have_value(edited)
+            page.get_by_role('button',name=names['back'],exact=True).click();expect(entry).to_be_focused()
+            entry.evaluate('(button)=>button.click()')
+            expect(provider).to_have_value('custom');expect(model).to_have_value('workspace-model-2026')
+            expect(result).to_be_visible()
+            expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.aiComposer&&node.selectionStart===3&&node.selectionEnd===15')
+            assert transcript.evaluate('(node)=>node===window.aiTranscript')
+            if width>760:assert transcript.evaluate('(node)=>node.scrollTop===window.aiReading.top&&node.clientWidth===window.aiReading.width&&node.clientHeight===window.aiReading.height&&node.scrollHeight===window.aiReading.scrollHeight')
+            result.locator('.fc-demo-ai-citations button').first.click()
+            expect(original).to_be_focused();expect(composer).to_have_value(draft)
+            entry.evaluate('(button)=>button.click()')
+            expect(result).to_be_visible();expect(model).to_have_value('workspace-model-2026')
+            checks[str(width)+'px_public_ai_full_edited_source_inspection_and_real_citations_preserve_session_composer_caret_and_conversation_reading']=True
+
+            ai.get_by_role('button',name=names['task'],exact=True).click();ai.get_by_role('button',name=names['prepare'],exact=True).click()
+            continuation=ai.get_by_role('button',name=names['continue'],exact=True)
+            expect(continuation).to_be_enabled()
+            open_picker();document_source.get_by_text(names['inspect'],exact=True).click()
+            document_source.get_by_role('button',name=names['original'],exact=True).click()
+            page.get_by_label('Redigera demodokument' if swedish else 'Edit demo document',exact=True).fill(edited.replace('TAIL_A','TAIL_B'))
+            entry.evaluate('(button)=>button.click()')
+            stale=ai.locator('[data-ai-result="stale"]')
+            expect(stale).to_be_visible();expect(continuation).to_be_disabled()
+            for citation in stale.locator('.fc-demo-ai-citations button').all():expect(citation).to_be_disabled()
+            ai.get_by_role('button',name=names['prepare'],exact=True).click();expect(continuation).to_be_enabled()
+            model.fill('workspace-model-next');expect(ai.locator('[data-ai-result]')).to_have_count(0)
+            ai.get_by_role('button',name=names['prepare'],exact=True).click();expect(continuation).to_be_enabled()
+            open_picker();own_source.get_by_role('checkbox').uncheck()
+            ai.get_by_role('button',name=names['prepare'],exact=True).click()
+            expect(continuation).to_have_count(0)
+            expect(ai.locator('[data-ai-result="current"]')).to_contain_text('Välj ett skickat meddelande' if swedish else 'Select a sent message')
+            own_source.get_by_role('checkbox').check();ai.get_by_role('button',name=names['prepare'],exact=True).click()
+            expect(continuation).to_be_enabled()
+            choose_channel(page,'design',swedish);entry.evaluate('(button)=>button.click()')
+            expect(provider).to_have_value('grok')
+            open_picker();expect(picker.locator('[data-ai-source-key="document:brief"]')).to_have_count(0)
+            expect(picker.locator('[data-ai-source-key="message:'+message_id+'"]')).to_have_count(0)
+            provider.select_option('openai');model.fill('design-model-2026')
+            ai.get_by_role('button',name=names['reply'],exact=True).click();ai.get_by_role('button',name=names['prepare'],exact=True).click()
+            expect(ai.locator('.fc-demo-ai-reply')).to_be_visible()
+            choose_channel(page,'studio',swedish);entry.evaluate('(button)=>button.click()')
+            expect(provider).to_have_value('custom');expect(model).to_have_value('workspace-model-next')
+            expect(ai.get_by_role('button',name=names['task'],exact=True)).to_have_attribute('aria-pressed','true')
+            expect(continuation).to_be_enabled();expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.aiComposer')
+            composer.evaluate('(node)=>node.setSelectionRange(3,15)')
+            checks[str(width)+'px_public_ai_blocks_stale_fulltext_and_setting_changes_document_only_task_and_restores_independent_channel_sessions']=True
+
+            image=REPORT.with_name('demo-public-ai-'+str(width)+('.sv' if swedish else '')+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            expect(page.locator('.fc-demo-task-from-message')).to_have_count(0)
+            continuation.click()
+            review=page.locator('.fc-demo-task-from-message:visible')
+            expect(review.get_by_role('heading')).to_be_focused()
+            expect(review.get_by_label(names['task_title'],exact=True)).to_have_value(source_text)
+            expect(review.get_by_role('button',name=names['unassigned'],exact=True)).to_have_attribute('aria-pressed','true')
+            expect(review.get_by_role('button',name=names['create'],exact=True)).to_be_enabled()
+            review.get_by_role('button',name=names['cancel'],exact=True).click();expect(entry).to_be_focused()
+            expect(composer).to_have_value(draft)
+            entry.evaluate('(button)=>button.click()');expect(continuation).to_be_enabled();continuation.click()
+            review.get_by_role('button',name=names['create'],exact=True).click()
+            expect(page.get_by_role('checkbox',name=source_text,exact=True)).to_have_count(1)
+            expect(review.get_by_role('button',name=names['create'],exact=True)).to_have_count(0)
+            expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.aiComposer&&node.selectionStart===3&&node.selectionEnd===15')
+            entry.evaluate('(button)=>button.click()');continuation.click()
+            expect(page.get_by_role('checkbox',name=source_text,exact=True)).to_have_count(1)
+            expect(review.get_by_role('button',name=names['create'],exact=True)).to_have_count(0)
+            page.get_by_role('button',name='Verktyg' if swedish else 'Tools',exact=True).click();page.get_by_role('button',name='Återställ demo' if swedish else 'Reset demo',exact=True).click();page.get_by_role('button',name='Återställ den här demon' if swedish else 'Reset this demo',exact=True).click()
+            page.get_by_role('button',name='Try AI',exact=True).click()
+            fresh=page.locator('[data-ai-preview="local"]:visible')
+            expect(fresh.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
+            expect(fresh.locator('[data-ai-result]')).to_have_count(0)
+            expect(page.locator('.fc-showroom-transcript').get_by_text(source_text,exact=True)).to_have_count(0)
+            fresh.get_by_role('textbox',name='AI model',exact=True).fill('not-persisted-model')
+            page.reload(wait_until='networkidle');page.get_by_role('button',name='Try AI',exact=True).click()
+            expect(fresh.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+            expect(fresh.locator('[data-ai-result]')).to_have_count(0)
+            assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_public_ai_hands_selected_message_to_review_without_automatic_creation_deduplicates_explicit_tasks_and_reset_reload_clear_previews']=True
         finally:visitor.close()
     return images
 
@@ -927,6 +1081,20 @@ def main():
                         if entry=='website':
                             assert visitor.evaluate('localStorage.length')==0 and visitor.evaluate('sessionStorage.length')==0
                         checks[entry+'_actual_entry_provider_buttons_history_direct_hash_reload_and_shared_local_state']=True
+                        visitor.goto(address+'#demo=assistant&provider=grok',wait_until='networkidle')
+                        direct_ai=visitor.locator('[data-ai-preview="local"]:visible')
+                        expect(direct_ai).to_be_visible()
+                        expect(direct_ai.get_by_role('combobox',name='AI provider',exact=True)).to_have_value('grok')
+                        expect(direct_ai.get_by_text('Selected text is reused locally. No model inference takes place.',exact=True)).to_be_visible()
+                        expect(visitor.get_by_role('button',name='Microsoft 365 Preparation guide',exact=True)).to_have_count(0)
+                        direct_ai.get_by_role('textbox',name='AI model',exact=True).fill('direct-entry-local-model')
+                        direct_ai.get_by_role('button',name='Prepare local example',exact=True).click()
+                        expect(direct_ai.locator('[data-ai-result="current"]')).to_be_visible()
+                        visitor.reload(wait_until='networkidle')
+                        expect(direct_ai).to_be_visible()
+                        expect(direct_ai.get_by_role('textbox',name='AI model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+                        expect(direct_ai.locator('[data-ai-result]')).to_have_count(0)
+                        checks[entry+'_actual_direct_ai_hash_is_discoverable_local_ignores_sso_provider_and_reload_discards_preview']=True
                     finally:routed.close()
                 assert not errors,errors
                 assert not unexpected,unexpected
@@ -938,10 +1106,12 @@ def main():
                 connection_images=connection_checks(browser,app,checks,errors,unexpected)
                 stage='source-aware message tasks, less typing, provenance and channel continuity'
                 message_task_images=message_task_checks(browser,app,checks,errors,unexpected)
+                stage='public local AI preview, exact selected sources, stale guards and explicit task review'
+                public_ai_images=public_ai_checks(browser,app,checks,errors,unexpected)
                 assert not errors,errors
                 assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':False,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images+connection_images+message_task_images,'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':False,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images+connection_images+message_task_images+public_ai_images,'source_sha256':source_hashes},indent=2)+'\n')
         except Exception:
             print('Failed stage: '+stage)
             print((private/'vite.log').read_text()[-3500:]);raise

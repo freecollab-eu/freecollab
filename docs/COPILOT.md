@@ -22,6 +22,10 @@ Before sending, an inline notice shows the saved provider hostname, configured m
 
 The existing per-request provider disclosure and additional secure-content acknowledgment remain required. Quick actions do not check those boxes, select extra sources, send a prompt or approve a task.
 
+## Public interactive preview
+
+The public demo has a visible **Try AI** entry and a direct `#demo=assistant` destination. Choose Grok, OpenAI or an example compatible service, select the current sample channel’s messages/documents, inspect the disclosure/cost warnings, and prepare an explicitly local example. Examples quote selected content or use fixed templates; no model is invoked, no API key is collected, and no provider or account request is made. Source citations open the original message or document. A task example can continue to the existing editable task review only when its selected sent message and preview controls still match. Creating the demo task remains a separate explicit action. Each channel keeps its own preview choices in memory; reset/reload clears them. This demonstrates the review flow rather than a production multi-step AI runner.
+
 ## Explicit context and citations
 
 Choose **Choose messages, documents and files**, then check only the sources you intend to disclose. Native message content is read only for those selected IDs. Text/JSON files must be UTF-8 and at most 12 KB; immutable file identities and current file availability are checked. Shared documents are reconstructed and verified by the trusted Yjs client, with up to 12,000 document characters bound to the current authorized document version. Each request is limited to eight sources and 24,000 context characters. There is no hidden index, background summarizer, automatic channel history ingestion or provider-initiated read tool.

@@ -89,6 +89,9 @@ test('explicit demo destinations round-trip both providers without taking over a
   assert.equal(readDemoDestination('#demo=connections&provider=untrusted').provider, undefined);
   assert.equal(readDemoDestination('#demo=untrusted&provider=google').section, 'chat');
   assert.equal(readDemoDestination('#demo=documents&provider=google').provider, undefined);
+  assert.equal(demoDestinationHash({ section: 'assistant' }), '#demo=assistant');
+  assert.equal(readDemoDestination('#demo=assistant&provider=google').section, 'assistant');
+  assert.equal(readDemoDestination('#demo=assistant&provider=google').provider, undefined);
 });
 
 test('a local decision creates one owned next-step task beside the same edited brief', () => {

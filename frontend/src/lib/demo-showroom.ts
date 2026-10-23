@@ -1,7 +1,7 @@
 /** Public showroom data. Every mutation is local and disappears on reset/reload. */
 export type DemoChannel = 'studio' | 'product' | 'design';
 export const demoChannels: readonly DemoChannel[] = ['studio', 'product', 'design'];
-export type DemoSection = 'chat' | 'projects' | 'documents' | 'connections' | 'appearance';
+export type DemoSection = 'chat' | 'projects' | 'documents' | 'assistant' | 'connections' | 'appearance';
 export type DemoProvider = 'microsoft' | 'google';
 export interface DemoDestination { section?: DemoSection; provider?: DemoProvider }
 export type DemoOwner = 'Maja' | 'Noor' | 'Elias' | 'Nora';
@@ -49,7 +49,7 @@ export function demoStackReferences(state: DemoState, channel: DemoChannel, stac
   const stack = demoChannelStacks(state, channel).find(row => row.id === stackId);
   return stack ? stack.references.map(id => state.messages[channel].find(message => message.id === id)).filter((message): message is DemoMessage => !!message) : [];
 }
-export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'connections', 'appearance'];
+export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'assistant', 'connections', 'appearance'];
 export function readDemoDestination(hash: string): DemoDestination | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   if (!params.has('demo')) return null;

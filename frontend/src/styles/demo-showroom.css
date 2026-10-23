@@ -8,6 +8,7 @@
 .fc-showroom :focus-visible{outline:2px solid var(--fc-accent);outline-offset:3px}
 .fc-showroom .fc-showroom-subtle{border-color:transparent;background:transparent;font-size:12px}
 .fc-showroom .fc-showroom-primary{background:var(--fc-accent);border-color:var(--fc-accent);color:var(--fc-on-accent)}
+.fc-showroom .fc-showroom-primary:hover{background:var(--fc-accent);border-color:var(--fc-accent);color:var(--fc-on-accent);box-shadow:0 0 0 2px var(--fc-accent-soft)}
 .fc-showroom button[aria-pressed=true]{color:var(--fc-accent);background:var(--fc-accent-soft)}
 .fc-showroom p,.fc-showroom h1,.fc-showroom h2,.fc-showroom h3,.fc-showroom label,.fc-showroom strong{overflow-wrap:anywhere}
 .fc-showroom-top{display:flex;align-items:center;gap:clamp(.65rem,2vw,2rem);max-width:1680px;margin:auto;padding:1.7rem clamp(1.25rem,4vw,4.5rem) 1rem}
@@ -304,6 +305,8 @@
 .fc-showroom .fc-studio-related { gap: .4rem; }
 .fc-studio-related small { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 .3rem; border-radius: 50%; color: var(--fc-accent); background: var(--fc-accent-soft); font-size: 10px; font-variant-numeric: tabular-nums; }
 @media (max-width: 360px) { .fc-studio-context > div { column-gap: .1rem; } .fc-studio-context button { padding-left: .35rem; padding-right: .35rem; } }
+.fc-studio-context .fc-studio-ai-entry { min-height: 44px; color: var(--fc-accent); background: var(--fc-accent-soft); border-color: color-mix(in srgb, var(--fc-accent) 25%, var(--fc-border)); font-size: 12px; font-weight: 500; }
+.fc-studio-journey > div { flex-wrap: wrap; }
 
 .fc-studio-related small[data-empty=true] { visibility: hidden; }
 

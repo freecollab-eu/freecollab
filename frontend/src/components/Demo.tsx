@@ -1,10 +1,11 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent } from 'react';
-import { ArrowLeft, ArrowUp, ArrowDown, ArrowUpRight, Check, CheckCheck, ChevronDown, FileText, LayoutGrid, Link2, MessageSquare, Palette, Pin, Plus, Plug, RotateCcw, Send, SlidersHorizontal, Download, Focus, Menu, X } from 'lucide-react';
+import { ArrowLeft, ArrowUp, ArrowDown, ArrowUpRight, Check, CheckCheck, ChevronDown, FileText, LayoutGrid, Link2, MessageSquare, Palette, Pin, Plus, Plug, RotateCcw, Send, SlidersHorizontal, Sparkles, Download, Focus, Menu, X } from 'lucide-react';
 import { useI18n, type Locale } from '../i18n';
 import swedish from '../i18n/demo-showroom.sv';
 import refinementSwedish from '../i18n/studio-refinement.sv';
 import journeySwedish from '../i18n/demo-journey.sv';
 import flowSwedish from '../i18n/demo-natural-flow.sv';
+import aiSwedish from '../i18n/demo-ai.sv';
 import courtyard from '../assets/open-studio/courtyard.png';
 import portraits from '../assets/open-studio/portraits.png';
 import { Brand } from './Brand';
@@ -13,6 +14,8 @@ import { DemoDocumentDesk, DEMO_MESSAGE_DRAG_TYPE } from './DemoDocumentDesk';
 import { DemoConnections } from './DemoConnections';
 import { DemoMessageActions } from './DemoMessageActions';
 import { DemoTaskFromMessage } from './DemoTaskFromMessage';
+import { DemoAiFlow } from './DemoAiFlow';
+import { buildDemoAiSources, createDemoAiSession, demoAiRunIsCurrent, type DemoAiRun, type DemoAiSession, type DemoAiSource } from '../lib/demo-ai';
 import { suggestDemoConnections } from '../lib/demo-connections';
 import { useModalFocus } from '../lib/useModalFocus';
 import { buildAppearanceTokens, DEFAULT_APPEARANCE, PRESETS, type AppearancePreferences } from '../lib/appearance';
@@ -20,8 +23,8 @@ import { createDemoState, demoCallbackExample, demoConnectionProviders, demoConn
 import '../styles/demo-showroom.css';
 
 export interface DemoProps { onBack: () => void; onOpenApp?: () => void; destination?: DemoDestination }
-const sectionNames: Record<DemoSection, string> = { chat: 'Conversation', projects: 'Projects', documents: 'Documents', connections: 'Connections', appearance: 'Appearance' };
-const sectionIcons = { chat: MessageSquare, projects: LayoutGrid, documents: FileText, connections: Plug, appearance: Palette };
+const sectionNames: Record<DemoSection, string> = { chat: 'Conversation', projects: 'Projects', documents: 'Documents', assistant: 'AI flow', connections: 'Connections', appearance: 'Appearance' };
+const sectionIcons = { chat: MessageSquare, projects: LayoutGrid, documents: FileText, assistant: Sparkles, connections: Plug, appearance: Palette };
 interface MessageTaskDraft { messageId: string; text: string; owner: DemoOwner | '' }
 interface MessageTaskCreation { id: string; text: string; owner?: DemoOwner }
 const createChannels = (): DemoManagedChannel[] => [
@@ -36,7 +39,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   const [localLocale, setLocalLocale] = useState<Locale | null>(null);
   const locale = localLocale ?? appLocale;
   function t(source: string, variables: Record<string, string | number> = {}) {
-    const text = locale === 'sv' ? (swedish[source] ?? refinementSwedish[source] ?? journeySwedish[source] ?? flowSwedish[source] ?? source) : source;
+    const text = locale === 'sv' ? (aiSwedish[source] ?? swedish[source] ?? refinementSwedish[source] ?? journeySwedish[source] ?? flowSwedish[source] ?? source) : source;
     return text.replace(/\{([A-Za-z][A-Za-z0-9_]*)\}/g, (whole, key: string) => Object.prototype.hasOwnProperty.call(variables, key) ? String(variables[key]) : whole);
   }
   const [toolsOpen, setToolsOpen] = useState(false), [layoutOpen, setLayoutOpen] = useState(false);
@@ -52,7 +55,9 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   const [managedChannels, setManagedChannels] = useState(createChannels);
   const [connectionSettings, setConnectionSettings] = useState<Record<DemoChannel, boolean>>({ studio: true, product: true, design: true });
   const [pendingReference, setPendingReference] = useState<DemoMessage | null>(null);
-  const [contextView, setContextView] = useState<'documents' | 'projects' | 'relations' | null>(null);
+  const [contextView, setContextView] = useState<'documents' | 'projects' | 'relations' | 'assistant' | null>(null);
+  const [aiSessions, setAiSessions] = useState<Partial<Record<DemoChannel, DemoAiSession>>>({});
+  const aiEntry = useRef<HTMLButtonElement>(null);
   const contextPanel = useRef<HTMLElement>(null);
   const contextOrigin = useRef<{ element: HTMLElement; x: number; y: number } | null>(null);
   const reading = useRef<Partial<Record<DemoChannel, { top: number; following: boolean }>>>({});
@@ -84,6 +89,8 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   const documentConnections = useMemo(() => connectionsEnabled && documentConnectionsActive ? suggestDemoConnections(state, channel, t, { documentId: selectedDocument.id }) : [], [connectionsEnabled, documentConnectionsActive, selectedDocument.id, channel, locale, state.messages, state.documents, state.stacks, state.documentLinks, state.dismissedConnections]);
   const activeChannel = managedChannels.find(row => row.id === channel)!;
   const channelName = activeChannel.sampleName ? t(activeChannel.name) : activeChannel.name;
+  const aiSources = useMemo(() => buildDemoAiSources(state, channel, t), [channel, locale, state.messages, state.documents, state.stacks]);
+  const aiSession = aiSessions[channel] ?? createDemoAiSession(aiSources);
   const documentTitle = (row: typeof selectedDocument) => row.sample ? t(row.title) : row.title;
   const visibleTasks = state.tasks.filter(row => !row.source || row.source.channel === channel);
   const done = visibleTasks.filter(row => row.done).length;
@@ -128,7 +135,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
       if (focus) panel.current?.focus({ preventScroll: true });
     });
   }
-  function openContext(next: 'documents' | 'projects' | 'relations', source: HTMLElement) {
+  function openContext(next: 'documents' | 'projects' | 'relations' | 'assistant', source: HTMLElement) {
     // Scroll events may still be queued when navigation starts in the same frame.
     rememberReading();
     if (!contextOrigin.current) {
@@ -209,6 +216,23 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   function renderConnections(forDocument?: string) {
     return <DemoConnections state={state} channel={channel} suggestions={forDocument ? documentConnections : suggestedConnections} dispatch={dispatch} t={t} onOpenDocument={openDocument} onRevealMessage={revealMessage} documentId={forDocument} enabled={connectionsEnabled} onEnabledChange={value => setConnectionSettings(previous => ({ ...previous, [channel]: value }))} />;
   }
+  function renderAi() {
+    function inspectSource(source: DemoAiSource, origin: HTMLElement) {
+      const current = aiSources.find(row => row.key === source.key && row.channel === channel);
+      if (!current) return;
+      if (current.kind === 'message') revealMessage(current.id);
+      else openDocument(current.id, aiEntry.current ?? origin);
+    }
+    function reviewTask(run: DemoAiRun, origin: HTMLElement) {
+      if (run !== aiSession.run || !demoAiRunIsCurrent(run, aiSession, aiSources, channel) || !run.task || run.task.channel !== channel) return;
+      const source = run.sources.find(row => row.kind === 'message' && row.id === run.task!.messageId && run.selectedKeys.includes(row.key));
+      const row = source && state.messages[channel].find(message => message.id === source.id);
+      if (!row) return;
+      setFilter('all');
+      makeMessageTask(row, aiEntry.current ?? origin);
+    }
+    return <DemoAiFlow channel={channel} channelName={channelName} sources={aiSources} session={aiSession} onSessionChange={next => setAiSessions(previous => ({ ...previous, [channel]: next }))} onReviewTask={reviewTask} onOpenSource={inspectSource} t={t} />;
+  }
   function renderDesk(compact = false) {
     return <DemoDocumentDesk state={state} channel={channel} dispatch={dispatch} t={t} compact={compact} onOpenDocument={openDocument} onRevealMessage={revealMessage} pendingReference={pendingReference} onReferenceSaved={() => setPendingReference(null)} onCancelReference={() => setPendingReference(null)} />;
   }
@@ -251,7 +275,7 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
   function reset() {
     for (const url of urls.current) URL.revokeObjectURL(url); urls.current.clear();
     navigationRevision.current++; reading.current = {}; conversationPosition.current = {}; ownMessage.current = null; contextOrigin.current = null; setContextView(null);
-    dispatch({ type: 'reset' }); setSection('chat'); setManagedChannels(createChannels()); setConnectionSettings({ studio: true, product: true, design: true }); setPendingReference(null); setToolsOpen(false); setLayoutOpen(false); setLocalLocale(null); setDrafts({ studio: '', product: '', design: '' }); setTask(''); setMessageTaskDrafts({}); setMessageTaskCreations({}); setFilter('all'); setChannel('studio'); setDocumentId('brief'); setProvider('microsoft'); setChecklists({ microsoft: [], google: [] }); setDecisionText(null); setNextStep(null); setDecisionOwner('Maja'); setEditingDecision(false); setAppearance({ ...DEFAULT_APPEARANCE, mode: 'light' }); setResetting(false); setNotice('The demo has been reset. You have a fresh workspace to explore.');
+    dispatch({ type: 'reset' }); setSection('chat'); setManagedChannels(createChannels()); setConnectionSettings({ studio: true, product: true, design: true }); setPendingReference(null); setToolsOpen(false); setLayoutOpen(false); setLocalLocale(null); setDrafts({ studio: '', product: '', design: '' }); setTask(''); setMessageTaskDrafts({}); setMessageTaskCreations({}); setAiSessions({}); setFilter('all'); setChannel('studio'); setDocumentId('brief'); setProvider('microsoft'); setChecklists({ microsoft: [], google: [] }); setDecisionText(null); setNextStep(null); setDecisionOwner('Maja'); setEditingDecision(false); setAppearance({ ...DEFAULT_APPEARANCE, mode: 'light' }); setResetting(false); setNotice('The demo has been reset. You have a fresh workspace to explore.');
   }
   const orderedMaterials = [...state.layout.order].sort((a, b) => Number(state.layout.pinned.includes(b)) - Number(state.layout.pinned.includes(a)));
   function avatar(author: string, large = false) {
@@ -295,13 +319,14 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
       </div>
     </header>
     <main className="fc-showroom-page">
-      <div className="fc-studio-context"><span>{t('Sample workspace · fictional people · changes stay in this tab')}</span><div><button type="button" className="fc-showroom-subtle fc-studio-related" aria-label={t('Suggested connections')} aria-expanded={contextView === 'relations'} aria-controls={id + '-context'} onClick={event => openContext('relations', event.currentTarget)}><Link2 size={15} aria-hidden="true" /><span>{t('Related')}</span><small aria-hidden="true" data-empty={suggestedConnections.length === 0}>{suggestedConnections.length}</small></button><button type="button" className="fc-studio-my-view" onClick={() => choose('appearance', true)}><Palette size={16} /><span>{t('My view')}</span></button><button className="fc-showroom-subtle" aria-pressed={state.layout.focus} onClick={() => { dispatch({ type: 'focus' }); choose('chat'); }}><Focus size={15} />{t(state.layout.focus ? 'Leave focus' : 'Focus')}</button><button className="fc-showroom-subtle" aria-expanded={layoutOpen} aria-controls={id + '-layout'} onClick={() => setLayoutOpen(!layoutOpen)}><SlidersHorizontal size={15} /><span>{t('Arrange')}</span></button></div></div>
-      {['chat', 'documents', 'projects'].includes(section) && <nav className="fc-studio-journey" aria-label={t('Follow the courtyard project')}>
+      <div className="fc-studio-context"><span>{t('Sample workspace · fictional people · changes stay in this tab')}</span><div><button ref={aiEntry} type="button" className="fc-studio-ai-entry" aria-expanded={section === 'assistant' || contextView === 'assistant'} aria-controls={section === 'assistant' ? id + '-assistant-panel' : id + '-context'} onClick={event => openContext('assistant', event.currentTarget)}><Sparkles size={15} aria-hidden="true" /><span>{t('Try AI')}</span></button><button type="button" className="fc-showroom-subtle fc-studio-related" aria-label={t('Suggested connections')} aria-expanded={contextView === 'relations'} aria-controls={id + '-context'} onClick={event => openContext('relations', event.currentTarget)}><Link2 size={15} aria-hidden="true" /><span>{t('Related')}</span><small aria-hidden="true" data-empty={suggestedConnections.length === 0}>{suggestedConnections.length}</small></button><button type="button" className="fc-studio-my-view" onClick={() => choose('appearance', true)}><Palette size={16} /><span>{t('My view')}</span></button><button className="fc-showroom-subtle" aria-pressed={state.layout.focus} onClick={() => { dispatch({ type: 'focus' }); choose('chat'); }}><Focus size={15} />{t(state.layout.focus ? 'Leave focus' : 'Focus')}</button><button className="fc-showroom-subtle" aria-expanded={layoutOpen} aria-controls={id + '-layout'} onClick={() => setLayoutOpen(!layoutOpen)}><SlidersHorizontal size={15} /><span>{t('Arrange')}</span></button></div></div>
+      {['chat', 'documents', 'projects', 'assistant'].includes(section) && <nav className="fc-studio-journey" aria-label={t('Follow the courtyard project')}>
         <span className="fc-studio-channel-summary">#{channelName}<small>{activeChannel.sampleDescription ? t(activeChannel.description) : activeChannel.description}</small></span>
         <div>
           <button type="button" aria-pressed={activeSurface === 'chat'} onClick={returnToConversation}><span>{t('Conversation')}</span></button>
           <button type="button" aria-pressed={activeSurface === 'documents'} onClick={event => openContext('documents', event.currentTarget)}><span>{t('Documents')}</span><small>{channelDocuments.length}</small></button>
           <button type="button" aria-pressed={activeSurface === 'projects'} onClick={event => { setFilter('all'); openContext('projects', event.currentTarget); }}><span>{t('Tasks')}</span><small>{visibleTasks.filter(row => !row.done).length}</small></button>
+          <button type="button" aria-pressed={activeSurface === 'assistant'} onClick={event => openContext('assistant', event.currentTarget)}><Sparkles size={14} aria-hidden="true" /><span>{t('AI flow')}</span></button>
         </div>
       </nav>}
       <section className="fc-showroom-workspace" aria-label={t('Interactive sample workspace')}>
@@ -313,19 +338,20 @@ export function Demo({ onBack, onOpenApp, destination }: DemoProps) {
             <div className="fc-studio-materials" aria-label={t('Shared sample materials')}><div className="fc-studio-material-stack" hidden={!!contextView}>{channel === 'studio' ? orderedMaterials.map(material => material === 'courtyard' ? <figure className={'fc-studio-courtyard' + (state.layout.pinned.includes(material) ? ' fc-studio-pinned' : '')} data-material="courtyard" key={material}><img src={courtyard} alt={t('A sunlit brick courtyard with trees, an open doorway and a shared table')} /><figcaption>{state.layout.pinned.includes(material) && <Pin size={12} aria-label={t('Pinned')} />}<span>{t('The courtyard, version 04 · shared by Elias')}</span></figcaption><div className="fc-studio-material-note">{avatar('Nora')}<div><strong>Nora <time>11:03</time></strong><p>{t('I’ll bring the material samples tomorrow.')}</p></div></div></figure> : <section className={'fc-studio-brief' + (state.layout.pinned.includes(material) ? ' fc-studio-pinned' : '')} data-material="brief" key={material}><header><span><FileText size={15} />{t('Shared brief')}{state.layout.pinned.includes(material) && <Pin size={12} aria-label={t('Pinned')} />}</span><button className="fc-showroom-subtle" onClick={event => { setDocumentId('brief'); openContext('documents', event.currentTarget); }} aria-label={t('Open project brief')} aria-controls={id + '-context'} aria-expanded={contextView === 'documents'}><ArrowUpRight size={16} /></button></header><label htmlFor={id + '-shared-brief'}>{t('A quieter courtyard')}</label><textarea id={id + '-shared-brief'} aria-label={t('Edit courtyard brief')} value={state.documents[0].edited ?? t(state.documents[0].source)} maxLength={20000} onChange={event => dispatch({ type: 'document', id: 'brief', text: event.target.value })} /><footer>{t(state.documents[0].edited === null ? 'Sample document' : 'Edited in this demo')}<span>{t('Markdown')}</span></footer><div className="fc-studio-brief-actions"><button type="button" className="fc-showroom-subtle" onClick={event => openContext('projects', event.currentTarget)}>{t('Agree a next step')}<ArrowUpRight size={14} /></button></div></section>) : null}
               <div className="fc-studio-stack-surface">{renderDesk(true)}</div>
               {state.decision && <section className="fc-studio-follow-up" aria-label={t('Agreed next step')}><span className="fc-showroom-kicker">{t('Agreed next step')}</span><p>{state.decision.text}</p><label><input type="checkbox" checked={state.tasks.find(row => row.id === demoDecisionTaskId)?.done ?? false} onChange={() => dispatch({ type: 'task_toggle', id: demoDecisionTaskId })} /><span>{state.decision.nextStep}</span></label><footer><span>{state.decision.owner}</span><button type="button" className="fc-showroom-subtle" onClick={event => openContext('projects', event.currentTarget)}>{t('View decision')}<ArrowUpRight size={14} /></button></footer></section>}
-              </div><section ref={contextPanel} id={id + '-context'} className="fc-studio-context-panel" hidden={!contextView || section !== 'chat'} aria-label={t(contextView === 'documents' ? 'The shared brief' : contextView === 'relations' ? 'Suggested connections' : 'Decision & next step')} tabIndex={-1} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && !resetting) { event.preventDefault(); event.stopPropagation(); returnToConversation(); } }}>
+              </div><section ref={contextPanel} id={id + '-context'} className="fc-studio-context-panel" hidden={!contextView || section !== 'chat'} aria-label={t(contextView === 'documents' ? 'The shared brief' : contextView === 'relations' ? 'Suggested connections' : contextView === 'assistant' ? 'AI flow' : 'Decision & next step')} tabIndex={-1} onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing && !resetting) { event.preventDefault(); event.stopPropagation(); returnToConversation(); } }}>
                 <header className="fc-studio-context-return"><button type="button" className="fc-showroom-subtle" onClick={returnToConversation}><ArrowLeft size={15} />{t('Back to conversation')}</button><span>#{channelName}</span></header>
-                {section === 'chat' && contextView === 'documents' && renderDocuments()}{section === 'chat' && contextView === 'projects' && renderProjects()}{section === 'chat' && contextView === 'relations' && renderConnections()}
+                {section === 'chat' && contextView === 'documents' && renderDocuments()}{section === 'chat' && contextView === 'projects' && renderProjects()}{section === 'chat' && contextView === 'relations' && renderConnections()}{section === 'chat' && contextView === 'assistant' && renderAi()}
               </section></div>
           </div></div>
             {section === 'projects' && renderProjects()}
             {section === 'documents' && renderDocuments()}
+            {section === 'assistant' && renderAi()}
             {section === 'connections' && <><div className="fc-showroom-section-heading"><div><span className="fc-showroom-kicker">{t('Self-hosted connections')}</span><h2>{t('Prepare your organisation’s app.')}</h2><p>{t('Explore how your own Google Workspace or Microsoft 365 app is prepared for a self-hosted installation.')}</p></div><Plug size={25} /></div><div className="fc-showroom-provider-picker" role="group" aria-label={t('Example connection provider')}>{(['microsoft', 'google'] as const).map(value => <button type="button" key={value} aria-pressed={provider === value} onClick={() => setProvider(value)}><span className={'fc-showroom-provider-logo fc-showroom-provider-logo-' + value} aria-hidden="true">{value === 'microsoft' ? <span><i /><i /><i /><i /></span> : 'G'}</span><strong>{demoConnectionProviders[value].name}</strong><small>{t('Preparation guide')}</small></button>)}</div><div className="fc-showroom-preparation"><div className="fc-showroom-preparation-heading"><h3>{t('Start with your own app')}</h3><span>{t('Demo checklist')}</span></div><p>{t('In your real installation, an administrator registers an app, reviews access, then explicitly authorizes and tests the connection. This demo makes no provider calls.')}</p><ol>{demoConnectionSteps.map((step, index) => <li key={step}><label><input type="checkbox" checked={checklists[provider].includes(index)} onChange={event => setChecklists(previous => ({ ...previous, [provider]: event.target.checked ? [...previous[provider], index] : previous[provider].filter(value => value !== index) }))} /><span>{t(step)}</span></label></li>)}</ol><dl><div><dt>{t('Customer app console')}</dt><dd>{demoConnectionProviders[provider].console}</dd></div><div><dt>{t('Example permissions to review')}</dt><dd>{demoConnectionProviders[provider].scopes}</dd></div></dl><label className="fc-showroom-callback">{t('Example callback — replace with your installation’s exact address')}<input readOnly value={demoCallbackExample} /></label><p className="fc-showroom-footnote">{t('Checking a box changes this example checklist only. No account is connected, authorized or tested here.')}</p></div></>}
             {section === 'appearance' && <><div className="fc-showroom-section-heading"><div><span className="fc-showroom-kicker">{t('My view')} · {t('Personal settings')}</span><h2>{t('Choose your colours and type.')}</h2><p>{t('Your colours, typeface and layout are personal. Your teammates keep their own view.')}</p></div><Palette size={25} /></div><div className="fc-showroom-palettes" role="group" aria-label={t('Demo colour palettes')}>{PRESETS.map(preset => <button type="button" key={preset.id} aria-pressed={appearance.accent_color === preset.accent_color && appearance.background_color === preset.background_color} onClick={() => setAppearance(previous => ({ ...previous, accent_color: preset.accent_color, background_color: preset.background_color }))}><span style={{ background: preset.background_color }}><i style={{ background: preset.accent_color }} />{appearance.accent_color === preset.accent_color && appearance.background_color === preset.background_color && <Check size={15} />}</span><strong>{t(preset.name)}</strong><small>{t(preset.description)}</small></button>)}</div><div className="fc-showroom-appearance-fields"><label>{t('Accent colour')}<span className="fc-showroom-colour-input"><input type="color" aria-label={t('Accent colour')} value={appearance.accent_color} onChange={event => setAppearance(previous => ({ ...previous, accent_color: event.target.value }))} /><span>{appearance.accent_color}</span></span></label><label>{t('Canvas colour')}<span className="fc-showroom-colour-input"><input type="color" aria-label={t('Canvas colour')} value={appearance.background_color} onChange={event => setAppearance(previous => ({ ...previous, background_color: event.target.value }))} /><span>{appearance.background_color}</span></span></label><label>{t('Demo typeface')}<select aria-label={t('Demo typeface')} value={appearance.font_family} onChange={event => setAppearance(previous => ({ ...previous, font_family: event.target.value as AppearancePreferences['font_family'] }))}><option value="inter">Inter</option><option value="manrope">Manrope</option><option value="serif">Source Serif</option><option value="system">{t('System')}</option></select></label><label>{t('Demo corners')}<select aria-label={t('Demo corners')} value={appearance.corner_style} onChange={event => setAppearance(previous => ({ ...previous, corner_style: event.target.value as AppearancePreferences['corner_style'] }))}><option value="soft">{t('Soft')}</option><option value="rounded">{t('Rounded')}</option><option value="square">{t('Square')}</option></select></label></div><div className="fc-showroom-type-sample"><span className="fc-showroom-kicker">{t('Conversation preview')}</span><h3>{t('Shall we open up to the courtyard?')}</h3><p>{t('Open doors, a long table and a few material samples to review together.')}</p><span className="fc-showroom-style-badge"><Check size={13} />{t('Applied to this demo only')}</span></div></>}
         </div>
       </section>
       <div className="fc-showroom-status" role="status" aria-live="polite">{notice ? t(notice) : t('Browser-only demo · no account or connected services · reset or reload to start fresh')}</div>
     </main>
-    {resetting && <div ref={resetDialog} tabIndex={-1} className="fc-showroom-reset" role="alertdialog" aria-modal="true" aria-labelledby={id + '-reset-title'}><div><h2 id={id + '-reset-title'}>{t('Start fresh?')}</h2><p>{t('This clears your demo messages, tasks, decisions, documents, stacks, channel changes, saved connections and personal settings. Nothing in a real workspace is changed.')}</p><div><button autoFocus onClick={() => setResetting(false)}>{t('Keep exploring')}</button><button className="fc-showroom-primary" onClick={reset}>{t('Reset this demo')}</button></div></div></div>}
+    {resetting && <div ref={resetDialog} tabIndex={-1} className="fc-showroom-reset" role="alertdialog" aria-modal="true" aria-labelledby={id + '-reset-title'}><div><h2 id={id + '-reset-title'}>{t('Start fresh?')}</h2><p>{t('This clears your demo messages, tasks, decisions, documents, stacks, channel changes, saved connections, AI previews and personal settings. Nothing in a real workspace is changed.')}</p><div><button autoFocus onClick={() => setResetting(false)}>{t('Keep exploring')}</button><button className="fc-showroom-primary" onClick={reset}>{t('Reset this demo')}</button></div></div></div>}
   </div>;
 }

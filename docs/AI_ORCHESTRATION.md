@@ -19,6 +19,8 @@ The immediate Copilot flow persists `processing`, `complete` or `failed` turns, 
 
 There is one provider endpoint and model per workspace. Named agents vary instructions and allowed tools; they do not have separate models. The current contract is public HTTPS443 OpenAI-compatible Chat Completions with Bearer authentication, streamed response validation, one choice and `max_tokens:2048`. The transport has a thirty-second deadline and no automatic retry. There are no personal per-user AI key stores, native Anthropic/Azure adapters or private-network model connections in this implementation. See [provider model](../backend/app/services/copilot.py#L48) and [transport](../backend/app/services/copilot.py#L261).
 
+The public `#demo=assistant` preview makes the source → review → local example → task-review flow interactive. Its state and outputs stay in browser memory, and its output is extractive/template-based rather than a provider completion. It does not add production run persistence, model routing or worker execution.
+
 ## What remains planned
 
 The existing flows have separate state models. They do not yet provide a common AI run/step timeline, cancellation/resume for general Copilot work, configurable model profiles/routing, a bounded multi-step planner, provider token/cost accounting or a workspace AI spending budget. Existing request/response limits and account rate limits are useful bounds, but are not a monetary spending limit.

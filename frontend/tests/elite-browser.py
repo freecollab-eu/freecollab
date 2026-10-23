@@ -12,6 +12,7 @@ import uuid
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import reveal_message_actions
 
 
 BASE = os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
@@ -162,7 +163,7 @@ with sync_playwright() as p:
         assert any(record['content'] == multiline for record in api('GET', '/messages/channels/' + studio['id'], alice))
         assert len(submitted) == 1, 'Enter must make exactly one durable multiline delivery request'
         article = page.locator('article').filter(has=page.get_by_text(multiline, exact=True))
-        article.hover()
+        reveal_message_actions(article)
         article.get_by_role('button', name='Edit', exact=True).click()
         edit = page.get_by_label('Edit message', exact=True)
         expect(edit).to_have_value(multiline)
@@ -374,7 +375,7 @@ with sync_playwright() as p:
             page.keyboard.press('Escape')
             expect(panel).to_have_count(0)
             expect(trigger).to_be_focused()
-        loaded_article.hover()
+        reveal_message_actions(loaded_article)
         reply_trigger = loaded_article.get_by_role('button', name='Reply in thread', exact=True)
         reply_trigger.click()
         thread = page.get_by_role('dialog', name='Thread', exact=True)

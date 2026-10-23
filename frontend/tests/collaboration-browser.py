@@ -2,6 +2,7 @@
 from ui_navigation import open_chat_tool, reveal_message_actions
 import json
 import os
+import re
 import uuid
 from urllib.request import Request, urlopen
 
@@ -25,6 +26,15 @@ def api(method, path, user=None, data=None):
 def register(name):
     email = name.lower() + '-' + RUN + '@example.com'
     return {**api('POST', '/auth/register', data={'name': name, 'email': email, 'password': PASSWORD}), 'email': email}
+
+
+def select_notebook_section(panel, name):
+    options = panel.locator('details.fc-collaboration-flow-options')
+    if options.get_attribute('open') is None:
+        options.locator('summary').click()
+    section = options.get_by_role('button', name=name, exact=True)
+    section.click()
+    expect(section).to_have_attribute('aria-current', 'page')
 
 
 owner, member = register('NotebookOwner'), register('NotebookMember')
@@ -52,14 +62,17 @@ with sync_playwright() as p:
         row.get_by_role('button', name='Pin message', exact=True).click()
         expect(row.get_by_role('button', name='Unpin message', exact=True)).to_have_attribute('aria-pressed', 'true')
         page.reload(wait_until='domcontentloaded')
+        expect(row).to_be_visible()
+        reveal_message_actions(row)
         expect(row.get_by_role('button', name='Remove saved message', exact=True)).to_have_attribute('aria-pressed', 'true')
         expect(row.get_by_role('button', name='Unpin message', exact=True)).to_have_attribute('aria-pressed', 'true')
         open_chat_tool(page, 'Saved items and decisions')
-        panel = page.get_by_role('dialog', name='Channel notebook', exact=True)
+        panel = page.get_by_role('region', name=re.compile(r'^(Channel notebook|Decisions in this conversation)$'))
+        expect(panel).to_have_attribute('data-presentation', 'flow')
         expect(panel.get_by_text(message['content'], exact=True)).to_be_visible()
-        panel.get_by_role('button', name='Saved', exact=True).click()
+        select_notebook_section(panel, 'Saved')
         expect(panel.get_by_text(message['content'], exact=True)).to_be_visible()
-        panel.get_by_role('button', name='Decisions', exact=True).click()
+        select_notebook_section(panel, 'Decisions')
         panel.get_by_role('button', name='Record a decision', exact=True).click()
         panel.get_by_label('Title', exact=True).fill('Launch agreement ' + RUN)
         panel.get_by_label('Decision and context', exact=True).fill('We will launch with the small, useful workflow first.')
@@ -74,7 +87,7 @@ with sync_playwright() as p:
         expect(panel.get_by_text('Revised launch agreement with a named owner.', exact=True)).to_be_visible()
         panel.get_by_role('button', name='History', exact=True).click()
         expect(panel.get_by_role('list', name='Decision revision history')).to_contain_text('We will launch with the small, useful workflow first.')
-        panel.get_by_role('button', name='Notifications', exact=True).click()
+        select_notebook_section(panel, 'Notifications')
         panel.get_by_label('Every message').check()
         panel.get_by_label('Email summaries', exact=True).select_option('weekly')
         panel.get_by_role('button', name='Save preferences', exact=True).click()
@@ -86,7 +99,12 @@ with sync_playwright() as p:
         page.keyboard.press('Shift+Tab')
         assert panel.evaluate('element => element.contains(document.activeElement)')
         page.screenshot(path='/tmp/freecollab-collaboration-mobile.png', full_page=True)
+        composer = page.locator('.fc-chat-composer textarea')
+        composer.click()
+        expect(composer).to_be_focused()
+        panel.locator('details.fc-collaboration-flow-options > summary').click()
         page.keyboard.press('Escape')
+        expect(panel).to_have_count(0)
         page.set_viewport_size({'width': 1440, 'height': 1000})
         reveal_message_actions(row)
         row.get_by_role('button', name='Reply in thread', exact=True).click()

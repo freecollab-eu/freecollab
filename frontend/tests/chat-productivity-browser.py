@@ -114,13 +114,15 @@ def main():
                 stage = 'private saved completion persists'
                 reveal_message_actions(message); message.get_by_role('button',name='Save message',exact=True).click()
                 open_chat_tool(page, 'Saved items and decisions')
-                notebook = page.get_by_role('dialog',name='Channel notebook',exact=True)
-                notebook.get_by_role('button',name='Saved',exact=True).click()
+                notebook = page.get_by_role('region',name='Channel notebook',exact=True)
+                views = notebook.locator('details.fc-collaboration-flow-options')
+                views.locator(':scope > summary').click()
+                views.get_by_role('button',name='Saved',exact=True).click()
                 notebook.get_by_role('button',name='Mark complete',exact=True).click()
                 expect(notebook.get_by_role('button',name='Completed',exact=True)).to_have_attribute('aria-pressed','true')
                 assert p.api(base,'GET','/bookmarks',owner)[0]['completed_at']
                 assert p.api(base,'GET','/bookmarks',peers[0]) == []
-                notebook.get_by_role('button',name='Close channel notebook',exact=True).click()
+                page.get_by_role('button',name='Close this work',exact=True).click()
                 checks['saved_completion_is_durable_and_private'] = True
                 stage = 'encrypted trusted-device schedule vault and no early send'
                 local_text = 'Private on-device scheduled context '+secrets.token_hex(8)

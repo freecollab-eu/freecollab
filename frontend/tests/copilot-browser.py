@@ -3,6 +3,7 @@
 Only disposable accounts, synthetic provider key, private SQLite and loopback TLS.
 """
 import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import importlib.util
 import json
@@ -25,11 +26,13 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/styles/copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
     with tempfile.TemporaryDirectory(prefix='freecollab-copilot-browser-') as directory:
         private=Path(directory);requests=[]
+        source_hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in PROOF_SOURCES}
         snapshot=private/'source';snapshot.mkdir()
         shutil.copytree(ROOT/'frontend',snapshot/'frontend',ignore=shutil.ignore_patterns('node_modules','dist','.vite','.env*'))
         (snapshot/'frontend/node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
@@ -80,7 +83,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
             with sync_playwright() as playwright:
                 browser=playwright.chromium.launch(headless=True,executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox'])
                 context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(45000);errors=[];urls=[]
-                page.on('pageerror',lambda failure:errors.append(type(failure).__name__));page.on('request',lambda request:urls.append(request.url))
+                page.on('pageerror',lambda failure:errors.append(str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:1000]));page.on('request',lambda request:urls.append(request.url))
                 stage='honest no-key production panel'
                 page.goto(app,wait_until='domcontentloaded',timeout=90000);page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+owner['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
@@ -96,14 +99,48 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(panel.get_by_label('I opt in to this provider configuration for my account.')).to_be_visible();expect(panel.get_by_label('Provider API key',exact=True)).to_have_value('')
                 panel.get_by_label('I opt in to this provider configuration for my account.').check();expect(panel.get_by_role('heading',name='Private conversation',exact=True)).to_be_visible()
                 assert not requests;results['fresh_auth_configured_named_agent_key_cleared_and_per_user_opt_in']=True
-                stage='selected context real HTTPS streamed answer citation and approval'
+                stage='quick actions preserve the draft context and disclosure without provider calls'
+                warning=panel.get_by_role('complementary',name='Before sending to AI',exact=True)
+                expect(warning).to_contain_text('Your prompt and 0 selected sources will be sent to localhost using fixture-chat.')
                 panel.get_by_role('button',name='Choose messages, documents, files and clip transcripts',exact=True).click()
                 selected_row=panel.locator('.fc-copilot-context label').filter(has_text=selected);expect(selected_row).to_be_visible();selected_row.get_by_role('checkbox').check()
-                panel.get_by_label('Task destination',exact=True).select_option('proof-project');panel.get_by_label('Your question',exact=True).fill('Summarize the selected source and propose a task.')
-                panel.get_by_label('Send this prompt, visible native AI history and checked sources to the configured provider.').check();panel.get_by_role('button',name='Send to provider',exact=True).click()
+                destination=panel.get_by_label('Task destination',exact=True);destination.select_option('proof-project')
+                question=panel.get_by_label('Your question',exact=True);draft='My wording stays: ää 🧭\nKeep this request short.';question.fill(draft)
+                disclosure=panel.get_by_label('Send this prompt, visible native AI history and checked sources to the configured provider.')
+                send=panel.get_by_role('button',name='Send to provider',exact=True)
+                panel.get_by_role('button',name='Summarise selection',exact=True).click()
+                if question.count()!=1:
+                    page.screenshot(path='/tmp/freecollab-copilot-failure.png')
+                    raise AssertionError('Quick action lost its composer: '+json.dumps({'page_errors':errors,'headings':page.get_by_role('heading').all_text_contents()}))
+                prepared=question.input_value()
+                assert prepared.startswith(draft+'\n\n') and 'Summarise only the sources I selected.' in prepared
+                panel.get_by_role('button',name='Summarise selection',exact=True).click();expect(question).to_have_value(prepared)
+                panel.get_by_role('button',name='Propose a task',exact=True).click();prepared=question.input_value()
+                assert prepared.startswith(draft+'\n\n') and 'otherwise return a draft' in prepared and 'do not claim the task was created' in prepared
+                expect(selected_row.get_by_role('checkbox')).to_be_checked();expect(destination).to_have_value('proof-project');expect(disclosure).not_to_be_checked();expect(send).to_be_disabled();assert not requests
+                results['quick_actions_preserve_exact_draft_selected_context_and_explicit_send']=True
+                stage='actual provider model source count costs and retention warning'
+                expect(warning).to_contain_text('Your prompt and 1 selected source will be sent to localhost using fixture-chat.')
+                expect(warning).to_contain_text('API use may incur charges on the provider account.')
+                expect(warning).to_contain_text('A chat subscription does not supply API access.')
+                expect(warning).to_contain_text('The provider’s retention policy applies to what you send.')
+                expect(warning).to_contain_text('AI answers can be wrong; check them before use.')
+                assert send.get_attribute('aria-describedby')==warning.get_attribute('id')
+                assert KEY not in warning.inner_text() and PASSWORD not in warning.inner_text() and not requests
+                results['actual_destination_model_source_count_and_api_privacy_warning']=True
+                stage='bounded quick action refuses overflow and preserves the entire draft'
+                bounded='å'*3900;question.fill(bounded);panel.get_by_role('button',name='Suggest next steps',exact=True).click()
+                expect(question).to_have_value(bounded);expect(panel.get_by_text('Your draft is too long to add this action. Shorten it first; your text has been kept.',exact=True)).to_be_visible()
+                expect(selected_row.get_by_role('checkbox')).to_be_checked();expect(destination).to_have_value('proof-project');expect(disclosure).not_to_be_checked();assert not requests
+                question.fill(prepared);expect(send).to_be_disabled()
+                results['overflow_keeps_user_text_and_never_sends_or_checks_disclosure']=True
+                stage='selected context real HTTPS streamed answer citation and approval'
+                disclosure.check();send.click()
                 expect(panel.get_by_text('Reviewed selected source [S1].',exact=True)).to_be_visible(timeout=60000)
                 assert len(requests)==1 and selected in json.dumps(requests) and omitted not in json.dumps(requests)
                 assert KEY not in json.dumps(requests)
+                assert draft in requests[0]['messages'][-1]['content'] or draft in json.dumps(requests[0],ensure_ascii=False)
+                expect(disclosure).not_to_be_checked();expect(warning).to_contain_text('Your prompt and 0 selected sources will be sent to localhost using fixture-chat.')
                 with sqlite3.connect(private/'proof.db') as connection:assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==0
                 panel.get_by_role('button',name='[S1] Message',exact=True).click();expect(panel.locator('.fc-copilot-source-review')).to_contain_text(selected)
                 panel.get_by_role('button',name='Approve and create task',exact=True).click();expect(panel.get_by_text('Approved task created. Repeated approval keeps the same task.',exact=True)).to_be_visible()
@@ -122,12 +159,17 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=60000)
                 page.locator('button.fc-chat-topbar-action:has(svg.lucide-layers)').click();page.locator('#work-tab-copilot').click()
                 panel=page.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
+                expect(panel.get_by_role('group',name='Snabbval',exact=True)).to_be_visible();expect(panel.get_by_role('complementary',name='Innan du skickar till AI',exact=True)).to_contain_text('fixture-chat')
                 REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.parent/'copilot-desktop-sv.png'))
                 page.set_viewport_size({'width':390,'height':844});assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth');page.screenshot(path=str(REPORT.parent/'copilot-mobile-sv.png'))
+                page.set_viewport_size({'width':320,'height':740});assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
+                for label in ('Sammanfatta urvalet','Föreslå nästa steg','Skriv ett svarsutkast','Föreslå en uppgift'):
+                    button=panel.get_by_role('button',name=label,exact=True);expect(button).to_be_visible();assert button.bounding_box()['height']>=44
                 results['saved_swedish_account_preference_and_mobile_without_overflow']=True
                 assert not errors and not any(KEY in url or PASSWORD in url for url in urls);results['no_page_errors_or_auth_secrets_in_urls']=True
                 context.close();browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'results':results},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
+            assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()), 'Copilot proof sources changed during this private run'
+            REPORT.write_text(json.dumps({'ok':True,'results':results,'source_hashes':source_hashes},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
         except Exception as failure:
             print(json.dumps({'failure':str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:5000]}))
             if 'page' in locals():

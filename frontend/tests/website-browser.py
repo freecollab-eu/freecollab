@@ -90,6 +90,22 @@ def main():
         page.get_by_role('button', name='Send demo message', exact=True).click()
         expect(page.get_by_role('log').get_by_text(message, exact=True)).to_be_visible()
         assert page.get_by_role('log').locator('img').count() == 0
+        source=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(message,exact=True))
+        source.get_by_role('button',name='Make a task from this message',exact=True).click()
+        review=page.locator('.fc-demo-task-from-message:visible')
+        expect(review.get_by_label('Task title',exact=True)).to_have_value(message)
+        expect(review.get_by_role('button',name='Unassigned',exact=True)).to_have_attribute('aria-pressed','true')
+        review.get_by_label('Task title',exact=True).fill('Website source-linked task')
+        review.get_by_role('button',name='Noor',exact=True).click()
+        review.get_by_role('button',name='Create task',exact=True).click()
+        created=page.get_by_role('checkbox',name='Website source-linked task',exact=True)
+        expect(created).to_have_count(1)
+        row=page.locator('[data-demo-task-id]').filter(has=created)
+        expect(row).to_contain_text('Noor')
+        review.get_by_role('button',name='Back to tasks',exact=True).click();expect(created).to_be_focused()
+        row.get_by_role('button',name='View source message',exact=True).click();expect(source).to_be_focused()
+        expect(source.get_by_role('button',name='View task for this message',exact=True)).to_be_visible()
+        checks['built_message_task_reuses_source_optional_owner_and_returns_to_original_without_copying'] = True
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Projects', exact=True).click()
         page.get_by_label('New demo task', exact=True).fill('Website-only task')
@@ -139,6 +155,7 @@ def main():
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Projects', exact=True).click()
         expect(page.get_by_role('checkbox', name='Website-only task', exact=True)).to_have_count(0)
+        expect(page.get_by_role('checkbox', name='Website source-linked task', exact=True)).to_have_count(0)
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Documents', exact=True).click()
         assert page.get_by_label('Edit demo document').input_value() != 'Website-only document'
@@ -190,9 +207,11 @@ def main():
               'frontend/src/components/Landing.tsx', 'frontend/src/components/Demo.tsx',
               'frontend/src/components/DemoChannelSwitcher.tsx', 'frontend/src/components/DemoDocumentDesk.tsx',
               'frontend/src/components/DemoConnections.tsx', 'frontend/src/lib/demo-connections.ts',
+              'frontend/src/components/DemoMessageActions.tsx', 'frontend/src/components/DemoTaskFromMessage.tsx',
               'frontend/src/lib/demo-showroom.ts', 'frontend/src/lib/useModalFocus.ts',
               'frontend/src/styles/demo-showroom.css', 'frontend/src/styles/demo-channel-switcher.css',
               'frontend/src/styles/demo-document-desk.css', 'frontend/src/styles/demo-connections.css',
+              'frontend/src/styles/demo-message-actions.css',
               'frontend/src/i18n/demo-showroom.sv.ts', 'frontend/tests/website-browser.py']
     args.report.write_text(json.dumps({'checks': checks, 'groups': len(checks), 'source_sha256': {
         name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in source},

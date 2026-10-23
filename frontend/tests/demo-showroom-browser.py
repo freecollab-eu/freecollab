@@ -20,6 +20,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
 SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/components/DemoChannelSwitcher.tsx','frontend/src/components/DemoDocumentDesk.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/lib/useModalFocus.ts','frontend/src/styles/demo-showroom.css','frontend/src/styles/demo-channel-switcher.css','frontend/src/styles/demo-document-desk.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
 SOURCE += ['frontend/src/components/DemoConnections.tsx','frontend/src/lib/demo-connections.ts','frontend/src/styles/demo-connections.css']
+SOURCE += ['frontend/src/components/DemoMessageActions.tsx','frontend/src/components/DemoTaskFromMessage.tsx','frontend/src/styles/demo-message-actions.css']
 
 def channel_trigger(page, swedish=False):
     return page.get_by_role('button',name='Välj kanal' if swedish else 'Choose channel',exact=True)
@@ -312,6 +313,142 @@ def connection_checks(browser, app, checks, errors, unexpected):
             expect(connections.get_by_role('switch',name='Suggest connections',exact=True)).to_have_attribute('aria-checked','true')
             assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
             checks[str(width)+'px_content_edits_remove_stale_matches_channel_settings_and_content_stay_isolated_and_reset_clears_links']=True
+        finally:visitor.close()
+    return images
+
+def message_task_checks(browser, app, checks, errors, unexpected):
+    """Sent text becomes one source-linked task, with no typing or inferred owner required."""
+    images=[]
+    for width,swedish in [(1440,False),(320,True)]:
+        visitor=browser.new_context(viewport={'width':width,'height':1000},reduced_motion='reduce')
+        try:
+            page=visitor.new_page();page.set_default_timeout(20000)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+            page.goto(app,wait_until='networkidle')
+            if swedish:
+                page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape')
+            names={'tools':'Verktyg' if swedish else 'Tools','message':'Ditt demomeddelande' if swedish else 'Your demo message','send':'Skicka demomeddelande' if swedish else 'Send demo message','make':'Skapa en uppgift från det här meddelandet' if swedish else 'Make a task from this message','view':'Visa uppgiften från det här meddelandet' if swedish else 'View task for this message','title':'Uppgiftens titel' if swedish else 'Task title','unassigned':'Ingen ansvarig' if swedish else 'Unassigned','create':'Skapa uppgift' if swedish else 'Create task','cancel':'Avbryt' if swedish else 'Cancel','back_tasks':'Tillbaka till uppgifter' if swedish else 'Back to tasks','undo':'Ångra skapandet av uppgiften' if swedish else 'Undo task creation','source':'Visa källmeddelandet' if swedish else 'View source message','original':'Visa originalmeddelandet' if swedish else 'View original message','full':'Läs hela meddelandet' if swedish else 'Read the full message'}
+            journey=page.get_by_role('navigation',name='Följ gårdsprojektet' if swedish else 'Follow the courtyard project',exact=True)
+            def daily(section):journey.get_by_role('button',name=re.compile('^'+section)).click()
+            def tools_section(section):
+                page.get_by_role('button',name=names['tools'],exact=True).click();page.get_by_role('tab',name=section,exact=True).click()
+            composer=page.get_by_label(names['message'],exact=True)
+            for index in range(7):
+                composer.fill('Reading continuity '+str(index)+'. '+('A neutral line remains in the same place. '*4))
+                page.get_by_role('button',name=names['send'],exact=True).click()
+            prefix=('Bring the annotated courtyard materials to the walkthrough. '*4)[:179]
+            source_text=prefix+'😀 Full source survives the title boundary. Åäö <img src="https://invalid.example/source">'
+            composer.fill(source_text);page.get_by_role('button',name=names['send'],exact=True).click()
+            original=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(source_text,exact=True))
+            original.evaluate('(node)=>{window.taskOriginal=node;window.taskSourceId=node.dataset.messageId}')
+            draft='A separate unfinished conversation draft. Åäö.'
+            composer.fill(draft);composer.evaluate('(node)=>{window.taskComposer=node;node.setSelectionRange(4,16)}')
+            trigger=original.get_by_role('button',name=names['make'],exact=True)
+            trigger.focus()
+            transcript=page.locator('.fc-showroom-transcript')
+            transcript.evaluate('(node)=>{window.taskTranscript=node;if(innerWidth>760)node.scrollTop=120;window.taskReading={top:node.scrollTop,width:node.clientWidth,height:node.clientHeight,scrollHeight:node.scrollHeight}}')
+            trigger.evaluate('(button)=>button.click()')
+            review=page.locator('.fc-demo-task-from-message:visible')
+            expect(review.get_by_role('heading')).to_be_focused()
+            title=review.get_by_label(names['title'],exact=True)
+            expect(title).to_have_value(prefix)
+            title.input_value().encode('utf-16-le')  # A clipped surrogate is invalid text.
+            expect(review.get_by_role('button',name=names['unassigned'],exact=True)).to_have_attribute('aria-pressed','true')
+            review.get_by_text(names['full'],exact=True).click()
+            expect(review.locator('details blockquote')).to_have_text(source_text)
+            assert review.locator('img').count()==0
+            title_text='Bring the annotated courtyard materials to the walkthrough'
+            title.fill(title_text);review.get_by_role('button',name='Noor',exact=True).click()
+            daily('Dokument' if swedish else 'Documents');daily('Uppgifter' if swedish else 'Tasks')
+            expect(title).to_have_value(title_text);expect(review.get_by_role('button',name='Noor',exact=True)).to_have_attribute('aria-pressed','true')
+            tools_section('Utseende' if swedish else 'Appearance');tools_section('Samtal' if swedish else 'Conversation')
+            trigger.evaluate('(button)=>button.click()')
+            expect(title).to_have_value(title_text)
+            assert composer.evaluate('(node)=>node===window.taskComposer&&node.selectionStart===4&&node.selectionEnd===16')
+            assert original.evaluate('(node)=>node===window.taskOriginal')
+            choose_channel(page,'design',swedish);choose_channel(page,'studio',swedish)
+            trigger.evaluate('(button)=>button.click()')
+            expect(title).to_have_value(title_text);expect(review.get_by_role('button',name='Noor',exact=True)).to_have_attribute('aria-pressed','true')
+            assert original.evaluate('(node)=>node.dataset.messageId===window.taskSourceId')
+            original.evaluate('(node)=>{window.taskOriginal=node}')
+            expect(composer).to_have_value(draft)
+            # Per-channel conversation draft values are retained; native caret
+            # position is separately established for the following task actions.
+            composer.evaluate('(node)=>node.setSelectionRange(4,16)')
+            review.get_by_role('button',name=names['cancel'],exact=True).click()
+            expect(review).to_have_count(0);expect(trigger).to_be_focused();expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.taskComposer&&node.selectionStart===4&&node.selectionEnd===16')
+            assert transcript.evaluate('(node)=>node===window.taskTranscript')
+            if width>760:assert transcript.evaluate('(node)=>node.scrollTop===window.taskReading.top&&node.clientWidth===window.taskReading.width&&node.clientHeight===window.taskReading.height&&node.scrollHeight===window.taskReading.scrollHeight')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_source_task_review_reuses_valid_text_unassigned_owner_full_source_and_keeps_drafts_caret_reading_across_detours']=True
+
+            trigger.evaluate('(button)=>button.click()')
+            expect(title).to_have_value(prefix)
+            title.fill(title_text);review.get_by_role('button',name='Noor',exact=True).click()
+            review.locator('form').evaluate('(form)=>{form.requestSubmit();form.requestSubmit()}')
+            expect(review.get_by_role('heading')).to_be_focused()
+            expect(review.get_by_role('button',name=names['create'],exact=True)).to_have_count(0)
+            assert composer.evaluate('(node)=>node===window.taskComposer&&node.selectionStart===4&&node.selectionEnd===16')
+            assert transcript.evaluate('(node)=>node===window.taskTranscript')
+            if width>760:assert transcript.evaluate('(node)=>node.scrollTop===window.taskReading.top&&node.clientWidth===window.taskReading.width&&node.clientHeight===window.taskReading.height&&node.scrollHeight===window.taskReading.scrollHeight')
+            checkbox=page.get_by_role('checkbox',name=title_text,exact=True)
+            expect(checkbox).to_have_count(1)
+            row=page.locator('[data-demo-task-id]').filter(has=checkbox)
+            expect(row).to_contain_text('Noor')
+            review.get_by_role('button',name=names['back_tasks'],exact=True).click();expect(checkbox).to_be_focused()
+            row.get_by_role('button',name=names['source'],exact=True).click();expect(original).to_be_focused()
+            assert original.evaluate('(node)=>node===window.taskOriginal')
+            view=original.get_by_role('button',name=names['view'],exact=True)
+            view.evaluate('(button)=>button.click()')
+            expect(checkbox).to_have_count(1);expect(review).to_contain_text('Noor')
+            review.get_by_role('button',name=names['undo'],exact=True).click()
+            expect(checkbox).to_have_count(0);expect(title).to_have_value(title_text)
+            expect(review.get_by_role('button',name=names['unassigned'],exact=True)).to_have_attribute('aria-pressed','false')
+            review.get_by_role('button',name=names['create'],exact=True).click()
+            expect(checkbox).to_have_count(1);checkbox.check()
+            expect(review.get_by_role('button',name=names['undo'],exact=True)).to_have_count(0)
+            review.get_by_role('button',name=names['back_tasks'],exact=True).click();expect(checkbox).to_be_focused()
+            row.get_by_role('button',name=names['source'],exact=True).click();view.evaluate('(button)=>button.click()')
+            expect(checkbox).to_be_checked();expect(checkbox).to_have_count(1)
+            expect(review.get_by_role('button',name=names['undo'],exact=True)).to_have_count(0)
+            review.get_by_role('button',name=names['original'],exact=True).click();expect(original).to_be_focused()
+            expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.taskComposer&&node.selectionStart===4&&node.selectionEnd===16')
+            checks[str(width)+'px_source_task_double_submit_creates_one_cited_task_reopens_it_undoes_only_matching_unfinished_creation_and_retains_original']=True
+
+            choose_channel(page,'design',swedish);daily('Uppgifter' if swedish else 'Tasks')
+            expect(page.get_by_role('checkbox',name=title_text,exact=True)).to_have_count(0)
+            page.get_by_role('button',name='Tillbaka till samtalet' if swedish else 'Back to conversation',exact=True).click()
+            design_source='A design-only next step from its own conversation.'
+            composer.fill(design_source);page.get_by_role('button',name=names['send'],exact=True).click()
+            design_original=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(design_source,exact=True))
+            design_original.get_by_role('button',name=names['make'],exact=True).click()
+            expect(title).to_have_value(design_source)
+            review.get_by_role('button',name=names['create'],exact=True).click()
+            expect(review).to_contain_text(names['unassigned'])
+            expect(page.get_by_role('checkbox',name=design_source,exact=True)).to_have_count(1)
+            choose_channel(page,'studio',swedish);daily('Uppgifter' if swedish else 'Tasks')
+            expect(page.get_by_role('checkbox',name=title_text,exact=True)).to_be_checked()
+            expect(page.get_by_role('checkbox',name=design_source,exact=True)).to_have_count(0)
+            image=REPORT.with_name('demo-message-task-'+str(width)+('.sv' if swedish else '')+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            page.reload(wait_until='networkidle')
+            expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('tab',name='Projects',exact=True).click()
+            expect(page.get_by_role('checkbox',name=title_text,exact=True)).to_have_count(0)
+            expect(page.get_by_role('checkbox',name=design_source,exact=True)).to_have_count(0)
+            expect(page.locator('.fc-demo-task-from-message')).to_have_count(0)
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('tab',name='Conversation',exact=True).click()
+            page.locator('.fc-showroom-transcript article').first.get_by_role('button',name='Make a task from this message',exact=True).click()
+            page.locator('.fc-demo-task-from-message:visible').get_by_role('button',name='Create task',exact=True).click()
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='Reset demo',exact=True).click();page.get_by_role('button',name='Reset this demo',exact=True).click()
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('tab',name='Projects',exact=True).click()
+            expect(page.locator('[data-task-source="true"]')).to_have_count(0)
+            expect(page.locator('.fc-demo-task-from-message')).to_have_count(0)
+            assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_source_tasks_remain_channel_scoped_and_optional_owner_reset_reload_discard_tasks_reviews_and_drafts']=True
         finally:visitor.close()
     return images
 
@@ -799,10 +936,12 @@ def main():
                 usability_images=usability_checks(browser,app,checks,errors,unexpected)
                 stage='content-derived suggestions, explicit links, stale matches, privacy and continuity'
                 connection_images=connection_checks(browser,app,checks,errors,unexpected)
+                stage='source-aware message tasks, less typing, provenance and channel continuity'
+                message_task_images=message_task_checks(browser,app,checks,errors,unexpected)
                 assert not errors,errors
                 assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':False,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images+connection_images,'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':False,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images+connection_images+message_task_images,'source_sha256':source_hashes},indent=2)+'\n')
         except Exception:
             print('Failed stage: '+stage)
             print((private/'vite.log').read_text()[-3500:]);raise

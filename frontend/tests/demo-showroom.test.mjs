@@ -435,3 +435,134 @@ test('confirmed and dismissed relationships never leak between visitor instances
   assert.equal(reset.nextId, 1); assert.equal(Object.keys(reset.stackUndo).length, 0);
   assert.equal(JSON.stringify(reset).includes('visitor-only-suggestion'), false);
 });
+
+test('tasks created from sample or visitor messages retain a literal citation and leave the message untouched', () => {
+  const initial = createDemoState();
+  const sample = demoReducer(initial, { type: 'task_from_message', channel: 'studio', messageId: 'studio-3', text: '  Bring the material samples  ', owner: 'Noor' });
+  const sampleTask = sample.tasks.at(-1);
+  assert.equal(sampleTask.id, 'local-' + initial.nextId); assert.equal(sample.nextId, initial.nextId + 1);
+  assert.equal(sampleTask.text, 'Bring the material samples'); assert.equal(sampleTask.owner, 'Noor');
+  assert.equal(sampleTask.sample, false); assert.equal(sampleTask.group, 'Team'); assert.equal(sampleTask.done, false);
+  assert.equal(sampleTask.source.channel, 'studio'); assert.equal(sampleTask.source.messageId, 'studio-3');
+  assert.equal(sample.messages, initial.messages); assert.equal(sample.documents, initial.documents);
+  assert.equal(initial.tasks.at(-1).source, undefined);
+  const sent = demoReducer(sample, { type: 'message', channel: 'design', text: 'Use <script> as literal planning text', time: '12:06' });
+  const message = sent.messages.design.at(-1);
+  const derived = demoReducer(sent, { type: 'task_from_message', channel: 'design', messageId: message.id, text: message.text });
+  const task = derived.tasks.at(-1);
+  assert.equal(task.text, message.text); assert.equal(task.owner, undefined);
+  assert.equal(task.source.channel, 'design'); assert.equal(task.source.messageId, message.id);
+  assert.equal(derived.messages, sent.messages); assert.equal(derived.messages.design.at(-1), message);
+  assert.equal(derived.nextId, sent.nextId + 1); assert.notEqual(task.id, message.id);
+});
+
+test('creating another task from the same cited message preserves the existing task and its completion', () => {
+  let state = demoReducer(createDemoState(), { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'Keep the first task', owner: 'Maja' });
+  const task = state.tasks.at(-1);
+  assert.equal(demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'A different proposed title', owner: 'Noor' }), state);
+  state = demoReducer(state, { type: 'task_toggle', id: task.id });
+  assert.equal(state.tasks.at(-1).done, true);
+  assert.equal(demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'Do not reset the completed task' }), state);
+  const differentMessage = demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-2', text: task.text });
+  assert.equal(differentMessage.tasks.length, state.tasks.length + 1);
+  assert.equal(differentMessage.tasks.at(-1).source.messageId, 'studio-2');
+  const fixture = createDemoState();
+  fixture.messages.studio[0].id = 'same-message-id'; fixture.messages.product[0].id = 'same-message-id';
+  let scoped = demoReducer(fixture, { type: 'task_from_message', channel: 'studio', messageId: 'same-message-id', text: 'A studio task' });
+  scoped = demoReducer(scoped, { type: 'task_from_message', channel: 'product', messageId: 'same-message-id', text: 'A product task' });
+  assert.equal(scoped.tasks.length, fixture.tasks.length + 2);
+  assert.equal(scoped.tasks.at(-2).source.channel, 'studio'); assert.equal(scoped.tasks.at(-1).source.channel, 'product');
+});
+
+test('message-derived tasks require a current visible source, bounded text and a valid owner', () => {
+  const initial = createDemoState();
+  for (const action of [
+    { channel: 'studio', messageId: 'missing', text: 'A task' },
+    { channel: 'studio', messageId: 'product-1', text: 'A task' },
+    { channel: 'constructor', messageId: 'studio-1', text: 'A task' },
+    { channel: 'studio', messageId: 'studio-1', text: ' ' },
+    { channel: 'studio', messageId: 'studio-1', text: 'x'.repeat(181) },
+    { channel: 'studio', messageId: 'studio-1', text: 'A task', owner: 'not-a-fictional-teammate' },
+  ]) assert.equal(demoReducer(initial, { type: 'task_from_message', ...action }), initial, JSON.stringify(action));
+  const stale = { ...initial, messages: { ...initial.messages, studio: initial.messages.studio.filter(message => message.id !== 'studio-1') } };
+  assert.equal(demoReducer(stale, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'A task from a removed source' }), stale);
+  const boundary = demoReducer(initial, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: '  ' + 'x'.repeat(180) + '  ' });
+  assert.equal(boundary.tasks.at(-1).text.length, 180); assert.equal(boundary.nextId, initial.nextId + 1);
+});
+
+test('message-derived tasks share the global task capacity and accept exactly the final available place', () => {
+  let state = createDemoState();
+  while (state.tasks.length < 49) state = demoReducer(state, { type: 'task_add', text: 'An existing shared task' });
+  const previousId = state.nextId;
+  state = demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'The final task' });
+  assert.equal(state.tasks.length, 50); assert.equal(state.nextId, previousId + 1);
+  assert.equal(state.tasks.at(-1).source.messageId, 'studio-1');
+  assert.equal(demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-2', text: 'One task too many' }), state);
+  assert.equal(demoReducer(state, { type: 'task_from_message', channel: 'product', messageId: 'product-1', text: 'The cap also applies in another channel' }), state);
+  assert.equal(demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'A repeated proposal at capacity', owner: 'Noor' }), state);
+});
+
+test('undoing a newly created source task preserves newer work and allows a fresh task from that source', () => {
+  const initial = createDemoState();
+  let state = demoReducer(initial, { type: 'task_from_message', channel: 'studio', messageId: 'studio-3', text: '  Bring two samples  ', owner: 'Elias' });
+  const created = state.tasks.at(-1);
+  state = demoReducer(state, { type: 'task_from_message', channel: 'product', messageId: 'product-1', text: 'Keep the product task' });
+  const productTask = state.tasks.at(-1);
+  state = demoReducer(state, { type: 'task_toggle', id: productTask.id });
+  state = demoReducer(state, { type: 'document', id: 'brief', text: 'Keep this newer document edit' });
+  state = demoReducer(state, { type: 'message', channel: 'design', text: 'Keep this newer message', time: '12:07' });
+  state = demoReducer(state, { type: 'document_link', channel: 'studio', documentId: 'brief', relatedDocumentId: 'notes' });
+  const documents = state.documents, messages = state.messages, links = state.documentLinks, stackUndo = state.stackUndo, nextId = state.nextId;
+  const action = { type: 'task_undo_created', channel: 'studio', id: created.id, text: created.text, owner: created.owner };
+  state = demoReducer(state, action);
+  assert.equal(state.tasks.some(task => task.id === created.id), false);
+  assert.equal(state.tasks.find(task => task.id === productTask.id).done, true);
+  assert.equal(state.documents, documents); assert.equal(state.messages, messages);
+  assert.equal(state.documentLinks, links); assert.equal(state.stackUndo, stackUndo); assert.equal(state.nextId, nextId);
+  assert.equal(demoReducer(state, action), state);
+  const recreated = demoReducer(state, { type: 'task_from_message', channel: 'studio', messageId: 'studio-3', text: 'A fresh task from the same message' });
+  assert.equal(recreated.tasks.at(-1).source.messageId, created.source.messageId);
+  assert.notEqual(recreated.tasks.at(-1).id, created.id); assert.equal(recreated.nextId, nextId + 1);
+  const withoutCurrentSource = { ...recreated, messages: { ...recreated.messages, studio: recreated.messages.studio.filter(message => message.id !== 'studio-3') } };
+  const latest = recreated.tasks.at(-1);
+  const undoneStaleSource = demoReducer(withoutCurrentSource, { type: 'task_undo_created', channel: 'studio', id: latest.id, text: latest.text });
+  assert.equal(undoneStaleSource.tasks.some(task => task.id === latest.id), false);
+  assert.equal(undoneStaleSource.messages, withoutCurrentSource.messages);
+});
+
+test('source-task undo rejects foreign, completed or changed tasks without deleting their newer state', () => {
+  const derived = demoReducer(createDemoState(), { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'A new task', owner: 'Maja' });
+  const task = derived.tasks.at(-1), action = { type: 'task_undo_created', channel: 'studio', id: task.id, text: task.text, owner: task.owner };
+  for (const changedAction of [
+    { ...action, channel: 'product' },
+    { ...action, channel: 'constructor' },
+    { ...action, id: 'missing' },
+    { ...action, text: 'An outdated title' },
+    { ...action, text: '  ' + task.text + '  ' },
+    { ...action, owner: 'Noor' },
+    { ...action, owner: undefined },
+  ]) assert.equal(demoReducer(derived, changedAction), derived);
+  const completed = demoReducer(derived, { type: 'task_toggle', id: task.id });
+  assert.equal(demoReducer(completed, action), completed);
+  for (const patch of [{ text: 'A later edit' }, { owner: 'Noor' }, { source: { channel: 'product', messageId: 'product-1' } }, { sample: true }, { group: 'Design' }]) {
+    const changed = { ...derived, tasks: derived.tasks.map(row => row.id === task.id ? { ...row, ...patch } : row) };
+    assert.equal(demoReducer(changed, action), changed);
+  }
+  const ordinary = demoReducer(createDemoState(), { type: 'task_add', text: task.text });
+  assert.equal(demoReducer(ordinary, { type: 'task_undo_created', channel: 'studio', id: ordinary.tasks.at(-1).id, text: task.text }), ordinary);
+  const sampleTask = derived.tasks[0];
+  assert.equal(demoReducer(derived, { type: 'task_undo_created', channel: 'studio', id: sampleTask.id, text: sampleTask.text }), derived);
+});
+
+test('source tasks and their citation objects stay local to one visitor and disappear on reset', () => {
+  const initial = createDemoState(), second = createDemoState();
+  const firstDerived = demoReducer(initial, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'Visitor-only follow-up' });
+  const secondDerived = demoReducer(second, { type: 'task_from_message', channel: 'studio', messageId: 'studio-1', text: 'Another visitor follow-up' });
+  assert.notEqual(firstDerived.tasks.at(-1).source, secondDerived.tasks.at(-1).source);
+  assert.equal(initial.tasks.some(task => task.source), false); assert.equal(second.tasks.some(task => task.source), false);
+  const reset = demoReducer(firstDerived, { type: 'reset' });
+  assert.equal(reset.tasks.some(task => task.source), false); assert.equal(reset.nextId, 1);
+  assert.equal(JSON.stringify(reset), JSON.stringify(initial));
+  assert.equal(JSON.stringify(reset).includes('Visitor-only follow-up'), false);
+  assert.equal(secondDerived.tasks.at(-1).text, 'Another visitor follow-up');
+});

@@ -10,7 +10,7 @@ export const demoDecisionExample = { text: 'Use warm, durable materials and keep
 export interface DemoDecision { text: string; nextStep: string; owner: DemoOwner }
 export const demoDecisionTaskId = 'courtyard-follow-up';
 export interface DemoMessage { id: string; author: string; text: string; time: string; sample: boolean }
-export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team'; owner?: DemoOwner }
+export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team'; owner?: DemoOwner; source?: { channel: DemoChannel; messageId: string } }
 export type DemoDocumentId = string;
 export interface DemoDocument { id: DemoDocumentId; channel: DemoChannel; stackId: string; title: string; source: string; edited: string | null; sample: boolean; owner: DemoOwner | 'You'; updatedLabel: string }
 export interface DemoDocumentLink { id: string; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId }
@@ -100,7 +100,7 @@ export function createDemoState(): DemoState {
     ], stacks: createDemoStacks(), documentLinks: { studio: [], product: [], design: [] }, dismissedConnections: { studio: [], product: [], design: [] }, stackUndo: {}, nextId: 1, layout: createDemoLayout(), decision: null,
   };
 }
-export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'document_link'; channel: DemoChannel; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId } | { type: 'document_unlink'; channel: DemoChannel; id: string } | { type: 'connection_dismiss'; channel: DemoChannel; id: string } | { type: 'connection_restore_dismissed'; channel: DemoChannel } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
+export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_from_message'; channel: DemoChannel; messageId: string; text: string; owner?: DemoOwner } | { type: 'task_undo_created'; channel: DemoChannel; id: string; text: string; owner?: DemoOwner } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'document_link'; channel: DemoChannel; documentId: DemoDocumentId; relatedDocumentId: DemoDocumentId } | { type: 'document_unlink'; channel: DemoChannel; id: string } | { type: 'connection_dismiss'; channel: DemoChannel; id: string } | { type: 'connection_restore_dismissed'; channel: DemoChannel } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset') return createDemoState();
   if (action.type === 'layout_reset') return { ...state, layout: createDemoLayout() };
@@ -125,6 +125,19 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'task_add') {
     const text = action.text.trim(); if (!text || text.length > 180 || state.tasks.length >= 50) return state;
     return { ...state, nextId: state.nextId + 1, tasks: [...state.tasks, { id: 'local-' + state.nextId, text, done: false, sample: false, group: 'Team' }] };
+  }
+  if (action.type === 'task_from_message') {
+    if (!validChannel(action.channel) || !state.messages[action.channel].some(message => message.id === action.messageId) || state.tasks.some(task => task.source?.channel === action.channel && task.source.messageId === action.messageId)) return state;
+    const text = action.text.trim();
+    if (!text || text.length > 180 || (action.owner !== undefined && !demoOwners.includes(action.owner)) || state.tasks.length >= 50) return state;
+    const task: DemoTask = { id: 'local-' + state.nextId, text, owner: action.owner, done: false, sample: false, group: 'Team', source: { channel: action.channel, messageId: action.messageId } };
+    return { ...state, nextId: state.nextId + 1, tasks: [...state.tasks, task] };
+  }
+  if (action.type === 'task_undo_created') {
+    if (!validChannel(action.channel)) return state;
+    const task = state.tasks.find(row => row.id === action.id);
+    if (!task || task.source?.channel !== action.channel || task.text !== action.text || task.owner !== action.owner || task.done !== false || task.sample !== false || task.group !== 'Team') return state;
+    return { ...state, tasks: state.tasks.filter(row => row.id !== task.id) };
   }
   if (action.type === 'task_toggle') return { ...state, tasks: state.tasks.map(row => row.id === action.id ? { ...row, done: !row.done } : row) };
   if (action.type === 'decision_record') {

@@ -7,6 +7,7 @@ from ..database import get_session
 from ..models.message import Message
 from ..models.collaboration import ThreadSubscription, EncryptedThreadSubscription, EncryptedMessageActivity
 from ..services.auth import get_current_user
+from ..services.request_guard import recheck_actor
 from ..services.access import require_channel_member, lock_channel_writes
 from ..services.workspaces import require_direct_message_writable
 from ..services.direct_messages import restore_direct_inbox
@@ -101,6 +102,7 @@ async def reply_to_message(
         raise HTTPException(404, "Message not found")
     
     lock_channel_writes(session, parent.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, parent.channel_id, user.id)
     require_direct_message_writable(session, parent.channel_id, user.id)
     require_native_channel(session, parent.channel_id)
@@ -192,7 +194,8 @@ def get_thread(
             and_(Message.created_at == before_msg.created_at, Message.id < before_msg.id),
         ))
     
-    replies = list(reversed(query.limit(limit).all()))
+    page = query.limit(limit + 1).all()
+    replies = list(reversed(page[:limit]))
 
     # Older clients could incorrectly mark plaintext as encrypted. Do not
     # silently expose unauthenticated content or fail with an unhandled error.
@@ -209,6 +212,7 @@ def get_thread(
     return {
         "parent_id": message_id,
         "thread_count": parent.thread_count or 0,
+        "has_more": len(page) > limit,
         "replies": [
             {
                 "id": r.id,

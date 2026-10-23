@@ -105,3 +105,17 @@ revision history, an encrypted approval note completed by the real workflow
 worker, opaque application API/database records and actual
 `m.room.encrypted` wire events. Native tests alone do not establish Matrix
 encryption.
+
+## Persistent native document organization
+
+Authenticated **Workspace tools → Documents** now supports persistent native page
+stacks, explicit bidirectional page relations and source-title connection
+proposals, saved message sources and stack discussions derived from the original
+page comments. A message action reviews the current source before saving a
+reference; no text copy is stored. Moves have their own compare-and-set revision and Undo preserves later
+Yjs edits. Stack creation generations reject stale requests after an ID is
+recreated. See [DOCUMENT_ORGANIZATION.md](DOCUMENT_ORGANIZATION.md) for the protocol,
+permissions, limits, export/retention and native-only scope. These resources are
+separate from the public demo's local stacks. Encrypted channels retain flat
+collaborative pages/comments/revisions; encrypted organization is explicitly
+unsupported and never uses a native plaintext fallback.

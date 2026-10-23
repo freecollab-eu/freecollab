@@ -36,6 +36,19 @@ export function contextualReviewedSnapshot(choices: ContextChoice[], sources: Co
 export function sameContextualProvider(left: CopilotState, right: CopilotState): boolean {
   return left.config_revision === right.config_revision && left.provider?.endpoint === right.provider?.endpoint && left.provider?.model === right.provider?.model;
 }
+/** Count the server's selected-context envelope, in Unicode characters. */
+export function contextualContextCharacters(choices: ContextChoice[], sources: CopilotSource[]): number {
+  if (choices.length !== sources.length) return Infinity;
+  let count = 0;
+  for (let index = 0; index < sources.length; index++) {
+    const source = sources[index], choice = choices[index];
+    if (source.id !== choice.source.id || source.kind !== choice.source.kind) return Infinity;
+    const text = source.kind === 'shared_document' ? source.text : source.kind === 'message' ? choice.message?.content : undefined;
+    if (typeof text !== 'string') return Infinity;
+    count += Array.from('[S' + (index + 1) + '] ' + source.kind + '\n' + text).length + (index ? 2 : 0);
+  }
+  return count;
+}
 
 /** In-place, explicitly disclosed AI help; the parent applies reviewed text to its editor. */
 export function ContextualCopilot({ workspaceId, channelId, contextKey, contextLabel, actions, sourceRefs = [], onApply, onConfigure, applyLabel = 'Use suggestion', applyHint = 'Uses reviewed text only after your approval.', maxApplyLength = 10000, applyActionIds }: ContextualCopilotProps) {
@@ -87,6 +100,7 @@ export function ContextualCopilot({ workspaceId, channelId, contextKey, contextL
   }
   const selectedAction = actions.find(action => action.id === actionId);
   const promptFits = !!selectedAction?.prompt.trim() && selectedAction.prompt.length <= 3900;
+  const contextFits = contextualContextCharacters(choices, reviewedSources) <= 24000;
   const host = copilotProviderHost(status?.provider?.endpoint) || t('Configured provider');
   const available = status?.globally_enabled && status.configured && status.consented;
   async function recheck(reviewed: CopilotState, selectedSnapshot: string) {
@@ -97,6 +111,7 @@ export function ContextualCopilot({ workspaceId, channelId, contextKey, contextL
   }
   async function send(version: number, token: string | null) {
     if (!status || !available || !selectedAction || !disclose || secure && !discloseSecure) return;
+    if (!contextFits) throw new Error('Select fewer sources. AI context is limited to 24,000 characters; nothing was sent.');
     const prompt = selectedAction.prompt, agent = status.agents.find(value => value.tools.length === 0) || status.agents[0];
     if (!agent || !prompt.trim() || prompt.length > 3900) throw new Error('Shorten the selected text before asking AI.');
     const snapshot = contextualReviewedSnapshot(choices, reviewedSources);
@@ -137,10 +152,11 @@ export function ContextualCopilot({ workspaceId, channelId, contextKey, contextL
         {!!choices.length && <details><summary>{t('Review {count} selected sources', { count: choices.length })}</summary>{choices.map((choice, index) => <div key={choice.key}><strong>{choice.label}</strong><p>{reviewedSources[index]?.text ?? choice.preview}</p></div>)}</details>}
         {choices.some(choice => choice.document) && <p>{t('Selected documents include up to 12,000 characters of verified text.')}</p>}
         {!promptFits && <p>{t('Shorten the selected text before asking AI.')}</p>}
+        {!contextFits && <p>{t('Select fewer sources. AI context is limited to 24,000 characters; nothing was sent.')}</p>}
         <aside id={uid + '-disclosure'}><p>{t('Your request and {count} selected sources will be sent to {provider} using {model}.', { count: choices.length, provider: host, model: status.provider?.model || '' })}</p><p>{t('API use may incur charges. A chat subscription is separate. The provider’s retention policy applies. AI answers can be wrong.')}</p></aside>
         <label><input type="checkbox" checked={disclose} onChange={event => setDisclose(event.target.checked)} />{t('Send this request and the selected context to this provider.')}</label>
         {secure && <label className="fc-contextual-copilot-secure"><input type="checkbox" checked={discloseSecure} onChange={event => setDiscloseSecure(event.target.checked)} />{t('I explicitly disclose selected decrypted content through the server relay to the AI provider. These copies leave end-to-end encryption. Secure exchanges are not stored as plaintext history.')}</label>}
-        <button type="button" className="fc-contextual-copilot-send" aria-describedby={uid + '-disclosure'} disabled={!promptFits || !disclose || secure && !discloseSecure} onClick={() => void perform('Asking your AI provider…', send)}>{t('Send to provider')}</button>
+        <button type="button" className="fc-contextual-copilot-send" aria-describedby={uid + '-disclosure'} disabled={!promptFits || !contextFits || !disclose || secure && !discloseSecure} onClick={() => void perform('Asking your AI provider…', send)}>{t('Send to provider')}</button>
       </fieldset>}
       {result && <div className="fc-contextual-copilot-result"><strong>{t('Review the suggestion')}</strong><p>{result.text}</p>{onApply && (!applyActionIds || applyActionIds.includes(result.action)) && <button type="button" disabled={!!busy || result.context !== contextKey || result.action !== actionId || result.text.length > maxApplyLength} onClick={() => void perform('Checking the current context…', async (version, token) => { if (result.context !== contextKey || result.action !== actionId) return; await recheck(result.config, result.sources); if (valid(version, identity, token) && onApply(result.text, result.context) === false) throw new Error('The target changed. Review a new suggestion.'); })}>{t(applyLabel)}</button>}{onApply && (!applyActionIds || applyActionIds.includes(result.action)) && result.text.length > maxApplyLength && <p>{t('The suggestion is too long for this field. Nothing was changed.')}</p>}<small>{t(applyHint)}</small></div>}
       {busy && <p role="status"><Loader2 size={14} aria-hidden="true" />{t(busy)}</p>}

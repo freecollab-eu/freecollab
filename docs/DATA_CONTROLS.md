@@ -37,3 +37,23 @@ Enter a fresh password/factor, the exact phrase `ERASE MY ACCOUNT`, and acknowle
 `DATA_CONTROLS_ENABLED=false` disables workspace control routes and pauses the shared worker's data queue, including pending physical cleanup. Re-enable it to resume that queue. A directly invoked trusted processing service still completes already-committed file cleanup, while refusing new metadata export/purge work. Account identity erasure remains available as a separate privacy action. Keep workers paused during backup restore and review applicable erasure records before resuming them.
 
 Verification uses private SQLite databases with foreign-key enforcement and private fixture file storage: `backend/.venv/bin/python -m pytest backend/tests/test_data_controls.py -q`. The browser proof `frontend/tests/data-controls-browser.py` runs disposable local API/Vite/Chromium processes and exercises an actual private archive download, preview/confirmation, row and file-byte erasure, responsive UI and identity erasure. No production account, data, provider or public service is required.
+
+### Document organization and current channel details
+
+Native owner exports include verified stack titles, placements, document pairs, saved-message routing references
+and current channel name/description metadata; secure channel detail exports
+contain the opaque Matrix event reference only. Native stack payloads are verified
+against their immutable creation generation before export. A failed binding stops
+the export rather than emitting a ciphertext dump.
+
+Retention includes shared-page placements and both sides of saved relations in
+the complete-history age check. A recent move or relation protects the relevant
+page history. A recent saved-message reference protects the source and its thread parent chain; old references are allowlisted dependents. Eligible old dependents are deleted before pages/stacks, without
+orphaned foreign keys. An old empty stack is eligible only if no placement remains.
+Current channel details are retained with the channel identity, as the channel's
+name and membership are, and are not erased by a time-based content purge.
+Edit the current channel profile to change those values. Its revision remains
+monotonic while the channel exists, so retention cannot revive an old editor's
+compare-and-set token. Account closure keeps the usual disabled opaque author
+stub for shared authored records, including these new records; it does not erase
+other participants' shared content.

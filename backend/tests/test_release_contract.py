@@ -41,6 +41,18 @@ def test_core_mentions_and_account_workspace_routes_require_authentication(pilot
         assert pilot.get(path).status_code in {401, 403}
 
 
+def test_native_feature_contract_registers_protected_product_routes(pilot):
+    capabilities = pilot.get("/capabilities").json()
+    assert capabilities["channel_metadata"] == {"native": True, "matrix": False, "revisioned": True}
+    assert capabilities["shared_document_organization"] == {
+        "native": True, "matrix": False, "message_references": True, "derived_comments": True,
+    }
+    assert capabilities["thread_history"] == "paged-with-roots-only-timeline"
+    assert capabilities["custom_presence"] == "active-device-leases"
+    for path in ("/channels/missing/metadata", "/channels/missing/shared-document-organization"):
+        assert pilot.get(path).status_code in {401, 403}
+
+
 @pytest.mark.parametrize("path", ["/health", "/capabilities", "/auth/me", "/missing-private-route"])
 def test_api_successes_and_errors_are_excluded_from_browser_and_shared_caches(pilot, path):
     response = pilot.get(path)

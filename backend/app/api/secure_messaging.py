@@ -193,9 +193,14 @@ def has_native_product_history(session, channel_id: str) -> bool:
     # immutable document history and workflow definitions still count as history.
     from ..models.project_tasks import ProjectBoard, TaskCard
     from ..models.shared_documents import SharedDocument
+    from ..models.document_organization import SharedDocumentStack, SharedDocumentPlacement, SharedDocumentRelation, SharedDocumentStackReference
+    from ..models.channel_metadata import ChannelMetadata
     from ..models.workflow import WorkflowDefinition, WorkflowRun
-    return any(session.exec(select(model.id).where(model.channel_id == channel_id)).first()
-               for model in (ProjectBoard, TaskCard, SharedDocument, WorkflowDefinition, WorkflowRun, ActivityFeedPost, CopilotConversation, CloudFileLink, ExternalMeeting))
+    return (any(session.exec(select(model.id).where(model.channel_id == channel_id)).first()
+               for model in (ProjectBoard, TaskCard, SharedDocument, SharedDocumentStack, SharedDocumentRelation, SharedDocumentStackReference, WorkflowDefinition, WorkflowRun, ActivityFeedPost, CopilotConversation, CloudFileLink, ExternalMeeting))
+            or session.exec(select(SharedDocumentPlacement.document_id).where(SharedDocumentPlacement.channel_id == channel_id)).first() is not None
+            or session.exec(select(ChannelMetadata.channel_id).where(ChannelMetadata.channel_id == channel_id,
+                                                                    ChannelMetadata.content_mode == "server")).first() is not None)
 
 
 @router.post("/secure/channels/{channel_id}/enable")

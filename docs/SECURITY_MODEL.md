@@ -63,7 +63,13 @@ Recording is best effort after the action. A failed activity write emits only a 
 
 ## Optional integrations and advanced routes
 
-Experimental posts and comments are disabled by default. Core mentions are enabled and member-scoped. Advanced routes are disabled with `ENABLE_EXPERIMENTAL_FEATURES=false`; the server AI-demo routes use separate `ENABLE_DEMO_AI=false`. Opt-in is an operator choice and requires validation of the enabled surface. When the AI demo is enabled and `GROQ_API_KEY` is configured, demo messages/history can be sent to Groq. Do not send private production content to a demo provider.
+Experimental posts and their generic comments are disabled by default via
+`ENABLE_EXPERIMENTAL_FEATURES=false`; production activity feeds and document
+comments have their own authenticated contracts. Core mentions are member-scoped.
+The anonymous server AI-demo endpoints are removed, and `ENABLE_DEMO_AI` is
+deprecated and ignored even when true. Production AI uses the separately
+configured [Copilot](COPILOT.md), reviewed sources, provider revision and explicit
+disclosure/consent. The public showroom uses local examples with no provider call.
 
 The legacy widget sends plaintext to the authenticated server and is refused access to secure channels. Its current protocol cannot join or send to encrypted rooms. It polls the latest 50 messages every three seconds. It does not reconcile edits/deletions or fill larger gaps. API URLs require HTTPS except HTTP loopback development. Requests omit cookies, disable caching and reject redirects. Changing the account or channel clears the displayed history and draft and cancels old work; destroying the instance is terminal. Render all host/user text as text. A host page must protect its user token, host a trusted bundle and never embed operator credentials. The [standalone example](../examples/widget/README.md) stores no token in the URL or persistent browser storage.
 

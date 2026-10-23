@@ -1,0 +1,2 @@
+.fc-chat-thread-older{min-height:44px;margin-bottom:1rem}.fc-chat-thread-error{margin:0 0 1rem}.fc-chat-thread-error>[role=alert]{color:var(--fc-danger)}.fc-chat-thread-reply:focus{outline:2px solid var(--fc-accent);outline-offset:4px;border-radius:4px}
+.fc-chat-thread-parent>div:nth-child(2),.fc-chat-thread-reply>div:nth-child(2){min-width:0;flex:1}.fc-chat-thread-stack{align-self:flex-start;flex-shrink:0;min-width:44px;min-height:44px}

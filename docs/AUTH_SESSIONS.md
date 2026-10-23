@@ -65,11 +65,11 @@ Recovery and sensitive account routes also use persistent database buckets. Reco
 
 Personal registration remains available for the self-hosted pilot. Workspace managed admission is independent of installation-wide personal registration; it does not make the public registration endpoint invitation-only. TLS termination, request-size limits and external traffic controls remain deployment responsibilities.
 
-## Pilot retention and permanent removal
+## Retention and permanent removal
 
-Permanent account and channel removal is unavailable in this pilot. The admin DELETE routes return HTTP 409 instead of deleting only a parent row and orphaning memberships, messages, files or dependent records. Their deletion buttons are removed from the admin UI. Pause an account or remove its channel membership to revoke access. These actions do not erase retained content or backups.
+Direct administrative account/channel DELETE routes remain fenced with HTTP 409 instead of removing only a parent row and orphaning shared history. Separate [reviewed data controls](DATA_CONTROLS.md) provide native content exports, preview-bound permanent retention purges with physical file cleanup, and personal account identity erasure in **Workspace tools → Data & retention**. Identity erasure requires fresh password/MFA confirmation, a current dependency preview and ownership handovers; it removes private account data, revokes sessions and retains a blocked anonymous author reference for shared work. Secure-channel access revocation must succeed before native identity erasure commits.
 
-An operator must define the retention/export policy and a coordinated database, file and backup removal workflow before offering permanent deletion. Do not describe pausing access as account erasure or a completed data-deletion request.
+Pausing an account or removing membership revokes access without erasing content. Native retention does not erase Matrix homeserver/device history, previously shared provider copies or backups. Operators must define those separate retention and restore policies; account identity erasure does not promise removal of all authored shared text or every external copy.
 
 Staff message moderation is a soft deletion: the message row remains with a deleted flag and a replacement marker, existing thread references and counts remain intact, and a `message_deleted` event updates connected channel members. Deleted messages are excluded from normal history. This preserves referential integrity; it does not provide an irreversible purge from database copies or backups.
 

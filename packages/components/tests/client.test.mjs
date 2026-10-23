@@ -35,6 +35,22 @@ test('modular native reads share one authenticated, scoped preflight; no cookie 
   client.destroy();
 });
 
+test('a busy thread cannot crowd its root out of the timeline while replies remain searchable', async () => {
+  const root = { id: 'root', channel_id: 'shared', content: 'Original discussion', created_at: '2026-10-23', parent_id: null };
+  const history = [...Array.from({ length: 105 }, (_, n) => ({ ...root, id: 'reply-' + (104 - n), content: 'Thread response ' + (104 - n), parent_id: root.id })), root];
+  const { client } = fixture({ fetch: async url => {
+    const request = new URL(url);
+    if (request.pathname !== '/api/messages/channels/shared') return null;
+    const candidates = request.searchParams.get('roots_only') === 'true' ? history.filter(row => !row.parent_id) : history;
+    const cursor = request.searchParams.get('before');
+    const start = cursor ? candidates.findIndex(row => row.id === cursor) + 1 : 0;
+    return Response.json(candidates.slice(start, start + Number(request.searchParams.get('limit'))));
+  } });
+  assert.deepEqual((await client.listMessages()).map(row => row.id), [root.id]);
+  assert.deepEqual((await client.searchMessages('Thread response 104')).map(row => row.id), ['reply-104']);
+  client.destroy();
+});
+
 test('host reauthentication clears old user resources synchronously and binds fresh user', async () => {
   const { client, setToken, requests } = fixture(); const notifications = await client.listNotifications();
   setToken('beta-token'); const reauth = client.reauthenticate(); assert.equal(client.state.status, 'authenticating');

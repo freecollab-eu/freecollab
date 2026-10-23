@@ -127,7 +127,7 @@ export class CollaborationClient {
     }
   }
   async listMessages(signal?: AbortSignal): Promise<CollaborationMessage[]> {
-    return this.request<CollaborationMessage[]>('/messages/channels/' + escaped(this.scopeValue.channelId) + '?limit=50', {}, signal, rows => {
+    return this.request<CollaborationMessage[]>('/messages/channels/' + escaped(this.scopeValue.channelId) + '?limit=50&roots_only=true', {}, signal, rows => {
       if (!Array.isArray(rows) || rows.some(row => row.channel_id !== this.scopeValue.channelId)) throw new SDKError('scope-mismatch', 'The server returned content outside the configured channel.');
       this.remember('message', rows);
       return rows.slice(0, 50).filter(row => !row.deleted && !row.parent_id).reverse();

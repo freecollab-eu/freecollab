@@ -1,8 +1,25 @@
-# Weavy comparison after FreeCollab 0.9
+# Weavy comparison: current FreeCollab source
 
-All eight prioritized implementation tracks below now have code and private validation. Personal language is selectable (Swedish/English), and the old experimental posts API remains separate from the new production feed. The SDK is locally packable rather than published; native Office saveback has protocol evidence rather than a vendor desktop test. Cloud pickers and the SDK fail closed for server-side access to encrypted channels, with client-encrypted cloud links supported separately. Real provider credentials/public service operation are not claimed.
+Updated **2026-10-23** for 0.13 and the subsequent review branch. The
+[implementation audit](FEATURE_AUDIT.md) is the current source of feature status,
+code, tests and missing work. The dated Weavy sources below were read on
+2026-10-21; Weavy has not been exercised here and its current product may differ.
 
-See [0.9 scope](PRODUCT_090.md), [languages](LANGUAGES.md) and [validation](VALIDATION.md) for the resulting product. The original dated comparison is preserved below so its former gaps are not mistaken for current behavior.
+| Previously identified gap | Current FreeCollab implementation | Remaining boundary |
+| --- | --- | --- |
+| Personal language and design | Saved Swedish/English, colors, typography, density, light/dark. [UX audit](audit/UX_LANGUAGES.md). | Two shipped languages; no claim of every Weavy locale. |
+| Files, previews and Office | Native file organization/versions/comments, bounded inert previews and expiring WebDAV saveback. [Content audit](audit/WORK_CONTENT.md). | No evidence of 100+ preview-format parity or actual vendor Office acceptance. |
+| Production feeds | Native/Matrix feed posts, comments, reactions, polls, following and read state. [Activity feeds](ACTIVITY_FEEDS.md). | Older experimental posts routes are separate. |
+| Modular embedding | Eleven native SDK modules, Web Components/React and isolated trusted Matrix client. [SDK audit](audit/SDK_OPERATIONS.md). | Packable, not npm-published; actual customer host acceptance separate. |
+| Cloud files | Google Drive, OneDrive/SharePoint, Dropbox and Box pickers, plus supported selective synchronization. [Integration audit](audit/INTEGRATIONS.md). | Customer-owned registrations/grants; encrypted links and server import have different limits. |
+| Contextual AI and agents | Reviewed message/draft/document/stack/task help, one compatible provider/model per workspace, fixed tools and separately approved writes. [AI audit](audit/AI_WORKFLOWS.md). | Not a general multi-step agent platform: no routing, AI spending ledger, arbitrary HTTP/web-search or workspace RAG. |
+| External meetings | Meet, Teams and Zoom adapters, plus own browser calls and optional LiveKit. [Integration audit](audit/INTEGRATIONS.md). | Customer grants/licenses and real provider acceptance required. |
+| Recent natural workflow | Real channel metadata, native document stacks, message references and derived stack discussions. [Organization](DOCUMENT_ORGANIZATION.md). | Native stacks do not imply Matrix stacks or general binary/external file taxonomy. |
+
+These are implemented bounded flows, not proof of full Weavy parity or an
+overall product/security ranking. See [the practical scorecard](OPEN_SOURCE_SCORECARD.md).
+The historical comparison is preserved verbatim below; its former gaps and
+retired Groq-demo description do not describe today's implementation.
 
 ---
 

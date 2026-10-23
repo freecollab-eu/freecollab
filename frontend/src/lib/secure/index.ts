@@ -4,6 +4,7 @@ import { decodeRecoveryKey } from 'matrix-js-sdk/lib/crypto-api/recovery-key';
 import { storageKeyFor, loadPendingNotices, savePendingNotices } from './device-store';
 import { sendOrResumeEncryptedTransaction } from './transaction-retry';
 import { APIError, type Message, type Reaction, type ReadReceipt } from '../api';
+import { channelMetadataFields, legacyChannelName, verifiedChannelMetadata, type ChannelMetadata, type ChannelMetadataRecord } from '../channel-metadata';
 const quietLogger = { trace() {}, debug() {}, info() {}, warn() {}, error() {}, getChild() { return this; } };
 interface Configuration { baseUrl: string; getAccessToken: () => string | null; getUserId: () => string | null }
 export interface SecureBinding { channel_id: string; room_id: string | null; status: string; federated_peer_server?: string }
@@ -13,6 +14,8 @@ const METADATA = 'eu.freecollab.channel.metadata', REACTION = 'eu.freecollab.rea
 let configuration: Configuration | null = null, client: MatrixClient | null = null, starting: Promise<MatrixClient> | null = null, ownerToken: string | null = null;
 let bindings = new Map<string, SecureBinding>(), bindingsLoaded = false;
 const listeners = new Set<Listener>(), names = new Map<string, string>();
+const channelDetails = new Map<string, ChannelMetadata>();
+const legacyMetadataOrder = new Map<string, { time: number; id: string }>();
 let generation = 0;
 const transactionEpochs = new WeakMap<MatrixClient, Map<string, string>>();
 interface RevokedDevice { user_id: string; matrix_user_id: string; device_id: string }
@@ -65,10 +68,10 @@ const accountId = (id: string) => {
 };
 const emit = (event: string, payload: Record<string, unknown>) => listeners.forEach(fn => fn(event, payload));
 export function configureSecureMessaging(next: Configuration) { configuration = next; }
-async function request<T>(path: string, body?: unknown): Promise<T> {
+async function request<T>(path: string, body?: unknown, method?: 'PATCH'): Promise<T> {
   if (!configuration?.getAccessToken()) throw new Error('Sign in to unlock encrypted channels.');
   const requestToken = configuration.getAccessToken();
-  const response = await fetch(configuration.baseUrl + path, { method: body === undefined ? 'GET' : 'POST', headers: { Authorization: 'Bearer ' + requestToken, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+  const response = await fetch(configuration.baseUrl + path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers: { Authorization: 'Bearer ' + requestToken, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   if (!response.ok) { const data = await response.json().catch(() => null); if (response.status === 401 && requestToken === configuration?.getAccessToken()) window.dispatchEvent(new Event('freecollab:session-expired')); throw new APIError(typeof data?.detail === 'string' ? data.detail : typeof data?.detail?.message === 'string' ? data.detail.message : 'Encrypted channel is unavailable.', response.status, typeof data?.detail?.code === 'string' ? data.detail.code : undefined); }
   if (requestToken !== configuration?.getAccessToken()) throw new Error('The signed-in account changed.');
   return response.json();
@@ -86,7 +89,21 @@ async function processEvent(e: MatrixEvent, c: MatrixClient) {
   try {
     await c.decryptEventIfNeeded(e); if (eventGeneration !== generation || e.isDecryptionFailure()) return;
     const content = e.getContent(), relation = e.getOriginalContent()['m.relates_to'];
-    if (e.getType() === METADATA && typeof content.name === 'string' && await validMetadataSender(binding.channel_id, e)) { names.set(binding.channel_id, content.name); emit('secure_metadata', { channel_id: binding.channel_id, name: content.name }); }
+    if (e.getType() === METADATA) {
+      const record = await request<ChannelMetadataRecord>('/channels/' + encodeURIComponent(binding.channel_id) + '/metadata');
+      if (eventGeneration !== generation || c !== client) return;
+      if (record.authoritative) {
+        if (record.matrix_event_id !== e.getId()) return;
+        publishChannelMetadata(verifiedChannelMetadata(record, binding.room_id!, c.getUserId()!, metadataEvent(e)));
+      } else {
+        const name = legacyChannelName(content), previous = legacyMetadataOrder.get(binding.channel_id);
+        if (name === null || e.isRedacted() || !await validMetadataSender(binding.channel_id, e) || eventGeneration !== generation || c !== client) return;
+        const order = { time: e.getTs(), id: e.getId() || '' };
+        if (previous && (previous.time > order.time || previous.time === order.time && previous.id >= order.id)) return;
+        legacyMetadataOrder.set(binding.channel_id, order);
+        publishChannelMetadata({ ...record, name, description: '' });
+      }
+    }
     else if (e.getType() === EventType.RoomMessage) { const message = asMessage(binding.channel_id, e); if (relation?.rel_type === 'm.replace') { const original = await secureMessaging.getDecryptedEvent(binding.channel_id, relation.event_id!); if (original.getSender() !== e.getSender()) return; emit('message_updated', { ...message, id: relation.event_id, content: content['m.new_content']?.body || content.body }); } else if (message.parent_id) emit('thread_reply', { parent_id: message.parent_id, reply: message, thread_count: 0 }); else emit('new_message', message as unknown as Record<string, unknown>); }
     else if (e.getType() === REACTION) emit('reaction_updated', { channel_id: binding.channel_id, message_id: content.event_id });
     else if (e.getType() === RECEIPT) emit('read_receipt', { channel_id: binding.channel_id, user_id: accountId(e.getSender()!), last_read_message_id: content.event_id, read_at: new Date(e.getTs()).toISOString() });
@@ -98,10 +115,68 @@ async function validMetadataSender(channelId: string, event: MatrixEvent) {
   const domain = client?.getUserId()?.split(':').slice(1).join(':');
   return members.some(member => member.role === 'admin' && event.getSender() === '@fc_' + member.user_id + ':' + domain);
 }
+function metadataEvent(event: MatrixEvent) {
+  return { id: event.getId(), roomId: event.getRoomId(), sender: event.getSender(), type: event.getType(),
+    encrypted: event.isEncrypted(), redacted: event.isRedacted(), failed: event.isDecryptionFailure(), content: event.getContent() };
+}
+function publishChannelMetadata(metadata: ChannelMetadata) {
+  const previous = channelDetails.get(metadata.channel_id);
+  if (previous && (previous.authoritative && !metadata.authoritative || previous.version > metadata.version)) return;
+  channelDetails.set(metadata.channel_id, metadata); names.set(metadata.channel_id, metadata.name);
+  if (!previous || previous.name !== metadata.name || previous.description !== metadata.description || previous.version !== metadata.version) {
+    emit('secure_metadata', { channel_id: metadata.channel_id, name: metadata.name, description: metadata.description, metadata_version: metadata.version });
+  }
+}
+async function readChannelMetadata(channelId: string, supplied?: ChannelMetadataRecord): Promise<ChannelMetadata> {
+  const token = configuration?.getAccessToken();
+  const { c, room, roomId } = await roomFor(channelId);
+  const attempt = generation;
+  const current = () => { if (token !== configuration?.getAccessToken() || attempt !== generation || c !== client) throw new Error('The signed-in encryption session changed.'); };
+  current();
+  const record = supplied ?? await request<ChannelMetadataRecord>('/channels/' + encodeURIComponent(channelId) + '/metadata');
+  current();
+  if (record.channel_id !== channelId || !record.secure) throw new Error('Encrypted channel details could not be verified.');
+  if (record.authoritative) {
+    if (!record.matrix_event_id) throw new Error('Encrypted channel details could not be verified.');
+    const event = await secureMessaging.getDecryptedEvent(channelId, record.matrix_event_id); current();
+    const metadata = verifiedChannelMetadata(record, roomId, c.getUserId()!, metadataEvent(event));
+    publishChannelMetadata(metadata); return metadata;
+  }
+  // Only the old name-only format can bootstrap a channel without a registered
+  // metadata row. A new upload whose compare-and-swap failed is never eligible.
+  for (;;) {
+    const rows = await events(channelId); current();
+    for (const event of [...rows].reverse()) {
+      if (event.getType() !== METADATA || event.isRedacted() || event.isDecryptionFailure()) continue;
+      const name = legacyChannelName(event.getContent());
+      if (name === null || !await validMetadataSender(channelId, event)) continue;
+      current();
+      const metadata = { ...record, name, description: '' };
+      publishChannelMetadata(metadata); return metadata;
+    }
+    const previous = room.oldState.paginationToken;
+    if (!previous) break;
+    await c.scrollback(room, 100); current();
+    if (previous === room.oldState.paginationToken) break;
+  }
+  throw new Error('Encrypted channel details are unavailable. Verify this device or unlock recovery.');
+}
+async function writeChannelMetadata(channelId: string, name: string, description: string, expectedVersion: number): Promise<ChannelMetadata> {
+  const fields = channelMetadataFields(name, description), token = configuration?.getAccessToken();
+  const record = await request<ChannelMetadataRecord>('/channels/' + encodeURIComponent(channelId) + '/metadata');
+  if (token !== configuration?.getAccessToken()) throw new Error('The signed-in encryption session changed.');
+  if (!record.secure || record.channel_id !== channelId || !record.can_manage) throw new Error('Channel admin access required');
+  if (record.version !== expectedVersion) throw new Error('Channel details changed; reload before saving');
+  const result = await sendEvent(channelId, METADATA, { ...fields, channel_id: channelId, version: expectedVersion + 1, registration_required: true });
+  if (token !== configuration?.getAccessToken()) throw new Error('The signed-in encryption session changed.');
+  const saved = await request<ChannelMetadataRecord>('/channels/' + encodeURIComponent(channelId) + '/metadata', { expected_version: expectedVersion, matrix_event_id: result.event_id }, 'PATCH');
+  if (token !== configuration?.getAccessToken()) throw new Error('The signed-in encryption session changed.');
+  return readChannelMetadata(channelId, saved);
+}
 async function refreshBindings() { const rows = await request<SecureBinding[]>('/secure/channels'); bindings = new Map(rows.map(row => [row.channel_id, row])); bindingsLoaded = true; return rows; }
 async function ensureSession(): Promise<MatrixClient> {
   const token = configuration?.getAccessToken(); if (!token) throw new Error('Sign in to unlock encrypted channels.');
-  if (ownerToken !== token) { generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }
+  if (ownerToken !== token) { generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }
   if (client) return client; if (starting) return starting;
   const attempt = generation;
   const assertCurrent = (c?: MatrixClient) => { if (generation !== attempt || configuration?.getAccessToken() !== token) { c?.stopClient(); throw new Error("The signed-in account changed."); } };
@@ -196,11 +271,12 @@ async function sendEvent(channelId: string, type: string, content: Record<string
   return result;
 }
 
-async function getMessages(channelId: string, before?: string, limit = 100): Promise<Message[]> {
+async function getMessages(channelId: string, before?: string, limit = 100, rootsOnly = false): Promise<Message[]> {
   const { c, room } = await roomFor(channelId);
   const boundedLimit = Math.max(1, Math.min(limit, 200));
   let rows = await events(channelId);
-  const messageEvents = () => rows.filter(e => (e.getType() === EventType.RoomMessage || e.isDecryptionFailure()) && e.getOriginalContent()['m.relates_to']?.rel_type !== 'm.replace');
+  const messageEvents = () => rows.filter(e => (e.getType() === EventType.RoomMessage || e.isDecryptionFailure()) && e.getOriginalContent()['m.relates_to']?.rel_type !== 'm.replace'
+    && (!rootsOnly || e.getOriginalContent()['m.relates_to']?.rel_type !== 'm.thread'));
   const older = () => { const messages = messageEvents(); const index = before ? messages.findIndex(e => e.getId() === before) : messages.length; return index < 0 ? [] : messages.slice(0, index); };
   while (older().length < boundedLimit && room.oldState.paginationToken) {
     const previous = room.oldState.paginationToken;
@@ -326,19 +402,10 @@ export const secureMessaging = {
   async handles(channelId: string) { await refreshBindings(); return bindings.has(channelId); },
   async enableChannel(channelId: string, title: string) { const binding = await request<SecureBinding>('/secure/channels/' + encodeURIComponent(channelId) + '/enable', {}); bindings.set(channelId, binding); bindingsLoaded = true; await sendEvent(channelId, METADATA, { name: title }); names.set(channelId, title); return binding; },
   getChannelName(channelId: string) { return names.get(channelId); },
-  async getChannelTitle(channelId: string) {
-    const { c, room } = await roomFor(channelId);
-    for (;;) {
-      const rows = await events(channelId);
-      for (const event of [...rows].reverse()) if (event.getType() === METADATA && typeof event.getContent().name === 'string' && event.getContent().name.length <= 100 && await validMetadataSender(channelId, event)) { names.set(channelId, event.getContent().name); return event.getContent().name as string; }
-      const previous = room.oldState.paginationToken;
-      if (!previous) break;
-      await c.scrollback(room, 100);
-      if (previous === room.oldState.paginationToken) break;
-    }
-    return names.get(channelId) || 'Encrypted channel';
-  },
-  async setChannelName(channelId: string, name: string) { await sendEvent(channelId, METADATA, { name }); },
+  getChannelMetadata: readChannelMetadata,
+  async getChannelTitle(channelId: string) { return (await readChannelMetadata(channelId)).name; },
+  setChannelMetadata: writeChannelMetadata,
+  async setChannelName(channelId: string, name: string) { const current = await readChannelMetadata(channelId); return writeChannelMetadata(channelId, name, current.description, current.version); },
   async editMessage(channelId: string, messageId: string, content: string) { await sendEvent(channelId, EventType.RoomMessage, { msgtype: MsgType.Text, body: '* ' + content, 'm.new_content': { msgtype: MsgType.Text, body: content }, 'm.relates_to': { rel_type: 'm.replace', event_id: messageId } }); },
   async deleteMessage(channelId: string, messageId: string) { const { c, roomId } = await roomFor(channelId, true); await c.redactEvent(roomId, messageId); },
   async getThread(channelId: string, parentId: string) {
@@ -363,5 +430,5 @@ export const secureMessaging = {
   async verifyDevice(device: SecureDevice, fingerprint: string) { const c = await ensureSession(); await refreshRevocations(); if (revokedDevices.has(deviceKey(device.matrix_user_id, device.device_id))) throw new Error('This encryption device was removed.'); const info = await c.getCrypto()!.getUserDeviceInfo([device.matrix_user_id], true), current = info.get(device.matrix_user_id)?.get(device.device_id); if (!current || current.getFingerprint() !== fingerprint.replace(/\s/g, '')) throw new Error('Fingerprint mismatch. Verify it through a separate trusted channel.'); await c.getCrypto()!.setDeviceVerified(device.matrix_user_id, device.device_id, true); for (const [channelId, title] of names) { const binding = bindings.get(channelId); if (binding?.room_id && c.getRoom(binding.room_id)?.getMember(device.matrix_user_id)?.membership === 'join') await sendEvent(channelId, METADATA, { name: title }); } },
   async recoveryStatus() { const c = await ensureSession(); await hydrateRecoveryMetadata(c); return { ready: !!await c.secretStorage.getKey() && !pendingRecovery, unlocked: !!secretStorageKey && !pendingRecovery, device_id: c.getDeviceId(), fingerprint: (await c.getCrypto()!.getOwnDeviceKeys()).ed25519 }; },
   async getDecryptedEvent(channelId: string, eventId: string) { const { c, room } = await roomFor(channelId), timeline = await c.getEventTimeline(room.getUnfilteredTimelineSet(), eventId), e = timeline?.getEvents().find(item => item.getId() === eventId); if (!e || !e.isEncrypted()) throw new Error('Encrypted event not found.'); await c.decryptEventIfNeeded(e); if (e.isDecryptionFailure()) throw new Error('Verify this device or unlock recovery to read this event.'); return e; },
-  stop() { clearTimeout(noticeTimer); noticeTimer = undefined; notices.clear(); noticesOwner = null; pendingRecovery = null; generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; ownerToken = null; bindingsLoaded = false; bindings.clear(); names.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; },
+  stop() { clearTimeout(noticeTimer); noticeTimer = undefined; notices.clear(); noticesOwner = null; pendingRecovery = null; generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; ownerToken = null; bindingsLoaded = false; bindings.clear(); names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; },
 };

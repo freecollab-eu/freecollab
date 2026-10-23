@@ -10,6 +10,7 @@ from ..models.message import Message
 from ..models.channel import Channel
 from ..models.collaboration import MessageChange
 from ..services.auth import get_current_user
+from ..services.request_guard import recheck_actor
 from ..services.access import require_channel_member, lock_channel_writes
 from ..services.workspaces import require_direct_message_writable
 from ..services.direct_messages import restore_direct_inbox
@@ -54,6 +55,7 @@ async def send_message(
     session=Depends(get_session),
 ):
     lock_channel_writes(session, channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, channel_id, user.id)
     require_direct_message_writable(session, channel_id, user.id)
     require_native_channel(session, channel_id)
@@ -129,6 +131,7 @@ def get_messages(
     channel_id: str,
     limit: int = Query(50, ge=1, le=100),
     before: str | None = None,
+    roots_only: bool = False,
     user=Depends(get_current_user),
     session=Depends(get_session),
 ):
@@ -139,6 +142,8 @@ def get_messages(
         Message.channel_id == channel_id,
         Message.deleted == False,
     )
+    if roots_only:
+        query = query.filter(Message.parent_id.is_(None))
 
     if before:
         cursor = session.get(Message, before)
@@ -201,6 +206,7 @@ async def edit_message(
         raise HTTPException(404, "Message not found")
 
     lock_channel_writes(session, message.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, message.channel_id, user.id)
     require_direct_message_writable(session, message.channel_id, user.id)
     require_native_channel(session, message.channel_id)
@@ -254,6 +260,7 @@ async def delete_message(
         raise HTTPException(404, "Message not found")
 
     lock_channel_writes(session, message.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, message.channel_id, user.id)
     require_native_channel(session, message.channel_id)
 

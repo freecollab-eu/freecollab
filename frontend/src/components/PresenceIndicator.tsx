@@ -1,5 +1,5 @@
 import { t, useI18n } from '../i18n';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { api, UserPresence } from '../lib/api';
 import { getSocket, setPresenceStatus } from '../lib/socket';
 import '../styles/panels.css';
@@ -15,39 +15,39 @@ export function PresenceIndicator({ userId, showLabel = false, size = 'md' }: Pr
   const [presence, setPresence] = useState<UserPresence | null>(null);
 
   useEffect(() => {
-    loadPresence();
+    let live = true, revision = 0;
+    const token = api.getAccessToken();
+    const current = () => live && token === api.getAccessToken();
+    setPresence(null);
+    const initial = revision;
+    void api.getUserPresence(userId).then(data => {
+      if (current() && revision === initial) setPresence(data);
+    }).catch(() => {
+      if (current() && revision === initial) setPresence(null);
+    });
     const socket = getSocket();
 
-    const handlePresenceUpdate = (data: { user_id: string; status: string; custom_status?: string }) => {
-      if (data.user_id === userId) {
-        setPresence(prev => prev ? {
-          ...prev,
+    const handlePresenceUpdate = (data: { user_id: string; status: string; custom_status?: string | null }) => {
+      if (current() && data.user_id === userId) {
+        revision++;
+        setPresence(prev => ({
+          ...(prev || { user_id: userId, last_seen: new Date().toISOString() }),
           status: data.status as UserPresence['status'],
-          custom_status: data.custom_status,
-        } : null);
+          ...('custom_status' in data ? { custom_status: data.custom_status || undefined } : {}),
+        }));
       }
     };
+    const clear = () => { live = false; setPresence(null); };
 
     socket.on('presence', handlePresenceUpdate);
+    window.addEventListener('freecollab:auth-changed', clear);
 
     return () => {
+      live = false;
       socket.off('presence', handlePresenceUpdate);
+      window.removeEventListener('freecollab:auth-changed', clear);
     };
   }, [userId]);
-
-  const loadPresence = async () => {
-    try {
-      const data = await api.getUserPresence(userId);
-      setPresence(data);
-    } catch (err) {
-      // User might not exist or be offline
-      setPresence({
-        user_id: userId,
-        status: 'offline',
-        last_seen: new Date().toISOString(),
-      });
-    }
-  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -77,10 +77,10 @@ export function PresenceIndicator({ userId, showLabel = false, size = 'md' }: Pr
 
   return (
     <div className="flex items-center space-x-1">
-      <span className={`${sizeClasses[size]} ${getStatusColor(status)} fc-presence-dot rounded-full border-2`}></span>
+      <span role="img" aria-label={presence?.custom_status || t(getStatusLabel(status))} title={presence?.custom_status || t(getStatusLabel(status))} className={`${sizeClasses[size]} ${getStatusColor(status)} fc-presence-dot rounded-full border-2`}></span>
       {showLabel && (
         <span className="text-xs fc-muted">
-          {presence?.custom_status || getStatusLabel(status)}
+          {presence?.custom_status || t(getStatusLabel(status))}
         </span>
       )}
     </div>
@@ -96,6 +96,20 @@ export function PresenceStatusSelector({ onClose }: PresenceStatusSelectorProps)
   useI18n();
   const [customStatus, setCustomStatus] = useState('');
   const [currentStatus, setCurrentStatus] = useState<'online' | 'away' | 'busy'>('online');
+  const [busy, setBusy] = useState(false), [error, setError] = useState('');
+  const identity = useRef(api.getAccessToken()), dirty = useRef(false), mounted = useRef(false);
+  useEffect(() => {
+    mounted.current = true;
+    const token = identity.current, user = api.getCurrentUserId();
+    if (user) void api.getUserPresence(user).then(value => {
+      if (!mounted.current || token !== api.getAccessToken() || dirty.current) return;
+      setCustomStatus(value.custom_status || '');
+      setCurrentStatus(value.status === 'away' || value.status === 'busy' ? value.status : 'online');
+    }).catch(() => {});
+    const clear = () => { mounted.current = false; setCustomStatus(''); setCurrentStatus('online'); setBusy(false); setError(''); };
+    window.addEventListener('freecollab:auth-changed', clear);
+    return () => { mounted.current = false; window.removeEventListener('freecollab:auth-changed', clear); };
+  }, []);
 
   const statuses: { value: 'online' | 'away' | 'busy'; label: string; icon: string; color: string }[] = [
     { value: 'online', label: t("Online"), icon: '🟢', color: 'fc-presence-online' },
@@ -103,25 +117,30 @@ export function PresenceStatusSelector({ onClose }: PresenceStatusSelectorProps)
     { value: 'busy', label: t("Do not disturb"), icon: '🔴', color: 'fc-presence-busy' },
   ];
 
-  const handleStatusChange = (status: 'online' | 'away' | 'busy') => {
+  const handleStatusChange = async (status: 'online' | 'away' | 'busy') => {
+    if (busy || identity.current !== api.getAccessToken()) return;
+    dirty.current = true;
     setCurrentStatus(status);
-    setPresenceStatus(status, customStatus || undefined);
-    onClose?.();
+    setBusy(true); setError('');
+    try {
+      await setPresenceStatus(status, customStatus.trim() || null);
+      if (mounted.current && identity.current === api.getAccessToken()) onClose?.();
+    } catch { if (mounted.current && identity.current === api.getAccessToken()) setError(t('Your status could not be updated. Please try again.')); }
+    finally { if (mounted.current && identity.current === api.getAccessToken()) setBusy(false); }
   };
 
-  const handleCustomStatusSubmit = () => {
-    setPresenceStatus(currentStatus, customStatus || undefined);
-    onClose?.();
-  };
+  const handleCustomStatusSubmit = () => void handleStatusChange(currentStatus);
 
   return (
     <div className="fc-presence-selector">
       <h3 className="font-semibold mb-3">{t("Set your status")}</h3>
+      {error && <p role="alert">{error}</p>}
       
       <div className="space-y-2 mb-4">
         {statuses.map(({ value, label, icon }) => (
           <button
             key={value}
+            disabled={busy}
             onClick={() => handleStatusChange(value)}
             className={`fc-presence-choice ${
               currentStatus === value ? 'is-active' : ''
@@ -137,13 +156,16 @@ export function PresenceStatusSelector({ onClose }: PresenceStatusSelectorProps)
         <input
           type="text"
           value={customStatus}
-          onChange={(e) => setCustomStatus(e.target.value)}
+          disabled={busy}
+          onChange={(e) => { dirty.current = true; setCustomStatus(e.target.value); }}
           placeholder={t("Set a custom status...")}
+          aria-label={t("Set a custom status...")}
           className="fc-input text-sm"
           maxLength={50}
         />
         <button
           onClick={handleCustomStatusSubmit}
+          disabled={busy}
           className="fc-button fc-button-primary w-full mt-2"
         >
           {t("Save Status")}</button>

@@ -336,6 +336,7 @@ def delete_draft(workspace_id: str, channel_id: str, draft_id: str, user=Depends
 
 
 class ScheduleInput(service.Strict):
+    expected_config_revision: int = Field(ge=1, strict=True)
     interval_hours: int = Field(default=24, ge=1, le=168)
     enabled: bool = True
     disclose_future_native_messages: bool
@@ -354,6 +355,8 @@ def schedule(workspace_id: str, channel_id: str, data: ScheduleInput, user=Depen
     lock_actor(session, workspace_id, user.id, channel_id)
     service.install_grants(session, workspace_id, user.id, [channel_id])
     config = service.ai_context(session, workspace_id, channel_id, user.id)
+    if data.expected_config_revision != config.revision:
+        raise HTTPException(409, "Provider configuration changed; review the current destination before scheduling")
     if data.enabled and not data.disclose_future_native_messages:
         raise HTTPException(422, "Explicitly consent to sharing up to eight new native messages per recap with this provider")
     row = session.exec(select(ChannelRecapSchedule).where(ChannelRecapSchedule.workspace_id == workspace_id,
@@ -364,7 +367,14 @@ def schedule(workspace_id: str, channel_id: str, data: ScheduleInput, user=Depen
     else:
         row.generation += 1
     row.interval_hours, row.enabled, row.provider_revision = data.interval_hours, data.enabled, config.revision
-    row.next_run_at = datetime.utcnow()
+    # This grant is for future messages only, including when re-enabling a
+    # paused schedule or changing its provider. Never backfill unseen history.
+    from datetime import timedelta
+    consented_at = datetime.utcnow()
+    if data.enabled:
+        row.last_run_at = consented_at
+        row.last_status = None
+    row.next_run_at = consented_at + timedelta(hours=data.interval_hours)
     session.add(row)
     session.commit()
     session.refresh(row)

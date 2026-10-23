@@ -30,7 +30,7 @@ def test_governed_recipient_socket_connect_uses_own_authenticated_scope(partner,
         iter([("recipient", "engineio")]) if room == "user:b-member" else iter([]))
     asyncio.run(socket.connect("recipient", {}, {"token": token}))
     assert socket.presence_store["b-member"]["sessions"]["recipient"]["user_id"] == "b-member"
-    socket.sio.emit.assert_awaited_once_with("presence", {"user_id": "b-member", "status": "online"}, room="recipient")
+    socket.sio.emit.assert_awaited_once_with("presence", {"user_id": "b-member", "status": "online", "custom_status": None}, room="recipient")
 
 
 def test_governed_presence_rechecks_each_scope_and_only_explicit_partner_peers(partner, monkeypatch):

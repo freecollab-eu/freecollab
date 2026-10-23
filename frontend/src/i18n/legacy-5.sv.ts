@@ -39,6 +39,8 @@ const catalog: Record<string, string> = {
   "At least 12 characters. Make it something only you know.": "Minst 12 tecken. Välj något som bara du känner till.",
   "New passwords must contain at least 12 characters.": "Nya lösenord måste innehålla minst 12 tecken.",
   "This password is too long. Try a shorter one.": "Lösenordet är för långt. Prova ett kortare.",
+  "Passwords cannot contain a null character.": "Lösenord får inte innehålla ett nolltecken.",
+  "Use valid Unicode characters in your password.": "Använd giltiga Unicode-tecken i lösenordet.",
   "Overview": "Översikt",
   "Authenticator or recovery code ": "Autentiserings- eller återställningskod ",
   "Back to Home": "Till startsidan",

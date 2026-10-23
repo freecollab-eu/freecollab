@@ -139,7 +139,53 @@ def test_browser_presence_payload_is_normalized(realtime):
     sio.manager.get_participants.return_value=[('member','engine-sid')]
     assert run(socket.set_status('member', {'status': 'away'})) == {'ok': True}
     assert socket.presence_store['member']['status'] == 'away'
-    sio.emit.assert_awaited_once_with('presence', {'user_id': 'member', 'status': 'away'}, room='member')
+    sio.emit.assert_awaited_once_with('presence', {'user_id': 'member', 'status': 'away', 'custom_status': None}, room='member')
+
+
+def test_custom_presence_text_roundtrips_preserves_on_omission_and_clears_explicitly(realtime):
+    engine, sio, sessions = realtime
+    with Session(engine) as session: token = create_token('member', session)
+    sessions['member']['token'] = token
+    run(socket.connect('member', {}, {'token': token}))
+    sio.manager.get_participants.return_value = [('member', 'engine-sid')]
+    sio.emit.reset_mock()
+    assert run(socket.set_status('member', {'status': 'busy', 'custom_status': '  Writing the brief 🧭  '})) == {'ok': True}
+    assert socket.get_user_presence('member')['custom_status'] == 'Writing the brief 🧭'
+    assert run(socket.set_status('member', {'status': 'away'})) == {'ok': True}
+    assert socket.get_user_presence('member')['custom_status'] == 'Writing the brief 🧭'
+    assert run(socket.set_status('member', {'status': 'online', 'custom_status': ''})) == {'ok': True}
+    assert socket.get_user_presence('member')['custom_status'] is None
+    assert sio.emit.await_args_list[-1] == call('presence', {'user_id': 'member', 'status': 'online', 'custom_status': None}, room='member')
+
+
+@pytest.mark.parametrize('value', [True, 42, [], {}, 'x' * 51, 'a\nb', 'a\x00b', 'a\x7fb'])
+def test_invalid_custom_status_cannot_change_presence_or_broadcast(realtime, value):
+    _, sio, _ = realtime
+    socket.presence_store['member'] = {'sid': 'member', 'status': 'online', 'custom_status': 'Keep me'}
+    assert 'error' in run(socket.set_status('member', {'status': 'busy', 'custom_status': value}))
+    assert socket.presence_store['member']['status'] == 'online'
+    assert socket.presence_store['member']['custom_status'] == 'Keep me'
+    sio.emit.assert_not_awaited()
+
+
+def test_custom_status_belongs_to_current_live_connection_and_revocation_drops_it(realtime):
+    engine, _, sessions = realtime
+    with Session(engine) as session: token = create_token('member', session)
+    sessions['member']['token'] = token
+    sessions['left'] = sessions['right'] = sessions['member']
+    run(socket.connect('left', {}, {'token': token}))
+    run(socket.set_status('left', {'status': 'busy', 'custom_status': 'Private review'}))
+    run(socket.connect('right', {}, {'token': token}))
+    # A newly connected device starts clean; another connection's omitted text
+    # must not borrow the older device's custom value.
+    run(socket.set_status('right', {'status': 'away'}))
+    assert socket.get_user_presence('member')['custom_status'] is None
+    run(socket.disconnect('right'))
+    assert socket.get_user_presence('member')['custom_status'] == 'Private review'
+    with Session(engine) as session:
+        revoke_token(token, session)
+    assert 'error' in run(socket.set_status('left', {'status': 'online', 'custom_status': 'Must not publish'}))
+    assert socket.get_user_presence('member')['custom_status'] is None
 
 
 def test_notification_delivery_prunes_inactive_or_wrong_user_sessions(realtime):

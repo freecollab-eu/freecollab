@@ -38,6 +38,8 @@ interface Channel {
   workspace_id?: string;
   secure?: boolean;
   matrix_room_id?: string;
+  description?: string;
+  metadata_version?: number;
 }
 
 interface ChannelInvite {
@@ -389,6 +391,16 @@ class FreeCollabAPI {
     return this.request<Channel>(`/channels/${channelId}`);
   }
 
+  async getChannelMetadata(channelId: string): Promise<import('./channel-metadata').ChannelMetadataRecord> {
+    return this.request<import('./channel-metadata').ChannelMetadataRecord>(`/channels/${encodeURIComponent(channelId)}/metadata`);
+  }
+
+  async updateChannelMetadata(channelId: string, input: { expected_version: number; name: string; description: string }): Promise<import('./channel-metadata').ChannelMetadataRecord> {
+    return this.request<import('./channel-metadata').ChannelMetadataRecord>(`/channels/${encodeURIComponent(channelId)}/metadata`, {
+      method: 'PATCH', body: JSON.stringify(input),
+    });
+  }
+
   async getChannelMembers(channelId: string): Promise<ChannelMember[]> {
     return this.request<ChannelMember[]>(`/channels/${channelId}/members`);
   }
@@ -431,12 +443,13 @@ class FreeCollabAPI {
     });
   }
 
-  async getMessages(channelId: string, options: { before?: string; limit?: number; signal?: AbortSignal } = {}): Promise<Message[]> {
+  async getMessages(channelId: string, options: { before?: string; limit?: number; signal?: AbortSignal; rootsOnly?: boolean } = {}): Promise<Message[]> {
     const secure = await this.secureChannel(channelId);
     if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-    if (secure) return (await secure.getMessages(channelId, options.before, options.limit || 50)).map(message => this.rememberMessage(message));
+    if (secure) return (await secure.getMessages(channelId, options.before, options.limit || 50, options.rootsOnly || false)).map(message => this.rememberMessage(message));
     const params = new URLSearchParams({ limit: String(options.limit || 50) });
     if (options.before) params.set('before', options.before);
+    if (options.rootsOnly) params.set('roots_only', 'true');
     return (await this.request<Message[]>(`/messages/channels/${channelId}?${params}`, { signal: options.signal })).map(message => this.rememberMessage(message));
   }
 
@@ -553,10 +566,21 @@ class FreeCollabAPI {
     });
   }
 
-  async getThread(messageId: string): Promise<{ parent_id: string; thread_count: number; replies: Message[] }> {
+  async getThread(messageId: string, options: { before?: string; limit?: number; signal?: AbortSignal } = {}): Promise<{ parent_id: string; thread_count: number; replies: Message[]; has_more: boolean }> {
     const secure = await this.secureMessage(messageId);
-    if (secure) { const replies = (await secure.adapter.getThread(secure.channelId, messageId)).map(message => this.rememberMessage(message)); return { parent_id: messageId, thread_count: replies.length, replies }; }
-    return this.request(`/threads/messages/${messageId}`);
+    if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const limit = Math.max(1, Math.min(options.limit || 50, 100));
+    if (secure) {
+      const all = (await secure.adapter.getThread(secure.channelId, messageId)).map(message => this.rememberMessage(message));
+      if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const end = options.before ? all.findIndex(message => message.id === options.before) : all.length;
+      if (end < 0) throw new APIError('Thread cursor not found', 404);
+      const start = Math.max(0, end - limit);
+      return { parent_id: messageId, thread_count: all.length, replies: all.slice(start, end), has_more: start > 0 };
+    }
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (options.before) query.set('before', options.before);
+    return this.request(`/threads/messages/${encodeURIComponent(messageId)}?${query}`, { signal: options.signal });
   }
 
   // Mentions

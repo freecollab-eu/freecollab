@@ -76,18 +76,31 @@ Recipient addresses remain routing metadata in the outbox. Retained counters des
 
 All responses use `Cache-Control: no-store`. For read-only scraping, configure a separate random `OPERATIONS_METRICS_TOKEN` of at least 32 bytes in the private environment. It is accepted only by `/operations/metrics`; it grants no account, status, outbox or mutation access. Store the same token in the monitor's secret store/private credential file and send Authorization: Bearer, never a query parameter. Rotate the configuration value to revoke it. Native installation-admin JWTs can also read metrics, but remain revocable and expire.
 
-The metrics expose mail configuration, worker health, outbox state/age and webhook/OTRUST/sync queue counts. They have no recipient, account, workspace or channel labels. Sync states normalize `queued` to `pending`, `syncing` to `processing` and `error` to `failed`; age uses the next scheduled run rather than connection creation. OTRUST receipts may legitimately wait for anchoring; those pending receipts are counted separately and excluded from unsent-job age. Integration-worker enablement includes `SYNC_ENABLED`, even when webhooks and OTRUST are disabled.
+The metrics expose mail configuration, worker health, outbox state/age and all 14 integration-worker groups. They have no recipient, account, workspace, channel, destination or provider-model labels. Counters describe retained records, not cumulative throughput or successful external acceptance. The dashboard uses the same aggregate states as the metrics.
 
-The integration worker independently polls three durable queues: webhooks,
-OTRUST and remote sync. Set `SYNC_ENABLED=true` and run the `integrations` Compose
-profile to activate configured sync connections; it defaults to false. A normal
-successful connection is scheduled again after 60 seconds. A pass selects at most
-two connections; each uses a durable fair scan cursor and a bounded batch of 20
-items with an approximately 45-second work budget. Provider requests also have
-bounded absolute deadlines and pagination. One provider failure cannot roll back
-another queue's transaction. Pausing a connection prevents new dispatches; use
-the connection activity/conflict controls for scoped retries and resolution.
-See [REMOTE_SYNC.md](REMOTE_SYNC.md).
+| Worker group | Counted records and interpretation |
+| --- | --- |
+| `webhooks` | Durable metadata delivery state. |
+| `otrust` | Submission/proof state; a pending anchoring receipt is distinct from an unsent request. |
+| `sync` | Connection state, not a count of synchronized files; `queued` → `pending`, `syncing` → `processing`, `error` → `failed`. |
+| `calendar-delivery` | Explicit provider invitations/RSVP jobs; `queued` → `pending`, `running` → `processing`, `succeeded` → `completed`; `uncertain` remains separate. |
+| `workflows` | Local workflow runs, including approval waits. |
+| `data` | Export/erasure jobs, including file-erasure progress. |
+| `push` / `native_push` | Browser/native delivery records; delivery does not prove a person read the notification. |
+| `apps` | App-command jobs; `uncertain` and failed review are not automatic retries or completed work. |
+| `chat` | Scheduled messages and reminders; sent messages awaiting notification dispatch have a separate `notification_pending` bucket and are excluded from `sent`. |
+| `recaps` | Enabled schedules due now (`pending`), enabled future schedules (`scheduled`), and disabled schedules. A claimed run advances its next time; this is not a separate processing-job counter. A private AI draft is not a published recap. |
+| `native-call-cleanup` | Retained call capabilities past expiry (`pending`) or not yet expired (`scheduled`); these are cleanup candidates, not call counts. |
+| `slack-import-cleanup` | Active preview/import copies past expiry (`pending`), active copies with future expiry (`scheduled`), and other lifecycle states (`inactive`). |
+| `personal-oauth-cleanup` | Pending/active grants due for local authority validation (`pending`), recently checked grants (`scheduled`), and inactive grants. Counts do not decrypt claims, validate provider credentials or call the provider. |
+
+Queue age uses the relevant due time: sync's next run, app/native-push next attempt, chat delivery time, schedule time or cleanup expiry/check deadline. A future due time has zero overdue age. A never-checked personal OAuth grant uses its creation time, not its epoch-valued initial check marker. OTRUST pending receipts are excluded from unsent-job age. Existing webhook/workflow/data and calendar-delivery ages describe retained queued/processing work from creation, rather than a universal provider-response latency.
+
+Integration-worker enablement includes every dispatch flag (`WEBHOOKS_ENABLED`, `OTRUST_ENABLED`, `SYNC_ENABLED`, `WORKFLOWS_ENABLED`, `DATA_CONTROLS_ENABLED`, `PUSH_ENABLED`, `NATIVE_PUSH_ENABLED`, `COPILOT_ENABLED`) and retained pending/processing/future work from always-on app, chat and local-cleanup groups. This prevents an installation using only scheduled messages or personal grants from silently hiding a missing worker. Terminal records and work behind a disabled feature alone do not require a running worker.
+
+The integration worker polls these groups serially, using bounded batches and an independent database session for each group. Run one integration-worker instance per supported single-replica installation. Transaction isolation prevents one failed group from rolling back another; it does not make slow provider batches concurrent. The heartbeat is recorded at the start of a poll, and a pass with many slow providers can exceed the three-minute freshness threshold. Investigate sustained lag together with queue progress rather than treating one heartbeat as proof of provider health.
+
+Set `SYNC_ENABLED=true` and run the `integrations` Compose profile to activate configured sync connections; it defaults to false. A normal successful connection is scheduled again after 60 seconds. A pass selects at most two connections; each uses a durable fair scan cursor and a bounded batch of 20 items with an approximately 45-second work budget. Provider requests also have bounded absolute deadlines and pagination. Pausing a connection prevents new dispatches; use the connection activity/conflict controls for scoped retries and resolution. See [REMOTE_SYNC.md](REMOTE_SYNC.md).
 
 A Prometheus scrape can use the public reverse proxy without exposing the API container:
 
@@ -131,7 +144,7 @@ A server backup does not replace users' separate encryption recovery keys. Indep
 
 ```bash
 cd backend
-.venv/bin/python -m pytest tests/test_operations.py tests/test_smtp_delivery.py -q
+.venv/bin/python -m pytest tests/test_operations.py tests/test_operations_worker_groups.py tests/test_smtp_delivery.py tests/test_security_status.py -q
 ```
 
 The SMTP tests start a loopback-only receiver with an ephemeral test CA. Real SMTP clients negotiate STARTTLS and implicit TLS, authenticate, deliver exact diagnostic bytes and acknowledge durable state. Another test rejects an untrusted certificate without sending content. OpenSSL only generates local test certificates; no external mail is sent and certificate verification stays enabled.

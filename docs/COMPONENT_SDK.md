@@ -1,6 +1,6 @@
 # Modular component SDK
 
-`packages/components` builds **`@freecollab/components@0.12.0`**, a distributable,
+`packages/components` builds **`@freecollab/components@0.13.0`**, a distributable,
 typed ESM package. Native modules mount independently inside a host application;
 the trusted-origin embed runs the full application, including its existing
 Matrix encryption runtime. Web Components and optional React wrappers are also
@@ -26,7 +26,7 @@ the monorepo's existing frontend tools. A standalone package checkout supports
 `npm ci --ignore-scripts && npm run release:check`. React is an **optional peer**; the
 framework-neutral components have no runtime framework dependency. The tarball
 contains compiled modules, declarations, the optional CSS token preset and the
-MIT licence. Install a reviewed artifact with `npm install /path/to/freecollab-components-0.12.0.tgz`.
+MIT licence. Install a reviewed artifact with `npm install /path/to/freecollab-components-0.13.0.tgz`.
 Packing does not publish the package to any registry.
 
 | Entry point | Public API |

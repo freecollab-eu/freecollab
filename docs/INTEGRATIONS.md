@@ -12,7 +12,11 @@ Administrators can start with **Connection setup** for provider recipes, exact c
 | Webhooks / n8n | Explicit channel grants, signed metadata-only events, durable retries/history and secret rotation. | Public HTTPS receivers; no plaintext message, title or attachment content. [Webhook API](WEBHOOKS.md), [n8n receiver](../examples/n8n/README.md). |
 | Document links | Provider-validated Nextcloud, Google Drive and SharePoint references with immutable revisions. | Opening a link uses the remote provider's own access policy. Linking requires no cloud-account authorization. [Documents](DOCUMENTS_CALENDAR.md). |
 | Channel calendar / ICS | Events, immutable revisions, local ICS import/export and calendar-app reminders. | Local export is an explicit plaintext download; importing does not send meeting invitations. [Calendar behavior](DOCUMENTS_CALENDAR.md). |
-| Cloud synchronization | Two-way supported file bytes/versions or standalone calendar events between one selected native channel and one remote folder/calendar. | Google Drive/Calendar, Microsoft OneDrive/SharePoint/Outlook, Nextcloud WebDAV/CalDAV and generic CalDAV. Opt-in, bounded, depth one; server sync rejects end-to-end encrypted channels. [Sync setup and limits](DOCUMENTS_CALENDAR.md#cloud-synchronization). |
+| Cloud synchronization | Two-way supported file bytes/versions or supported bounded calendar events/series between one selected native channel and one remote folder/calendar. | Google Drive/Calendar, Microsoft OneDrive/SharePoint/Outlook, Nextcloud WebDAV/CalDAV and generic CalDAV. Opt-in, bounded, depth one; server sync rejects end-to-end encrypted channels. [Sync setup and limits](DOCUMENTS_CALENDAR.md#cloud-synchronization). |
+| Cloud file picker | Browse and explicitly import an exact Google Drive, OneDrive, Dropbox or Box revision into immutable native file versions. | Customer-owned OAuth; Google/Microsoft reuse the channel file-sync grant. Secure channels use separate encrypted links. [Cloud files](CLOUD_FILES.md). |
+| External meeting services | Explicit Google Meet, Microsoft Teams or Zoom create/recover/cancel with channel calendar links. | Customer-owned OAuth and provider licence; title/time disclosure requires consent. The provider runs its own media. [Meeting services](EXTERNAL_MEETINGS.md). |
+| Personal provider accounts | Separate personal Google/Microsoft consent for read-only search or reviewed calendar commands, including refresh and source-bound revocation. | Separate customer web clients per purpose; account sign-in and channel sync grants remain distinct. [Personal OAuth](PERSONAL_OAUTH.md). |
+| Integration library | Bundled recipes and operator-approved immutable community packages installed by exact digest and channel grants. | Installation-local declarative catalog, no executable plugin installation or central marketplace. [Library](INTEGRATION_LIBRARY.md). |
 | OTRUST | Explicit hash-only version requests, durable receipts, exact `.ots` download and proof-commitment checks. | A checked commitment is distinct from independently verified Bitcoin anchoring. [Version timestamps](OTRUST_INTEGRATION.md). |
 
 ## Customer-owned configuration
@@ -29,7 +33,7 @@ The [remote sync guide](REMOTE_SYNC.md) describes provider setup, resource limit
 
 Document links, local calendar exchange, customer SSO and SCIM configuration need no installation-wide customer provider credentials. Configure the trusted HTTPS `PUBLIC_APP_URL` and retain the independent `ACCOUNT_SECURITY_KEY` that protects customer secrets and account factors.
 
-Webhooks, OTRUST and background synchronization are disabled by default:
+Webhooks, OTRUST, background synchronization, cloud file picking and external meeting services are disabled by default:
 
 ```dotenv
 WEBHOOKS_ENABLED=false
@@ -37,6 +41,8 @@ OTRUST_ENABLED=false
 OTRUST_BASE_URL=https://www.otrust.eu
 OTRUST_TIMEOUT_SECONDS=10
 SYNC_ENABLED=false
+CLOUD_FILES_ENABLED=false
+EXTERNAL_MEETINGS_ENABLED=false
 ```
 
 Set only the intended flags to true in private deployment configuration, then rebuild/recreate the API and start its worker:
@@ -55,7 +61,7 @@ python -m app.services.integration_worker --interval 10
 python -m app.services.integration_worker --once
 ```
 
-The worker records its heartbeat and processes bounded batches for each enabled queue in independent database sessions. A failed provider does not block the other integration queues. Flags prevent dispatch while disabled, even if pending work exists. Durable sync mappings, claims, cursors and retry times survive restarts. Webhook delivery remains at least once; receivers must deduplicate event IDs.
+The worker records its heartbeat and processes bounded batches for each enabled queue in independent database sessions. A failed provider transaction does not roll back other groups. Groups run serially on the supported single worker, so a slow provider can delay later groups; the dashboard and metrics cover all 14 groups. [Integration operations](INTEGRATION_OPERATIONS.md) explains the actual counters and heartbeat limits. Flags prevent dispatch while disabled, even if pending work exists. Durable sync mappings, claims, cursors and retry times survive restarts. Webhook delivery remains at least once; receivers must deduplicate event IDs.
 
 ## Encryption and disclosure
 
@@ -78,3 +84,5 @@ Global operators can inspect private diagnostics and limited Prometheus metrics.
 Cold backup stops integration workers with other writers and records their exact images. Restore keeps the outbound worker stopped by default; inspect retained destinations and pending work before using `--resume-integrations`. Preserve the account-security key for OIDC secrets/PKCE, cloud tokens/app passwords, webhook secrets and native factors. Never regenerate production keys during an upgrade.
 
 [VALIDATION.md](VALIDATION.md) records executed local checks separately from hosted provider validation. Protocol fixtures and browser proofs do not establish a real customer-tenant connection, live n8n deployment, hosted Bitcoin anchoring, public deployment or independent security review.
+
+[The dated integrations audit](audit/INTEGRATIONS.md) traces each promised connection to its actual UI, API, provider/worker and tests, including preparation-only behavior and remaining live-customer acceptance.

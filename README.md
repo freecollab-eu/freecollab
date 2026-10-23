@@ -2,7 +2,20 @@
 
 # FreeCollab
 
+**Current implementation audit (2026-10-23, review branch):**
+[Feature status, code, tests and remaining gaps](docs/FEATURE_AUDIT.md).
+This branch adds real channel details, native document stacks and message
+references, derived stack discussions and reviewed inline stack AI. The audit
+also corrects presence, thread history, app-AI consent and worker diagnostics.
+These changes are not yet a published release. The static demo remains local
+examples; it is separate from the authenticated product.
+
 Self-hosted collaboration with workspaces, private and encrypted channels, direct messages, files and decisions. MIT licensed.
+
+Run your own installation on a computer, private LAN/VPN server or chosen host.
+Accounts and data belong to that installation; no central FreeCollab account or
+cloud control plane is required. Microsoft, Google and AI are optional services.
+See [local and network self-hosting](docs/SELF_HOSTING.md) and [operations](docs/OPERATIONS.md).
 
 ![FreeCollab interactive product demo with sample conversations and workspace tools](docs/images/freecollab-demo.png)
 
@@ -10,7 +23,7 @@ FreeCollab brings conversations, documents, tasks, files and meetings into a wor
 
 **Explore the demo** opens a browser-only showroom at `/#demo`, with sample messages, tasks, editable Markdown, appearance and both provider setup guides. Open the shared brief or agree a next step beside the same conversation. On mobile, **Back to conversation** returns to the source with the draft and reading position preserved. The agreed next step also appears beside the conversation. The Microsoft and Google cards open their selected setup guide directly. It requires no account or provider connection. Sample changes and separate channel drafts stay in memory in the current tab; reload or confirm reset to start fresh. The full application supplies **Open App** for its authenticated installation. The [independent public website](deploy/website/README.md) serves only the landing page, documentation and demo. For Railway, start with the [maintained deployment guide](RAILWAY_DEPLOY.md).
 
-## Start the self-hosted pilot
+## Start your own installation
 
 Requirements: a Linux host, Python 3.11+, Docker with Compose v2, and a Docker daemon. From the repository root:
 
@@ -71,7 +84,12 @@ Use the topbar channel name to open the channel drawer. Open **Quick switcher** 
 
 In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. When you scroll back, incoming messages preserve your reading position; **Jump to latest** takes you to the new messages and updates the read receipt. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
 
-Advanced posts/flows, comments and the server AI-demo routes are **disabled by default**. `ENABLE_EXPERIMENTAL_FEATURES=true` opts into the advanced API routes; `ENABLE_DEMO_AI=true` separately opts into the AI-demo API. These are not dependencies of ordinary chat and need separate validation before use with real content.
+Legacy posts/flows and their generic comments remain **disabled by default**;
+`ENABLE_EXPERIMENTAL_FEATURES=true` opts into those experimental API routes.
+Production activity feeds and document comments have their own authenticated
+APIs. The old anonymous server AI-demo routes are removed; `ENABLE_DEMO_AI` is
+deprecated and ignored. Use the opt-in, customer-configured [Copilot](docs/COPILOT.md)
+for real AI and the browser-only showroom for local demo examples.
 
 The typed **`@freecollab/components@0.13.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
 
@@ -156,7 +174,7 @@ The Compose frontend also proxies `/api` and `/socket.io`, so its `VITE_API_URL`
 | `SECURITY_AUDIT_RETENTION_DAYS` | Selected authenticated security activity age window; default 90 days, accepts 7–365. Existing backup copies have separate retention. |
 | `SECURITY_AUDIT_MAX_RECORDS` | Activity record target; default 100,000, accepts 1,000–1,000,000. Age/cap cleanup is bounded per recorded write. |
 | `ENABLE_EXPERIMENTAL_FEATURES` | Advanced API opt-in; default `false`. |
-| `ENABLE_DEMO_AI` | Demo-AI API opt-in; default `false`. |
+| `ENABLE_DEMO_AI` | Deprecated and ignored; legacy server demo routes are removed. |
 
 Use [OPERATIONS.md](docs/OPERATIONS.md) for initialization, health/readiness, database/file/key backup, restoration into a separate installation and deployment checks. The Railway, Fly and Render templates are configuration examples; they do not replace these checks or provision a complete verified hosted installation automatically.
 

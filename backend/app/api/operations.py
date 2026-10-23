@@ -16,7 +16,7 @@ from ..services.account_security import account_limit, ensure_reauthentication, 
 from ..services.auth import active_user_for_token, security
 from ..services.sso_scope import require_unrestricted
 from ..services.mail import enqueue_mail
-from ..services.maildiagnostics import integration_queue_status, mail_configuration, queue_status, safe_delivery, worker_status
+from ..services.maildiagnostics import integration_queue_status, integration_worker_required, mail_configuration, queue_status, safe_delivery, worker_status
 from .admin import require_admin
 
 
@@ -68,6 +68,7 @@ def reauthenticate_operator(session, user, credentials, data, scope):
 @router.get("/status")
 def status(user=Depends(require_admin), session=Depends(get_session)):
     session.exec(text("SELECT 1"))
+    integration_queues = integration_queue_status(session)
     return {
         "database": {"reachable": True},
         "mail": mail_configuration(),
@@ -75,9 +76,9 @@ def status(user=Depends(require_admin), session=Depends(get_session)):
         "worker": worker_status(session),
         "integration_worker": {
             **worker_status(session, name="integrations"),
-            "enabled": bool(getattr(settings, "webhooks_enabled", False) or getattr(settings, "otrust_enabled", False) or getattr(settings, "sync_enabled", False) or settings.workflows_enabled or settings.data_controls_enabled or settings.push_enabled),
+            "enabled": integration_worker_required(integration_queues),
         },
-        "integration_queues": integration_queue_status(session),
+        "integration_queues": integration_queues,
     }
 
 
@@ -143,7 +144,7 @@ def metrics(user=Depends(require_metrics_access), session=Depends(get_session)):
     config = mail_configuration()
     integration_queues = integration_queue_status(session)
     integration_worker = worker_status(session, name="integrations")
-    integrations_enabled = bool(getattr(settings, "webhooks_enabled", False) or getattr(settings, "otrust_enabled", False) or getattr(settings, "sync_enabled", False) or settings.workflows_enabled or settings.data_controls_enabled or settings.push_enabled)
+    integrations_enabled = integration_worker_required(integration_queues)
     lines = [
         "# HELP freecollab_mail_configured Whether configured mail delivery is usable.",
         "# TYPE freecollab_mail_configured gauge",
@@ -157,13 +158,13 @@ def metrics(user=Depends(require_metrics_access), session=Depends(get_session)):
         "# HELP freecollab_mail_oldest_pending_seconds Age of the oldest pending or processing record.",
         "# TYPE freecollab_mail_oldest_pending_seconds gauge",
         f"freecollab_mail_oldest_pending_seconds {queue['oldest_pending_seconds']}",
-        "# HELP freecollab_integrations_enabled Whether webhooks, OTRUST or native remote sync is enabled.",
+        "# HELP freecollab_integrations_enabled Whether an integration-worker feature is enabled or persisted always-on work requires it.",
         "# TYPE freecollab_integrations_enabled gauge",
         f"freecollab_integrations_enabled {int(integrations_enabled)}",
         "# HELP freecollab_integrations_worker_healthy Whether the integration worker polled in the last 180 seconds.",
         "# TYPE freecollab_integrations_worker_healthy gauge",
         f"freecollab_integrations_worker_healthy {int(integration_worker['status'] == 'healthy')}",
-        "# HELP freecollab_integration_queue_records Retained delivery jobs or sync connections by queue and status.",
+        "# HELP freecollab_integration_queue_records Retained jobs, connections, schedules or maintenance records by worker group and state.",
         "# TYPE freecollab_integration_queue_records gauge",
         *[f'freecollab_integration_queue_records{{queue="{name}",status="{status}"}} {count}'
           for name, counters in integration_queues.items() for status, count in counters.items() if status != "oldest_pending_seconds"],

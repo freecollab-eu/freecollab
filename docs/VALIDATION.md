@@ -1,5 +1,90 @@
 # FreeCollab validation record
 
+## Implementation and documentation audit — 2026-10-23
+
+The [current feature audit](FEATURE_AUDIT.md) maps the original requirements and
+subsequent product decisions to actual UI/API/storage and tests. Its domain
+ledgers distinguish implemented bounded flows, customer configuration/external
+acceptance, local demo examples and missing code. [Self-hosting](SELF_HOSTING.md)
+describes local computer/LAN/VPN installation: accounts belong to that
+installation, with no required central FreeCollab service. The public static
+Railway showroom is a separate delivery.
+
+The audit added real native document stacks, generation/CAS-protected moves and
+Undo, reviewed document relations, message-source references, placement-derived
+stack discussion and read-only selected-page stack AI. It also added revisioned
+native/Matrix channel metadata and fixed stale list rollback, custom presence,
+Socket.IO REST-prefix normalization, roots-only timelines with paged thread
+history, fresh authorization after channel locks, app-AI reviewed source/provider
+binding, future-only recap consent, complete fourteen-group worker diagnostics
+and Unicode/UTF-8 password checks. The anonymous server AI demo was retired.
+New in-app help links the actual SDK and production feed contracts.
+
+Executed independent scopes, with overlapping coverage rather than an additive
+grand total:
+
+- The unchanged `c2762404` baseline passed **2,141 backend cases** across four
+  exhaustive file shards. A preceding sequential run was interrupted and is
+  excluded from that pass claim. Tests used isolated synthetic SQLite, storage,
+  signing/encryption material and private provider fixtures; existing services
+  and operator configuration were not used as fixtures.
+- **27 SDK release checks** passed, including the actual standalone package
+  artifact/declaration checks; tarball and integrity manifest were verified.
+  The real packed SDK browser proof passed **26 checks** across its native
+  modules and React/customer-scoped sessions. No npm publication occurred.
+- **15 real Copilot browser groups** passed, preserving the existing request,
+  source, consent, draft and approval checks. The new group created actual Yjs
+  documents and a native stack, deselected a page, reviewed the selected page
+  and sent only its verified body to a private HTTPS/SSE fixture. Unselected
+  pages/comments/messages were absent and no shared content was written.
+  The report binds 26 current source hashes.
+- **Nine real app-platform browser groups** passed, preserving the previous six
+  and checking source/provider review, explicit approvals and future-only recap
+  cursors. Customer credentials and actual model providers were not contacted.
+- **Seven real channel-metadata browser groups** passed: discover/save/cancel,
+  reload persistence, stale CAS draft retention, member/admin entry and Swedish
+  focus/layout at 320 px. Actual encrypted reader/writer tests separately cover
+  authoritative event and account-generation handling; this native browser
+  harness is not new live Matrix acceptance.
+- **Seven real communication browser groups** passed against the full app,
+  API and Socket.IO. They created 107 messages including 105 thread replies,
+  retained roots and scroll position, paged all replies, isolated drafts and
+  stale responses, opened exact search sources, reviewed parent/reply stack
+  sources without saving, and saved/reloaded/cleared real custom status with
+  acknowledged realtime transport. The report binds 21 current sources.
+- Independent source review found no remaining concrete security defect in the
+  reviewed channel metadata, message references, comment filtering, retention
+  joins and E2EE conversion fences. A separate sweep checked **875 relative
+  audit links**, all resolving. This is internal code review, not independent
+  security certification.
+
+- The final implementation passed **2,238 backend cases** in four exhaustive
+  file shards: 657 + 509 + 601 + 471. Each shard exited successfully; no skipped
+  shard or interrupted run is included. The unchanged baseline is a separate
+  comparison, not additional current-source coverage.
+- **480 frontend Node cases** passed, with zero failures/skips. TypeScript and
+  production application/trusted-embed builds passed. The final static website
+  build and **eleven actual website browser groups** passed, retaining all ten
+  existing groups and adding English/Swedish product help at 1440/390/320 px.
+  Thirteen guide links, installation-local accounts/private-network operation,
+  no required central cloud account, actual SDK/feed/comment examples and paged
+  thread-history examples were checked. All 96 bound source hashes matched.
+- **15 document-organization browser groups** passed with 19 current source
+  hashes. Actual drag/keyboard move, persisted placement, guarded Undo after text
+  editing, concurrent changes, reviewed relations, in-flight comment drafts,
+  derived discussion/source focus/archive filtering, and real main/thread
+  message → review → save → original-source navigation were exercised. Both
+  main and thread drafts survived. Swedish 320 px remained usable.
+
+These are local implementation proofs; publication and actual deployed bytes
+require separate evidence. No customer application/API/database deployment is
+implied by a successful static website build.
+The detailed ledgers describe actual limits: no general AI run/step engine,
+model routing/spending ledger, autonomous semantic pairing or Matrix document
+organization is implied by the implemented flows. Customer OAuth/SSO, actual
+Office, physical mobile behavior, app-store distribution and off-host recovery
+remain separate acceptance work.
+
 ## Conversation continuity — 2026-10-22
 
 The demo opens its existing brief and decision in context beside the mounted

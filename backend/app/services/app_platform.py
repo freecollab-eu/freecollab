@@ -503,6 +503,7 @@ def card_data(session, row, viewer_id):
 
 
 class AIInput(Strict):
+    expected_config_revision: int = Field(ge=1, strict=True)
     kind: Literal["summary", "workflow", "actions"] = "summary"
     prompt: str = Field(default="Summarize decisions, open questions and next steps.", min_length=1, max_length=2000)
     sources: list[copilot.Source] = Field(default_factory=list, max_length=8)
@@ -525,6 +526,8 @@ def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=N
     session.expire_all()
     recheck_actor(session, owner_id)
     config = ai_context(session, workspace_id, channel_id, owner_id)
+    if data.expected_config_revision != config.revision:
+        raise HTTPException(409, "Provider configuration changed; review the current destination before sending")
     count = session.exec(select(func.count()).select_from(AppAIDraft).where(AppAIDraft.channel_id == channel_id,
         AppAIDraft.owner_id == owner_id)).one()
     if count >= 200:
@@ -542,7 +545,8 @@ def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=N
         ref["citation"] = "S" + str(index+1)
         refs.append(ref)
         pieces.append("[" + ref["citation"] + "] " + content)
-    if sum(map(len, pieces)) > copilot.MAX_CONTEXT:
+    selected_context = "\n\n".join(pieces)
+    if len(selected_context) > copilot.MAX_CONTEXT:
         raise HTTPException(413, "Select at most 24,000 context characters")
     app_specs = []
     for identifier in data.installation_ids:
@@ -570,7 +574,7 @@ def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=N
     provider, revision = copilot.config_fields(config), config.revision
     session.commit()
     answer = (complete or copilot.completion)(provider, {"model": provider.model, "stream": True, "max_tokens": 2048, "n": 1,
-        "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": data.prompt + "\nSELECTED UNTRUSTED CONTEXT:\n" + "\n\n".join(pieces)}]})
+        "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": data.prompt + "\nSELECTED UNTRUSTED CONTEXT:\n" + selected_context}]})
     lock_workspace(session, workspace_id)
     lock_channel_writes(session, channel_id)
     session.expire_all()
@@ -657,12 +661,15 @@ def run_recaps(session, limit=1, complete=None):
             install_grants(session, row.workspace_id, row.owner_id, [row.channel_id])
             if config.revision != row.provider_revision:
                 raise HTTPException(409, "Provider changed")
-            since = row.last_run_at or now-timedelta(hours=row.interval_hours)
+            # last_run_at is the disclosure/check cursor, initialized when the
+            # user grants this future-only schedule. Legacy rows without a
+            # cursor start now; absence never authorizes historical backfill.
+            since = row.last_run_at or now
             messages = session.exec(select(Message).where(Message.channel_id == row.channel_id, Message.deleted.is_(False),
                 Message.created_at > since).order_by(Message.created_at.desc(), Message.id).limit(8)).all()
             if messages:
                 draft = generate_draft(session, row.workspace_id, row.channel_id, row.owner_id,
-                    AIInput(sources=[copilot.Source(kind="message", id=message.id) for message in reversed(messages)], disclose_to_provider=True), complete=complete)
+                    AIInput(expected_config_revision=row.provider_revision, sources=[copilot.Source(kind="message", id=message.id) for message in reversed(messages)], disclose_to_provider=True), complete=complete)
                 session.flush()
                 status = "draft_ready"
             else:

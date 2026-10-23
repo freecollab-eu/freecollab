@@ -1,4 +1,11 @@
-# Self-hosted pilot operations
+# Self-hosted installation operations
+
+FreeCollab runs as your own installation on a computer or private LAN/VPN
+server, as well as on a chosen hosting service. Accounts authenticate to that
+installation; there is no required central FreeCollab cloud account or control
+plane. The profile's historical `pilot` name does not require a pilot group.
+See [local and network self-hosting](SELF_HOSTING.md) for the deployment model
+and optional-service boundaries.
 
 This runbook targets a single Linux Docker Engine with Docker Compose v2 and Python 3.11+. It runs one API worker, one PostgreSQL 15 database and an Nginx frontend. Nginx serves the application/widget and proxies `/api/` and `/socket.io/` on the same origin. The default port is bound to loopback only.
 

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { ChevronRight, ChevronDown, Book, Code, Zap, Shield, MessageCircle, ArrowLeft } from 'lucide-react'
 import '../styles/panels.css'
 import { Brand } from './Brand'
+import { ProductGuide } from './ProductGuide'
 
 interface DocsProps {
   onBack: () => void
@@ -17,6 +18,7 @@ const sections = [
       { id: 'introduction', title: 'Introduction' },
       { id: 'installation', title: 'Installation' },
       { id: 'quick-start', title: 'Quick Start' },
+      { id: 'product-guide', title: 'Product guide' },
     ]
   },
   {
@@ -96,17 +98,18 @@ const content: Record<string, { title: string; content: () => React.ReactNode }>
         </div>
         <h3 className="text-xl font-semibold mt-8">{t("Features Overview")}</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {['Real-time Chat', 'Threads', 'Reactions', '@Mentions', 'Read Receipts', 'Typing Indicators', 
-            'Presence', 'Flows', 'Comments', 'Notifications', 'File Uploads', 'Server-side Message Encryption',
-            'Admin Panel', 'Moderation', 'Self-hosted', 'Free Forever'].map((f, i) => (
+          {['Real-time Chat', 'Threads', 'Reactions', '@Mentions', 'Read Receipts', 'Typing Indicators',
+            'Presence', 'Shared documents', 'Projects and tasks', 'Notifications', 'File Uploads', 'Meetings',
+            'Appearance', 'Customer SSO', 'Self-hosted', 'MIT License'].map((f, i) => (
             <div key={i} className="flex items-center gap-2 fc-muted">
-              <span className="fc-accent">•</span> {f}
+              <span className="fc-accent">•</span> {t(f)}
             </div>
           ))}
         </div>
       </div>
     )
   },
+  'product-guide': { title: 'Product guide', content: () => <ProductGuide /> },
   'installation': {
     title: 'Installation',
     content: () => (
@@ -244,9 +247,15 @@ socket.on('message_deleted', (data) => {
             <code className="fc-muted">{`// Reply to a message to create/continue a thread
 await api.replyToMessage(parentMessageId, "This is a reply!")
 
-// Get all replies in a thread
+// Read the latest page; older replies have an explicit cursor.
 const thread = await api.getThread(parentMessageId)
-console.log(thread.replies)`}</code>
+console.log(thread.replies)
+if (thread.has_more && thread.replies.length) {
+  const older = await api.getThread(parentMessageId, {
+    before: thread.replies[0].id
+  })
+  console.log(older.replies)
+}`}</code>
           </pre>
         </div>
       </div>
@@ -340,11 +349,17 @@ const { unread_count } = await api.getUnreadCount(channelId)`}</code>
     content: () => (
       <div className="space-y-6">
         <p className="fc-muted">
-          {t("Flows are activity feeds for sharing updates, announcements, and posts with your team. Think of them as a combination of social feeds and announcement boards.")}</p>
+          {t('Open Work → Activity feed for production posts, comments, reactions, polls and read status. This uses the current activity-feed API; the older experimental posts routes are separate and disabled by default.')}</p>
         <div className="fc-docs-code">
           <pre className="p-4 text-sm overflow-x-auto">
-            <code className="fc-muted">{`// A channel serves as the flow context
-const posts = await api.getFlow(channelId)`}</code>
+            <code className="fc-muted">{`import { mountFeed } from '@freecollab/components/feed';
+
+// client uses a current user session scoped to this workspace/channel.
+const feed = mountFeed(container, client, { locale: 'sv' });
+// On route teardown:
+feed.destroy();
+// On host logout or account change, destroy every mounted resource:
+client.destroy();`}</code>
           </pre>
         </div>
       </div>
@@ -355,14 +370,19 @@ const posts = await api.getFlow(channelId)`}</code>
     content: () => (
       <div className="space-y-6">
         <p className="fc-muted">
-          {t("Posts are the content items within a Flow.")}</p>
+          {t('Publish an update in the channel activity feed. Posts have revisioned text, optional polls and explicit channel access; changing content requires the current revision.')}</p>
         <div className="fc-docs-code">
           <pre className="p-4 text-sm overflow-x-auto">
-            <code className="fc-muted">{`// Create a post
-await api.createPost(flowId, "Check out this update!")
-
-// Get posts in a flow
-const posts = await api.getFlow(flowId)`}</code>
+            <code className="fc-muted">{`// Native channel API; provide your authenticated Authorization header.
+GET /channels/{channel_id}/activity-feed
+POST /channels/{channel_id}/activity-feed
+{
+  "id": "0123456789abcdef0123456789abcdef",
+  "expected_revision": 0,
+  "fields": { "title": "An update", "body": "Reviewed text", "poll": null },
+  "archived": false
+}
+// Use the trusted client for encrypted Matrix channel content.`}</code>
           </pre>
         </div>
       </div>
@@ -373,14 +393,19 @@ const posts = await api.getFlow(flowId)`}</code>
     content: () => (
       <div className="space-y-6">
         <p className="fc-muted">
-          {t("Add comments to posts, files, or any other content.")}</p>
+          {t('Comments belong to a specific activity post, shared document or file. Each tool checks its resource permissions and revisions; there is no unrestricted comment endpoint for arbitrary objects.')}</p>
         <div className="fc-docs-code">
           <pre className="p-4 text-sm overflow-x-auto">
-            <code className="fc-muted">{`// Add a comment
-await api.createComment("post", postId, "Great post!")
-
-// Get comments
-const comments = await api.getComments("post", postId)`}</code>
+            <code className="fc-muted">{`// Native activity-post comments use the current parent and revision.
+POST /channels/{channel_id}/activity-feed/{post_id}/comments
+{
+  "id": "0123456789abcdef0123456789abcdef",
+  "expected_revision": 0,
+  "fields": { "body": "A reviewed comment" },
+  "archived": false
+}
+// Shared document comments:
+// /channels/{channel_id}/shared-documents/{document_id}/comments`}</code>
           </pre>
         </div>
       </div>
@@ -548,7 +573,7 @@ POST /auth/login
           ].map((e, i) => (
             <div key={i} className="fc-docs-event">
               <code className="fc-accent font-mono text-sm">{e.event}</code>
-              <span className="fc-muted text-sm">{e.desc}</span>
+              <span className="fc-muted text-sm">{t(e.desc)}</span>
             </div>
           ))}
         </div>
@@ -560,7 +585,21 @@ POST /auth/login
     content: () => (
       <div className="space-y-6">
         <p className="fc-muted">
-          {t("The React components in this repository belong to the reference application. No public package with a provider or standalone component API is shipped here. Follow Quick Start for an HTTP integration, and WebSocket Events for realtime updates.")}</p>
+          {t('The repository includes the typed @freecollab/components SDK with eleven native modules, Web Components and optional React wrappers. Build and install a reviewed tarball; registry publication is a separate authenticated release step.')}</p>
+        <div className="fc-docs-code"><pre className="p-4 text-sm overflow-x-auto"><code className="fc-muted">{`import { createClient } from '@freecollab/components';
+import { Chat } from '@freecollab/components/react';
+
+const client = createClient({
+  apiBase: 'https://collaboration.your-company.eu/api',
+  workspaceId, channelId,
+  tokenFactory: ({ scope, reason, signal }) =>
+    yourBackend.currentCollaborationSession({ scope, reason, signal }),
+});
+
+<Chat client={client} locale="sv" />
+// Call client.destroy() immediately on host logout or account change.`}</code></pre></div>
+        <p className="fc-muted">{t('Native components use authorized server-readable channels. Use the trusted-origin embedded workspace for client-encrypted Matrix collaboration; customer OIDC, exact origins and current sessions remain required.')}</p>
+        <p><a className="fc-account-link" href="https://github.com/freecollab-eu/freecollab/blob/design/open-studio/docs/COMPONENT_SDK.md" target="_blank" rel="noopener noreferrer">{t('Component SDK and embedding guide')}</a></p>
         <p className="fc-muted">
           {t("The embeddable widget can be built with npm run build:widget and hosted as dist-widget/widget.iife.js. It requires a user token and a channel the user belongs to. Its receive path polls recent history; validate its limits before deployment.")}</p>
       </div>

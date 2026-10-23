@@ -29,7 +29,7 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
-PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/connection-presets.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py')
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
@@ -231,7 +231,41 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
                     assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
                 results['inline_composer_sends_only_reviewed_draft_and_explicitly_replaces_without_posting']=True
-                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-copilot').click()
+                open_chat_tool(page,'Open workspace tools');page.locator('#work-tab-documents').click()
+                stage='actual native stack review sends only its explicitly chosen verified Yjs page to private HTTPS'
+                documents=page.get_by_role('region',name='Shared documents',exact=True)
+                stack_body='EXPLICIT VERIFIED STACK PAGE CONTENT';omitted_stack_body='OMITTED STACK PAGE MUST NEVER REACH AI';omitted_comment='STACK COMMENT IS NOT AN AI SOURCE'
+                for title,body in [('Chosen stack page',stack_body),('Omitted stack page',omitted_stack_body)]:
+                    documents.get_by_role('button',name='New shared document',exact=True).click();documents.get_by_label('Document title',exact=True).fill(title);documents.get_by_role('button',name='Create document',exact=True).click()
+                    expect(documents.get_by_label('Document text',exact=True)).to_be_editable();documents.get_by_label('Document text',exact=True).fill(body);expect(documents.get_by_text('All edits synchronized',exact=True)).to_be_visible()
+                    if title=='Chosen stack page':
+                        documents.get_by_label('Add a comment',exact=True).fill(omitted_comment);documents.get_by_role('button',name='Post comment',exact=True).click();expect(documents.get_by_text(omitted_comment,exact=True)).to_be_visible()
+                    documents.get_by_role('button',name='All documents',exact=True).click();expect(documents.get_by_role('region',name='Document stacks',exact=True)).to_be_visible()
+                documents.get_by_role('button',name='New stack',exact=True).click();documents.get_by_label('Stack name',exact=True).fill('Private proof stack');documents.get_by_role('button',name='Create stack',exact=True).click()
+                stack=documents.get_by_role('region',name='Private proof stack',exact=True);expect(stack).to_be_visible()
+                organization=helpers.api(base,'GET','/channels/'+channel['id']+'/shared-document-organization',owner);stack_id=next(item['id'] for item in organization['stacks'] if item['title']=='Private proof stack')
+                for title in ('Chosen stack page','Omitted stack page'):
+                    documents.get_by_label('Move '+title+' to stack',exact=True).select_option(stack_id);expect(stack.get_by_role('button',name=re.compile('^'+title))).to_be_visible()
+                stack.get_by_text('Review this stack with AI',exact=True).click();stack_selection=stack.get_by_role('group',name='Pages included in AI review',exact=True)
+                stack_selection.get_by_label('Omitted stack page',exact=True).uncheck();expect(stack_selection.get_by_label('Chosen stack page',exact=True)).to_be_checked()
+                stack.locator('.fc-contextual-copilot-trigger').click();stack_ai=stack.locator('.fc-contextual-copilot-card');expect(stack_ai).to_have_attribute('aria-busy','false')
+                stack_ai.get_by_role('button',name='Suggest reading order',exact=True).click();stack_ai.get_by_text('Review 1 selected sources',exact=True).click();expect(stack_ai).to_contain_text(stack_body)
+                assert omitted_stack_body not in stack_ai.inner_text() and omitted_comment not in stack_ai.inner_text() and len(requests)==4
+                with sqlite3.connect(private/'proof.db') as connection:
+                    before_stack=connection.execute('SELECT * FROM shareddocumentstack ORDER BY id').fetchall();before_placements=connection.execute('SELECT * FROM shareddocumentplacement ORDER BY document_id').fetchall();before_updates=connection.execute('SELECT count(*) FROM shareddocumentupdate').fetchone()[0]
+                stack_ai.get_by_label('Send this request and the selected context to this provider.',exact=True).check();stack_ai.get_by_role('button',name='Send to provider',exact=True).click()
+                expect(stack_ai.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000);expect(stack_ai).to_have_attribute('aria-busy','false')
+                assert len(requests)==5 and stack_body in requests[-1]['messages'][-1]['content']
+                assert all(text not in json.dumps(requests[-1]) for text in (omitted_stack_body,omitted_comment,selected,omitted))
+                assert stack_ai.locator('.fc-contextual-copilot-result').get_by_role('button').count()==0
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT * FROM shareddocumentstack ORDER BY id').fetchall()==before_stack
+                    assert connection.execute('SELECT * FROM shareddocumentplacement ORDER BY document_id').fetchall()==before_placements
+                    assert connection.execute('SELECT count(*) FROM shareddocumentupdate').fetchone()[0]==before_updates
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1 and connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                results['actual_stack_ai_uses_only_selected_verified_page_not_unselected_pages_comments_or_native_writes']=True
+                page.locator('#work-tab-copilot').click()
                 stage='Grok connection preset edits the draft only and clears typed destination credentials'
                 page.get_by_role('button',name='Close workspace tools',exact=True).click();open_chat_tool(page,'Integrations')
                 integrations=page.get_by_role('dialog',name='Integrations',exact=True)

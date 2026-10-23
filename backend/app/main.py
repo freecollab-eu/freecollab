@@ -18,12 +18,12 @@ from .services.rate_limit import install_auth_rate_limits
 from .services.crypto import message_keyring
 from .services.workspaces import init_workspaces
 from .api import auth, channels, messages, files, reactions, read_receipts, threads, mentions, presence, posts, comments, notifications, admin, preferences
-from .routers import demo_ai
 from .api import account, workspaces, direct_messages, saved_items, decisions, secure_messaging
 from .api import oidc, workspace_oidc, webhooks, integrations_content, proofs, operations
 from .api import workforce, scim, remote_sync
 from .api import security_events, security_status
 from .api import project_tasks, meetings, push, shared_documents, workflows, data_control
+from .api import channel_metadata, document_organization
 from .services.security_audit import SecurityAuditMiddleware
 from .services.capability_logs import install_capability_log_filter
 from .api import file_experience, activity_feed, copilot, cloud_files, external_meetings
@@ -112,6 +112,8 @@ app.include_router(project_tasks.router)
 app.include_router(meetings.router)
 app.include_router(push.router)
 app.include_router(shared_documents.router)
+app.include_router(channel_metadata.router)
+app.include_router(document_organization.router)
 app.include_router(workflows.router)
 app.include_router(data_control.router)
 app.include_router(data_control.account_router)
@@ -145,10 +147,6 @@ app.include_router(personal_oauth.router)
 if settings.enable_experimental_features:
     app.include_router(posts.router)
     app.include_router(comments.router)
-if settings.enable_demo_ai:
-    app.include_router(demo_ai.router)
-    # Preserve the original direct-backend demo URL for opted-in installations.
-    app.include_router(demo_ai.router, prefix="/api", include_in_schema=False)
 
 # Socket.io
 socket_app = socketio.ASGIApp(sio, app)
@@ -180,7 +178,7 @@ def capabilities():
     return {
         "version": "0.13.0",
         "experimental_features": settings.enable_experimental_features,
-        "demo_ai": settings.enable_demo_ai,
+        "demo_ai": False,
         "max_file_size": files.MAX_FILE_SIZE,
         "file_types": sorted(files.ALLOWED_TYPES),
         "invitations": True,
@@ -223,6 +221,10 @@ def capabilities():
         "copilot": settings.copilot_enabled,
         "meetings": True,
         "shared_documents": True,
+        "channel_metadata": {"native": True, "matrix": settings.matrix_enabled, "revisioned": True},
+        "shared_document_organization": {"native": True, "matrix": False, "message_references": True, "derived_comments": True},
+        "thread_history": "paged-with-roots-only-timeline",
+        "custom_presence": "active-device-leases",
         "mobile_offline": True,
         "workflows": settings.workflows_enabled,
         "data_controls": settings.data_controls_enabled,

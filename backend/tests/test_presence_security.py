@@ -57,3 +57,17 @@ def test_channel_presence_filters_active_members(presence_context):
 
 def test_channel_presence_missing_channel(presence_context):
     assert presence_context.get('/presence/channel/missing', headers=headers('member')).status_code == 404
+
+
+def test_person_presence_returns_custom_text_only_to_visible_directory_peers(presence_context, monkeypatch):
+    calls = []
+    def current(user_id):
+        calls.append(user_id)
+        return {'status': 'busy', 'last_seen': '2026-10-23T10:00:00', 'custom_status': 'Writing the brief 🧭',
+                'session_hash': 'must-not-leave-server', 'claims': {'sub': user_id}}
+    monkeypatch.setattr(presence, 'get_user_presence', current)
+    result = presence_context.get('/presence/users/colleague', headers=headers('member'))
+    assert result.status_code == 200
+    assert result.json() == {'user_id': 'colleague', 'status': 'busy', 'last_seen': '2026-10-23T10:00:00', 'custom_status': 'Writing the brief 🧭'}
+    assert presence_context.get('/presence/users/outsider', headers=headers('member')).status_code == 404
+    assert calls == ['colleague']

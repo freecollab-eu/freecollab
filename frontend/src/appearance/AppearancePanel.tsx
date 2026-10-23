@@ -175,7 +175,7 @@ export function AppearancePanel({
             </div>
             <div className="appearance-colors">
               <ColorControl label={t("Accent")} value={preferences.accent_color} onChange={(color) => onChange({ accent_color: color })} />
-              <ColorControl label={`Canvas · ${resolvedMode}`} value={canvasColor} onChange={(color) => onChange(resolvedMode === 'dark' ? { dark_background_color: color } : { background_color: color })} />
+              <ColorControl label={t(resolvedMode === 'dark' ? 'Dark canvas' : 'Light canvas')} value={canvasColor} onChange={(color) => onChange(resolvedMode === 'dark' ? { dark_background_color: color } : { background_color: color })} />
             </div>
             <p className="appearance-color-note">{t("Choose your own colors. Text stays readable as you explore.")}</p>
           </fieldset>

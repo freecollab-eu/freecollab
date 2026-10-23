@@ -1,4 +1,5 @@
 const catalog: Record<string, string> = {
+  "Select fewer sources. AI context is limited to 24,000 characters; nothing was sent.": "Välj färre källor. AI-kontexten får högst vara 24 000 tecken; inget har skickats.",
   "A workspace owner must enable and connect an AI provider in Connection setup.": "En arbetsyteägare måste aktivera och ansluta en AI-leverantör i anslutningsguiden.",
   "AI actions": "AI-åtgärder",
   "AI configuration or consent changed. Close and reopen this suggestion to review it.": "AI-konfigurationen eller godkännandet har ändrats. Stäng och öppna förslaget igen för att granska det.",

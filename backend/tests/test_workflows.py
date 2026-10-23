@@ -210,6 +210,41 @@ def test_creator_and_status_conditions_use_bounded_native_metadata(flows):
             service.queue_event(session, 'e', 'b', 'channel-a', 'task_updated', 'task')
 
 
+@pytest.mark.parametrize('accept_at_creation', [False, True])
+def test_native_decision_status_producer_drives_only_matching_workflows(flows, monkeypatch, accept_at_creation):
+    from app.api import decisions
+    from app.config import settings
+    from app.services import webhooks
+    client, engine, tokens = flows
+    client.app.include_router(decisions.router)
+    monkeypatch.setattr(webhooks, 'settings', settings)
+    monkeypatch.setattr(settings, 'webhooks_enabled', False)
+    fields = definition(trigger='decision_updated', steps=[{'kind': 'notify', 'recipients': ['approver']}])
+    fields['conditions'] = {'actor': 'creator', 'status': 'accepted'}
+    created = create(flows, fields); assert created.status_code == 201, created.text
+    draft = {'title': 'Reviewed native decision', 'content': 'Decision content stays out of workflow metadata', 'status': 'accepted' if accept_at_creation else 'proposed'}
+    response = client.post('/channels/channel-a/decisions', headers=headers(tokens), json=draft)
+    assert response.status_code == 200, response.text
+    decision = response.json()
+    expected_resource = decision['id']
+    if not accept_at_creation:
+        with Session(engine) as session:
+            assert session.exec(select(WorkflowRun)).all() == []
+        updated = client.post('/decisions/'+decision['id']+'/revisions', headers=headers(tokens), json={**draft, 'status': 'accepted', 'expected_revision': 1})
+        assert updated.status_code == 200, updated.text
+        expected_resource = updated.json()['revision_id']
+    assert process(engine) == 1
+    assert process(engine) == 0
+    with Session(engine) as session:
+        run = session.exec(select(WorkflowRun)).one()
+        assert run.status == 'completed' and run.actor_id == 'owner'
+        assert run.resource_id == expected_resource
+        assert 'Decision content' not in json.dumps(run.model_dump(mode='json'))
+        notices = session.exec(select(WorkflowNotice)).all()
+        assert {(notice.user_id, notice.kind) for notice in notices} == {('approver', 'notify'), ('owner', 'finished')}
+        assert len(notices) == len(session.exec(select(Notification)).all()) == 2
+
+
 def test_file_metadata_recovers_creator_without_reading_file_bytes(flows):
     _, engine, _ = flows
     fields = definition(trigger='file_uploaded'); fields['conditions']['actor'] = 'creator'

@@ -22,7 +22,7 @@ import type { WorkHubTab } from '../lib/work-hub-view';
 import '../styles/work-hub.css';
 
 export type { WorkHubTab } from '../lib/work-hub-view';
-interface Props { workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string }
+interface Props { workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -38,7 +38,7 @@ const tabs = [
   { id: 'mobile', label: 'Mobile & offline', icon: Smartphone },
 ] as const;
 
-export function WorkHub({ workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId }: Props) {
+export function WorkHub({ workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
@@ -104,7 +104,7 @@ export function WorkHub({ workspaceId, channel, onClose, onTabChange, initialTab
           {tab === 'cloud' && <><ChannelSyncNotice channelId={channel.id} kind="files" /><CloudFilesPicker workspaceId={workspaceId} channelId={channel.id} /></>}
           {tab === 'external-meetings' && <ExternalMeetingsPanel {...props} isAdmin={integrationAdmin && unrestricted && channel.role === 'admin'} />}
           {tab === 'tasks' && <ProjectTasksPanel {...props} initialProjectId={initialProjectId} focusTaskId={focusTaskId} />}
-          {tab === 'documents' && <SharedDocumentsPanel {...props} onPendingChange={onDocumentPending} />}
+          {tab === 'documents' && <SharedDocumentsPanel {...props} onPendingChange={onDocumentPending} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage ? id => { if (mayLeaveDocument()) onRevealMessage(id); } : undefined} />}
           {tab === 'workflows' && <WorkflowsPanel {...props} />}
           {tab === 'apps' && <ChannelApps workspaceId={workspaceId} channelId={channel.id} />}
           {tab === 'data' && <DataControlsPanel {...props} isAdmin={dataAdmin && unrestricted} />}

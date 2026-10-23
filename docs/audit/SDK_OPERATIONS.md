@@ -1,0 +1,27 @@
+# Funktionsgranskning: inbäddning, SDK, distribution och drift
+
+Granskad 2026-10-23 på `design/open-studio`. [Huvudförteckningen](../FEATURE_AUDIT.md)
+skiljer nuvarande kod från publicerad release och lokala demoexempel.
+
+| Förmåga | Status och verklig implementation | Bevis och gräns |
+| --- | --- | --- |
+| Elva native-moduler | Implementerat: Chat, Files, Feed, Notifications, Tasks, Documents, Workflows, Meetings, Search, Calendar, Decisions. [Klient](../../packages/components/src/client.ts), [komponenter](../../packages/components/src/elements.ts). | [SDK-avtal](../COMPONENT_SDK.md), [backend-/UI-browserproof](../../packages/components/tests/browser-proof.py). Serverläsbara kanaler; inget automatiskt E2EE i native-modul. |
+| Web Components och React | Implementerat, [element](../../packages/components/src/elements.ts), [React](../../packages/components/src/react.tsx). | [Node-tester](../../packages/components/tests/client.test.mjs), [React-/paketproof](../../packages/components/tests/browser-proof.py). Token kommer från kundens server; ingen providerhemlighet i browsern. |
+| Full betrodd klient med Matrix | Implementerat, [embed](../../frontend/src/embed-entry.tsx), [SDK-embed](../../packages/components/src/embed.ts). | [Kundidentitet](../EMBED_IDENTITY.md), [embedproof](../../packages/components/tests/embed-browser-proof.py). Exakt betrott ursprung, fristående enheter/nycklar och uttryckliga grants. |
+| Kundens egen SSO och värdprodukt | Implementerat, [embed-API](../../backend/app/api/embed.py), [OIDC-brygga](../../backend/app/services/embed.py). | [SDK/identitet](../EMBED_IDENTITY.md), [backendtest](../../backend/tests/test_embed_identity.py). Kundens riktiga IdP är extern acceptans; installatörens SSO ersätter inte kundens. |
+| SDK-historik vid många trådsvar | Implementerat, korrigerat här: tidslinjen använder roots_only, sökning fortsatt all-history. [Klient](../../packages/components/src/client.ts). | [105-svarsregression](../../packages/components/tests/client.test.mjs). Tidslinjen är senaste50 rötter; inte hela kanalhistoriken som en enda sida. |
+| Packat SDK med manifest | Implementerat byggflöde, [package](../../packages/components/package.json), [distributionsavtal](../SDK_RELEASES.md). | `npm run release:check` bygger, testar och verifierar den verkliga tarballen. Körningen publicerar inget. |
+| npm/release/publicering | Förberett, ej genomförd av denna granskning. [Workflow](../../.github/workflows/sdk-release.yml), [versionskontrakt](../../packages/components/COMPATIBILITY.md). | Ingen npm-publicering, merge till main eller ny tagg ska underförstås. |
+| Offentlig webbplats och demo | Implementerat, [webbplats](../../deploy/website/README.md), [demo](../../frontend/src/components/Demo.tsx). | Konto- och leverantörsfri lokal demo. Webbplatsen är ett separat statiskt bygge; den demonstrerar inte kundens faktiska anslutningar. |
+| Inbyggd produktguide | Implementerat i [Docs](../../frontend/src/components/Docs.tsx) och [ProductGuide](../../frontend/src/components/ProductGuide.tsx), EN/SV. | Länkar dagens granskningsgren och funktionsstatus. [Browserproof](../../frontend/tests/website-browser.py) granskar de verkliga sidorna. |
+| Railway-installation | Implementerad konfiguration, [guide](../../RAILWAY_DEPLOY.md), [website Dockerfile](../../frontend/website/Dockerfile). | Exakt tjänst/repo/build måste verifieras vid deployment. En publicerad statisk demo är inte en uppdaterad produkt-API-tjänst. |
+| Enkel/multiprocessdrift | Implementerat, [skalningsavtal](../SCALING.md), [shared runtime](../../backend/app/services/shared_runtime.py), [tester](../../backend/tests/test_valkey_runtime.py). | Standard en API-process. Fler kräver hela TLS-Valkey- och delad lagringskonfigurationen. Inga obegränsade kapacitetslöften. |
+| S3-kompatibla native-filer | Implementerat, [lagring](../OBJECT_STORAGE.md), [backend](../../backend/app/services/storage.py), [tester](../../backend/tests/test_s3_storage.py). | Kundägd tjänst, privata buckets och retention-/backupval; extern driftacceptans separat. |
+| Workerdiagnostik och fjorton grupper | Implementerat, korrigerat här, [API](../../backend/app/api/operations.py), [UI](../../frontend/src/components/OperationsPanel.tsx). | [Grupptester](../../backend/tests/test_operations_worker_groups.py), [driftavtal](../INTEGRATION_OPERATIONS.md). Verkliga lagrade tillstånd/förfallotider; ingen läsning av sekretesspayload. |
+| Hälsa/readiness/metrics | Implementerat, [main](../../backend/app/main.py), [diagnostik](../../backend/app/services/operational_security.py), [avtal](../DEPLOYMENT_READINESS.md). | Installationsadmin krävs för privata kontroller. Heartbeat eller SMTP-config bevisar inte leverans/SLA/restore. |
+| Backup/återställning | Implementerat operatörsverktyg och isolerade tester, [driftavtal](../OPERATIONS.md). | Egna nycklar, offsitekopiering och faktisk separat restore måste operatören verifiera. Native-retention raderar inte backups eller mottagares Matrixkopior. |
+| Ren publik historik | Repo-/leveransregel: endast Kris Ledel som författare och committer, inga Co-authored-by. [Repo](https://github.com/freecollab-eu/freecollab). | Denna granskning sker på reviewbranch. Ingen omskrivning av skyddad main eller befintliga releasetaggar. |
+
+Slutkällans exekverade kontroller sammanställs i [VALIDATION](../VALIDATION.md).
+Tester för fysisk mobil-/desktopdistribution och verkliga kundmiljöer ersätts
+inte av paketering eller privata browserfixtures.

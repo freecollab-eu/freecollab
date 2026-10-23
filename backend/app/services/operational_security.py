@@ -204,7 +204,8 @@ def security_status(session, *, now: datetime | None = None) -> dict:
         {"id": "public_https_origin", "status": "pass" if public else "attention" if production else "unknown"},
         {"id": "cors_https_origins", "status": "pass" if exact_cors and public in cors else "attention" if production else "unknown"},
         {"id": "experimental_features", "status": "attention" if settings.enable_experimental_features else "disabled"},
-        {"id": "demo_ai", "status": "attention" if settings.enable_demo_ai else "disabled"},
+        # The legacy unauthenticated demo router is retired; its old flag is ignored.
+        {"id": "demo_ai", "status": "disabled"},
         {"id": "independent_server_keys", "status": independent_key_status()},
         {"id": "operator_mfa", "status": "pass" if operators["active"] and not operators["without_mfa"] else "attention"},
         {"id": "storage_capacity", "status": storage["status"]},

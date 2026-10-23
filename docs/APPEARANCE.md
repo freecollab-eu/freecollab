@@ -22,6 +22,8 @@ The app derives text, surfaces, borders and button colors from the saved colors.
 
 Automated token tests check at least 4.5:1 contrast for the tested body/muted/accent text and accent-button pairs across the built-in palettes and varied custom canvases. These checks support readability; they are not a full accessibility audit of every interface state, image or embedded widget. Text size and spacing controls apply to the reference client, while the standalone widget keeps its host integration styles.
 
+The current canvas field is labelled **Light canvas** or **Dark canvas** in English and **Ljus bakgrund** or **Mörk bakgrund** in Swedish, including its accessible name. `frontend/tests/channel-metadata-browser.py` checks these actual controls in both modes as part of its isolated native-client proof.
+
 ## Authenticated API
 
 The API exposes `GET /preferences/appearance` and `PUT /preferences/appearance`. Through the bundled frontend proxy these become `/api/preferences/appearance`. Both require an active account's bearer token and return `Cache-Control: private, no-store`. Blocked accounts and revoked sessions are rejected using the normal authentication rules.

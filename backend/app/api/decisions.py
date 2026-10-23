@@ -132,7 +132,8 @@ def create_decision(channel_id: str, data: DecisionContent, user=Depends(get_cur
     session.flush()
     session.add(revision)
     from ..services.webhooks import enqueue_channel_event
-    enqueue_channel_event(session, channel_id, "decision.created", decision.id)
+    enqueue_channel_event(session, channel_id, "decision.created", decision.id,
+                          workflow_metadata=None if data.matrix_event_id else {"status": data.status or "proposed"})
     session.commit()
     return revision_data(session, decision, revision)
 
@@ -169,7 +170,8 @@ def revise_decision(decision_id: str, data: ReviseDecision, user=Depends(get_cur
     session.add(revision)
     try:
         from ..services.webhooks import enqueue_channel_event
-        enqueue_channel_event(session, decision.channel_id, "decision.updated", revision.id)
+        enqueue_channel_event(session, decision.channel_id, "decision.updated", revision.id,
+                              workflow_metadata=None if data.matrix_event_id else {"status": data.status or "proposed"})
         session.commit()
     except IntegrityError:
         session.rollback()

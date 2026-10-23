@@ -27,6 +27,8 @@ class Settings(BaseSettings):
     s3_allow_insecure_http: bool = False
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     enable_experimental_features: bool = False
+    # Deprecated compatibility setting: the anonymous provider demo is retired.
+    # This flag never enables routes; production AI uses copilot_enabled.
     enable_demo_ai: bool = False
     message_encryption_keys: dict[str, SecretStr] = Field(default_factory=dict)
     message_encryption_active_key_id: str = "local-dev"

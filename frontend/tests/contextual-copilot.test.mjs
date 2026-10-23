@@ -137,3 +137,35 @@ test('read-only intents cannot expose an unrelated target application action', a
   assert.ok(!h.nodes().some(node => node.type === 'button' && node.props.children === 'Use suggestion'));
   assert.equal(h.applied.length, 0);
 });
+
+function mixedBudgetSources(messageText) {
+  return [
+    { key: 'message:m1', source: { kind: 'message', id: 'm1' }, label: 'Selected message', preview: messageText, message: { id: 'm1', channel_id: 'channel', content: messageText } },
+    ...['d1', 'd2'].map(id => ({ key: 'shared_document:' + id, source: { kind: 'shared_document', id }, label: id, preview: id, document: { id, channel_id: 'channel', version: 2, archived: false } })),
+  ];
+}
+const mixedRefs = [{ kind: 'message', id: 'm1' }, { kind: 'shared_document', id: 'd1' }, { kind: 'shared_document', id: 'd2' }];
+
+test('mixed message/document budget includes citation headers and separators and cannot send one character over', async () => {
+  const h = fixture({ refs: mixedRefs }), body = 'm'.repeat(6002), document = 'd'.repeat(8970);
+  h.setChoices(mixedBudgetSources(body)); h.setDocumentText(document); await h.open();
+  // Bodies alone are23,942; real [S#] kind headers and joins add59 =>24,001.
+  assert.ok(h.text().includes(body)); assert.ok(h.text().includes(document));
+  assert.ok(h.text().includes('Select fewer sources. AI context is limited to 24,000 characters; nothing was sent.'));
+  await h.check('Send this request'); assert.equal(h.button('Send to provider').props.disabled, true);
+  // The event handler also rejects a forced click; no conversation is allocated.
+  h.button('Send to provider').props.onClick(); await h.settle();
+  assert.equal(h.calls.filter(call => call.kind === 'create' || call.kind === 'send').length, 0);
+});
+
+test('an exact24k Unicode context sends the whole reviewed documents without truncation', async () => {
+  const h = fixture({ refs: mixedRefs }), body = '🧭'.repeat(6001), document = 'd'.repeat(8970);
+  h.setChoices(mixedBudgetSources(body)); h.setDocumentText(document); await h.open();
+  // Python counts Unicode characters, not UTF-16 units:23,941 body +59 envelope.
+  assert.ok(!h.text().includes('Select fewer sources. AI context is limited'));
+  await h.check('Send this request'); assert.equal(h.button('Send to provider').props.disabled, false);
+  await h.click('Send to provider');
+  const sent = h.calls.find(call => call.kind === 'send'); assert.ok(sent);
+  assert.deepEqual(sent.payload.sources, [{ kind: 'message', id: 'm1' }, ...['d1', 'd2'].map(id => ({ kind: 'shared_document', id, revision: 2, text: document }))]);
+  assert.ok(h.text().includes(body)); assert.ok(h.text().includes(document));
+});

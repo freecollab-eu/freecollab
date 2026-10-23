@@ -169,7 +169,7 @@ def _enqueue(session, row, event_type: str, resource_id: str | None, channel_id:
     return delivery
 
 
-def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id: str):
+def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id: str, *, workflow_metadata: dict | None = None):
     """Join the caller's content transaction; disabled installations do no work."""
     if getattr(settings, "workflows_enabled", False):
         kind = {"file.created": "file_uploaded", "file.version.created": "file_uploaded",
@@ -178,7 +178,7 @@ def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id
             mapping = session.get(WorkspaceChannel, channel_id)
             if mapping:
                 from .workflow import queue_event
-                queue_event(session, event_type + ":" + resource_id, mapping.workspace_id, channel_id, kind, resource_id)
+                queue_event(session, event_type + ":" + resource_id, mapping.workspace_id, channel_id, kind, resource_id, metadata=workflow_metadata)
     if not webhooks_enabled():
         return 0
     if event_type not in EVENT_TYPES or not isinstance(resource_id, str) or not 1 <= len(resource_id) <= 1024:

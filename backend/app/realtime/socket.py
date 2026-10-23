@@ -27,7 +27,7 @@ def _presence_metadata(user_id, token, status="online"):
     claims = decode_token_claims(token) or {}
     allowed = {key: claims[key] for key in ("sub","exp","iat","av","amr","sso_workspace_id","sso_provider_revision","embed_application_id","native_client_id") if key in claims}
     now = datetime.utcnow()
-    return {"user_id":user_id,"status":status,"last_seen":now.isoformat(),"changed_at":now.timestamp(),
+    return {"user_id":user_id,"status":status,"custom_status":None,"last_seen":now.isoformat(),"changed_at":now.timestamp(),
         "session_hash":token_digest(token),"claims":allowed}
 
 
@@ -44,9 +44,9 @@ def _local_presence(user_id):
     row=presence_store.get(user_id,{"status":"offline","last_seen":None})
     if "sessions" not in row:return row
     valid=[value for value in list(row["sessions"].values()) if _presence_valid(value)]
-    if not valid:return {"status":"offline","last_seen":row.get("last_seen")}
+    if not valid:return {"status":"offline","custom_status":None,"last_seen":row.get("last_seen")}
     latest=max(valid,key=lambda value:value["changed_at"])
-    return {"status":latest["status"],"last_seen":latest["last_seen"]}
+    return {"status":latest["status"],"custom_status":latest.get("custom_status"),"last_seen":latest["last_seen"]}
 
 
 async def start_realtime_broker():
@@ -196,7 +196,7 @@ async def connect(sid, environ, auth):
     current.setdefault("sessions",{})[sid]=metadata
     current.update(status="online",last_seen=metadata["last_seen"],sid=sid)
     await sio.enter_room(sid, f"user:{user_id}")
-    await broadcast_presence(user_id, {"user_id": user_id, "status": "online"})
+    await broadcast_presence(user_id, {"user_id": user_id, "status": "online", "custom_status": None})
 
 
 @sio.event
@@ -271,18 +271,27 @@ async def set_status(sid, data):
     status = data.get("status") if isinstance(data, dict) else data
     if not isinstance(status, str) or status not in {"online", "away", "busy", "offline"}:
         return {"error": "Invalid status"}
+    changes_text = isinstance(data, dict) and "custom_status" in data
+    custom_status = data.get("custom_status") if changes_text else None
+    if custom_status is not None and (not isinstance(custom_status, str) or len(custom_status) > 50
+            or any(ord(char) < 32 or ord(char) == 127 for char in custom_status)):
+        return {"error": "Custom status must contain at most 50 characters without control characters"}
+    if isinstance(custom_status, str): custom_status = custom_status.strip() or None
     user_id = await _active_user(sid)
     if not user_id:
         return {"error": "Invalid user"}
     if user_id in presence_store:
-        presence_store[user_id]["status"] = status
-        presence_store[user_id]["last_seen"] = datetime.utcnow().isoformat()
         row=presence_store[user_id].get("sessions",{}).get(sid)
+        if not changes_text:
+            custom_status = (row or presence_store[user_id]).get("custom_status")
+        presence_store[user_id]["status"] = status
+        presence_store[user_id]["custom_status"] = custom_status
+        presence_store[user_id]["last_seen"] = datetime.utcnow().isoformat()
         if row:
-            row.update(status=status,last_seen=datetime.utcnow().isoformat(),changed_at=datetime.utcnow().timestamp())
+            row.update(status=status,custom_status=custom_status,last_seen=datetime.utcnow().isoformat(),changed_at=datetime.utcnow().timestamp())
             shared=broker()
             if shared:await shared.write_presence(sid,row)
-    await broadcast_presence(user_id, {"user_id": user_id, "status": status})
+    await broadcast_presence(user_id, {"user_id": user_id, "status": status, "custom_status": custom_status})
     return {"ok": True}
 
 

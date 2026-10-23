@@ -1,5 +1,6 @@
 /** Public showroom data. Every mutation is local and disappears on reset/reload. */
 export type DemoChannel = 'studio' | 'product' | 'design';
+export const demoChannels: readonly DemoChannel[] = ['studio', 'product', 'design'];
 export type DemoSection = 'chat' | 'projects' | 'documents' | 'connections' | 'appearance';
 export type DemoProvider = 'microsoft' | 'google';
 export interface DemoDestination { section?: DemoSection; provider?: DemoProvider }
@@ -10,11 +11,39 @@ export interface DemoDecision { text: string; nextStep: string; owner: DemoOwner
 export const demoDecisionTaskId = 'courtyard-follow-up';
 export interface DemoMessage { id: string; author: string; text: string; time: string; sample: boolean }
 export interface DemoTask { id: string; text: string; done: boolean; sample: boolean; group: 'Planning' | 'Design' | 'Team'; owner?: DemoOwner }
-export interface DemoDocument { id: 'brief' | 'notes'; title: string; source: string; edited: string | null }
+export type DemoDocumentId = string;
+export interface DemoDocument { id: DemoDocumentId; channel: DemoChannel; stackId: string; title: string; source: string; edited: string | null; sample: boolean; owner: DemoOwner | 'You'; updatedLabel: string }
+export interface DemoDocumentStack { id: string; title: string; sample: boolean; references: string[] }
+export type DemoStackUndo = { kind: 'document_move'; documentId: DemoDocumentId; fromStackId: string; toStackId: string } | { kind: 'reference_add'; stackId: string; messageId: string } | { kind: 'reference_remove'; stackId: string; messageId: string; index: number };
+export const demoStackLimit = 12;
+export const demoDocumentLimit = 30;
+export const demoStackReferenceLimit = 30;
+const validChannel = (channel: DemoChannel) => demoChannels.includes(channel);
+export function createDemoStacks(): Record<DemoChannel, DemoDocumentStack[]> {
+  const stacks = (channel: DemoChannel): DemoDocumentStack[] => [
+    { id: channel + '-reference', title: 'Reference material', sample: true, references: [] },
+    { id: channel + '-sketches', title: 'Sketches', sample: true, references: [] },
+    { id: channel + '-decisions', title: 'Decisions', sample: true, references: [] },
+  ];
+  return { studio: stacks('studio'), product: stacks('product'), design: stacks('design') };
+}
 export type DemoMaterial = 'courtyard' | 'brief';
 export interface DemoLayout { order: DemoMaterial[]; pinned: DemoMaterial[]; side: 'left' | 'right'; focus: boolean }
 export const createDemoLayout = (): DemoLayout => ({ order: ['courtyard', 'brief'], pinned: [], side: 'right', focus: false });
-export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; nextId: number; layout: DemoLayout; decision: DemoDecision | null }
+export interface DemoState { messages: Record<DemoChannel, DemoMessage[]>; tasks: DemoTask[]; documents: DemoDocument[]; stacks: Record<DemoChannel, DemoDocumentStack[]>; stackUndo: Partial<Record<DemoChannel, DemoStackUndo>>; nextId: number; layout: DemoLayout; decision: DemoDecision | null }
+export function demoChannelDocuments(state: DemoState, channel: DemoChannel): DemoDocument[] {
+  return validChannel(channel) ? state.documents.filter(document => document.channel === channel) : [];
+}
+export function demoChannelStacks(state: DemoState, channel: DemoChannel): DemoDocumentStack[] {
+  return validChannel(channel) ? state.stacks[channel] : [];
+}
+export function demoStackDocuments(state: DemoState, channel: DemoChannel, stackId: string): DemoDocument[] {
+  return demoChannelStacks(state, channel).some(stack => stack.id === stackId) ? demoChannelDocuments(state, channel).filter(document => document.stackId === stackId) : [];
+}
+export function demoStackReferences(state: DemoState, channel: DemoChannel, stackId: string): DemoMessage[] {
+  const stack = demoChannelStacks(state, channel).find(row => row.id === stackId);
+  return stack ? stack.references.map(id => state.messages[channel].find(message => message.id === id)).filter((message): message is DemoMessage => !!message) : [];
+}
 export const demoSections: DemoSection[] = ['chat', 'projects', 'documents', 'connections', 'appearance'];
 export function readDemoDestination(hash: string): DemoDestination | null {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
@@ -55,12 +84,18 @@ export function createDemoState(): DemoState {
       { id: 'task-4', text: 'Plan a short team walkthrough', done: false, sample: true, group: 'Team' },
     ],
     documents: [
-      { id: 'brief', title: 'Project brief', edited: null, source: '## A quieter courtyard\n\nCreate a welcoming shared space for the neighbourhood.\n\n### Our direction\n- Warm, durable materials\n- Room to gather and room to pause\n- A simple first version, shaped by feedback\n\n### Open question\nWhich materials work best for this space?' },
-      { id: 'notes', title: 'Studio notes', edited: null, source: '## A few things we agreed\n\n- Start small and keep decisions visible.\n- Collect questions before the next walkthrough.\n- Give every task a clear next step.\n\n### Next conversation\nBring one idea that makes the courtyard feel more welcoming.' },
-    ], nextId: 1, layout: createDemoLayout(), decision: null,
+      { id: 'brief', channel: 'studio', stackId: 'studio-reference', title: 'Project brief', edited: null, sample: true, owner: 'Maja', updatedLabel: '10:39', source: '## A quieter courtyard\n\nCreate a welcoming shared space for the neighbourhood.\n\n### Our direction\n- Warm, durable materials\n- Room to gather and room to pause\n- A simple first version, shaped by feedback\n\n### Open question\nWhich materials work best for this space?' },
+      { id: 'notes', channel: 'studio', stackId: 'studio-reference', title: 'Studio notes', edited: null, sample: true, owner: 'Noor', updatedLabel: '10:42', source: '## A few things we agreed\n\n- Start small and keep decisions visible.\n- Collect questions before the next walkthrough.\n- Give every task a clear next step.\n\n### Next conversation\nBring one idea that makes the courtyard feel more welcoming.' },
+      { id: 'materials', channel: 'studio', stackId: 'studio-sketches', title: 'Materials & sketches', edited: null, sample: true, owner: 'Elias', updatedLabel: '10:45', source: '## Materials to bring together\n\n- A warm timber sample for the long table\n- Brick and stone colours from the courtyard\n- A sketch of the open doorway\n\nLeave room for the team to add another possibility.' },
+      { id: 'decision', channel: 'studio', stackId: 'studio-decisions', title: 'The direction we agreed', edited: null, sample: true, owner: 'Maja', updatedLabel: '11:03', source: '## Our starting point\n\nKeep the courtyard welcoming, durable and open.\n\n### Before the walkthrough\nBring a few material samples and one question to discuss together.' },
+      { id: 'product-plan', channel: 'product', stackId: 'product-reference', title: 'A shared plan', edited: null, sample: true, owner: 'Noor', updatedLabel: '10:05', source: '## One shared plan\n\nStart with a small first version. Keep the work visible and give every task a clear next step.' },
+      { id: 'product-walkthrough', channel: 'product', stackId: 'product-decisions', title: 'The next walkthrough', edited: null, sample: true, owner: 'Maja', updatedLabel: '10:08', source: '## Make the next step clear\n\n- Review what is ready\n- Collect the remaining questions\n- Choose one next step and a person to take it forward' },
+      { id: 'design-palette', channel: 'design', stackId: 'design-reference', title: 'Colour & materials', edited: null, sample: true, owner: 'Elias', updatedLabel: '11:02', source: '## A warm, quiet palette\n\nUse the colours of timber, paper and the courtyard. Give the work plenty of room and keep the important details easy to find.' },
+      { id: 'design-type', channel: 'design', stackId: 'design-sketches', title: 'Type & space', edited: null, sample: true, owner: 'Maja', updatedLabel: '11:07', source: '## Room to read\n\nChoose comfortable type, clear headings and generous spacing. Try your own colours and typeface in My view.' },
+    ], stacks: createDemoStacks(), stackUndo: {}, nextId: 1, layout: createDemoLayout(), decision: null,
   };
 }
-export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
+export type DemoAction = { type: 'message'; channel: DemoChannel; text: string; time: string } | { type: 'task_add'; text: string } | { type: 'task_toggle'; id: string } | { type: 'decision_record'; text: string; nextStep: string; owner: DemoOwner } | { type: 'document'; id: DemoDocument['id']; text: string } | { type: 'document_add'; channel: DemoChannel; stackId: string; title: string } | { type: 'document_move'; channel: DemoChannel; id: DemoDocumentId; stackId: string } | { type: 'stack_add'; channel: DemoChannel; title: string } | { type: 'stack_rename'; channel: DemoChannel; id: string; title: string } | { type: 'stack_reference'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_reference_remove'; channel: DemoChannel; stackId: string; messageId: string } | { type: 'stack_undo'; channel: DemoChannel } | { type: 'reset' } | { type: 'layout_reset' } | { type: 'focus' } | { type: 'layout_side'; side: DemoLayout['side'] } | { type: 'layout_pin'; id: DemoMaterial } | { type: 'layout_move'; id: DemoMaterial; direction: -1 | 1 };
 export function demoReducer(state: DemoState, action: DemoAction): DemoState {
   if (action.type === 'reset') return createDemoState();
   if (action.type === 'layout_reset') return { ...state, layout: createDemoLayout() };
@@ -77,6 +112,7 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     return { ...state, layout: { ...state.layout, order } };
   }
   if (action.type === 'message') {
+    if (!validChannel(action.channel)) return state;
     const text = action.text.trim(), rows = state.messages[action.channel];
     if (!rows || !text || text.length > 2000 || rows.length >= 100) return state;
     return { ...state, nextId: state.nextId + 1, messages: { ...state.messages, [action.channel]: [...rows, { id: 'local-' + state.nextId, author: 'You', text, time: action.time, sample: false }] } };
@@ -95,12 +131,67 @@ export function demoReducer(state: DemoState, action: DemoAction): DemoState {
     return { ...state, decision, tasks: previousTask ? state.tasks.map(row => row.id === demoDecisionTaskId ? task : row) : [...state.tasks, task] };
   }
   if (action.type === 'document') {
-    if (action.text.length > 20000) return state;
-    return { ...state, documents: state.documents.map(row => row.id === action.id ? { ...row, edited: action.text } : row) };
+    if (action.text.length > 20000 || !state.documents.some(row => row.id === action.id)) return state;
+    return { ...state, documents: state.documents.map(row => row.id === action.id ? { ...row, edited: action.text, owner: 'You', updatedLabel: 'Just now' } : row) };
+  }
+  if (action.type === 'stack_add' || action.type === 'stack_rename') {
+    if (!validChannel(action.channel)) return state;
+    const title = action.title.trim(), stacks = state.stacks[action.channel];
+    if (!title || title.length > 80 || stacks.some(stack => (action.type === 'stack_add' || stack.id !== action.id) && stack.title.toLowerCase() === title.toLowerCase())) return state;
+    if (action.type === 'stack_add') {
+      if (stacks.length >= demoStackLimit) return state;
+      return { ...state, nextId: state.nextId + 1, stacks: { ...state.stacks, [action.channel]: [...stacks, { id: 'stack-' + state.nextId, title, sample: false, references: [] }] } };
+    }
+    if (!stacks.some(stack => stack.id === action.id && stack.title !== title)) return state;
+    return { ...state, stacks: { ...state.stacks, [action.channel]: stacks.map(stack => stack.id === action.id ? { ...stack, title, sample: false } : stack) } };
+  }
+  if (action.type === 'document_add') {
+    if (!validChannel(action.channel)) return state;
+    const title = action.title.trim();
+    if (!title || title.length > 200 || !state.stacks[action.channel].some(stack => stack.id === action.stackId) || demoChannelDocuments(state, action.channel).length >= demoDocumentLimit) return state;
+    const document: DemoDocument = { id: 'document-' + state.nextId, channel: action.channel, stackId: action.stackId, title, source: '', edited: '', sample: false, owner: 'You', updatedLabel: 'Just now' };
+    return { ...state, nextId: state.nextId + 1, documents: [...state.documents, document] };
+  }
+  if (action.type === 'document_move') {
+    if (!validChannel(action.channel)) return state;
+    const document = state.documents.find(row => row.id === action.id && row.channel === action.channel);
+    if (!document || document.stackId === action.stackId || !state.stacks[action.channel].some(stack => stack.id === action.stackId)) return state;
+    return { ...state, documents: state.documents.map(row => row.id === document.id ? { ...row, stackId: action.stackId } : row), stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'document_move', documentId: document.id, fromStackId: document.stackId, toStackId: action.stackId } } };
+  }
+  if (action.type === 'stack_reference') {
+    if (!validChannel(action.channel) || !state.messages[action.channel].some(message => message.id === action.messageId)) return state;
+    const stack = state.stacks[action.channel].find(row => row.id === action.stackId);
+    if (!stack || stack.references.includes(action.messageId) || stack.references.length >= demoStackReferenceLimit) return state;
+    return { ...state, stacks: { ...state.stacks, [action.channel]: state.stacks[action.channel].map(row => row.id === stack.id ? { ...row, references: [...row.references, action.messageId] } : row) }, stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'reference_add', stackId: stack.id, messageId: action.messageId } } };
+  }
+  if (action.type === 'stack_reference_remove') {
+    if (!validChannel(action.channel)) return state;
+    const stack = state.stacks[action.channel].find(row => row.id === action.stackId), index = stack?.references.indexOf(action.messageId) ?? -1;
+    if (!stack || index < 0) return state;
+    return { ...state, stacks: { ...state.stacks, [action.channel]: state.stacks[action.channel].map(row => row.id === stack.id ? { ...row, references: row.references.filter(id => id !== action.messageId) } : row) }, stackUndo: { ...state.stackUndo, [action.channel]: { kind: 'reference_remove', stackId: stack.id, messageId: action.messageId, index } } };
+  }
+  if (action.type === 'stack_undo') {
+    if (!validChannel(action.channel)) return state;
+    const undo = state.stackUndo[action.channel];
+    if (!undo) return state;
+    const stackUndo = { ...state.stackUndo }; delete stackUndo[action.channel];
+    if (undo.kind === 'document_move') {
+      const document = state.documents.find(row => row.id === undo.documentId && row.channel === action.channel);
+      if (!document || document.stackId !== undo.toStackId || !state.stacks[action.channel].some(stack => stack.id === undo.fromStackId)) return state;
+      return { ...state, stackUndo, documents: state.documents.map(row => row.id === document.id ? { ...row, stackId: undo.fromStackId } : row) };
+    }
+    const stack = state.stacks[action.channel].find(row => row.id === undo.stackId);
+    if (undo.kind === 'reference_remove') {
+      if (!stack || stack.references.includes(undo.messageId) || stack.references.length >= demoStackReferenceLimit || !state.messages[action.channel].some(message => message.id === undo.messageId)) return state;
+      const references = [...stack.references]; references.splice(undo.index, 0, undo.messageId);
+      return { ...state, stackUndo, stacks: { ...state.stacks, [action.channel]: state.stacks[action.channel].map(row => row.id === stack.id ? { ...row, references } : row) } };
+    }
+    if (!stack?.references.includes(undo.messageId)) return state;
+    return { ...state, stackUndo, stacks: { ...state.stacks, [action.channel]: state.stacks[action.channel].map(row => row.id === stack.id ? { ...row, references: row.references.filter(id => id !== undo.messageId) } : row) } };
   }
   return state;
 }
-export function demoMarkdown(document: DemoDocument, translate: (source: string) => string) { return '# ' + translate(document.title) + '\n\n' + (document.edited ?? translate(document.source)) + '\n'; }
+export function demoMarkdown(document: DemoDocument, translate: (source: string) => string) { return '# ' + (document.sample ? translate(document.title) : document.title) + '\n\n' + (document.edited ?? (document.sample ? translate(document.source) : document.source)) + '\n'; }
 export const demoConnectionProviders = {
   microsoft: { name: 'Microsoft 365', console: 'Microsoft Entra admin center', scopes: 'Files.ReadWrite.All · offline_access (files) / Calendars.ReadWrite · offline_access (calendar)' },
   google: { name: 'Google Workspace', console: 'Google Cloud console', scopes: 'drive (files) / calendar.events (calendar)' },

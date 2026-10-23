@@ -6,7 +6,7 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/demo-showroom.ts', import.meta.url), 'utf8');
 const exports = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports, URLSearchParams });
-const { createDemoState, demoReducer, demoMarkdown, readDemoDestination, demoDestinationHash, demoDecisionTaskId } = exports;
+const { createDemoState, demoReducer, demoMarkdown, readDemoDestination, demoDestinationHash, demoDecisionTaskId, demoChannelDocuments, demoChannelStacks, demoStackDocuments, demoStackReferences, demoStackLimit, demoDocumentLimit, demoStackReferenceLimit } = exports;
 
 test('independent demo instances and reset never retain another visitor draft', () => {
   const first = createDemoState(), second = createDemoState();
@@ -127,4 +127,168 @@ test('decision input and task capacity stay bounded without partial state change
   let full = initial;
   while (full.tasks.length < 50) full = demoReducer(full, { type: 'task_add', text: 'A visitor task' });
   assert.equal(demoReducer(full, { type: 'decision_record', text: 'A choice', nextStep: 'A step', owner: 'Maja' }), full);
+});
+
+test('document stacks expose only the current channel and keep the original sample brief identities', () => {
+  const state = createDemoState(), second = createDemoState();
+  assert.deepEqual(Array.from(state.documents.slice(0, 2), row => row.id), ['brief', 'notes']);
+  assert.deepEqual(Array.from(demoChannelDocuments(state, 'studio'), row => row.id), ['brief', 'notes', 'materials', 'decision']);
+  assert.deepEqual(Array.from(demoChannelStacks(state, 'studio'), row => row.title), ['Reference material', 'Sketches', 'Decisions']);
+  assert.deepEqual(Array.from(demoStackDocuments(state, 'studio', 'studio-reference'), row => row.id), ['brief', 'notes']);
+  assert.equal(demoStackDocuments(state, 'studio', 'product-reference').length, 0);
+  assert.equal(demoChannelDocuments(state, 'constructor').length, 0);
+  assert.equal(demoChannelStacks(state, 'constructor').length, 0);
+  assert.equal(demoStackReferences(state, 'studio', 'product-reference').length, 0);
+  assert.equal(demoStackDocuments(state, 'product', 'product-sketches').length, 0);
+  assert.notEqual(state.stacks.studio, second.stacks.studio);
+  assert.notEqual(state.stacks.studio[0].references, second.stacks.studio[0].references);
+  const saved = demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-1' });
+  assert.equal(state.stacks.studio[0].references.length, 0);
+  assert.equal(second.stacks.studio[0].references.length, 0);
+  assert.equal(demoStackReferences(saved, 'studio', 'studio-reference')[0], state.messages.studio[0]);
+});
+
+test('invalid and cross-channel stack operations are atomic and preserve the available undo', () => {
+  const initial = createDemoState();
+  const state = demoReducer(initial, { type: 'document_move', channel: 'studio', id: 'brief', stackId: 'studio-sketches' });
+  for (const action of [
+    { type: 'document_move', channel: 'studio', id: 'brief', stackId: 'product-reference' },
+    { type: 'document_move', channel: 'studio', id: 'product-plan', stackId: 'studio-reference' },
+    { type: 'document_move', channel: 'studio', id: 'brief', stackId: 'studio-sketches' },
+    { type: 'document_move', channel: 'studio', id: 'missing', stackId: 'studio-reference' },
+    { type: 'document_move', channel: 'constructor', id: 'brief', stackId: 'studio-reference' },
+    { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'product-1' },
+    { type: 'stack_reference', channel: 'studio', stackId: 'product-reference', messageId: 'studio-1' },
+    { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'missing' },
+    { type: 'stack_reference_remove', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-1' },
+    { type: 'stack_rename', channel: 'studio', id: 'product-reference', title: 'A different name' },
+    { type: 'document_add', channel: 'studio', stackId: 'product-reference', title: 'A new document' },
+    { type: 'stack_undo', channel: 'constructor' },
+    { type: 'message', channel: 'constructor', text: 'A message', time: '12:00' },
+    { type: 'document', id: 'missing', text: 'A document' },
+  ]) assert.equal(demoReducer(state, action), state, JSON.stringify(action));
+  assert.equal(state.nextId, initial.nextId);
+  assert.equal(state.stackUndo.studio.documentId, 'brief');
+  assert.equal(initial.documents[0].stackId, 'studio-reference');
+});
+
+test('undoing a document move preserves later editing and work in other channels', () => {
+  const initial = createDemoState();
+  let state = demoReducer(initial, { type: 'document_move', channel: 'studio', id: 'brief', stackId: 'studio-sketches' });
+  state = demoReducer(state, { type: 'document_move', channel: 'product', id: 'product-plan', stackId: 'product-decisions' });
+  state = demoReducer(state, { type: 'document', id: 'brief', text: 'The text I wrote after moving the brief' });
+  state = demoReducer(state, { type: 'message', channel: 'design', text: 'Keep this newer conversation', time: '12:03' });
+  const productUndo = state.stackUndo.product, currentMessages = state.messages, currentTasks = state.tasks;
+  state = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  const brief = state.documents.find(row => row.id === 'brief');
+  assert.equal(brief.stackId, 'studio-reference');
+  assert.equal(brief.edited, 'The text I wrote after moving the brief');
+  assert.equal(brief.owner, 'You'); assert.equal(brief.updatedLabel, 'Just now');
+  assert.equal(state.messages, currentMessages); assert.equal(state.tasks, currentTasks);
+  assert.equal(state.messages.design.at(-1).text, 'Keep this newer conversation');
+  assert.equal(state.stackUndo.product, productUndo); assert.equal(state.stackUndo.studio, undefined);
+  assert.equal(state.documents.find(row => row.id === 'product-plan').stackId, 'product-decisions');
+  assert.equal(demoReducer(state, { type: 'stack_undo', channel: 'studio' }), state);
+  state = demoReducer(state, { type: 'stack_undo', channel: 'product' });
+  assert.equal(state.documents.find(row => row.id === 'product-plan').stackId, 'product-reference');
+  assert.equal(state.documents[0].edited, brief.edited);
+  assert.equal(initial.documents[0].edited, null);
+});
+
+test('saved conversation references are scoped, removable and undoable without losing later work', () => {
+  let state = createDemoState();
+  for (const messageId of ['studio-1', 'studio-2']) state = demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId });
+  assert.equal(demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-2' }), state);
+  state = demoReducer(state, { type: 'stack_reference', channel: 'product', stackId: 'product-reference', messageId: 'product-1' });
+  state = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  assert.deepEqual(Array.from(demoStackReferences(state, 'studio', 'studio-reference'), row => row.id), ['studio-1']);
+  assert.equal(demoStackReferences(state, 'product', 'product-reference')[0].id, 'product-1');
+  state = demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-2' });
+  state = demoReducer(state, { type: 'stack_reference_remove', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-1' });
+  assert.deepEqual(Array.from(demoStackReferences(state, 'studio', 'studio-reference'), row => row.id), ['studio-2']);
+  state = demoReducer(state, { type: 'document', id: 'brief', text: 'Keep this edit made after removing a reference' });
+  const messages = state.messages, productStacks = state.stacks.product;
+  state = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  assert.deepEqual(Array.from(demoStackReferences(state, 'studio', 'studio-reference'), row => row.id), ['studio-1', 'studio-2']);
+  assert.equal(state.messages, messages); assert.equal(state.stacks.product, productStacks);
+  assert.equal(state.documents[0].edited, 'Keep this edit made after removing a reference');
+  assert.equal(state.stackUndo.product.kind, 'reference_add');
+  assert.equal(demoReducer(state, { type: 'stack_undo', channel: 'studio' }), state);
+});
+
+test('stack and document creation enforce per-channel limits without consuming ids on rejection', () => {
+  const initial = createDemoState();
+  for (const action of [
+    { type: 'stack_add', channel: 'studio', title: ' ' },
+    { type: 'stack_add', channel: 'studio', title: 'x'.repeat(81) },
+    { type: 'stack_add', channel: 'studio', title: '  REFERENCE MATERIAL  ' },
+    { type: 'document_add', channel: 'studio', stackId: 'studio-reference', title: ' ' },
+    { type: 'document_add', channel: 'studio', stackId: 'studio-reference', title: 'x'.repeat(201) },
+    { type: 'stack_add', channel: 'constructor', title: 'A stack' },
+    { type: 'document_add', channel: 'constructor', stackId: 'studio-reference', title: 'A document' },
+  ]) assert.equal(demoReducer(initial, action), initial);
+  let state = initial;
+  while (state.stacks.studio.length < demoStackLimit) state = demoReducer(state, { type: 'stack_add', channel: 'studio', title: '  Visitor stack ' + state.nextId + '  ' });
+  assert.equal(state.stacks.studio.length, demoStackLimit);
+  assert.equal(state.stacks.studio.at(-1).sample, false);
+  assert.equal(state.stacks.studio.at(-1).title, 'Visitor stack ' + (state.nextId - 1));
+  assert.equal(demoReducer(state, { type: 'stack_add', channel: 'studio', title: 'One too many' }), state);
+  while (demoChannelDocuments(state, 'studio').length < demoDocumentLimit) state = demoReducer(state, { type: 'document_add', channel: 'studio', stackId: 'studio-reference', title: '  Visitor document ' + state.nextId + '  ' });
+  assert.equal(demoChannelDocuments(state, 'studio').length, demoDocumentLimit);
+  assert.equal(demoReducer(state, { type: 'document_add', channel: 'studio', stackId: 'studio-reference', title: 'One too many' }), state);
+  const last = state.documents.at(-1);
+  assert.equal(last.sample, false); assert.equal(last.owner, 'You'); assert.equal(last.updatedLabel, 'Just now');
+  assert.equal(last.edited, ''); assert.equal(last.source, '');
+  assert.equal(last.id, 'document-' + (state.nextId - 1));
+  assert.equal(demoChannelDocuments(state, 'product').length, 2);
+  const otherChannel = demoReducer(state, { type: 'document_add', channel: 'product', stackId: 'product-reference', title: 'Product can still create a document' });
+  assert.equal(demoChannelDocuments(otherChannel, 'product').length, 3);
+  assert.equal(demoChannelDocuments(otherChannel, 'studio').length, demoDocumentLimit);
+});
+
+test('stack references stop at the limit while conversation messages remain intact', () => {
+  let state = createDemoState();
+  while (state.messages.studio.length <= demoStackReferenceLimit) state = demoReducer(state, { type: 'message', channel: 'studio', text: 'A useful reference ' + state.nextId, time: '12:00' });
+  for (const message of state.messages.studio.slice(0, demoStackReferenceLimit)) state = demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: message.id });
+  assert.equal(demoStackReferences(state, 'studio', 'studio-reference').length, demoStackReferenceLimit);
+  const extraMessage = state.messages.studio.at(-1);
+  assert.equal(demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: extraMessage.id }), state);
+  assert.equal(state.messages.studio.length, demoStackReferenceLimit + 1);
+  const undone = demoReducer(state, { type: 'stack_undo', channel: 'studio' });
+  assert.equal(demoStackReferences(undone, 'studio', 'studio-reference').length, demoStackReferenceLimit - 1);
+  assert.equal(undone.messages, state.messages);
+});
+
+test('visitor names and document text stay literal even when they match sample translation keys', () => {
+  let state = createDemoState();
+  const original = state.stacks.studio[0];
+  state = demoReducer(state, { type: 'stack_rename', channel: 'studio', id: original.id, title: '  My shared research  ' });
+  assert.equal(state.stacks.studio[0].title, 'My shared research');
+  assert.equal(state.stacks.studio[0].sample, false);
+  state = demoReducer(state, { type: 'stack_rename', channel: 'studio', id: original.id, title: 'MY SHARED RESEARCH' });
+  assert.equal(state.stacks.studio[0].title, 'MY SHARED RESEARCH');
+  assert.equal(demoReducer(state, { type: 'stack_rename', channel: 'studio', id: original.id, title: 'MY SHARED RESEARCH' }), state);
+  assert.equal(demoReducer(state, { type: 'stack_rename', channel: 'studio', id: original.id, title: 'SKETCHES' }), state);
+  const nextId = state.nextId;
+  state = demoReducer(state, { type: 'document_add', channel: 'studio', stackId: original.id, title: 'Project brief' });
+  state = demoReducer(state, { type: 'document', id: 'document-' + nextId, text: '## A quieter courtyard' });
+  const document = state.documents.find(row => row.id === 'document-' + nextId);
+  const markdown = demoMarkdown(document, () => { assert.fail('Visitor content must not be translated'); });
+  assert.equal(markdown, '# Project brief\n\n## A quieter courtyard\n');
+  assert.equal(original.title, 'Reference material'); assert.equal(original.sample, true);
+});
+
+test('reset removes every visitor stack, document, reference and undo without affecting another visitor', () => {
+  const initial = createDemoState(), second = createDemoState();
+  let state = demoReducer(initial, { type: 'stack_add', channel: 'studio', title: 'My private draft stack' });
+  state = demoReducer(state, { type: 'document_add', channel: 'studio', stackId: state.stacks.studio.at(-1).id, title: 'My private draft document' });
+  state = demoReducer(state, { type: 'document', id: state.documents.at(-1).id, text: 'My private draft text' });
+  state = demoReducer(state, { type: 'stack_reference', channel: 'studio', stackId: 'studio-reference', messageId: 'studio-1' });
+  state = demoReducer(state, { type: 'document_move', channel: 'product', id: 'product-plan', stackId: 'product-sketches' });
+  const reset = demoReducer(state, { type: 'reset' });
+  assert.equal(JSON.stringify(reset), JSON.stringify(second));
+  assert.equal(JSON.stringify(initial), JSON.stringify(second));
+  assert.equal(Object.keys(reset.stackUndo).length, 0);
+  assert.equal(reset.nextId, 1);
+  assert.equal(JSON.stringify(reset).includes('My private'), false);
 });

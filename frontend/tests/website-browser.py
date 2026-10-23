@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 from urllib.parse import urlsplit
 from urllib.request import urlopen
@@ -54,9 +55,9 @@ def main():
         browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),
                                              headless=True, args=['--no-sandbox'])
         context = browser.new_context(viewport={'width': 1440, 'height': 1000}, reduced_motion='reduce', locale='en-US')
-        context.add_init_script('''
+        context.add_init_script(r'''
           if (!sessionStorage.getItem('website-proof-seeded')) {
-            for (const [key,value] of Object.entries('''+json.dumps(seed)+''')) localStorage.setItem(key,value);
+            for (const [key,value] of Object.entries('''+json.dumps(seed)+r''')) localStorage.setItem(key,value);
             sessionStorage.setItem('website-proof-seeded','yes');
           }
           window.websiteProofCalls=[];
@@ -97,6 +98,26 @@ def main():
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Documents', exact=True).click()
         page.get_by_label('Edit demo document', exact=True).fill('Website-only document')
+        channel_trigger=page.get_by_role('button',name='Choose channel',exact=True)
+        channel_trigger.click()
+        picker=page.get_by_role('dialog',name='Channels',exact=True)
+        picker.get_by_role('button',name=re.compile(r'^Manage channel')).click()
+        manage=page.get_by_role('dialog',name='Manage channel',exact=True)
+        manage.get_by_label('Channel name',exact=True).fill('Website-only courtyard')
+        manage.get_by_role('button',name='Save channel',exact=True).click()
+        expect(channel_trigger).to_be_focused();expect(channel_trigger).to_contain_text('Website-only courtyard')
+        desk=page.locator('.fc-demo-desk:visible')
+        desk.get_by_role('button',name='New',exact=True).click()
+        desk.get_by_role('button',name='Stack',exact=True).click()
+        desk.get_by_label('Stack name',exact=True).fill('Website-only stack')
+        desk.get_by_role('button',name='Create stack',exact=True).click()
+        stack=desk.get_by_role('region',name='Website-only stack',exact=True)
+        stack.get_by_role('button',name='Add document',exact=True).click()
+        desk.get_by_label('Document title',exact=True).fill('Website-only document title')
+        desk.get_by_role('button',name='Create document',exact=True).click()
+        page.get_by_label('Edit demo document',exact=True).fill('Website-only created document')
+        expect(page.get_by_role('region',name='Document editor',exact=True)).to_contain_text('Website-only document title')
+        checks['built_demo_channel_management_and_document_stack_creation_are_local'] = True
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Appearance', exact=True).click()
         page.get_by_label('Demo typeface', exact=True).select_option('manrope')
@@ -112,6 +133,9 @@ def main():
         page.get_by_role('button', name='Tools', exact=True).click()
         page.get_by_role('tab', name='Documents', exact=True).click()
         assert page.get_by_label('Edit demo document').input_value() != 'Website-only document'
+        expect(page.get_by_role('button',name='Choose channel',exact=True)).to_contain_text('courtyard')
+        expect(page.locator('.fc-demo-desk:visible').get_by_text('Website-only stack',exact=True)).to_have_count(0)
+        expect(page.locator('.fc-demo-desk:visible').get_by_text('Website-only document title',exact=True)).to_have_count(0)
         checks['demo_mutations_disappear_on_reload'] = True
         page.get_by_role('button', name='Back to FreeCollab', exact=True).click()
         page.get_by_role('button', name='Documentation', exact=True).first.click()
@@ -125,6 +149,12 @@ def main():
             page.locator('.fc-public-nav-cta').click()
             expect(page.locator('.fc-showroom')).to_be_visible()
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Demo overflow at{width}'
+            trigger=page.get_by_role('button',name='Välj kanal',exact=True)
+            expect(trigger).to_contain_text('Kanaler')
+            trigger.click();picker=page.get_by_role('dialog',name='Kanaler',exact=True)
+            expect(picker).to_be_visible()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth'), f'Channel picker overflow at{width}'
+            page.keyboard.press('Escape');expect(trigger).to_be_focused()
             page.get_by_role('button', name='Tillbaka till FreeCollab', exact=True).click()
         checks['documentation_swedish_and_390_320px_layout'] = True
         actual = page.evaluate('(keys)=>Object.fromEntries(keys.map(key=>[key,localStorage.getItem(key)]))', list(seed))
@@ -139,7 +169,11 @@ def main():
         context.close(); browser.close()
     source = ['frontend/src/website-entry.tsx', 'frontend/vite.website.config.ts', 'frontend/website/index.html',
               'frontend/website/Dockerfile', 'frontend/website/nginx.conf.template', 'frontend/website/19-validate-port.sh',
-              'frontend/src/components/Landing.tsx', 'frontend/src/components/Demo.tsx', 'frontend/tests/website-browser.py']
+              'frontend/src/components/Landing.tsx', 'frontend/src/components/Demo.tsx',
+              'frontend/src/components/DemoChannelSwitcher.tsx', 'frontend/src/components/DemoDocumentDesk.tsx',
+              'frontend/src/lib/demo-showroom.ts', 'frontend/src/lib/useModalFocus.ts',
+              'frontend/src/styles/demo-showroom.css', 'frontend/src/styles/demo-channel-switcher.css',
+              'frontend/src/styles/demo-document-desk.css', 'frontend/tests/website-browser.py']
     args.report.write_text(json.dumps({'checks': checks, 'groups': len(checks), 'source_sha256': {
         name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in source},
         'limits': ['Read-only acceptance against an owned static server; no Railway, DNS or public TLS deployment is claimed.',

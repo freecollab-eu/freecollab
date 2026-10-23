@@ -228,3 +228,73 @@
   .fc-studio-context-return > span { font-size: 10px; }
   .fc-studio-context-return > button { font-size: 11px; }
 }
+
+/* Everyday navigation and paper collections share the same quiet canvas. */
+.fc-showroom .fc-studio-my-view { border: 0; padding: .6rem .3rem; gap: .45rem; font-size: 12px; white-space: nowrap; }
+.fc-showroom-top-actions { gap: 1rem; }
+.fc-studio-journey { padding: .6rem 0 0; }
+.fc-studio-journey > .fc-studio-channel-summary { color: var(--fc-text); font-size: 12px; padding-bottom: .7rem; }
+.fc-studio-channel-summary small { display: block; color: var(--fc-muted); margin-top: .15rem; font-size: 10px; }
+.fc-studio-journey > div { align-self: stretch; gap: 1.2rem; }
+.fc-studio-journey button { border-radius: 0; padding: .8rem .2rem; min-height: 48px; font-size: 12px; border-bottom: 2px solid transparent; }
+.fc-studio-journey button[aria-pressed=true] { border-bottom-color: var(--fc-accent); }
+.fc-studio-journey button small { min-width: 19px; padding: 0 .25rem; border-radius: 20px; background: var(--fc-accent-soft); color: var(--fc-muted); font-variant-numeric: tabular-nums; text-align: center; font-size: 10px; }
+.fc-showroom .fc-studio-message-keep { min-height: 30px; padding: .3rem 0; border: 0; font-size: 10px; color: var(--fc-muted); opacity: 1; }
+.fc-showroom-message:hover .fc-studio-message-keep, .fc-studio-message-keep:focus-visible { opacity: 1; color: var(--fc-accent); }
+.fc-showroom-message[data-message-id]:focus-visible { outline-offset: 5px; }
+.fc-studio-material-stack .fc-studio-courtyard img { height: 310px; }
+.fc-studio-material-stack .fc-studio-brief { width: 90%; margin-top: .6rem; }
+.fc-studio-stack-surface { width: 100%; padding-top: .5rem; }
+.fc-showroom-document { margin-top: 1.8rem; }
+@media (min-width: 1500px) { .fc-studio-material-stack .fc-studio-courtyard img { height: 380px; } }
+@media (max-width: 1000px) and (min-width: 761px) {
+  .fc-showroom-top { gap: .8rem; }
+  .fc-studio-workspace-selector { margin-left: 0; max-width: 105px; }
+  .fc-showroom-top-actions { gap: .5rem; }
+  .fc-showroom-top-actions > .fc-studio-portrait { display: none; }
+}
+@media (max-width: 760px) {
+  .fc-showroom-top { grid-template-columns: 1fr auto; }
+  .fc-showroom-back { grid-column: 1; grid-row: 1; }
+  .fc-showroom-top-actions { grid-column: 2; grid-row: 1; gap: .5rem; }
+  .fc-showroom-top-actions > .fc-studio-portrait { display: none; }
+  .fc-studio-workspace-selector { grid-column: 1; grid-row: 2; }
+  .fc-demo-channel-switcher { grid-column: 2; grid-row: 2; }
+  .fc-studio-journey > div { gap: 1rem; }
+  .fc-studio-journey button { align-items: center; flex: initial; font-size: 12px; }
+  .fc-studio-journey > .fc-studio-channel-summary { display: none; }
+  .fc-studio-context { padding-top: .2rem; }
+  .fc-studio-context > span { padding-top: .6rem; }
+  .fc-showroom .fc-studio-message-keep { min-height: 44px; opacity: 1; }
+  .fc-studio-material-stack .fc-studio-courtyard img { height: min(90vw, 380px); }
+  .fc-studio-material-stack .fc-studio-brief { width: 100%; }
+  .fc-studio-context > div { flex-direction: row; }
+  .fc-studio-context > div button { min-height: 44px; }
+  .fc-studio-my-view span { display: inline !important; }
+}
+@media (max-width: 360px) {
+  .fc-showroom .fc-studio-my-view { font-size: 11px; }
+  .fc-showroom-top-actions { gap: .3rem; }
+  .fc-studio-journey > div { gap: .6rem; }
+  .fc-studio-journey button { font-size: 11px; }
+  .fc-studio-context { display: block; }
+  .fc-studio-context > span { display: block; max-width: none; }
+  .fc-studio-context > div { justify-content: flex-end; }
+}
+
+.fc-studio-opening .fc-studio-message-keep { grid-column: 2; justify-self: start; margin-top: -.5rem; white-space: nowrap; }
+@media (max-width: 760px) { .fc-studio-opening .fc-studio-message-keep { grid-column: 1 / -1; margin-top: -.25rem; } }
+@media (max-width: 360px) {
+  .fc-showroom-top { grid-template-columns: minmax(0,1fr) auto; gap: .5rem; }
+  .fc-showroom .fc-showroom-back { gap: .4rem; min-width: 0; }
+  .fc-showroom-back > svg { width: 12px; flex-shrink: 0; }
+  .fc-showroom .fc-brand-mark { width: 23px; height: 23px; }
+  .fc-showroom .fc-brand-name { font-size: 18px; }
+  .fc-showroom-top-actions { gap: .2rem; }
+}
+
+@media (max-width: 760px) {
+  .fc-studio-context { flex-direction: column; align-items: stretch; gap: 0; }
+  .fc-studio-context > span { max-width: none; }
+  .fc-studio-context > div { justify-content: flex-end; }
+}

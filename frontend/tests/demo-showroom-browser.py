@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import subprocess
@@ -17,7 +18,165 @@ from playwright.sync_api import expect, sync_playwright
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/demo-showroom-browser.json')))
-SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/styles/demo-showroom.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+SOURCE = ['frontend/src/assets/open-studio/courtyard.png','frontend/src/assets/open-studio/portraits.png','frontend/src/components/Landing.tsx','frontend/src/components/Demo.tsx','frontend/src/components/DemoChannelSwitcher.tsx','frontend/src/components/DemoDocumentDesk.tsx','frontend/src/App.tsx','frontend/src/website-entry.tsx','frontend/src/lib/demo-showroom.ts','frontend/src/lib/useModalFocus.ts','frontend/src/styles/demo-showroom.css','frontend/src/styles/demo-channel-switcher.css','frontend/src/styles/demo-document-desk.css','frontend/src/i18n/demo-showroom.sv.ts','frontend/src/i18n/studio-refinement.sv.ts','frontend/src/i18n/demo-journey.sv.ts','frontend/src/i18n/demo-natural-flow.sv.ts','frontend/tests/demo-showroom.test.mjs','frontend/tests/demo-showroom-browser.py']
+
+def channel_trigger(page, swedish=False):
+    return page.get_by_role('button',name='Välj kanal' if swedish else 'Choose channel',exact=True)
+
+def expect_channel(page, channel, swedish=False):
+    labels={'studio':'gården' if swedish else 'courtyard','product':'planering' if swedish else 'planning','design':'design'}
+    expect(channel_trigger(page,swedish)).to_contain_text(labels[channel])
+
+def choose_channel(page, channel, swedish=False):
+    """Use the real visible channel picker, preserving its focus contract."""
+    labels={'studio':'gården' if swedish else 'courtyard','product':'planering' if swedish else 'planning','design':'design'}
+    trigger=channel_trigger(page,swedish);trigger.click()
+    dialog=page.get_by_role('dialog',name='Kanaler' if swedish else 'Channels',exact=True)
+    expect(dialog).to_be_visible()
+    dialog.get_by_role('button',name=re.compile('^'+re.escape(labels[channel])+r'\b')).click()
+    expect(dialog).to_have_count(0);expect(trigger).to_be_focused()
+    expect_channel(page,channel,swedish)
+
+def expand_stack(page, title):
+    desk=page.locator('.fc-demo-desk:visible')
+    cover=desk.locator('.fc-demo-stack-cover').filter(has=page.get_by_text(title,exact=True))
+    if cover.get_attribute('aria-expanded')!='true':cover.click()
+    return desk.get_by_role('region',name=title,exact=True)
+
+def usability_checks(browser, app, checks, errors, unexpected):
+    """Real channel management, paper moves, undo and original-message navigation."""
+    images=[]
+    for width in [1440,320]:
+        visitor=browser.new_context(viewport={'width':width,'height':1000},reduced_motion='reduce')
+        try:
+            page=visitor.new_page();page.set_default_timeout(20000)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
+            page.goto(app,wait_until='networkidle')
+            composer=page.get_by_label('Your demo message',exact=True)
+            draft='Keep this draft while arranging the work.'
+            composer.fill(draft);composer.evaluate('(node)=>{window.usabilityComposer=node;node.setSelectionRange(3,14)}')
+            trigger=channel_trigger(page)
+            expect(trigger).to_contain_text('Channels')
+            assert trigger.bounding_box()['height']>=44
+            trigger.focus();page.keyboard.press('Enter')
+            dialog=page.get_by_role('dialog',name='Channels',exact=True)
+            expect(dialog.get_by_label('Search channels',exact=True)).to_be_focused()
+            dialog.get_by_label('Search channels',exact=True).fill('planning')
+            expect(dialog.locator('.fc-demo-channel-list button')).to_have_count(1)
+            expect(dialog.locator('.fc-demo-channel-list button')).to_contain_text('planning')
+            dialog.get_by_role('button',name='Close channel picker',exact=True).focus()
+            page.keyboard.press('Shift+Tab')
+            assert dialog.evaluate('(node)=>node.contains(document.activeElement)')
+            page.keyboard.press('Tab')
+            assert dialog.evaluate('(node)=>node.contains(document.activeElement)')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            page.keyboard.press('Escape');expect(dialog).to_have_count(0);expect(trigger).to_be_focused()
+            trigger.click();page.mouse.click(4,4)
+            expect(dialog).to_have_count(0);expect(trigger).to_be_focused()
+            assert composer.evaluate('(node)=>node===window.usabilityComposer&&node.selectionStart===3&&node.selectionEnd===14')
+            expect(composer).to_have_value(draft)
+
+            trigger.click();dialog.get_by_role('button',name=re.compile(r'^Manage channel')).click()
+            manage=page.get_by_role('dialog',name='Manage channel',exact=True)
+            expect(manage.get_by_label('Channel name',exact=True)).to_be_focused()
+            expect(manage).to_contain_text('You manage only this demo channel. Changes stay in this tab.')
+            custom_channel='courtyard <i>local</i>'
+            custom_description='A description written only for this browser tab.'
+            manage.get_by_label('Channel name',exact=True).fill(custom_channel)
+            manage.get_by_role('textbox',name='Channel description',exact=True).fill(custom_description)
+            manage.get_by_role('checkbox',name='Nora',exact=True).uncheck()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            manage.get_by_role('button',name='Save channel',exact=True).click()
+            expect(manage).to_have_count(0);expect(trigger).to_be_focused();expect(trigger).to_contain_text(custom_channel)
+            assert trigger.locator('i').count()==0
+            trigger.click();dialog.get_by_label('Search channels',exact=True).fill(custom_channel)
+            row=dialog.locator('.fc-demo-channel-list button')
+            expect(row).to_have_count(1);expect(row).to_contain_text(custom_description);expect(row).to_contain_text('3 members')
+            page.keyboard.press('Escape')
+            choose_channel(page,'design')
+            trigger.click();dialog.locator('.fc-demo-channel-list button').filter(has=page.get_by_text(custom_channel,exact=True)).click()
+            expect(trigger).to_contain_text(custom_channel);expect(composer).to_have_value(draft)
+            trigger.click();dialog.get_by_role('button',name=re.compile(r'^Manage channel')).click()
+            manage.get_by_label('Channel name',exact=True).fill('An edit that is cancelled')
+            manage.get_by_role('button',name='Cancel',exact=True).click()
+            expect(trigger).to_contain_text(custom_channel)
+            checks[str(width)+'px_visible_searchable_channel_picker_focus_trap_escape_outside_local_manage_and_cancel']=True
+
+            desk=page.locator('.fc-demo-desk:visible')
+            desk.get_by_role('button',name='New',exact=True).click()
+            desk.get_by_role('button',name='Stack',exact=True).click()
+            desk.get_by_label('Stack name',exact=True).fill('Walkthrough')
+            desk.get_by_role('button',name='Create stack',exact=True).click()
+            cover=desk.locator('.fc-demo-stack-cover').filter(has=page.get_by_text('Walkthrough',exact=True))
+            expect(cover).to_be_focused();expect(cover).to_have_attribute('aria-expanded','true')
+            expand_stack(page,'Walkthrough').get_by_role('button',name='Add document',exact=True).click()
+            title='A locally drafted brief'
+            desk.get_by_label('Document title',exact=True).fill(title)
+            desk.get_by_role('combobox',name='In this stack',exact=True).select_option(label='Walkthrough')
+            desk.get_by_role('button',name='Create document',exact=True).click()
+            editor=page.get_by_label('Edit demo document',exact=True)
+            expect(editor).to_be_focused();editor.fill('## A real local document\n\nKeep this text after moving it.')
+            desk=page.locator('.fc-demo-desk:visible')
+            expect(expand_stack(page,'Walkthrough').get_by_role('button',name=title,exact=True)).to_be_visible()
+            desk.get_by_label('Move '+title+' to',exact=True).select_option(label='Sketches')
+            expect(expand_stack(page,'Sketches').get_by_role('button',name=title,exact=True)).to_be_visible()
+            edited='## Edited after the move\n\nUndo must preserve this ongoing work.'
+            editor.fill(edited)
+            desk.get_by_role('button',name='Undo',exact=True).click()
+            expect(expand_stack(page,'Walkthrough').get_by_role('button',name=title,exact=True)).to_be_visible()
+            expect(editor).to_have_value(edited)
+            expect(desk.get_by_role('button',name='Undo',exact=True)).to_have_count(0)
+            desk.get_by_role('button',name='List',exact=True).click()
+            expect(desk.get_by_role('button',name=title,exact=True)).to_be_visible()
+            expect(desk.get_by_label('Move '+title+' to',exact=True)).to_have_value(re.compile(r'^stack-'))
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            checks[str(width)+'px_real_stack_document_creation_accessible_move_list_and_undo_preserve_edits']=True
+
+            page.get_by_role('button',name='Back to conversation',exact=True).click()
+            expect(composer).to_have_value(draft)
+            reference='A useful reference from the actual conversation.'
+            composer.fill(reference);page.get_by_role('button',name='Send demo message',exact=True).click()
+            composer.fill(draft);composer.evaluate('(node)=>node.setSelectionRange(3,14)')
+            # Mobile context hides this same DOM; an unscoped role locator would
+            # deliberately exclude it while the reference is being saved.
+            original=page.locator('.fc-showroom-transcript article').filter(has=page.get_by_text(reference,exact=True))
+            original.evaluate('(node)=>{window.usabilityOriginalMessage=node}')
+            original.get_by_role('button',name='Keep message from You',exact=True).click()
+            desk=page.locator('.fc-demo-desk:visible')
+            desk.get_by_role('combobox',name='Choose a stack',exact=True).select_option(label='Walkthrough')
+            desk.get_by_role('button',name='Save reference',exact=True).click()
+            stack=expand_stack(page,'Walkthrough')
+            expect(stack.locator('blockquote')).to_have_text(reference)
+            expect(original).to_have_count(1)
+            assert original.evaluate('(node)=>node===window.usabilityOriginalMessage')
+            stack.get_by_role('button',name='Remove reference from Walkthrough',exact=True).click()
+            expect(stack.locator('blockquote')).to_have_count(0)
+            desk.get_by_role('button',name='Undo',exact=True).click()
+            expect(stack.locator('blockquote')).to_have_text(reference)
+            stack.get_by_role('button',name='Show original',exact=True).click()
+            expect(page.locator('.fc-studio-context-panel')).not_to_be_visible();expect(original).to_be_focused()
+            expect(composer).to_have_value(draft)
+            assert composer.evaluate('(node)=>node===window.usabilityComposer&&node.selectionStart===3&&node.selectionEnd===14')
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+            image=REPORT.with_name('demo-usability-'+str(width)+'.png');page.screenshot(path=str(image),full_page=True);images.append(str(image))
+            checks[str(width)+'px_conversation_reference_remove_undo_and_original_jump_keep_single_message_and_draft']=True
+
+            choose_channel(page,'design')
+            expect(page.locator('.fc-demo-desk:visible').get_by_text('Walkthrough',exact=True)).to_have_count(0)
+            expect(page.locator('.fc-demo-desk:visible').get_by_role('button',name='Undo',exact=True)).to_have_count(0)
+            trigger.click();dialog.locator('.fc-demo-channel-list button').filter(has=page.get_by_text(custom_channel,exact=True)).click()
+            expect(expand_stack(page,'Walkthrough').get_by_role('button',name=title,exact=True)).to_be_visible()
+            page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='Reset demo',exact=True).click()
+            page.get_by_role('button',name='Reset this demo',exact=True).click()
+            expect_channel(page,'studio')
+            expect(page.locator('.fc-demo-desk:visible').get_by_text('Walkthrough',exact=True)).to_have_count(0)
+            expect(page.get_by_role('log').get_by_text(reference,exact=True)).to_have_count(0)
+            expect(composer).to_have_value('')
+            assert page.evaluate('localStorage.length')==0 and page.evaluate('sessionStorage.length')==0
+            checks[str(width)+'px_channel_scoped_stacks_and_reset_clear_channel_names_documents_references_and_drafts']=True
+        finally:visitor.close()
+    return images
 
 def port():
     with socket.socket() as listener:
@@ -64,7 +223,7 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
         composer.evaluate('(node)=>{window.naturalComposer=node;node.setSelectionRange(3,17)}')
         transcript.evaluate('(node)=>{window.naturalTranscript=node;node.scrollTop=120}')
         page.wait_for_function('() => Math.abs(window.naturalTranscript.scrollTop-120)<=1')
-        brief=journey.get_by_role('button',name='The shared brief',exact=True)
+        brief=journey.get_by_role('button',name=re.compile(r'^Documents'))
         brief.focus();page.keyboard.press('Enter')
         expect(context).to_be_visible();expect(context).to_be_focused()
         expect(page.locator('.fc-studio-conversation')).to_be_visible()
@@ -95,7 +254,7 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
         context.get_by_label('Owner',exact=True).select_option('Elias')
         context.get_by_role('button',name='View shared brief',exact=True).click()
         expect(context.get_by_label('Edit demo document',exact=True)).to_have_value(document)
-        journey.get_by_role('button',name='Decision & next step',exact=True).click()
+        journey.get_by_role('button',name=re.compile(r'^Tasks')).click()
         expect(context.get_by_label('Sample decision',exact=True)).to_have_value(decision)
         expect(context.get_by_label('Next step',exact=True)).to_have_value(next_step)
         expect(context.get_by_label('Owner',exact=True)).to_have_value('Elias')
@@ -118,18 +277,18 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
         checks['context_decision_draft_survives_brief_switch_and_compact_next_step_updates_the_same_single_task']=True
 
         for channel in ['design','product']:
-            page.get_by_label('Demo channel',exact=True).select_option(channel)
+            choose_channel(page,channel)
             value='An unfinished '+channel+' conversation.'
             composer.fill(value);composer.evaluate('(node)=>node.setSelectionRange(2,12)')
-            trigger=journey.get_by_role('button',name='Decision & next step',exact=True)
+            trigger=journey.get_by_role('button',name=re.compile(r'^Tasks'))
             trigger.focus();page.keyboard.press('Enter');expect(context).to_be_focused()
-            expect(page.get_by_label('Demo channel',exact=True)).to_have_value(channel)
-            journey.get_by_role('button',name='The conversation',exact=True).click()
+            expect_channel(page,channel)
+            journey.get_by_role('button',name='Conversation',exact=True).click()
             expect(context).not_to_be_visible();expect(trigger).to_be_focused()
-            expect(page.get_by_label('Demo channel',exact=True)).to_have_value(channel)
+            expect_channel(page,channel)
             expect(composer).to_have_value(value)
             assert composer.evaluate('(node)=>node===window.naturalComposer&&node.selectionStart===2&&node.selectionEnd===12')
-        page.get_by_label('Demo channel',exact=True).select_option('studio')
+        choose_channel(page,'studio')
         expect(composer).to_have_value(draft)
         assert transcript.evaluate('(node)=>node===window.naturalTranscript&&Math.abs(node.scrollTop-120)<=1')
         checks['context_conversation_return_preserves_design_product_channels_and_channel_scoped_drafts_and_reading']=True
@@ -159,11 +318,11 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
             page.on('request',lambda request:unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost'] or '/api/' in urlsplit(request.url).path else None)
             page.goto(app,wait_until='networkidle')
             page.get_by_role('button',name='Tools',exact=True).click();page.get_by_role('button',name='SV',exact=True).click();page.keyboard.press('Escape')
-            page.get_by_label('Demokanal',exact=True).select_option('design')
+            choose_channel(page,'design',True)
             composer=page.get_by_label('Ditt demomeddelande',exact=True)
             value='Ett oskickat utkast i designkanalen. Behåll markeringen.'
             composer.fill(value);composer.evaluate('(node)=>{window.naturalMobileComposer=node;node.setSelectionRange(4,15)}')
-            source=page.get_by_role('button',name='Öppna projektbeskrivningen',exact=True)
+            source=page.get_by_role('navigation',name='Följ gårdsprojektet',exact=True).get_by_role('button',name=re.compile(r'^Dokument'))
             source.scroll_into_view_if_needed();source.focus()
             position=page.evaluate('({x:window.scrollX,y:window.scrollY})')
             source.press('Enter')
@@ -174,13 +333,13 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
             context.get_by_label('Redigera demodokument',exact=True).focus();page.keyboard.press('Escape')
             expect(context).not_to_be_visible();expect(source).to_be_focused()
-            expect(page.get_by_label('Demokanal',exact=True)).to_have_value('design')
+            expect_channel(page,'design',True)
             expect(composer).to_have_value(value)
             assert composer.evaluate('(node)=>node===window.naturalMobileComposer&&node.selectionStart===4&&node.selectionEnd===15')
             page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
             source.press('Enter');expect(context).to_be_focused()
-            context.get_by_role('button',name='Bestäm nästa steg',exact=True).click()
+            page.get_by_role('navigation',name='Följ gårdsprojektet',exact=True).get_by_role('button',name=re.compile(r'^Uppgifter')).click()
             expect(context.get_by_role('heading',name='Gör nästa steg tydligt.',exact=True)).to_be_visible()
             context.get_by_label('Exempelbeslut',exact=True).fill('Följ upp designförslaget vid teamets genomgång.')
             next_step='Ta med designförslaget vid '+str(width)+' pixlar'
@@ -200,12 +359,12 @@ def natural_flow_checks(browser, app, checks, errors, unexpected):
             source.scroll_into_view_if_needed();source.focus();position=page.evaluate('({x:window.scrollX,y:window.scrollY})');source.press('Enter');expect(context).to_be_focused()
             page.get_by_role('button',name='Verktyg',exact=True).click();page.get_by_role('tab',name='Utseende',exact=True).click()
             page.get_by_role('button',name='Verktyg',exact=True).click();page.get_by_role('tab',name='Samtal',exact=True).click()
-            expect(composer).to_have_value(value);expect(page.get_by_label('Demokanal',exact=True)).to_have_value('design')
+            expect(composer).to_have_value(value);expect_channel(page,'design',True)
             page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
             assert composer.evaluate('(node)=>node===window.naturalMobileComposer&&node.selectionStart===4&&node.selectionEnd===15')
-            source.press('Enter');expect(context).to_be_focused();page.get_by_label('Demokanal',exact=True).select_option('product')
+            source.press('Enter');expect(context).to_be_focused();choose_channel(page,'product',True)
             expect(context).not_to_be_visible();expect(composer).to_have_value('')
-            page.get_by_label('Demokanal',exact=True).select_option('design')
+            choose_channel(page,'design',True)
             expect(composer).to_have_value(value)
             page.wait_for_function('(position)=>Math.abs(window.scrollY-Math.min(position.y,Math.max(0,document.documentElement.scrollHeight-innerHeight)))<=1',arg=position)
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
@@ -284,9 +443,9 @@ def main():
                 assert page.get_by_role('log').locator('img').count()==0
                 page.wait_for_timeout(1100)
                 assert page.get_by_role('log').locator('article').count()==initial+1
-                page.get_by_label('Demo channel',exact=True).select_option('design')
+                choose_channel(page,'design')
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_have_count(0)
-                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                choose_channel(page,'studio')
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_be_visible()
                 checks['guest_literal_channel_scoped_memory_chat_no_bot']=True
                 stage='independent unsent drafts survive channel and tool navigation'
@@ -296,18 +455,18 @@ def main():
                 expect(page.get_by_text('Unsent draft · kept in this tab',exact=True)).to_be_visible()
                 REPORT.parent.mkdir(parents=True,exist_ok=True)
                 draft_image=REPORT.with_name('demo-showroom-draft.png');page.screenshot(path=str(draft_image),full_page=True)
-                page.get_by_label('Demo channel',exact=True).select_option('design')
+                choose_channel(page,'design')
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
                 page.get_by_label('Your demo message',exact=True).fill(other_draft)
-                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                choose_channel(page,'studio')
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value(draft)
                 page.get_by_role('button',name='Send demo message',exact=True).click()
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
-                page.get_by_label('Demo channel',exact=True).select_option('design')
+                choose_channel(page,'design')
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value(other_draft)
                 section('Projects');section('Conversation')
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value(other_draft)
-                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                choose_channel(page,'studio')
                 checks['independent_memory_drafts_survive_navigation_and_only_sent_draft_clears']=True
                 stage='actual project checkbox/add/filter'
                 section('Projects')
@@ -324,16 +483,16 @@ def main():
                 with page.expect_download() as downloaded:page.get_by_role('button',name='Download Markdown',exact=True).click()
                 download=downloaded.value;assert download.suggested_filename=='freecollab-demo-brief.md'
                 assert Path(download.path()).read_text()=='# Project brief\n\n'+edited+'\n'
-                page.get_by_role('button',name='Studio notes',exact=True).click();assert page.get_by_label('Edit demo document').input_value()!=edited
-                page.get_by_role('button',name='Project brief',exact=True).click();expect(page.get_by_label('Edit demo document')).to_have_value(edited)
+                expand_stack(page,'Reference material').get_by_role('button',name='Studio notes',exact=True).click();assert page.get_by_label('Edit demo document').input_value()!=edited
+                expand_stack(page,'Reference material').get_by_role('button',name='Project brief',exact=True).click();expect(page.get_by_label('Edit demo document')).to_have_value(edited)
                 checks['edited_document_markdown_actual_download_and_independent_documents']=True
                 stage='one conversation, the same shared brief, and a real local decision/owned task'
                 journey=page.get_by_role('navigation',name='Follow the courtyard project',exact=True)
-                journey.get_by_role('button',name='The conversation',exact=True).click()
+                journey.get_by_role('button',name='Conversation',exact=True).click()
                 expect(page.get_by_label('Edit courtyard brief',exact=True)).to_have_value(edited)
                 journey_brief='## A shared courtyard direction\n\nKeep the doorway open and compare two timber samples.'
                 page.get_by_label('Edit courtyard brief',exact=True).fill(journey_brief)
-                journey.get_by_role('button',name='The shared brief',exact=True).click()
+                journey.get_by_role('button',name=re.compile(r'^Documents')).click()
                 expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
                 page.get_by_role('button',name='Agree a next step',exact=True).click()
                 task_count=page.get_by_role('checkbox').count()
@@ -364,9 +523,9 @@ def main():
                 assert page.get_by_role('checkbox').count()==task_count+1
                 page.get_by_role('button',name='View shared brief',exact=True).click()
                 expect(page.get_by_label('Edit demo document',exact=True)).to_have_value(journey_brief)
-                journey.get_by_role('button',name='Decision & next step',exact=True).click()
+                journey.get_by_role('button',name=re.compile(r'^Tasks')).click()
                 expect(page.get_by_role('checkbox',name=revised_step,exact=True)).to_be_visible()
-                expect(journey.get_by_role('button',name='Decision & next step',exact=True)).to_have_attribute('aria-pressed','true')
+                expect(journey.get_by_role('button',name=re.compile(r'^Tasks'))).to_have_attribute('aria-pressed','true')
                 checks['same_shared_brief_local_decision_owned_task_revision_and_completion']=True
                 stage='Microsoft and Google preparation only'
                 section('Connections')
@@ -405,9 +564,9 @@ def main():
                 page.keyboard.press('Escape');expect(dialog).to_have_count(0)
                 reset_menu();page.get_by_role('button',name='Reset this demo',exact=True).click()
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
-                page.get_by_label('Demo channel',exact=True).select_option('design')
+                choose_channel(page,'design')
                 expect(page.get_by_label('Your demo message',exact=True)).to_have_value('')
-                page.get_by_label('Demo channel',exact=True).select_option('studio')
+                choose_channel(page,'studio')
                 expect(page.get_by_role('log').get_by_text(text,exact=True)).to_have_count(0)
                 expect(page.locator('.fc-studio-materials')).to_be_visible()
                 expect(page.locator('.fc-studio-scene')).to_have_attribute('data-material-position','right')
@@ -499,10 +658,12 @@ def main():
                 assert not unexpected,unexpected
                 stage='natural context, reading, draft, focus, channel and compact outcome continuity'
                 natural_images=natural_flow_checks(browser,app,checks,errors,unexpected)
+                stage='visible channels, local management, paper stacks, move undo and reference continuity'
+                usability_images=usability_checks(browser,app,checks,errors,unexpected)
                 assert not errors,errors
                 assert not unexpected,unexpected
                 browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images,'source_sha256':source_hashes},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':True,'scope':'private Chromium synthetic showroom and actual guest App/public website entries; no real users/accounts/providers. Credential-ignored/no-storage contract applies to standalone website, not signed-in full-App bootstrap.','checks':checks,'api_provider_requests':unexpected,'screenshots':[str(desktop),str(mobile),str(draft_image),str(journey_image)]+natural_images+usability_images,'source_sha256':source_hashes},indent=2)+'\n')
             print('Demo showroom browser proof passed: '+str(len(checks))+' checks.')
         except Exception:
             print('Failed stage: '+stage)

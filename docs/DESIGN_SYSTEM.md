@@ -87,6 +87,11 @@ The composer grows for multiline text. **Enter** sends, **Shift+Enter** inserts 
 
 Messages run from oldest at the top to newest at the bottom, next to the composer. Incoming messages follow the latest conversation when the reader is already near the bottom. While reading earlier messages, the view stays in place and shows a new-message count with **Jump to latest**. Those arrivals alone do not advance the latest-message read receipt while the reader remains scrolled back. Reaching the bottom, choosing the jump action or sending your own message returns to the latest conversation. Scroll transitions respect the device's reduced-motion preference.
 
+Returning from shared work restores the source reading position as an explicit
+reading choice, including near the end of a mobile conversation. A composer
+resize does not convert that return into automatic following. Deliberate chat
+navigation while work is open takes precedence over the original source.
+
 ## Dialog behavior
 
 The shared modal helper keeps focus in the active dialog, makes the background inactive with `inert`, supports Tab/Shift+Tab and Escape, and restores focus to the opening control when it remains available. If one dialog opens another, only the top dialog receives interaction. Closing the final dialog restores the background's prior state.

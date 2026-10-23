@@ -1,5 +1,43 @@
 # FreeCollab validation record
 
+## Returning from work retains the reading position — 2026-10-23
+
+The public style acceptance caught a mobile source return that moved 90 px.
+A private actual-product reproduction confirmed that the source position was
+first restored correctly; a queued composer measurement then treated its
+distance of less than 96 px from the bottom as a choice to follow latest.
+Closing back to an unchanged authorized source now retains the explicit
+reading choice before those measurements run. Deliberate chat navigation,
+own sends and **Jump to latest** retain their normal precedence.
+
+- **543 frontend cases passed**, together with TypeScript and application/
+  trusted-embed production builds.
+- All **17 actual native/example-product workspace groups passed**, including
+  two added regressions with the original 15 groups preserved. The genuine
+  source/footer offset remains 102.203125 px after save, all work modes,
+  minimization and explicit close. The 90 px distance from the bottom remains;
+  it is not replaced by following. Deliberate message reading while work is
+  parked remains in place, and actual own-send/jump actions still follow.
+  All 586 source hashes per fixture match; both owned example visits were
+  revoked with HTTP204 and the fixtures removed.
+- The unchanged **15-group conversation regression passed** with all 576
+  recorded source hashes matching. Current-source screenshots were reviewed.
+  All 59 stylesheets recorded by the earlier 11-group visual proof remain
+  byte-identical; this increment changes the return behavior and its tests.
+- The next CI startup failure was reproduced in the isolated external-meeting
+  fixture with the same missing scheduled-message model. Its explicit model
+  import fixes startup; production model initialization is unchanged. All
+  **nine external-meeting browser checks passed** using private TLS provider
+  fixtures, including create/recovery/cancel/calendar and Swedish mobile.
+  These are not live customer-provider consent tests. An audit accounts for
+  all 11 explicit browser database launchers: the other launchers register the
+  full model graph, and the meeting fixture has its earlier explicit fix.
+  Original containers remain unchanged; owned fixtures are removed.
+
+The failed public attempt and its cleanup remain preserved separately. Public
+acceptance is recorded against the new frozen source; the earlier 10-of-11
+result is not substituted for that source's final acceptance.
+
 ## Shared interface polish — 2026-10-23
 
 Conversation, documents, stacks, tasks, decisions, account/appearance settings,

@@ -1453,6 +1453,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     workLayout.reset(); setWorkSurfaceResourceTitle('');
     const origin = workHubOrigin.current; workHubOrigin.current = null;
     const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
+    if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current) {
+      // Returning to a source is a reading choice. A restored position can be
+      // within the near-bottom threshold without choosing to follow latest.
+      // Composer resize callbacks must not replace it with the bottom edge.
+      roomOverviewRef.current = true;
+      followingLatestRef.current = false; clearTimeout(followTimeoutRef.current);
+    }
     setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
     requestAnimationFrame(() => {
       if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;

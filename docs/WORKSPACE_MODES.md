@@ -53,6 +53,10 @@ actions. Existing document synchronization keeps its normal behavior.
 - **Show source message** restores split view, reveals and focuses the real
   message, or opens a saved reply's genuine thread, while keeping the editor
   mounted. It does not create a source-message copy or save the work.
+- Closing back to the source keeps its reading position, even when it lies
+  close to the timeline's end. Composer resizing cannot turn this return into
+  following the latest message. A deliberate move in the conversation while
+  work is open takes precedence over the original source position.
 - Closing work or changing its actual target uses normal navigation guards.
   Pending writes still block leaving; choosing another document, task, group,
   channel or workspace cannot silently discard the current form.

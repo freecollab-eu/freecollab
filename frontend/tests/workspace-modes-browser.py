@@ -945,6 +945,176 @@ def demo(browser):
             context.close()
 
 
+def material_reading_anchor(page, control):
+    """Capture the source position on the genuine click, after native scrolling."""
+    control.evaluate('''element => {
+      window.__workspaceMaterialReading = null;
+      element.addEventListener('click', () => {
+        const timeline = document.querySelector('.fc-chat-timeline');
+        window.__workspaceMaterialReading = {
+          documentId: element.closest('[data-document-id]').dataset.documentId,
+          top: timeline.scrollTop,
+          gap: timeline.scrollHeight - timeline.clientHeight - timeline.scrollTop,
+          offset: element.getBoundingClientRect().top - timeline.getBoundingClientRect().top
+        };
+      }, {capture: true, once: true});
+    }''')
+    control.click()
+    value = page.evaluate('window.__workspaceMaterialReading')
+    assert value is not None
+    return value
+
+
+def same_material_reading_anchor(page, previous):
+    # Wait beyond the close/layout commit: its composer ResizeObserver queues
+    # another frame, which must not replace a restored near-bottom reading choice.
+    page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))')
+    page.wait_for_function('''previous => {
+      const timeline = document.querySelector('.fc-chat-timeline');
+      const card = [...timeline.querySelectorAll('[data-document-id]')]
+        .find(node => node.dataset.documentId === previous.documentId);
+      const footer = card?.querySelector('.fc-chat-material-footer button');
+      return footer && Math.abs(footer.getBoundingClientRect().top - timeline.getBoundingClientRect().top - previous.offset) <= 2;
+    }''', arg=previous)
+    actual = page.locator('.fc-chat-material-document[data-document-id=' + json.dumps(previous['documentId']) + '] .fc-chat-material-footer button').evaluate('''footer => {
+      const timeline = document.querySelector('.fc-chat-timeline');
+      return {documentId: footer.closest('[data-document-id]').dataset.documentId, top: timeline.scrollTop,
+        offset: footer.getBoundingClientRect().top - timeline.getBoundingClientRect().top};
+    }''')
+    assert actual['documentId'] == previous['documentId'] and abs(actual['offset'] - previous['offset']) <= 2
+    assert abs(actual['top'] - previous['top']) <= 2
+    return actual
+
+
+def demo_reading_return(browser):
+    """A source close must preserve reading while explicit chat actions still win."""
+    global stage
+    stage = 'owned actual demo near-bottom source reading fixture startup'
+    with fixture('demo') as (base, app, _private):
+        snapshots['demo-reading-return'] = snapshots['demo'].copy()
+        context, page, errors, unexpected, writes = browser_context(browser, app)
+        dialogs, _answer = install_dialog_answers(page)
+        visit = None
+        try:
+            with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/demo/session') as response:
+                page.goto(app + '/product-demo/?locale=en', wait_until='domcontentloaded')
+            assert response.value.ok
+            visit = response.value.json()
+            expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
+            channel_id = visit['channel_id']
+            document_id = visit['examples']['document_ids'][0]
+            card = page.locator('.fc-chat-material-document[data-document-id=' + json.dumps(document_id) + ']')
+            card.get_by_role('button', name='Open document', exact=True).click()
+            pane = workspace_pane(page, 'split')
+            field = pane.locator('#shared-document-body')
+            expect(field).to_be_editable()
+            long_body = field.input_value() + '\n\n' + '\n'.join('Reading line %02d — actual shared materials and decisions 🧭 åäö.' % index for index in range(80))
+            update_path = '/api/channels/' + channel_id + '/shared-documents/' + document_id + '/updates'
+            with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == update_path) as saved:
+                field.fill(long_body)
+            assert saved.value.ok
+            expect(pane.locator('.fc-shared-sync')).to_have_text('All edits synchronized')
+            close_work_area(page)
+            page.locator('.fc-chat-account-trigger').click()
+            account = page.locator('.fc-account-panel')
+            with page.expect_response(lambda response: response.request.method == 'PUT' and urlsplit(response.url).path == '/api/preferences/language') as language:
+                account.get_by_role('combobox', name='Language', exact=True).select_option('sv')
+            assert language.value.ok
+            page.keyboard.press('Escape')
+            expect(account).to_have_count(0)
+            page.set_viewport_size({'width': 320, 'height': 850})
+            composer = page.locator('.fc-chat-composer textarea')
+            draft = 'Ett oskickat utkast som ska finnas kvar.'
+            composer.fill(draft)
+            action = card.locator('.fc-chat-material-footer button')
+            action.scroll_into_view_if_needed()
+            stage = 'actual near-bottom material source survives mode cycles footer parking and explicit close'
+            before = material_reading_anchor(page, action)
+            assert 0 < before['gap'] < 96, 'Exercise a reading choice inside the real near-bottom follow threshold'
+            pane = workspace_pane(page, 'split')
+            field = pane.get_by_label('Dokumenttext', exact=True)
+            final_body = long_body + '\n\nEn liten verklig anteckning i mobilvyn.'
+            with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == update_path) as saved:
+                field.fill(final_body)
+            assert saved.value.ok
+            expect(pane.locator('.fc-shared-sync')).to_have_text('Alla ändringar är synkroniserade')
+            since = len(writes)
+            node, state = cycle_live_editor(page, field, dialogs, footer=True)
+            assert no_resource_writes(writes, since)
+            minimize_work(page, footer=True)
+            assert node.evaluate('node=>node.isConnected')
+            organization_path = '/api/channels/' + channel_id + '/shared-document-organization'
+            with page.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == organization_path) as refreshed:
+                page.locator('.fc-work-resume-bar [data-work-close]').click()
+            assert refreshed.value.ok
+            expect(pane.locator('.fc-conversation-work')).to_have_count(0)
+            assert not node.evaluate('node=>node.isConnected')
+            expect(composer).to_have_value(draft)
+            actual = same_material_reading_anchor(page, before)
+            action.click()
+            pane = workspace_pane(page, 'split')
+            fresh_body = pane.get_by_label('Dokumenttext', exact=True)
+            expect(fresh_body).to_have_value(final_body)
+            assert fresh_body.evaluate('(current,previous)=>current!==previous&&!previous.isConnected', node)
+            close_work_area(page)
+            same_material_reading_anchor(page, before)
+            observations.append({'nearBottomSourceReadingReturn': {'before': before, 'after': actual}})
+            screenshot(page, 'actual-demo-swedish-reading-return-320')
+            mark('actual_demo_near_bottom_material_reading_anchor_survives_same_editor_mode_cycles_footer_parking_and_explicit_close')
+
+            stage = 'explicit send latest and deliberate parked conversation movement override a source origin'
+            sent_text = draft + ' En verklig leverans ' + RUN
+            composer.fill(sent_text)
+            with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == '/api/mobile/offline/channels/' + channel_id + '/messages') as sent:
+                composer.press('Enter')
+            assert sent.value.ok
+            expect(composer).to_have_value('')
+            assert last_message(base, channel_id, visit['session'], sent_text)['content'] == sent_text
+            bottom = "()=>{const n=document.querySelector('.fc-chat-timeline');return n.scrollHeight-n.clientHeight-n.scrollTop<=1}"
+            page.wait_for_function(bottom)
+            timeline = page.locator('.fc-chat-timeline')
+            rectangle = timeline.bounding_box()
+            page.mouse.move(rectangle['x'] + 40, rectangle['y'] + 30)
+            page.mouse.wheel(0, -400)
+            expect(page.locator('.fc-chat-latest')).to_be_visible()
+            page.locator('.fc-chat-latest').click()
+            page.wait_for_function(bottom)
+
+            action.scroll_into_view_if_needed()
+            opening = material_reading_anchor(page, action)
+            pane = workspace_pane(page, 'split')
+            expect(pane.get_by_label('Dokumenttext', exact=True)).to_have_value(final_body)
+            minimize_work(page)
+            rectangle = timeline.bounding_box()
+            page.mouse.move(rectangle['x'] + 40, rectangle['y'] + 30)
+            page.mouse.wheel(0, -1200)
+            page.wait_for_function('''()=>{const n=document.querySelector('.fc-chat-timeline'),r=n.getBoundingClientRect();return [...n.querySelectorAll('.fc-chat-message-content')].some(m=>{const b=m.getBoundingClientRect();return b.top<r.bottom&&b.bottom>r.top+1})}''')
+            visible_id = timeline.evaluate('''n=>{const r=n.getBoundingClientRect();return [...n.querySelectorAll('.fc-chat-message')].find(m=>{const b=m.getBoundingClientRect();return b.top<r.bottom&&b.bottom>r.top+1}).id}''')
+            page.locator('#' + visible_id + ' .fc-chat-message-content').click(position={'x': 8, 'y': 8})
+            page.mouse.wheel(0, -120)
+            page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+            moved = timeline.evaluate('''n=>{const r=n.getBoundingClientRect(),m=[...n.querySelectorAll('.fc-chat-message')].find(m=>m.getBoundingClientRect().bottom>r.top+1);return{top:n.scrollTop,id:m.id,offset:m.getBoundingClientRect().top-r.top}}''')
+            assert abs(moved['top'] - opening['top']) > 100, 'Exercise an actual different reading choice while work is parked'
+            page.locator('.fc-work-resume-bar [data-work-close]').click()
+            expect(pane.locator('.fc-conversation-work')).to_have_count(0)
+            page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))')
+            after = timeline.evaluate('''n=>{const r=n.getBoundingClientRect(),m=[...n.querySelectorAll('.fc-chat-message')].find(m=>m.getBoundingClientRect().bottom>r.top+1);return{top:n.scrollTop,id:m.id,offset:m.getBoundingClientRect().top-r.top}}''')
+            assert after['id'] == moved['id'] and abs(after['offset'] - moved['offset']) <= 2, 'Closing parked work replaced the deliberate current conversation reading position'
+            observations.append({'explicitParkedReadingChoice': {'sourceOpening': opening, 'beforeClose': moved, 'afterClose': after}, 'explicitOwnSendAndJumpLatestStillFollow': True})
+            assert not dialogs, 'Synced work and mode changes must not ask to discard'
+            mark('actual_demo_explicit_send_and_jump_latest_still_follow_and_closing_parked_work_respects_deliberate_conversation_movement')
+            assert not errors and not unexpected
+            assert not any(row.get('status') == 429 for row in observations)
+        except Exception:
+            capture_failure(page, 'demo-reading-return')
+            raise
+        finally:
+            if visit:
+                api(base, 'DELETE', '/demo/session', visit['session'])
+                observations.append({'ownedReadingReturnDemoVisitRevoked': 204})
+            context.close()
+
+
 def main():
     def interrupt(_signal, _frame):
         raise KeyboardInterrupt('Owned workspace-mode proof interrupted')
@@ -958,6 +1128,7 @@ def main():
             try:
                 native(browser)
                 demo(browser)
+                demo_reading_return(browser)
                 complete = True
             finally:
                 browser.close()

@@ -21,7 +21,7 @@ http {
     add_header X-Content-Type-Options nosniff always;
     add_header Referrer-Policy no-referrer always;
     add_header Cache-Control "no-store" always;
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ${WEBSOCKET_ORIGIN}; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors ${WEBSITE_ORIGIN}" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' ${WEBSOCKET_ORIGIN}; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors ${WEBSITE_ORIGIN}" always;
     location = / { return 302 /product-demo/; }
     location = /product-demo { return 302 /product-demo/; }
     location = /healthz { proxy_pass http://127.0.0.1:8000/ready; }

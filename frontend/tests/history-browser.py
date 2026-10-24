@@ -20,7 +20,13 @@ i=api('POST',f"/workspaces/{w['id']}/invites",a['access_token'],{'role':'member'
 api('POST','/workspaces/invites/accept',b['access_token'],{'token':i['token']})
 c=api('POST','/channels',a['access_token'],{'name':'History-'+RUN,'type':'group','workspace_id':w['id'],'member_ids':[b['user_id']]})
 old=api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':'Oldest searchable needle '+RUN})
-for index in range(121): api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':f'Historical entry {index:03d} '+RUN})
+history=[]
+for index in range(121): history.append(api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':f'Historical entry {index:03d} '+RUN}))
+# Exercise explicit cursor pagination from a genuine recent reading boundary.
+# With no receipt, first-unread entry correctly seeks through older history.
+api('POST',f"/read-receipts/channels/{c['id']}",a['access_token'],{'message_id':history[95]['id']})
+receipts=api('GET',f"/read-receipts/channels/{c['id']}",a['access_token'])
+assert next(row['last_read_message_id'] for row in receipts if row['user_id']==a['user_id'])==history[95]['id'], 'Pagination fixture must use its canonical native receipt'
 with sync_playwright() as p:
     browser=p.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or None,headless=True,args=['--no-sandbox'])
     page=browser.new_page(viewport={'width':1440,'height':1000}); page.set_default_timeout(30000)

@@ -1,5 +1,21 @@
 # FreeCollab validation record
 
+## Recent-read history pagination fixture — 2026-10-24
+
+The 122-root history proof now records and verifies a genuine recent own receipt
+before entering the channel. This keeps its original older-message pagination,
+search, edits, deletion, mentions and storage assertions meaningful with the new
+receipt-based entry policy. All 4 original Python assertions and 15 browser
+expectations remain; the canonical-receipt assertion is additional.
+
+The actual history proof passed all 4 groups. Files, collaboration, office files
+(7 groups) and security operations (9 groups) also passed in disposable native
+fixtures with no source drift. Read-only review of all 66 Product CI browser
+scripts found no further affected fresh-root pagination fixture. The preceding
+CI candidate passed frontend, all four backend shards and real-client encryption
+and recovery; its Product job identified this fixture adjustment. Final workflow
+status is tracked on the review branch.
+
 ## Feature-list keyboard and pointer intent — 2026-10-24
 
 A real Swedish 390 px owner flow exposed keyboard scrolling triggering trusted

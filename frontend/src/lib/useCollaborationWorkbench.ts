@@ -19,6 +19,7 @@ interface Transition {
   activity: number;
   identity: string;
   mode: WorkSurfaceMode;
+  from: WorkSurfaceMode;
   snapshot: Snapshot;
   expectedFocus: Element | null;
 }
@@ -78,7 +79,7 @@ export function useCollaborationWorkbenchLayout({ workRef, timelineRef, composer
   function transition(next: WorkSurfaceMode, snapshot: Snapshot | null) {
     if (!valid() || !snapshot || snapshot.element !== workRef.current) return;
     prepared.current = null;
-    pending.current = { generation: ++generation.current, activity: liveActivity.current(), identity, mode: next, snapshot, expectedFocus: document.activeElement };
+    pending.current = { generation: ++generation.current, activity: liveActivity.current(), identity, mode: next, from: modeRef.current, snapshot, expectedFocus: document.activeElement };
     modeRef.current = next; setView({ identity, mode: next });
   }
   function toggleExpanded() {
@@ -103,6 +104,19 @@ export function useCollaborationWorkbenchLayout({ workRef, timelineRef, composer
   useLayoutEffect(() => {
     const action = pending.current;
     if (!action || action.identity !== identity || action.mode !== mode) return;
+    // A resume removes its focused dock button. Restore the exact visible field
+    // before an expanded modal chooses a header control and records new activity.
+    const resumedField = action.snapshot.field?.element;
+    if (action.from === 'minimized' && mode !== 'minimized' && valid() && liveRestore.current() && action.generation === generation.current
+      && action.activity === liveActivity.current() && workRef.current === action.snapshot.element
+      && (document.activeElement === document.body || document.activeElement === action.expectedFocus)
+      && resumedField && action.snapshot.element.contains(resumedField) && visible(resumedField)) {
+      resumedField.focus({ preventScroll: true });
+      // The card reports its own successful programmatic focus as activity.
+      // A later sibling/user focus must still invalidate the queued restoration.
+      if (document.activeElement === resumedField && valid() && liveRestore.current() && pending.current === action
+        && action.generation === generation.current) action.activity = liveActivity.current();
+    }
     const frame = requestAnimationFrame(() => {
       if (!valid() || !liveRestore.current() || action !== pending.current || action.generation !== generation.current || action.activity !== liveActivity.current() || workRef.current !== action.snapshot.element) return;
       const active = document.activeElement;

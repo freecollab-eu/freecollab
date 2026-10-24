@@ -45,12 +45,12 @@ Validation of the frozen runtime:
   substitutes were used. The four fixtures and their eight owned API/Vite
   processes stopped; the owned example visit was deleted.
 - Focused real React/browser checks passed for shared input (**9**), retained
-  workbench (**10**), modal continuation (**4**), reader lifetimes (**13**) and
+  workbench (**12**), modal continuation (**4**), reader lifetimes (**13**) and
   existing layout/focus behavior (**8**). The older reader reproduced a late
   navigation after unmount; the current implementation rejects it, including
   after a host's second await and newer deliberate input.
 - The complete **33-group Product workflow**, **17-group Copilot** and
-  **7-group slash** regressions passed on the final runtime with unchanged
+  **7-group slash** regressions passed on the preceding full candidate with unchanged
   wrapper source graphs. The Product workflow's copied/current-source equality
   check passed too. Conversation (**15**), workspace modes (**17**), shared
   documents (**8**), threads (**11**), commands/references (**18**) and language
@@ -60,6 +60,29 @@ Validation of the frozen runtime:
 - **55 document/federation regressions** passed after reproducing actual Yjs
   high-surrogate corruption before the fix. Text replacement now respects full
   Unicode scalar boundaries, preserving reference anchors and reloads.
+
+The first full CI run (`5f87239`) passed frontend, all four backend shards,
+native client artifacts and real-client encryption/recovery. Its Product job
+found an older primary-only document field selector in `flow-first-browser.py`.
+The fixture now scopes its accessible field and resume controls to the captured
+work area. All 55 original Python assertions and 73 Playwright expectations
+remain; editability and exact automatic thread return are checked explicitly.
+
+That corrected fixture also reproduced a real retained-document reading-focus
+bug: expanding a resumed reading page let the modal's default header button
+take focus before its saved reader. Retained work now restores the saved visible
+field before modal defaults and acknowledges only its own successful focus.
+Newer user, scope and credential activity still wins. The same actual React
+regression failed before the hook change and passed afterward, including a
+later sibling-field/scroll veto.
+
+The latest source passed the complete **10-group flow-first proof** (native,
+three actual receipt/network races and Swedish 320 px demo), with 609 unchanged
+wrapper inputs and three matching 612-file runtime snapshots. Its owned example
+visit was revoked with HTTP 204. The complete **34-group/102-dispatch** product
+proof and **712 Node tests/application builds** were rerun on this corrected
+hook with zero source drift. Earlier whole-product results retain their original
+source binding; they are not promoted to the later hook revision.
 
 The security-transition browser witness uses a real empty native channel and
 an owned unavailable loopback Matrix endpoint: enable durably enters preparing

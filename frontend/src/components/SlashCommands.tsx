@@ -111,9 +111,11 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
     <div ref={listRef} id={id} className="fc-slash-commands-list" role="listbox" aria-labelledby={titleId}>
       {groups.map((group, groupIndex) => <div key={group.key + '-' + groupIndex} role="group" aria-label={group.key === 'results' ? t('Everything you can do here') : t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}>
         {group.key !== 'results' && <p className="fc-slash-commands-group" aria-hidden="true">{t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}</p>}
+        {/* Keyboard scrolling can move rows under a stationary pointer.
+            Only actual mouse movement should change the hover selection. */}
         {group.commands.map(({ command, index }) => <div key={command.id} id={id + '-' + command.id} role="option"
           aria-selected={index === currentIndex} tabIndex={-1} className={`fc-slash-command${index === currentIndex ? ' is-active' : ''}`}
-          onMouseDown={event => event.preventDefault()} onMouseEnter={() => onActiveIndex(index)} onClick={() => onSelect(command)}>
+          onMouseDown={event => event.preventDefault()} onMouseMove={() => { if (index !== currentIndex) onActiveIndex(index); }} onClick={() => onSelect(command)}>
           <span className="fc-slash-command-copy"><strong>{command.label}</strong><span>{command.description}</span></span>
           <code>/{command.command}</code>
         </div>)}

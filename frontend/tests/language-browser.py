@@ -77,6 +77,46 @@ def open_flow_with_keyboard(page, kind):
     return work
 
 
+def check_stationary_pointer_navigation(page):
+    """Real mouse motion chooses a row; keyboard scroll cannot choose beneath it."""
+    launcher=page.get_by_role('button',name='Visa alla funktioner',exact=True)
+    composer=page.locator('.fc-chat-composer textarea')
+    original_draft=composer.input_value()
+    work_count=page.get_by_role('region',name='Arbete i det här samtalet',exact=True).count()
+    resource_writes=[]
+    def record_write(request):
+        if request.method=='POST' and any(part in request.url for part in ['/mobile/offline/channels/','/messages/channels/','/shared-documents','/projects/','/decisions']):
+            resource_writes.append(request.url)
+    page.on('request',record_write)
+    try:
+        launcher.focus();launcher.press('Enter')
+        panel=page.locator('.fc-slash-commands');expect(panel).to_be_visible()
+        search=panel.get_by_role('combobox');expect(search).to_be_focused()
+        options=panel.get_by_role('option')
+        identifiers=options.evaluate_all('nodes=>nodes.map(node=>node.id)')
+        assert len(identifiers)>20, 'The actual owner inventory must require list scrolling'
+        def active(index):
+            target=panel.locator('[role="option"][id='+json.dumps(identifiers[index])+']')
+            # Settle actual React/layout work and browser enter events while the
+            # pointer stays fixed, rather than winning a transient polling race.
+            page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+            expect(search).to_have_attribute('aria-activedescendant',identifiers[index])
+            expect(target).to_have_attribute('aria-selected','true');expect(search).to_be_focused()
+            assert target.evaluate('''node=>{const row=node.getBoundingClientRect(),list=node.closest('[role="listbox"]').getBoundingClientRect();return row.top>=list.top-2&&row.bottom<=list.bottom+2&&row.left>=-1&&row.right<=innerWidth+1}''')
+        # This is deliberate real motion INTO the picker, not moving the
+        # pointer away to avoid the native mouseenter-on-scroll regression.
+        options.first.hover();active(0)
+        for key,index in [('Home',0),('End',len(identifiers)-1),('ArrowUp',len(identifiers)-2),('ArrowDown',len(identifiers)-1),('Home',0),('ArrowDown',1)]:
+            search.press(key);active(index)
+        options.nth(2).hover();active(2)
+        expect(panel).to_be_visible();expect(composer).to_have_value(original_draft)
+        assert page.get_by_role('region',name='Arbete i det här samtalet',exact=True).count()==work_count
+        assert not resource_writes, 'Pointer motion must not invoke a feature or send a message'
+        search.press('Escape');expect(panel).to_have_count(0)
+    finally:
+        page.remove_listener('request',record_write)
+
+
 def port():
     with socket.socket() as server: server.bind(('127.0.0.1', 0)); return server.getsockname()[1]
 
@@ -273,6 +313,8 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                                 choose_chat_channel(product,'Lansering')
                                 expect(product.locator('html')).to_have_attribute('lang','sv')
                                 checks['member_slash_inventory_excludes_owner_data_controls_and_real_owner_session_exposes_the_full_inventory']=True
+                                check_stationary_pointer_navigation(product)
+                                checks['owner_swedish390_stationary_pointer_keeps_keyboard_selection_and_real_pointer_motion_changes_only_the_active_row']=True
                             for kind in ['feed','copilot','cloud','external-meetings','tasks','meetings','documents','workflows','apps','data','mobile']:
                                 work=open_flow_with_keyboard(product,kind)
                                 assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')

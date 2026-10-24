@@ -1,5 +1,22 @@
 # FreeCollab validation record
 
+## Feature-list keyboard and pointer intent — 2026-10-24
+
+A real Swedish 390 px owner flow exposed keyboard scrolling triggering trusted
+mouse-enter events under a stationary pointer, which changed the active command
+while the combobox retained focus. Hover selection now responds to actual mouse
+movement. Clicking still selects explicitly.
+
+TypeScript and 35 focused command tests passed. All 18 language-browser groups
+passed against the patched source, retaining all 32 original Python assertions
+and adding a deterministic stationary-pointer Home/End/Arrow regression plus
+actual later mouse motion. The test also verifies that a real member cannot see
+owner-only data controls, then uses a real owner session to open all 11 work
+features at 390/320 px. No role override, pointer-away workaround or automatic
+resource write is used. The preceding 33-group full product proof remains bound
+to its recorded source candidate; follow-up work-view/flow runs record the narrow
+pointer change separately.
+
 ## Everyday work follows the conversation — 2026-10-24
 
 The six [conversation-first UX changes](FLOW_FIRST_UX.md) are implemented in the

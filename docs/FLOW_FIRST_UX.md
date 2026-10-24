@@ -13,6 +13,11 @@ writing and the work attached to a discussion.
 | Understand or change the channel | Channel selector and Channel menu | The full channel name identifies the current place. The menu exposes introduction, members, files and details. A scoped optional introduction contains the room context and shared material. |
 | Ask for assistance | Relevant message, thread or draft action | A concrete action opens review beside the content. Provider, sources, disclosure and application remain explicit. |
 
+The feature list keeps keyboard selection while its own list scrolls under a
+stationary pointer. Actual mouse movement changes the hovered row; selection
+still requires an explicit action. Available entries follow current account and
+workspace permissions, including owner-only data controls.
+
 ## Reading and entry
 
 Read-receipt writes are serialized per channel for the current account and coalesce queued positions. A slower older request cannot overwrite this interface's newer reading position.

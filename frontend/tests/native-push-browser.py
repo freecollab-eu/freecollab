@@ -3,6 +3,7 @@
 
 No live Firebase/Apple credential, signed device or background delivery is claimed.
 """
+from ui_navigation import open_chat_tool
 import base64
 import hashlib
 import importlib.util
@@ -22,7 +23,7 @@ from playwright.sync_api import sync_playwright, expect
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('native_push_browser_fixture',Path(__file__).with_name('customer-sso-browser.py'))
 p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
-PYTHON=str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable
+PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 REPORT=ROOT.parent/'.freecollab/proof-results/native-push-browser.json'
 TOKEN='synthetic_android_registration_'+'x'*80
 
@@ -91,7 +92,7 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 assert page.evaluate('window.__nativeRegistrations')==0
                 checks.append('actual native UI makes no permission/registration request before explicit opt-in')
                 stage='device opt-in'
-                page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                open_chat_tool(page, 'Mobile and offline settings')
                 dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                 expect(dialog.get_by_role('button',name='Enable on this mobile device',exact=True)).to_be_enabled()
                 dialog.get_by_role('checkbox',name='Also alert me when a channel call starts',exact=True).check()
@@ -120,12 +121,12 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 expect(page.get_by_role('button',name='Open call',exact=True)).to_be_visible(timeout=30000)
                 assert page.evaluate('window.__nativeMedia')==0
                 page.get_by_role('button',name='Open call',exact=True).click()
-                work=page.get_by_role('dialog',name='Workspace tools',exact=True)
+                work=page.get_by_role('region',name='Work in this conversation',exact=True)
                 expect(work).to_be_visible(timeout=30000)
-                expect(work.get_by_role('combobox',name='Workspace tool',exact=True)).to_have_value('meetings')
+                expect(work).to_have_attribute('data-work-kind','meetings'); expect(work.get_by_role('tablist')).to_have_count(0)
                 assert page.evaluate('window.__nativeMedia')==0
                 checks.append('generic incoming-call reference resolves current authority and opens real meeting controls without automatic media/admission')
-                work.get_by_role('button',name='Close workspace tools',exact=True).click()
+                work.get_by_role('button',name='Close this work',exact=True).click()
                 stage='expired action'
                 p.api(base,'POST','/meetings/'+meeting['id']+'/end',host,{})
                 page.evaluate('(item)=>window.__nativePending.push(item)',incoming)
@@ -136,7 +137,7 @@ navigator.mediaDevices.getUserMedia=async()=>{window.__nativeMedia++;throw new E
                 p.api(base,'PUT','/preferences/language',child,{'locale':'sv'})
                 page.reload(wait_until='domcontentloaded')
                 page.get_by_role('button',name='Fler kanalverktyg',exact=True).click()
-                page.get_by_role('button',name='Inställningar för mobil och offline',exact=True).click()
+                open_chat_tool(page, 'Inställningar för mobil och offline')
                 expect(page.get_by_role('heading',name='Mobilnotiser i appen',exact=True)).to_be_visible()
                 checks.append('actual mobile notification UI respects Swedish account language')
                 assert not errors,'Unexpected page errors'

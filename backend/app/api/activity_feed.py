@@ -114,7 +114,7 @@ def save_post(channel_id: str, data: PostWrite, user=Depends(get_current_user), 
         if count >= service.MAX_POSTS: raise HTTPException(409, "This channel reached its retained activity limit")
         item = ActivityFeedPost(id=data.id, channel_id=channel_id, created_by=user.id)
         session.add(item); session.flush()
-    fields = service.validate_content(session, channel_id, "post", data.fields, data.matrix_event_id, user.id)
+    fields = service.validate_content(session, channel_id, "post", data.fields, data.matrix_event_id, user.id, previous_item=item)
     service.locked_member(session, channel_id, user.id, credentials.credentials)
     poll = service.validate_poll_change(session, item, fields, data.poll)
     if repeat(session, channel_id, "post", item, data, fields, user.id, poll=poll): return service.post_record(session, item, user.id)
@@ -160,7 +160,7 @@ def comment(channel_id: str, post_id: str, data: CommentWrite, user=Depends(get_
         if count >= service.MAX_COMMENTS: raise HTTPException(409, "This post reached its retained comment limit")
         item = ActivityFeedComment(id=data.id, post_id=post.id, created_by=user.id)
         session.add(item); session.flush()
-    fields = service.validate_content(session, channel_id, "comment", data.fields, data.matrix_event_id, user.id)
+    fields = service.validate_content(session, channel_id, "comment", data.fields, data.matrix_event_id, user.id, previous_item=item)
     service.locked_member(session, channel_id, user.id, credentials.credentials)
     if repeat(session, channel_id, "comment", item, data, fields, user.id):
         return service.content_record(session, channel_id, "comment", item, service.revision_for(session, "comment", item.id, item.revision))

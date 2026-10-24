@@ -1,4 +1,14 @@
-# Current product: FreeCollab 0.10
+# Current product: FreeCollab 0.13 source and implementation audit
+
+The [current feature audit](FEATURE_AUDIT.md) maps the agreed requirements to
+real UI, APIs, persistence, tests and remaining gaps. The 0.13 source includes
+the [0.11](PRODUCT_011.md), [0.12](PRODUCT_012.md) and [0.13](PRODUCT_013.md)
+increments. The current review branch adds native document organization,
+channel metadata and communication/AI/operations corrections; those latest
+changes are not yet a published release. The historical plans below retain
+their original priorities and do not override today's implementation contracts.
+
+## Implemented embedding and connection foundations
 
 The integration increment adds eleven native SDK modules, optional React wrappers and Web Components, plus the full trusted-origin embedded client. Customers can register their exact product origins in **Integrations → Embedding**, connect their own OIDC provider through the popup/PKCE bridge and embed ordinary or encrypted collaboration. Live server leases renew without replacing the verified Matrix device, resetting authentication freshness or replaying content writes. Native inline components keep their server-readable boundary; encryption runs inside the trusted embedded client. See [the SDK](COMPONENT_SDK.md), [embedding identity and sessions](EMBED_IDENTITY.md), [compatibility](../packages/components/COMPATIBILITY.md) and [release artifacts](SDK_RELEASES.md).
 
@@ -22,7 +32,10 @@ Native task/document contents use the server content key ring; secure-channel ta
 
 Operator setup remaining for a particular deployment: public HTTPS, the deployment's own STUN/TURN service when required, optional VAPID/browser consent for push, and explicit retention/backup lifecycle choices. See [validation evidence and limits](VALIDATION.md).
 
-The current [Weavy comparison](WEAVY_COMPARISON.md) identifies potential next priorities: Swedish localization, a broader file/Office workflow, production feeds and a published component SDK. These are comparison findings, outside the implemented six-part increment.
+At the time of this historical 0.8 plan, the [Weavy comparison](WEAVY_COMPARISON.md)
+identified Swedish localization, files/Office, production feeds and a component
+SDK as future work. Subsequent increments implemented those bounded flows;
+npm publication and external acceptance remain separate.
 
 ## Product and first audience
 
@@ -71,7 +84,11 @@ Have a small group of external developers complete installation and the core flo
 
 The eight workstreams in the [product roadmap](PRODUCT_ROADMAP.md) now have a 0.5 implementation. See [client encryption](E2EE_IMPLEMENTATION.md) for the selected architecture and [validation](VALIDATION.md) for completed checks and remaining limits. The older baseline below remains historical.
 
-Posts/flows and comments are optional advanced API routes, disabled by default via `ENABLE_EXPERIMENTAL_FEATURES=false`. The AI-demo API is independently disabled by `ENABLE_DEMO_AI=false`. Enabling a feature requires its own access-control and browser validation; hiding navigation alone is insufficient. AI-demo opt-in may send demo messages/history to Groq if a key is configured.
+Historical pilot note: posts/flows and their generic comments used optional
+advanced APIs. Those experimental routes remain disabled by default via
+`ENABLE_EXPERIMENTAL_FEATURES=false`. The formerly separate anonymous AI-demo
+API has since been removed; `ENABLE_DEMO_AI` is ignored. Production feeds,
+document comments and configured Copilot now have separate authenticated flows.
 
 These are separate product decisions before a wider organizational release:
 

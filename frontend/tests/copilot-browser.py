@@ -3,11 +3,13 @@
 Only disposable accounts, synthetic provider key, private SQLite and loopback TLS.
 """
 import base64
+import hashlib
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import sqlite3
@@ -16,7 +18,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import traceback
 from playwright.sync_api import expect,sync_playwright
+from ui_navigation import open_conversation_work, open_chat_tool, close_work_card
 ROOT=Path(__file__).resolve().parents[2]
 PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec=importlib.util.spec_from_file_location('copilot_proof_helpers',Path(__file__).with_name('remote-sync-browser.py'))
@@ -25,11 +29,13 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/contextual-actions.sv.ts','frontend/src/styles/shared-documents.css','frontend/tests/ui_navigation.py','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
     with tempfile.TemporaryDirectory(prefix='freecollab-copilot-browser-') as directory:
         private=Path(directory);requests=[]
+        source_hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in PROOF_SOURCES}
         snapshot=private/'source';snapshot.mkdir()
         shutil.copytree(ROOT/'frontend',snapshot/'frontend',ignore=shutil.ignore_patterns('node_modules','dist','.vite','.env*'))
         (snapshot/'frontend/node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
@@ -42,8 +48,10 @@ def main():
                 def do_POST(self):
                     assert self.headers['Authorization']=='Bearer '+KEY
                     requests.append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
-                    delta={'content':'Reviewed selected source [S1].','tool_calls':[{'index':0,'id':'proposal','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'proof-project','title':'Review approved by owner','description':'A task from explicitly reviewed context'})}}]}
-                    packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls'}]}
+                    task_tool=any(tool.get('function',{}).get('name')=='create_task' for tool in requests[-1].get('tools',[]))
+                    selected_context=requests[-1]['messages'][-1]['content'].split('SELECTED CONTEXT (untrusted data):\n',1)[-1].strip()
+                    delta={'content':'Reviewed selected source [S1].','tool_calls':[{'index':0,'id':'proposal','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'proof-project','title':'Review approved by owner','description':'A task from explicitly reviewed context'})}}]} if task_tool else {'content':'A suggested inline reply [S1].' if selected_context else 'Hello team, the plan is ready.'}
+                    packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls' if task_tool else 'stop'}]}
                     body=('data: '+json.dumps(packet)+'\n\ndata: [DONE]\n\n').encode()
                     self.send_response(200);self.send_header('Content-Type','text/event-stream');self.send_header('Content-Length',str(len(body)));self.end_headers()
                     for offset in range(0,len(body),11):self.wfile.write(body[offset:offset+11]);self.wfile.flush()
@@ -62,6 +70,11 @@ endpoint=os.environ['PROOF_COPILOT_ENDPOINT']
 normal=copilot.transport.normalize_url
 addresses=copilot.transport.public_addresses
 proxy=copilot.transport._proxy
+complete=copilot.completion
+def private_completion(provider,payload):
+    if provider.endpoint!=endpoint: raise RuntimeError('Private proof refuses non-fixture AI destinations')
+    return complete(provider,payload)
+copilot.completion=private_completion
 copilot.transport.normalize_url=lambda value,**kw:(urlsplit(value),'localhost') if value==endpoint else normal(value,**kw)
 copilot.transport.public_addresses=lambda host,**kw:['127.0.0.1'] if host=='localhost' else addresses(host,**kw)
 copilot.transport._proxy=lambda host,port:None if host=='localhost' else proxy(host,port)
@@ -79,13 +92,14 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
             helpers.api(base,'POST','/channels/'+channel['id']+'/projects',owner,{'id':'proof-project','fields':{'title':'Review project','description':'Private fixture','color':'sage'}})
             with sync_playwright() as playwright:
                 browser=playwright.chromium.launch(headless=True,executable_path=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'),args=['--no-sandbox'])
-                context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(45000);errors=[];urls=[]
-                page.on('pageerror',lambda failure:errors.append(type(failure).__name__));page.on('request',lambda request:urls.append(request.url))
+                context=browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce');page=context.new_page();page.set_default_timeout(45000);errors=[];urls=[];writes=[]
+                page.on('pageerror',lambda failure:errors.append(str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:1000]));page.on('request',lambda request:urls.append(request.url))
+                page.on('request',lambda request:writes.append((request.method,request.url)) if request.method not in {'GET','HEAD','OPTIONS'} else None)
                 stage='honest no-key production panel'
                 page.goto(app,wait_until='domcontentloaded',timeout=90000);page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+owner['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
-                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);page.get_by_role('button',name='Open workspace tools',exact=True).click();page.locator('#work-tab-copilot').click()
-                panel=page.get_by_role('region',name='AI Copilot',exact=True)
+                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);work_area=open_conversation_work(page,'copilot')
+                panel=work_area.get_by_role('region',name='AI Copilot',exact=True)
                 expect(panel.get_by_text('AI configuration required',exact=True)).to_be_visible();assert not requests
                 results['honest_configuration_required_no_provider_calls_without_key']=True
                 stage='native owner config encrypted key named agent and explicit opt-in'
@@ -96,14 +110,48 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(panel.get_by_label('I opt in to this provider configuration for my account.')).to_be_visible();expect(panel.get_by_label('Provider API key',exact=True)).to_have_value('')
                 panel.get_by_label('I opt in to this provider configuration for my account.').check();expect(panel.get_by_role('heading',name='Private conversation',exact=True)).to_be_visible()
                 assert not requests;results['fresh_auth_configured_named_agent_key_cleared_and_per_user_opt_in']=True
-                stage='selected context real HTTPS streamed answer citation and approval'
+                stage='quick actions preserve the draft context and disclosure without provider calls'
+                warning=panel.get_by_role('complementary',name='Before sending to AI',exact=True)
+                expect(warning).to_contain_text('Your prompt and 0 selected sources will be sent to localhost using fixture-chat.')
                 panel.get_by_role('button',name='Choose messages, documents, files and clip transcripts',exact=True).click()
                 selected_row=panel.locator('.fc-copilot-context label').filter(has_text=selected);expect(selected_row).to_be_visible();selected_row.get_by_role('checkbox').check()
-                panel.get_by_label('Task destination',exact=True).select_option('proof-project');panel.get_by_label('Your question',exact=True).fill('Summarize the selected source and propose a task.')
-                panel.get_by_label('Send this prompt, visible native AI history and checked sources to the configured provider.').check();panel.get_by_role('button',name='Send to provider',exact=True).click()
+                destination=panel.get_by_label('Task destination',exact=True);destination.select_option('proof-project')
+                question=panel.get_by_label('Your question',exact=True);draft='My wording stays: ää 🧭\nKeep this request short.';question.fill(draft)
+                disclosure=panel.get_by_label('Send this prompt, visible native AI history and checked sources to the configured provider.')
+                send=panel.get_by_role('button',name='Send to provider',exact=True)
+                panel.get_by_role('button',name='Summarise selection',exact=True).click()
+                if question.count()!=1:
+                    page.screenshot(path='/tmp/freecollab-copilot-failure.png')
+                    raise AssertionError('Quick action lost its composer: '+json.dumps({'page_errors':errors,'headings':page.get_by_role('heading').all_text_contents()}))
+                prepared=question.input_value()
+                assert prepared.startswith(draft+'\n\n') and 'Summarise only the sources I selected.' in prepared
+                panel.get_by_role('button',name='Summarise selection',exact=True).click();expect(question).to_have_value(prepared)
+                panel.get_by_role('button',name='Propose a task',exact=True).click();prepared=question.input_value()
+                assert prepared.startswith(draft+'\n\n') and 'otherwise return a draft' in prepared and 'do not claim the task was created' in prepared
+                expect(selected_row.get_by_role('checkbox')).to_be_checked();expect(destination).to_have_value('proof-project');expect(disclosure).not_to_be_checked();expect(send).to_be_disabled();assert not requests
+                results['quick_actions_preserve_exact_draft_selected_context_and_explicit_send']=True
+                stage='actual provider model source count costs and retention warning'
+                expect(warning).to_contain_text('Your prompt and 1 selected source will be sent to localhost using fixture-chat.')
+                expect(warning).to_contain_text('API use may incur charges on the provider account.')
+                expect(warning).to_contain_text('A chat subscription does not supply API access.')
+                expect(warning).to_contain_text('The provider’s retention policy applies to what you send.')
+                expect(warning).to_contain_text('AI answers can be wrong; check them before use.')
+                assert send.get_attribute('aria-describedby')==warning.get_attribute('id')
+                assert KEY not in warning.inner_text() and PASSWORD not in warning.inner_text() and not requests
+                results['actual_destination_model_source_count_and_api_privacy_warning']=True
+                stage='bounded quick action refuses overflow and preserves the entire draft'
+                bounded='å'*3900;question.fill(bounded);panel.get_by_role('button',name='Suggest next steps',exact=True).click()
+                expect(question).to_have_value(bounded);expect(panel.get_by_text('Your draft is too long to add this action. Shorten it first; your text has been kept.',exact=True)).to_be_visible()
+                expect(selected_row.get_by_role('checkbox')).to_be_checked();expect(destination).to_have_value('proof-project');expect(disclosure).not_to_be_checked();assert not requests
+                question.fill(prepared);expect(send).to_be_disabled()
+                results['overflow_keeps_user_text_and_never_sends_or_checks_disclosure']=True
+                stage='selected context real HTTPS streamed answer citation and approval'
+                disclosure.check();send.click()
                 expect(panel.get_by_text('Reviewed selected source [S1].',exact=True)).to_be_visible(timeout=60000)
                 assert len(requests)==1 and selected in json.dumps(requests) and omitted not in json.dumps(requests)
                 assert KEY not in json.dumps(requests)
+                assert draft in requests[0]['messages'][-1]['content'] or draft in json.dumps(requests[0],ensure_ascii=False)
+                expect(disclosure).not_to_be_checked();expect(warning).to_contain_text('Your prompt and 0 selected sources will be sent to localhost using fixture-chat.')
                 with sqlite3.connect(private/'proof.db') as connection:assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==0
                 panel.get_by_role('button',name='[S1] Message',exact=True).click();expect(panel.locator('.fc-copilot-source-review')).to_contain_text(selected)
                 panel.get_by_role('button',name='Approve and create task',exact=True).click();expect(panel.get_by_text('Approved task created. Repeated approval keeps the same task.',exact=True)).to_be_visible()
@@ -117,18 +165,196 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(panel.get_by_text('Private AI history reset.',exact=True)).to_be_visible()
                 with sqlite3.connect(private/'proof.db') as connection:assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
                 results['private_history_reset_retains_approved_shared_task']=True
+                stage='in-place message AI has reviewed context and no automatic provider request'
+                inline_writes_start=len(writes)
+                close_work_card(page,work_area)
+                composer=page.locator('.fc-chat-composer textarea');original_draft='My own wording stays.';composer.fill(original_draft)
+                article=page.locator('article.fc-chat-message').filter(has=page.locator('.fc-chat-message-content').filter(has_text=selected))
+                expect(article).to_have_count(1);article.get_by_role('button',name='More message actions',exact=True).click()
+                article.get_by_role('button',name='Draft a reply',exact=True).click()
+                inline=article.locator('.fc-contextual-copilot-card');expect(inline).to_have_attribute('aria-busy','false')
+                expect(inline.get_by_role('button',name='Draft a reply',exact=True)).to_have_attribute('aria-pressed','true')
+                expect(inline).to_contain_text('Your request and 1 selected sources will be sent to localhost using fixture-chat.')
+                expect(inline).to_contain_text('API use may incur charges. A chat subscription is separate. The provider’s retention policy applies.')
+                inline.get_by_text('Review 1 selected sources',exact=True).click();expect(inline).to_contain_text(selected);assert omitted not in inline.inner_text()
+                inline_disclosure=inline.get_by_label('Send this request and the selected context to this provider.',exact=True)
+                inline_send=inline.get_by_role('button',name='Send to provider',exact=True)
+                expect(inline_send).to_be_disabled();assert len(requests)==1
+                results['inline_message_reviews_exact_source_destination_without_automatic_call']=True
+                stage='in-place message answer becomes unusable when the recipient draft changes'
+                inline_disclosure.check();inline_send.click()
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000)
+                expect(inline).to_have_attribute('aria-busy','false')
+                assert len(requests)==2 and selected in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1])
+                assert 'My wording stays:' not in json.dumps(requests[-1]) and not any(tool.get('function',{}).get('name')=='create_task' for tool in requests[-1].get('tools',[]))
+                expect(composer).to_have_value(original_draft)
+                newer_draft='My newer wording must not be overwritten.';composer.fill(newer_draft)
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_have_count(0)
+                expect(inline.get_by_role('button',name='Add reply to draft',exact=True)).to_have_count(0)
+                expect(inline).to_have_attribute('aria-busy','false');expect(inline_disclosure).not_to_be_checked();assert len(requests)==2
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                results['inline_stale_draft_invalidates_answer_without_provider_retry_or_shared_write']=True
+                stage='in-place real HTTPS answer applies only through explicit append to the current draft'
+                inline_disclosure.check();inline_send.click()
+                expect(inline.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000)
+                expect(inline).to_have_attribute('aria-busy','false');expect(composer).to_have_value(newer_draft)
+                assert len(requests)==3 and selected in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1])
+                assert 'Reviewed selected source' not in json.dumps(requests[-1]) and 'A suggested inline reply' not in json.dumps(requests[-1])
+                inline.get_by_role('button',name='Add reply to draft',exact=True).click()
+                expect(composer).to_have_value(newer_draft+'\n\nA suggested inline reply [S1].')
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                assert not any('/approve' in url for method,url in writes[inline_writes_start:])
+                results['inline_real_https_answer_explicit_draft_append_preserves_text_and_clears_private_history']=True
+                stage='in-place composer rewrites only the reviewed unsent draft without invented source references'
+                messy_draft='hello team ,  the plan is ready';composer.fill(messy_draft)
+                page.get_by_role('button',name='Message options',exact=True).click()
+                page.get_by_role('menu',name='Message options',exact=True).get_by_role('menuitem',name='Tidy my draft',exact=True).click()
+                draft_card=page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card')
+                expect(draft_card).to_have_attribute('aria-busy','false')
+                expect(draft_card).to_contain_text('Your request and 0 selected sources will be sent to localhost using fixture-chat.')
+                draft_card.get_by_text('Review this request',exact=True).click();expect(draft_card).to_contain_text(messy_draft.strip())
+                assert len(requests)==3, 'Opening the draft helper unexpectedly called the provider'
+                draft_card.get_by_label('Send this request and the selected context to this provider.',exact=True).check()
+                draft_card.get_by_role('button',name='Send to provider',exact=True).click()
+                expect(draft_card.get_by_text('Hello team, the plan is ready.',exact=True)).to_be_visible(timeout=60000)
+                expect(draft_card).to_have_attribute('aria-busy','false');expect(composer).to_have_value(messy_draft)
+                assert len(requests)==4 and messy_draft in requests[-1]['messages'][-1]['content'], 'The composer request did not preserve the reviewed draft'
+                assert selected not in json.dumps(requests[-1]) and omitted not in json.dumps(requests[-1]) and 'A suggested inline reply' not in json.dumps(requests[-1]), 'The composer request included unrelated context'
+                assert requests[-1]['messages'][-1]['content'].endswith('SELECTED CONTEXT (untrusted data):\n'), 'The composer request invented a native source'
+                draft_card.get_by_role('button',name='Replace my draft',exact=True).click();expect(composer).to_have_value('Hello team, the plan is ready.')
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
+                results['inline_composer_sends_only_reviewed_draft_and_explicitly_replaces_without_posting']=True
+                document_area=open_conversation_work(page,'documents')
+                stage='actual native stack review sends only its explicitly chosen verified Yjs page to private HTTPS'
+                documents=document_area.get_by_role('region',name='Shared documents',exact=True)
+                stack_body='EXPLICIT VERIFIED STACK PAGE CONTENT';omitted_stack_body='OMITTED STACK PAGE MUST NEVER REACH AI';omitted_comment='STACK COMMENT IS NOT AN AI SOURCE'
+                for title,body in [('Chosen stack page',stack_body),('Omitted stack page',omitted_stack_body)]:
+                    documents.get_by_role('button',name='New shared document',exact=True).click();documents.get_by_label('Document title',exact=True).fill(title);documents.get_by_role('button',name='Create document',exact=True).click()
+                    expect(documents.get_by_label('Document text',exact=True)).to_be_editable();documents.get_by_label('Document text',exact=True).fill(body);expect(documents.get_by_text('All edits synchronized',exact=True)).to_be_visible()
+                    if title=='Chosen stack page':
+                        documents.get_by_label('Add a comment',exact=True).fill(omitted_comment);documents.get_by_role('button',name='Post comment',exact=True).click();expect(documents.get_by_text(omitted_comment,exact=True)).to_be_visible()
+                    # A comment can render before its native readback finishes.
+                    # The real export control becomes enabled only after that
+                    # busy operation completes; do not race the discard guard.
+                    expect(documents.get_by_role('button',name='Export Markdown',exact=True,include_hidden=True)).to_be_enabled()
+                    documents.get_by_role('button',name='Documents',exact=True).click();expect(documents.get_by_role('region',name='Document stacks',exact=True)).to_be_visible()
+                organize=documents.locator('details.fc-document-flow-organize');organize.locator('summary').click()
+                organize.get_by_role('button',name='New stack',exact=True).click();organize.get_by_label('Stack name',exact=True).fill('Private proof stack');organize.get_by_role('button',name='Create stack',exact=True).click()
+                stack=organize.get_by_role('region',name='Private proof stack',exact=True);expect(stack).to_be_visible()
+                organization=helpers.api(base,'GET','/channels/'+channel['id']+'/shared-document-organization',owner);stack_id=next(item['id'] for item in organization['stacks'] if item['title']=='Private proof stack')
+                for title in ('Chosen stack page','Omitted stack page'):
+                    organize.get_by_label('Move '+title+' to stack',exact=True).select_option(stack_id);expect(stack.get_by_role('button',name=re.compile('^'+title))).to_be_visible()
+                stack.get_by_text('Review this stack with AI',exact=True).click();stack_selection=stack.get_by_role('group',name='Pages included in AI review',exact=True)
+                stack_selection.get_by_label('Omitted stack page',exact=True).uncheck();expect(stack_selection.get_by_label('Chosen stack page',exact=True)).to_be_checked()
+                stack.locator('.fc-contextual-copilot-trigger').click();stack_ai=stack.locator('.fc-contextual-copilot-card');expect(stack_ai).to_have_attribute('aria-busy','false')
+                stack_ai.get_by_role('button',name='Suggest reading order',exact=True).click();stack_ai.get_by_text('Review 1 selected sources',exact=True).click();expect(stack_ai).to_contain_text(stack_body)
+                assert omitted_stack_body not in stack_ai.inner_text() and omitted_comment not in stack_ai.inner_text() and len(requests)==4
+                with sqlite3.connect(private/'proof.db') as connection:
+                    before_stack=connection.execute('SELECT * FROM shareddocumentstack ORDER BY id').fetchall();before_placements=connection.execute('SELECT * FROM shareddocumentplacement ORDER BY document_id').fetchall();before_updates=connection.execute('SELECT count(*) FROM shareddocumentupdate').fetchone()[0]
+                stack_ai.get_by_label('Send this request and the selected context to this provider.',exact=True).check();stack_ai.get_by_role('button',name='Send to provider',exact=True).click()
+                expect(stack_ai.get_by_text('A suggested inline reply [S1].',exact=True)).to_be_visible(timeout=60000);expect(stack_ai).to_have_attribute('aria-busy','false')
+                assert len(requests)==5 and stack_body in requests[-1]['messages'][-1]['content']
+                assert all(text not in json.dumps(requests[-1]) for text in (omitted_stack_body,omitted_comment,selected,omitted))
+                assert stack_ai.locator('.fc-contextual-copilot-result').get_by_role('button').count()==0
+                with sqlite3.connect(private/'proof.db') as connection:
+                    assert connection.execute('SELECT * FROM shareddocumentstack ORDER BY id').fetchall()==before_stack
+                    assert connection.execute('SELECT * FROM shareddocumentplacement ORDER BY document_id').fetchall()==before_placements
+                    assert connection.execute('SELECT count(*) FROM shareddocumentupdate').fetchone()[0]==before_updates
+                    assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
+                    assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1 and connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
+                results['actual_stack_ai_uses_only_selected_verified_page_not_unselected_pages_comments_or_native_writes']=True
+                work_area=open_conversation_work(page,'copilot')
+                stage='Grok connection preset edits the draft only and clears typed destination credentials'
+                close_work_card(page,work_area);expect(document_area).to_be_visible();open_chat_tool(page,'Integrations')
+                integrations=page.get_by_role('dialog',name='Integrations',exact=True)
+                integrations.get_by_role('button',name='Connection setup',exact=True).click()
+                setup=integrations.locator('.fc-connection-setup');expect(setup).to_have_attribute('aria-busy','false')
+                setup.locator('[data-connection-recipe="ai.openai_compatible"]').click();setup.locator('[data-connection-step="configure"]').click()
+                provider=setup.get_by_role('region',name='AI Copilot',exact=True)
+                preset=provider.get_by_role('combobox',name=re.compile(r'^AI provider preset'));expect(preset).to_be_visible()
+                expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value(endpoint)
+                provider.get_by_label('Provider API key',exact=True).fill(KEY);provider.get_by_label('Current password',exact=True).fill(PASSWORD);provider.get_by_label('Authenticator or recovery code',exact=True).fill('123456')
+                before=len(writes);provider_calls=len(requests);saved=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
+                preset.select_option('xai-grok')
+                expect(preset.locator('option:checked')).to_have_text('Grok · xAI')
+                expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value('https://api.x.ai/v1/chat/completions')
+                expect(provider.get_by_label('Model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+                for label in ('Provider API key','Current password','Authenticator or recovery code'):expect(provider.get_by_label(label,exact=True)).to_have_value('')
+                expect(provider.get_by_role('button',name='Save provider and agents',exact=True)).to_be_disabled()
+                current=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
+                assert current['provider']==saved['provider'] and current['config_revision']==saved['config_revision'] and current['provider']['endpoint']==endpoint
+                assert len(writes)==before and len(requests)==provider_calls and not any(url.startswith('https://api.x.ai/') for url in urls)
+                provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.get_by_label('Model',exact=True).fill('fixture-chat')
+                expect(setup.get_by_role('button',name='Discard changes and return to preparation',exact=True)).to_have_count(0)
+                integrations.get_by_role('button',name='Close integrations',exact=True).click()
+                work_area=open_conversation_work(page,'copilot')
+                results['grok_preset_only_edits_draft_clears_secrets_without_save_or_xai_calls']=True
                 stage='saved Swedish language and responsive panel'
                 helpers.api(base,'PUT','/preferences/language',owner,{'locale':'sv'});page.reload(wait_until='domcontentloaded')
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=60000)
-                page.locator('button.fc-chat-topbar-action:has(svg.lucide-layers)').click();page.locator('#work-tab-copilot').click()
-                panel=page.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
+                work_area=open_conversation_work(page,'copilot',locale='sv')
+                panel=work_area.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
+                expect(panel.get_by_role('group',name='Snabbval',exact=True)).to_be_visible();expect(panel.get_by_role('complementary',name='Innan du skickar till AI',exact=True)).to_contain_text('fixture-chat')
                 REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.parent/'copilot-desktop-sv.png'))
                 page.set_viewport_size({'width':390,'height':844});assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth');page.screenshot(path=str(REPORT.parent/'copilot-mobile-sv.png'))
+                page.set_viewport_size({'width':320,'height':740});assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')
+                for label in ('Sammanfatta urvalet','Föreslå nästa steg','Skriv ett svarsutkast','Föreslå en uppgift'):
+                    button=panel.get_by_role('button',name=label,exact=True);expect(button).to_be_visible();assert button.bounding_box()['height']>=44
                 results['saved_swedish_account_preference_and_mobile_without_overflow']=True
+                stage='configured contextual draft review stays usable at Swedish320 without an automatic request'
+                close_work_card(page,work_area)
+                mobile_draft='Ett eget utkast som ska granskas innan något skickas.'
+                composer=page.locator('.fc-chat-composer textarea');composer.fill(mobile_draft)
+                provider_calls=len(requests)
+                page.get_by_role('button',name='Meddelandealternativ',exact=True).click()
+                page.get_by_role('menu',name='Meddelandealternativ',exact=True).get_by_role('menuitem',name='Putsa mitt utkast',exact=True).click()
+                mobile_review=page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card')
+                expect(mobile_review).to_have_attribute('aria-busy','false')
+                expect(mobile_review.get_by_role('heading',name='Putsa mitt utkast',exact=True)).to_be_visible()
+                expect(mobile_review).to_contain_text('fixture-chat')
+                mobile_send=mobile_review.get_by_role('button',name='Skicka till leverantören',exact=True)
+                expect(mobile_send).to_be_disabled()
+                mobile_review.evaluate('node=>{node.scrollTop=node.scrollHeight}')
+                geometry=mobile_review.evaluate('node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}}')
+                assert geometry['left']>=-1 and geometry['right']<=geometry['width']+1
+                assert geometry['top']>=-1 and geometry['bottom']<=geometry['height']+1, json.dumps(geometry)
+                send_box=mobile_send.bounding_box();assert send_box and send_box['height']>=44 and send_box['y']+send_box['height']<=geometry['height']+1
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+                assert len(requests)==provider_calls
+                expect(composer).to_have_value(mobile_draft)
+                page.screenshot(path=str(REPORT.parent/'copilot-contextual-mobile-sv-320.png'))
+                results['configured_Swedish320_draft_review_is_bounded_gated_and_preserves_the_draft']=True
+                stage='clearing a reviewed draft requires a fresh contextual AI activation'
+                composer.fill('');expect(mobile_review).to_have_count(0)
+                fresh_draft='Ett nytt utkast utan någon begärd AI-åtgärd.';composer.fill(fresh_draft)
+                page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+                expect(mobile_review).to_have_count(0)
+                expect(composer).to_have_value(fresh_draft)
+                assert len(requests)==provider_calls
+                page.get_by_role('button',name='Meddelandealternativ',exact=True).click()
+                page.get_by_role('menu',name='Meddelandealternativ',exact=True).get_by_role('menuitem',name='Putsa mitt utkast',exact=True).click()
+                expect(mobile_review).to_have_attribute('aria-busy','false')
+                expect(mobile_review.get_by_role('heading',name='Putsa mitt utkast',exact=True)).to_be_visible()
+                mobile_review.get_by_role('button',name='Stäng AI-hjälpen',exact=True).click()
+                expect(mobile_review).to_have_count(0)
+                expect(page.get_by_role('button',name='Meddelandealternativ',exact=True)).to_be_focused()
+                assert len(requests)==provider_calls
+                results['cleared_draft_requires_a_new_AI_action_and_close_restores_its_menu_focus']=True
                 assert not errors and not any(KEY in url or PASSWORD in url for url in urls);results['no_page_errors_or_auth_secrets_in_urls']=True
                 context.close();browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'results':results},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
+            assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()), 'Copilot proof sources changed during this private run'
+            REPORT.write_text(json.dumps({'ok':True,'results':results,'source_hashes':source_hashes},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
         except Exception as failure:
+            print(json.dumps({'failure_locations':[{'file':Path(frame.filename).name,'line':frame.lineno} for frame in traceback.extract_tb(failure.__traceback__)]}))
             print(json.dumps({'failure':str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:5000]}))
             if 'page' in locals():
                 try:

@@ -16,11 +16,11 @@ Password reset/change increments this version as part of the same transaction as
 
 ## Credential rules
 
-Registration, login and admin-created users canonicalize email addresses by trimming surrounding whitespace and lowercasing them. Names are nonempty after trimming and limited to 80 characters; email input is validated and limited to 320 characters. Passwords must contain 1–72 UTF-8 bytes and no null character, so bcrypt cannot silently truncate them. The UI can impose a stronger minimum; this byte limit remains the server's upper bound.
+Registration, login and admin-created users canonicalize email addresses by trimming surrounding whitespace and lowercasing them. Names are nonempty after trimming and limited to 80 characters; email input is validated and limited to 320 characters. New native registrations and admin-created accounts require at least 12 Unicode code points and at most 72 UTF-8 bytes, with no null character. Existing-account login and reauthentication retain the 1–72 UTF-8 byte rule so valid legacy passwords remain usable. The server checks the byte limit without bcrypt truncation; the creation forms check the same code-point and byte boundaries.
 
 Normal registration and admin creation both reject canonical duplicates and handle concurrent unique-key conflicts. Legacy case-only duplicate addresses are not merged automatically: login rejects an ambiguous canonical address. Back up and reconcile those records through operator access, preserving channel ownership and membership, before enabling their login.
 
-Password reset/change requires a new password of 12–72 characters within the same 72-byte UTF-8 limit. Existing valid shorter passwords can still sign in. Password changes and sensitive account actions require the current password; with MFA enabled they also require a valid authenticator or unused recovery code. A rejected reauthentication returns HTTP 403 and does not revoke the signed-in session.
+Password reset/change requires at least 12 Unicode code points within the same 72-byte UTF-8 limit. Existing valid shorter passwords can still sign in. Password changes and sensitive account actions require the current password; with MFA enabled they also require a valid authenticator or unused recovery code. A rejected reauthentication returns HTTP 403 and does not revoke the signed-in session.
 
 ## Email ownership and password recovery
 
@@ -65,11 +65,11 @@ Recovery and sensitive account routes also use persistent database buckets. Reco
 
 Personal registration remains available for the self-hosted pilot. Workspace managed admission is independent of installation-wide personal registration; it does not make the public registration endpoint invitation-only. TLS termination, request-size limits and external traffic controls remain deployment responsibilities.
 
-## Pilot retention and permanent removal
+## Retention and permanent removal
 
-Permanent account and channel removal is unavailable in this pilot. The admin DELETE routes return HTTP 409 instead of deleting only a parent row and orphaning memberships, messages, files or dependent records. Their deletion buttons are removed from the admin UI. Pause an account or remove its channel membership to revoke access. These actions do not erase retained content or backups.
+Direct administrative account/channel DELETE routes remain fenced with HTTP 409 instead of removing only a parent row and orphaning shared history. Separate [reviewed data controls](DATA_CONTROLS.md) provide native content exports, preview-bound permanent retention purges with physical file cleanup, and personal account identity erasure in **Workspace tools → Data & retention**. Identity erasure requires fresh password/MFA confirmation, a current dependency preview and ownership handovers; it removes private account data, revokes sessions and retains a blocked anonymous author reference for shared work. Secure-channel access revocation must succeed before native identity erasure commits.
 
-An operator must define the retention/export policy and a coordinated database, file and backup removal workflow before offering permanent deletion. Do not describe pausing access as account erasure or a completed data-deletion request.
+Pausing an account or removing membership revokes access without erasing content. Native retention does not erase Matrix homeserver/device history, previously shared provider copies or backups. Operators must define those separate retention and restore policies; account identity erasure does not promise removal of all authored shared text or every external copy.
 
 Staff message moderation is a soft deletion: the message row remains with a deleted flag and a replacement marker, existing thread references and counts remain intact, and a `message_deleted` event updates connected channel members. Deleted messages are excluded from normal history. This preserves referential integrity; it does not provide an irreversible purge from database copies or backups.
 

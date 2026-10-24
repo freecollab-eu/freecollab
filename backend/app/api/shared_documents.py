@@ -1,7 +1,7 @@
 """Bounded collaborative document transport and immutable named revisions."""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -9,8 +9,11 @@ from sqlmodel import select
 
 from ..database import get_session
 from ..models.shared_documents import SharedDocument, SharedDocumentComment, SharedDocumentSnapshot, SharedDocumentUpdate
+# Reference validation registers scheduled-reference foreign keys as well.
+from ..models.chat_productivity import ScheduledMessage  # noqa: F401
 from ..services.auth import get_current_user, security
 from ..services import shared_documents as service
+from ..services.message_references import ReferenceInput, validate_references
 
 
 def no_store(response: Response):
@@ -64,12 +67,13 @@ class SnapshotInput(StrictInput):
 class CommentInput(StrictInput):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     text: str | None = Field(default=None, min_length=1, max_length=2000)
+    references: list[ReferenceInput] | None = Field(default=None, max_length=50)
     matrix_event_id: str | None = Field(default=None, min_length=1, max_length=1024)
 
     @model_validator(mode="after")
     def mode(self):
         if self.matrix_event_id:
-            if self.text is not None:
+            if self.text is not None or self.references is not None:
                 raise ValueError("Encrypted comments accept only an event reference")
         elif self.text is None or not self.text.strip():
             raise ValueError("Write a comment")
@@ -84,6 +88,12 @@ class StateInput(StrictInput):
 class ResolveInput(StrictInput):
     expected_version: int = Field(ge=1)
     resolved: bool
+
+
+def document_changed(background_tasks, channel_id, document_id, part):
+    from ..realtime.socket import broadcast_to_channel
+    background_tasks.add_task(broadcast_to_channel, channel_id, "shared_document_changed",
+                              {"channel_id": channel_id, "document_id": document_id, "part": part})
 
 
 def commit(session):
@@ -103,7 +113,7 @@ def list_documents(channel_id: str, archived: bool = False, user=Depends(get_cur
 
 
 @router.post("", status_code=201)
-def create_document(channel_id: str, data: CreateInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+def create_document(channel_id: str, data: CreateInput, background_tasks: BackgroundTasks, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     actor = user.id
     service.locked_member(session, channel_id, actor, credentials.credentials)
     previous = session.get(SharedDocument, data.id)
@@ -129,6 +139,7 @@ def create_document(channel_id: str, data: CreateInput, user=Depends(get_current
         queue_event(session, "document:" + document.id, workspace_id, channel_id,
                     "document_created", document.id, actor_id=actor)
     commit(session)
+    document_changed(background_tasks, channel_id, document.id, "updates")
     return service.metadata(document, session)
 
 
@@ -144,16 +155,17 @@ def list_updates(channel_id: str, document_id: str, after_sequence: int = Query(
 
 
 @router.post("/{document_id}/updates")
-def append(channel_id: str, document_id: str, data: UpdateInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+def append(channel_id: str, document_id: str, data: UpdateInput, background_tasks: BackgroundTasks, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     actor = user.id
     document, _ = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
     row = service.append_update(session, document, data, actor, credentials.credentials)
     commit(session)
+    document_changed(background_tasks, channel_id, document.id, "updates")
     return service.content_record(session, document, row, "update")
 
 
 @router.patch("/{document_id}")
-def archive(channel_id: str, document_id: str, data: StateInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+def archive(channel_id: str, document_id: str, data: StateInput, background_tasks: BackgroundTasks, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     actor = user.id
     member = service.locked_member(session, channel_id, actor, credentials.credentials)
     document = service.document_for(session, channel_id, document_id, actor)
@@ -166,6 +178,7 @@ def archive(channel_id: str, document_id: str, data: StateInput, user=Depends(ge
     document.updated_at = datetime.utcnow()
     session.add(document)
     commit(session)
+    document_changed(background_tasks, channel_id, document.id, "metadata")
     return service.metadata(document, session)
 
 
@@ -210,11 +223,22 @@ def list_comments(channel_id: str, document_id: str, user=Depends(get_current_us
 
 
 @router.post("/{document_id}/comments", status_code=201)
-def comment(channel_id: str, document_id: str, data: CommentInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+def comment(channel_id: str, document_id: str, data: CommentInput, background_tasks: BackgroundTasks, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     actor = user.id
     document, _ = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
     secure = service.validate_mode(session, channel_id, actor, data.matrix_event_id, credentials.credentials)
     fields = None if secure else {"text": data.text.strip()}
+    if fields and data.references:
+        leading = len(data.text[:len(data.text) - len(data.text.lstrip())].encode("utf-16-le")) // 2
+        maximum = len(fields["text"].encode("utf-16-le")) // 2
+        if any(ref.start < leading or ref.end - leading > maximum for ref in data.references):
+            raise HTTPException(422, "A reference must stay inside its displayed comment")
+        shifted = [ReferenceInput(kind=ref.kind, id=ref.id, start=ref.start - leading, end=ref.end - leading) for ref in data.references]
+        fields["references"], _ = validate_references(session, channel_id, actor, fields["text"], shifted)
+        # A target resolver may refresh authority or invoke an extension. Keep
+        # the current credential, document and native mode after that lookup.
+        document, _ = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
+        service.validate_mode(session, channel_id, actor, None, credentials.credentials)
     if fields:
         from ..services.enterprise_governance import enforce_native_document
         enforce_native_document(session, channel_id, actor, fields)
@@ -234,11 +258,12 @@ def comment(channel_id: str, document_id: str, data: CommentInput, user=Depends(
         encrypted_payload=None if secure else service.seal(channel_id, "comment", document.id, data.id, fields))
     session.add(row)
     commit(session)
+    document_changed(background_tasks, channel_id, document.id, "comments")
     return service.content_record(session, document, row, "comment")
 
 
 @router.patch("/{document_id}/comments/{comment_id}")
-def resolve(channel_id: str, document_id: str, comment_id: str, data: ResolveInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+def resolve(channel_id: str, document_id: str, comment_id: str, data: ResolveInput, background_tasks: BackgroundTasks, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     actor = user.id
     document, member = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
     row = session.get(SharedDocumentComment, comment_id)
@@ -251,4 +276,5 @@ def resolve(channel_id: str, document_id: str, comment_id: str, data: ResolveInp
     row.resolved, row.version = data.resolved, row.version + 1
     session.add(row)
     commit(session)
+    document_changed(background_tasks, channel_id, document.id, "comments")
     return service.content_record(session, document, row, "comment")

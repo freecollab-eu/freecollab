@@ -7,6 +7,7 @@ CHAT_BASE_URL defaults3000; CONTENT_API_URL defaults the app's /api proxy.
 Only fixture accounts are created. No provider URL is fetched, no external
 calendar opens, and no tokens or content keys are logged.
 """
+from ui_navigation import open_chat_tool, reveal_chat_tool
 import json
 import os
 from pathlib import Path
@@ -66,15 +67,16 @@ def init(context, user):
     if API != BASE + "/api":
         page.route("**/api/**", lambda route: route.fulfill(response=route.fetch(url=API + route.request.url.split("/api", 1)[1])))
     page.goto(BASE, wait_until="domcontentloaded", timeout=90000)
+    reveal_chat_tool(page, 'Account settings')
     expect(page.get_by_role("button", name="Account settings", exact=True)).to_be_visible(timeout=90000)
     page.get_by_role("button", name=re.compile("^Switch workspace, ")).click()
     page.get_by_role("menuitemradio", name=re.compile("Content Studio " + RUN)).click()
-    expect(page.get_by_placeholder("Message #" + native["name"])).to_be_visible(timeout=90000)
+    expect(page.get_by_role('textbox', name="Message #" + native["name"], exact=True)).to_be_visible(timeout=90000)
     return page
 
 
 def integrations(page, tab, channel):
-    if not page.get_by_role("dialog", name="Integrations", exact=True).is_visible(): page.get_by_role("button", name="Integrations", exact=True).click()
+    if not page.get_by_role("dialog", name="Integrations", exact=True).is_visible(): open_chat_tool(page, 'Integrations')
     panel = page.get_by_role("dialog", name="Integrations", exact=True)
     panel.get_by_role("navigation", name="Integration sections").get_by_role("button", name=tab, exact=True).click()
     panel.get_by_label("Channel", exact=True).select_option(channel)
@@ -166,6 +168,7 @@ with sync_playwright() as p:
             for device in devices:
                 if device["user_id"] == other["user_id"]: page.evaluate("device=>contentProofSecure.verifyDevice(device,device.fingerprint)", device)
         left.reload(wait_until="domcontentloaded")
+        reveal_chat_tool(left, 'Account settings')
         expect(left.get_by_role("button", name="Account settings", exact=True)).to_be_visible(timeout=90000)
         wire_requests = []
         left.on("request", lambda req: wire_requests.append(req.post_data or "") if req.method == "POST" and "/channels/" + channel + "/integrations/" in req.url else None)

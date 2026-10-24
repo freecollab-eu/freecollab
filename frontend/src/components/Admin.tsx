@@ -4,6 +4,7 @@ import { api } from "../lib/api"
 import { ArrowLeft } from "lucide-react"
 import "../styles/panels.css"
 import { Brand } from "./Brand"
+import { version as clientVersion } from "../../package.json"
 
 interface Stats {
   users: { total: number; today: number; blocked: number; admins: number; moderators: number; max_admins: number }
@@ -99,6 +100,14 @@ export function Admin({ onBack }: AdminProps) {
       alert(t("Please fill all fields"))
       return
     }
+    if ([...newUserPassword].length < 12) {
+      alert(t("New passwords must contain at least 12 characters."))
+      return
+    }
+    if (new TextEncoder().encode(newUserPassword).length > 72) {
+      alert(t("This password is too long. Try a shorter one."))
+      return
+    }
     try {
       await api.request("/admin/users", {
         method: "POST",
@@ -191,18 +200,18 @@ export function Admin({ onBack }: AdminProps) {
             {myRole.role.toUpperCase()}
           </span>
         </div>
-        <div className="fc-admin-brand"><Brand size="small" /><span>{t("Administration · v0.8.0")}</span></div>
+        <div className="fc-admin-brand"><Brand size="small" /><span>{t("Administration")} · v{clientVersion}</span></div>
       </div>
 
       <div className="fc-admin-tabs">
-        {(["stats", "users", "channels"] as const).map((t) => (
+        {(["stats", "users", "channels"] as const).map((tabId) => (
           <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={"fc-admin-tab " + (tab === t ? "is-active" : "")}
-            aria-pressed={tab === t}
+            key={tabId}
+            onClick={() => setTab(tabId)}
+            className={"fc-admin-tab " + (tab === tabId ? "is-active" : "")}
+            aria-pressed={tab === tabId}
           >
-            {t}
+            {tabId === "stats" ? t("Overview") : tabId === "users" ? t("Users") : t("Channels")}
           </button>
         ))}
       </div>
@@ -290,14 +299,19 @@ export function Admin({ onBack }: AdminProps) {
                     onChange={(e) => setNewUserEmail(e.target.value)}
                     className="fc-input"
                   />
-                  <input
-                    type="password"
-                    aria-label={t("Password")}
-                    placeholder={t("Password")}
-                    value={newUserPassword}
-                    onChange={(e) => setNewUserPassword(e.target.value)}
-                    className="fc-input"
-                  />
+                  <div>
+                    <input
+                      type="password"
+                      aria-label={t("Password")}
+                      aria-describedby="admin-password-help"
+                      placeholder={t("Password")}
+                      value={newUserPassword}
+                      onChange={(e) => setNewUserPassword(e.target.value)}
+                      minLength={12}
+                      className="fc-input"
+                    />
+                    <p id="admin-password-help" className="fc-auth-field-help">{t("At least 12 characters. Make it something only you know.")}</p>
+                  </div>
                   <select
                     aria-label={t("New user role")}
                     value={newUserRole}

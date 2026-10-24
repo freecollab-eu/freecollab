@@ -74,7 +74,7 @@ def callback(platform, made, **changes):
 
 
 def generate(platform, **changes):
-    data = {"kind": "summary", "sources": [{"kind": "message", "id": "source"}], "disclose_to_provider": True}
+    data = {"expected_config_revision": 1, "kind": "summary", "sources": [{"kind": "message", "id": "source"}], "disclose_to_provider": True}
     data.update(changes)
     return platform[0].post(CHANNEL + "/ai/drafts", headers=platform[2]["owner"], json=data)
 
@@ -271,6 +271,132 @@ def test_real_ai_https_sse_sources_private_preview_citations_and_reviewed_publis
         assert len(session.exec(select(AppCard)).all()) == 1
 
 
+def test_reviewed_provider_revision_fences_immediate_drafts_and_schedule_creation_before_ai(platform, provider):
+    old_endpoint, old = provider
+    new_endpoint, new = old["create_recipient"]()
+    with Session(platform[1]) as session:
+        config = session.get(CopilotConfig, "team")
+        fields = service.copilot.config_fields(config)
+        fields.endpoint, fields.model = new_endpoint, "new-reviewed-model"
+        config.revision = 2
+        config.encrypted_config = service.copilot.seal(fields.model_dump(), "config", "team")
+        consent = session.get(CopilotConsent, ("team", "owner")); consent.config_revision = 2
+        session.add_all([config, consent]); session.commit()
+    # Another tab has consented to revision2; an old recipient review is still invalid.
+    assert generate(platform, expected_config_revision=1).status_code == 409
+    schedule_data = {"expected_config_revision": 1, "interval_hours": 24, "disclose_future_native_messages": True}
+    assert platform[0].post(CHANNEL+"/ai/recaps", headers=platform[2]["owner"], json=schedule_data).status_code == 409
+    assert old["requests"] == new["requests"] == []
+    with Session(platform[1]) as session:
+        assert session.exec(select(AppAIDraft)).all() == session.exec(select(ChannelRecapSchedule)).all() == []
+    response = generate(platform, expected_config_revision=2)
+    assert response.status_code == 201, response.text
+    assert old["requests"] == [] and len(new["requests"]) == 1 and new["requests"][0]["model"] == "new-reviewed-model"
+    scheduled = platform[0].post(CHANNEL+"/ai/recaps", headers=platform[2]["owner"], json={**schedule_data, "expected_config_revision": 2})
+    assert scheduled.status_code == 201 and scheduled.json()["provider_revision"] == 2
+    assert len(new["requests"]) == 1
+
+
+def test_reviewed_provider_revision_requires_a_positive_strict_integer_before_any_draft_or_schedule(platform, monkeypatch):
+    monkeypatch.setattr(service.copilot, "completion", lambda *_: pytest.fail("Invalid reviewed revision reached provider"))
+    for value in (None, True, False, "1", 1.0, 0, -1):
+        for suffix, body in (("drafts", {"sources": [{"kind": "message", "id": "source"}], "disclose_to_provider": True}),
+                             ("recaps", {"disclose_future_native_messages": True})):
+            if value is not None:
+                body["expected_config_revision"] = value
+            response = platform[0].post(CHANNEL+"/ai/"+suffix, headers=platform[2]["owner"], json=body)
+            assert response.status_code == 422, response.text
+    with Session(platform[1]) as session:
+        assert session.exec(select(AppAIDraft)).all() == session.exec(select(ChannelRecapSchedule)).all() == []
+
+
+def test_reviewed_native_message_hash_blocks_an_edit_before_app_ai_disclosure(platform, provider):
+    endpoint, state = provider
+    with Session(platform[1]) as session:
+        config = session.get(CopilotConfig, "team"); fields = service.copilot.config_fields(config); fields.endpoint = endpoint
+        config.encrypted_config = service.copilot.seal(fields.model_dump(), "config", "team")
+        source = session.get(Message, "source"); source.content = "Edited after review: ää 🧭"; session.add_all([config, source]); session.commit()
+    reviewed = hashlib.sha256(b"REVIEWED NATIVE SOURCE").hexdigest()
+    response = generate(platform, sources=[{"kind": "message", "id": "source", "expected_text_sha256": reviewed}])
+    assert response.status_code == 409 and state["requests"] == []
+    with Session(platform[1]) as session:
+        assert session.exec(select(AppAIDraft)).all() == []
+    fresh = hashlib.sha256("Edited after review: ää 🧭".encode()).hexdigest()
+    response = generate(platform, sources=[{"kind": "message", "id": "source", "expected_text_sha256": fresh}])
+    assert response.status_code == 201, response.text
+    assert len(state["requests"]) == 1 and "Edited after review: ää 🧭" in json.dumps(state["requests"], ensure_ascii=False)
+
+
+def test_context_character_bound_includes_source_separators_before_provider_io(platform, monkeypatch):
+    monkeypatch.setattr(service.copilot, "completion", lambda *_: pytest.fail("Oversized joined context reached provider"))
+    with Session(platform[1]) as session:
+        session.add_all([Message(id='bounded-'+str(index), channel_id='room', author_id='owner', content='x'*7995, encrypted=False) for index in range(3)])
+        session.commit()
+    # Three [Sx] prefixes bring the individual pieces to24k; joining adds four characters.
+    response = generate(platform, sources=[{"kind": "message", "id": 'bounded-'+str(index)} for index in range(3)])
+    assert response.status_code == 413
+    with Session(platform[1]) as session:
+        assert session.exec(select(AppAIDraft)).all() == []
+
+
+def test_recaps_disclose_only_messages_after_each_explicit_grant_including_provider_regrant(platform, provider):
+    first_endpoint, first = provider
+    second_endpoint, second = first["create_recipient"]()
+    with Session(platform[1]) as session:
+        config = session.get(CopilotConfig, 'team'); fields = service.copilot.config_fields(config); fields.endpoint = first_endpoint
+        config.encrypted_config = service.copilot.seal(fields.model_dump(), 'config', 'team'); session.add(config); session.commit()
+    path = CHANNEL+'/ai/recaps'
+    payload = {'expected_config_revision': 1, 'interval_hours': 24, 'disclose_future_native_messages': True}
+    response = platform[0].post(path, headers=platform[2]['owner'], json=payload)
+    assert response.status_code == 201, response.text
+    identifier = response.json()['id']
+    with Session(platform[1]) as session:
+        row = session.get(ChannelRecapSchedule, identifier)
+        assert row.last_run_at is not None and row.last_status is None
+        assert row.next_run_at > datetime.utcnow()+timedelta(hours=23)
+    def dispatch():
+        with Session(platform[1]) as session:
+            row = session.get(ChannelRecapSchedule, identifier); row.next_run_at = datetime.utcnow()-timedelta(seconds=1)
+            session.add(row); session.commit()
+            return service.run_recaps(session)
+    def add_message(identifier, text):
+        with Session(platform[1]) as session:
+            session.add(Message(id=identifier, channel_id='room', author_id='owner', content=text, encrypted=False)); session.commit()
+    assert dispatch() == 0 and first['requests'] == []
+    add_message('after-first-grant', 'ONLY AFTER FIRST CONSENT')
+    assert dispatch() == 1
+    assert 'ONLY AFTER FIRST CONSENT' in json.dumps(first['requests'])
+    assert 'REVIEWED NATIVE SOURCE' not in json.dumps(first['requests'])
+    assert platform[0].delete(path+'/'+identifier, headers=platform[2]['owner']).status_code == 200
+    add_message('while-paused', 'PAUSED HISTORY MUST NEVER REACH NEW PROVIDER')
+    with Session(platform[1]) as session:
+        config = session.get(CopilotConfig, 'team'); fields = service.copilot.config_fields(config)
+        fields.endpoint, fields.model = second_endpoint, 'second-future-provider'
+        config.revision = 2; config.encrypted_config = service.copilot.seal(fields.model_dump(), 'config', 'team')
+        consent = session.get(CopilotConsent, ('team', 'owner')); consent.config_revision = 2
+        session.add_all([config, consent]); session.commit()
+    response = platform[0].post(path, headers=platform[2]['owner'], json={**payload, 'expected_config_revision': 2, 'interval_hours': 1})
+    assert response.status_code == 201 and response.json()['id'] == identifier
+    assert dispatch() == 0 and second['requests'] == []
+    add_message('after-new-grant', 'ONLY AFTER SECOND PROVIDER CONSENT')
+    assert dispatch() == 1 and len(first['requests']) == len(second['requests']) == 1
+    actual = json.dumps(second['requests'])
+    assert 'ONLY AFTER SECOND PROVIDER CONSENT' in actual
+    assert 'PAUSED HISTORY' not in actual and 'ONLY AFTER FIRST CONSENT' not in actual and 'REVIEWED NATIVE SOURCE' not in actual
+
+
+def test_legacy_recap_without_a_disclosure_cursor_never_backfills_history(platform, monkeypatch):
+    monkeypatch.setattr(service.copilot, 'completion', lambda *_: pytest.fail('Missing future-consent cursor disclosed old messages'))
+    with Session(platform[1]) as session:
+        row = ChannelRecapSchedule(workspace_id='team', channel_id='room', owner_id='owner', provider_revision=1,
+                                   interval_hours=24, next_run_at=datetime.utcnow()-timedelta(seconds=1))
+        session.add(row); session.commit()
+        assert service.run_recaps(session) == 0
+        session.refresh(row)
+        assert row.last_run_at is not None and row.last_status == 'no_messages' and row.enabled
+        assert session.exec(select(AppAIDraft)).all() == []
+
+
 def test_ai_proposes_cross_app_writes_and_requires_unchanged_reviewed_grants(platform, monkeypatch):
     made = install(platform, "github.issue")
     payload = {"actions": [{"installation_id": made["installation"]["id"], "command": "create-issue", "arguments": {"title": "Reviewed proposal", "body": "Citation [S1]"}}]}
@@ -293,16 +419,21 @@ def test_ai_proposes_cross_app_writes_and_requires_unchanged_reviewed_grants(pla
 def test_consent_secure_source_change_and_recap_schedule_pause(platform, monkeypatch):
     monkeypatch.setattr(service.copilot, "completion", lambda *_: {"text": "Summary [S1]", "tool_calls": []})
     assert generate(platform, disclose_to_provider=False).status_code == 422
-    assert platform[0].post("/workspaces/team/channels/secure/apps/ai/drafts", headers=platform[2]["owner"], json={"sources": [{"kind": "message", "id": "$event", "text": "NEVER INGEST", "event_ids": ["$event"]}], "disclose_to_provider": True}).status_code == 409
+    assert platform[0].post("/workspaces/team/channels/secure/apps/ai/drafts", headers=platform[2]["owner"], json={"expected_config_revision": 1, "sources": [{"kind": "message", "id": "$event", "text": "NEVER INGEST", "event_ids": ["$event"]}], "disclose_to_provider": True}).status_code == 409
     response = generate(platform)
     with Session(platform[1]) as session:
         source = session.get(Message, "source"); source.content = "CHANGED"; session.add(source); session.commit()
     assert platform[0].post(CHANNEL+"/ai/drafts/"+response.json()["id"]+"/approve", headers=platform[2]["owner"], json={"confirm": True}).status_code == 409
     path = CHANNEL+"/ai/recaps"
-    assert platform[0].post(path, headers=platform[2]["owner"], json={"interval_hours": 24, "disclose_future_native_messages": False}).status_code == 422
-    scheduled = platform[0].post(path, headers=platform[2]["owner"], json={"interval_hours": 24, "disclose_future_native_messages": True})
+    assert platform[0].post(path, headers=platform[2]["owner"], json={"expected_config_revision": 1, "interval_hours": 24, "disclose_future_native_messages": False}).status_code == 422
+    scheduled = platform[0].post(path, headers=platform[2]["owner"], json={"expected_config_revision": 1, "interval_hours": 24, "disclose_future_native_messages": True})
     assert scheduled.status_code == 201, scheduled.text
     with Session(platform[1]) as session:
+        schedule = session.get(ChannelRecapSchedule, scheduled.json()["id"])
+        schedule.next_run_at = datetime.utcnow()-timedelta(seconds=1)
+        session.add(schedule)
+        session.add(Message(id="future-recap-source", channel_id="room", author_id="owner", content="New after future-only consent", encrypted=False))
+        session.commit()
         assert service.run_recaps(session) == 1
         schedule = session.get(ChannelRecapSchedule, scheduled.json()["id"])
         assert schedule.last_status == "draft_ready" and schedule.enabled
@@ -350,7 +481,10 @@ def test_ai_workflow_requires_current_admin_password_and_installs_atomically_onc
 
 def test_ai_rechecks_grants_after_provider_and_stopped_recap_discards_new_draft(platform, monkeypatch):
     path = CHANNEL+"/ai/recaps"
-    scheduled = platform[0].post(path, headers=platform[2]["owner"], json={"interval_hours": 24, "disclose_future_native_messages": True}).json()
+    scheduled = platform[0].post(path, headers=platform[2]["owner"], json={"expected_config_revision": 1, "interval_hours": 24, "disclose_future_native_messages": True}).json()
+    with Session(platform[1]) as session:
+        row = session.get(ChannelRecapSchedule, scheduled["id"]); row.next_run_at = datetime.utcnow()-timedelta(seconds=1)
+        session.add(row); session.add(Message(id="future-stop-source", channel_id="room", author_id="owner", content="Future source selected before stopping", encrypted=False)); session.commit()
     def stop_during_provider(*_):
         with Session(platform[1]) as session:
             row = session.get(ChannelRecapSchedule, scheduled["id"]); row.enabled = False; row.generation += 1

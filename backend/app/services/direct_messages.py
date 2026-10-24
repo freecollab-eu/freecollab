@@ -8,7 +8,6 @@ from ..models.channel import Channel, ChannelMember
 from ..models.direct_message import DirectMessage, DirectMessageState
 from ..models.user import User
 from ..models.workspace import WorkspaceChannel, WorkspaceMember
-from .group_crypto import GroupCryptoService
 from .workspaces import lock_workspace, require_workspace_member, users_blocked, visible_workspace_user_ids
 
 
@@ -46,15 +45,10 @@ def open_direct_channel(session, workspace_id: str, user_id: str, other_id: str,
     session.flush()
     session.add(WorkspaceChannel(channel_id=channel.id, workspace_id=workspace_id))
     session.add(DirectMessage(channel_id=channel.id, workspace_id=workspace_id, user_low=low, user_high=high))
-    # Retain the legacy key fields for old client compatibility. These server
-    # generated keys are not presented as client-side end-to-end encryption.
-    users = [session.get(User, user_id), other]
-    encrypted_keys = GroupCryptoService.encrypt_key_for_members(
-        GroupCryptoService.generate_channel_key(), {person.id: person.public_key for person in users if person.public_key},
-    )
-    for person in users:
-        session.add(ChannelMember(channel_id=channel.id, user_id=person.id, role="admin",
-                                  encrypted_channel_key=encrypted_keys.get(person.id)))
+    # New DMs are native until explicitly bound to Matrix. Keep legacy
+    # envelopes on reused conversations; never add them to new native rooms.
+    for participant_id in (user_id, other_id):
+        session.add(ChannelMember(channel_id=channel.id, user_id=participant_id, role="admin"))
     session.commit()
     return (channel, True) if return_created else channel
 

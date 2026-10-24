@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Real full-app personal home, source navigation and source-authorized actions."""
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime, timedelta, timezone
 import importlib.util
@@ -67,7 +68,7 @@ def main():
                 page.on('pageerror',lambda failure:errors.append(str(failure)))
                 p.login(page,app,owner,first)
                 stage='real personal home cross-workspace snapshot'
-                page.get_by_role('button',name='My day',exact=True).click()
+                open_chat_tool(page, 'My day')
                 day=page.get_by_role('dialog',name='My day',exact=True)
                 expect(day.get_by_role('button',name=fields['title'],exact=True)).to_be_visible()
                 expect(day.get_by_role('button',name=event['title'],exact=True)).to_be_visible()
@@ -77,13 +78,13 @@ def main():
                 page.screenshot(path=str(REPORT.with_name(REPORT.stem+'-desktop.png')))
                 stage='exact project navigation switches workspace'
                 day.get_by_role('button',name=fields['title'],exact=True).click()
-                work=page.get_by_role('dialog',name='Workspace tools',exact=True)
-                expect(work).to_be_visible(); expect(work.get_by_role('combobox',name='Choose project',exact=True)).to_have_value('target-project')
+                work=page.get_by_role('region',name='Work in this conversation',exact=True)
+                expect(work).to_be_visible(); expect(work).to_have_attribute('data-work-kind','tasks'); expect(work.locator('.fc-project-card')).to_have_attribute('data-task-id','personal-task')
                 expect(work.get_by_role('heading',name=fields['title'],exact=True)).to_be_visible()
-                work.get_by_role('button',name='Close workspace tools',exact=True).click()
+                work.get_by_role('button',name='Close this work',exact=True).click()
                 checks['task_link_reauthorizes_switches_workspace_and_opens_exact_project']=True
                 stage='source-authorized completion and follow-up'
-                page.get_by_role('button',name='My day',exact=True).click()
+                open_chat_tool(page, 'My day')
                 day.get_by_role('button',name='Complete task '+fields['title'],exact=True).click()
                 expect(day.get_by_text('No open tasks assigned to you.',exact=True)).to_be_visible()
                 tasks=p.api(base,'GET',f"/channels/{channel['id']}/projects/target-project/tasks",owner)
@@ -106,7 +107,7 @@ def main():
                 checks['calendar_link_opens_current_channel_calendar']=True
                 stage='Swedish and narrow layout with appearance tokens'
                 page.evaluate('async()=>{(await import("/src/i18n/core.ts")).applyLocale("sv")}')
-                page.get_by_role('button',name='Min arbetsdag',exact=True).click()
+                open_chat_tool(page, 'Min arbetsdag')
                 day=page.get_by_role('dialog',name='Min arbetsdag',exact=True)
                 expect(day.get_by_role('heading',name='Min arbetsdag',exact=True)).to_be_visible()
                 page.set_viewport_size({'width':320,'height':800})

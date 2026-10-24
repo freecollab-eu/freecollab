@@ -6,10 +6,12 @@ production App, LocaleProvider, LanguagePicker and Chat. Fixture sessions belong
 only to its private database. Latency middleware delays REAL API responses after
 their production handlers ran; no language/data/composer API is mocked.
 """
+from ui_navigation import choose_chat_channel, open_channels, open_conversation_work, activate_chat_feature, capture_work_card, conversation_work_region, close_work_card
 import base64
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import secrets
 import shutil
@@ -25,6 +27,94 @@ from playwright.sync_api import expect, sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 PYTHON = os.getenv('BACKEND_PYTHON') or (str(ROOT / 'backend/.venv/bin/python') if (ROOT / 'backend/.venv/bin/python').is_file() else sys.executable)
 REPORT = Path(os.getenv('LANGUAGE_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/language-browser.json')))
+CHANNEL_SWITCH = re.compile(r'^(Byt kanal|Visa eller dölj kanaler)$')
+
+
+def check_channels_drawer(page):
+    """The same accessible drawer contract applies at desktop and mobile sizes."""
+    toggle = page.get_by_role('button', name=CHANNEL_SWITCH, exact=True)
+    expect(toggle).to_be_visible()
+    expect(toggle).to_have_attribute('aria-expanded', 'false')
+    drawer = page.get_by_role('dialog', name='Arbetsytans kanaler', exact=True)
+    expect(drawer).to_have_count(0)
+    toggle.focus(); toggle.press('Enter')
+    expect(drawer).to_be_visible()
+    channel = drawer.get_by_role('navigation', name='Kanaler', exact=True).get_by_role('button').filter(has=page.get_by_text('Lansering', exact=True))
+    expect(channel).to_have_accessible_name(re.compile(r'^Lansering(?:\s|$)'))
+    width = page.viewport_size['width']
+    bounds = drawer.locator('.fc-chat-sidebar').bounding_box()
+    assert min(280, width - 24) <= bounds['width'] <= width - 16
+    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+    for key in ['Shift+Tab', 'Tab', 'Tab']:
+        page.keyboard.press(key)
+        assert drawer.evaluate('node=>node.contains(document.activeElement)')
+    page.keyboard.press('Escape')
+    expect(drawer).to_have_count(0)
+    expect(toggle).to_be_focused()
+
+
+def open_flow_with_keyboard(page, kind):
+    """Traverse the real full / inventory with its focused combobox and active row."""
+    feature_ids={'documents':'document','tasks':'task','meetings':'meetings','feed':'activity','copilot':'copilot','cloud':'cloud','external-meetings':'external-meetings','workflows':'workflows','apps':'apps','data':'data','mobile':'mobile'}
+    launcher=activate_chat_feature(page,feature_ids[kind],keyboard=True)
+    if kind=='mobile':
+        # /mobile is the actual device-settings destination. Its native dialog
+        # is separate from editing conversation work and closes back to /.
+        settings=page.get_by_role('dialog',name='Mobil och utan nätverk',exact=True)
+        expect(settings).to_be_visible()
+        expect(page.locator('.fc-chat-composer textarea')).to_be_enabled()
+        page.keyboard.press('Escape')
+        expect(settings).to_have_count(0)
+        expect(launcher).to_be_focused()
+        return settings
+    work=conversation_work_region(page,locale='sv',kind=kind)
+    expect(work).to_be_visible();expect(work).to_have_attribute('data-work-kind',kind)
+    expect(work.locator('[id$="work-panel-'+kind+'"]')).to_be_visible(timeout=90000)
+    expect(work.get_by_role('tablist')).to_have_count(0)
+    expect(page.locator('.fc-work-hub')).to_have_count(0)
+    expect(page.get_by_role('combobox',name='Verktyg',exact=True)).to_have_count(0)
+    expect(page.locator('.fc-chat-composer textarea')).to_be_enabled()
+    return work
+
+
+def check_stationary_pointer_navigation(page):
+    """Real mouse motion chooses a row; keyboard scroll cannot choose beneath it."""
+    launcher=page.get_by_role('button',name='Visa alla funktioner',exact=True)
+    composer=page.locator('.fc-chat-composer textarea')
+    original_draft=composer.input_value()
+    work_count=page.get_by_role('region',name='Arbete i det här samtalet',exact=True).count()
+    resource_writes=[]
+    def record_write(request):
+        if request.method=='POST' and any(part in request.url for part in ['/mobile/offline/channels/','/messages/channels/','/shared-documents','/projects/','/decisions']):
+            resource_writes.append(request.url)
+    page.on('request',record_write)
+    try:
+        launcher.focus();launcher.press('Enter')
+        panel=page.locator('.fc-slash-commands');expect(panel).to_be_visible()
+        search=panel.get_by_role('combobox');expect(search).to_be_focused()
+        options=panel.get_by_role('option')
+        identifiers=options.evaluate_all('nodes=>nodes.map(node=>node.id)')
+        assert len(identifiers)>20, 'The actual owner inventory must require list scrolling'
+        def active(index):
+            target=panel.locator('[role="option"][id='+json.dumps(identifiers[index])+']')
+            # Settle actual React/layout work and browser enter events while the
+            # pointer stays fixed, rather than winning a transient polling race.
+            page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+            expect(search).to_have_attribute('aria-activedescendant',identifiers[index])
+            expect(target).to_have_attribute('aria-selected','true');expect(search).to_be_focused()
+            assert target.evaluate('''node=>{const row=node.getBoundingClientRect(),list=node.closest('[role="listbox"]').getBoundingClientRect();return row.top>=list.top-2&&row.bottom<=list.bottom+2&&row.left>=-1&&row.right<=innerWidth+1}''')
+        # This is deliberate real motion INTO the picker, not moving the
+        # pointer away to avoid the native mouseenter-on-scroll regression.
+        options.first.hover();active(0)
+        for key,index in [('Home',0),('End',len(identifiers)-1),('ArrowUp',len(identifiers)-2),('ArrowDown',len(identifiers)-1),('Home',0),('ArrowDown',1)]:
+            search.press(key);active(index)
+        options.nth(2).hover();active(2)
+        expect(panel).to_be_visible();expect(composer).to_have_value(original_draft)
+        assert page.get_by_role('region',name='Arbete i det här samtalet',exact=True).count()==work_count
+        assert not resource_writes, 'Pointer motion must not invoke a feature or send a message'
+        search.press('Escape');expect(panel).to_have_count(0)
+    finally:
+        page.remove_listener('request',record_write)
 
 
 def port():
@@ -54,9 +144,12 @@ def native(base, token, method, path, body=None):
         value=response.read();return json.loads(value)if value else None
 
 
-def wait_file(page, path):
+def wait_file(page, path, page_errors=()):
     deadline = time.monotonic() + 15
     while time.monotonic() < deadline:
+        if page_errors:
+            detail = 'snapshot package.json does not export version' if any("does not provide an export named 'version'" in error for error in page_errors) else 'browser JavaScript initialization failed'
+            raise AssertionError('The native delayed request cannot start: ' + detail)
         if path.exists(): return
         page.wait_for_timeout(50)
     raise AssertionError('The real native delayed request was not captured')
@@ -64,14 +157,16 @@ def wait_file(page, path):
 
 def main():
     checks, stage, processes, logs = {}, 'private source snapshot and services', [], []
+    REPORT.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='freecollab-language-') as directory:
         private = Path(directory); web = private / 'web'; web.mkdir()
         source = web / 'src'; shutil.copytree(ROOT / 'frontend/src', source)
         shutil.copytree(ROOT/'frontend/public',web/'public');shutil.copyfile(ROOT/'frontend/postcss.config.js',web/'postcss.config.js');shutil.copyfile(ROOT/'frontend/tailwind.config.js',web/'tailwind.config.js')
-        (web/'package.json').write_text('{"type":"module"}');(web/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
+        # App imports Admin, which reads the version from the real manifest.
+        shutil.copyfile(ROOT/'frontend/package.json',web/'package.json');(web/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
         # Static snapshot prevents unrelated teams' live catalog writes triggering
         # HMR reloads while measuring draft retention. Implementation is unedited.
-        source_hashes = {name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in ['frontend/src/i18n/index.tsx','frontend/src/i18n/core.ts','frontend/src/components/Chat.tsx','frontend/src/styles/chat.css','frontend/src/i18n/mobile-toolbar.sv.ts','frontend/src/App.tsx','frontend/src/components/WorkHub.tsx','frontend/src/styles/work-hub.css','backend/app/api/preferences.py']}
+        source_hashes = {name:hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in ['frontend/package.json','frontend/src/i18n/index.tsx','frontend/src/i18n/core.ts','frontend/src/components/Chat.tsx','frontend/src/styles/chat.css','frontend/src/i18n/mobile-toolbar.sv.ts','frontend/src/i18n/conversation-work.sv.ts','frontend/src/App.tsx','frontend/src/components/Admin.tsx','frontend/src/components/WorkHub.tsx','frontend/src/components/CollaborationPanel.tsx','frontend/src/lib/conversation-navigation.ts','frontend/src/styles/work-hub.css','frontend/src/styles/conversation-work.css','frontend/tests/ui_navigation.py','frontend/tests/language-browser.py','backend/app/api/preferences.py']}
         api_port, app_port = port(), port(); base, origin = f'http://127.0.0.1:{api_port}', f'http://127.0.0.1:{app_port}'
         def controls(**values):
             temporary = private / 'controls.next'; temporary.write_text(json.dumps(values)); temporary.replace(private / 'controls.json')
@@ -138,15 +233,18 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                 browser=playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH')or shutil.which('chromium'),headless=True,args=['--no-sandbox']);context=browser.new_context(viewport={'width':1440,'height':1050},locale='en-US');page=context.new_page();page.set_default_timeout(45000);errors=[];page.on('pageerror',lambda failure:errors.append(str(failure)))
                 context.add_init_script('window.__languageSessions='+json.dumps(sessions)+';for(const name of["alpha","beta"])localStorage.setItem("freecollab.workspace:"+name,"team");if(!localStorage.getItem("freecollab_token")){localStorage.setItem("freecollab_token",window.__languageSessions.alpha);localStorage.setItem("freecollab_user_id","alpha")}')
                 try:
-                    stage='native initial English and pending real GET';controls(get='alpha');page.goto(origin,wait_until='domcontentloaded');wait_file(page,private/'get-alpha.captured')
-                    picker=page.locator('.proof-language-controls select');composer=page.locator('.fc-chat-composer textarea');page.locator('.fc-chat-channel').filter(has_text='Lansering').click();expect(composer).to_be_visible();expect(picker).to_have_value('auto');assert page.evaluate('document.documentElement.lang')=='en';checks['native_english_browser_fallback_and_real_language_get']=True
-                    stage='Swedish switch keeps native composer DOM, value, selection and user content';draft='Keep this unsent English draft exactly. Åäö.';composer.fill(draft);composer.evaluate('(node)=>{window.languageComposer=node;node.setSelectionRange(3,11)}');picker.select_option('sv');controls();expect(picker).to_have_value('sv');expect(page.locator('.proof-language-controls')).to_contain_text('Språk');expect(composer).to_have_value(draft);assert composer.evaluate('(node)=>node===window.languageComposer&&node.selectionStart===3&&node.selectionEnd===11');expect(page.get_by_text('A user-authored English note stays exactly as written.',exact=True)).to_be_visible();expect(page.locator('.fc-chat-message-content').get_by_text('Settings',exact=True)).to_be_visible();assert page.evaluate('document.documentElement.lang')=='sv';assert saved(base,sessions['alpha'])=='sv';checks['swedish_catalog_and_html_lang_preserve_native_draft_dom_selection_and_user_content']=True
+                    stage='native initial English and pending real GET';controls(get='alpha');page.goto(origin,wait_until='domcontentloaded');wait_file(page,private/'get-alpha.captured',errors)
+                    picker=page.locator('.proof-language-controls select');composer=page.locator('.fc-chat-composer textarea');choose_chat_channel(page, 'Lansering');expect(composer).to_be_visible();expect(picker).to_have_value('auto');assert page.evaluate('document.documentElement.lang')=='en';checks['native_english_browser_fallback_and_real_language_get']=True
+                    stage='Swedish switch keeps native composer DOM, value, selection and user content';draft='Keep this unsent English draft exactly. Åäö.';composer.fill(draft);composer.evaluate('(node)=>{window.languageComposer=node;node.setSelectionRange(3,11)}');picker.select_option('sv');controls();expect(picker).to_have_value('sv');expect(page.locator('.proof-language-controls')).to_contain_text('Språk');expect(composer).to_have_value(draft);assert composer.evaluate('(node)=>node===window.languageComposer&&node.selectionStart===3&&node.selectionEnd===11');expect(page.get_by_text('A user-authored English note stays exactly as written.',exact=True)).to_be_visible();expect(page.locator('.fc-chat-message-content').get_by_text('Settings',exact=True)).to_be_visible();assert page.evaluate('document.documentElement.lang')=='sv'
+                    # The catalog is optimistic; wait for the real PUT acknowledgement before reading persistence.
+                    expect(page.locator('.proof-language-controls')).to_contain_text('Språket har sparats',timeout=10000)
+                    assert saved(base,sessions['alpha'])=='sv';checks['swedish_catalog_and_html_lang_preserve_native_draft_dom_selection_and_user_content']=True
                     stage='stale real GET response cannot replace successful newer selection';(private/'get.release').touch();page.wait_for_timeout(150);expect(picker).to_have_value('sv');assert page.evaluate('localStorage.getItem("freecollab.language:alpha")')=='sv';checks['stale_get_response_cannot_overwrite_newer_language_put']=True
                     stage='server preference survives reload without local language cache';page.evaluate('localStorage.removeItem("freecollab.language:alpha")');page.reload(wait_until='networkidle');expect(picker).to_have_value('sv');assert page.evaluate('document.documentElement.lang')=='sv';checks['server_saved_swedish_survives_reload_without_local_preference_cache']=True
                     stage='hanging Alpha PUT does not block Beta save and stale PUT cannot repaint Beta';controls(put='alpha');picker.select_option('en');wait_file(page,private/'put-alpha.captured');controls();page.evaluate('window.switchLanguageAccount("beta")');expect(picker).to_have_value('en');picker.select_option('sv');expect(page.locator('.proof-language-controls')).to_contain_text('Språket har sparats',timeout=10000);assert saved(base,sessions['beta'])=='sv';assert not(private/'put.release').exists();checks['hanging_alpha_save_does_not_block_beta_independent_account_queue']=True
                     (private/'put.release').touch();page.wait_for_timeout(200);expect(picker).to_have_value('sv');assert page.evaluate('document.documentElement.lang')=='sv';assert page.evaluate('localStorage.getItem("freecollab.language:beta")')=='sv';assert saved(base,sessions['alpha'])=='en';checks['stale_alpha_put_response_cannot_change_beta_locale_or_cache']=True
                     stage='same-account latest selection preserves serialized server order';page.evaluate('window.switchLanguageAccount("alpha")');expect(picker).to_have_value('en');(private/'put.release').unlink();(private/'put-alpha.captured').unlink();controls(put='alpha');picker.select_option('sv');wait_file(page,private/'put-alpha.captured');controls();picker.select_option('en');expect(picker).to_have_value('en');(private/'put.release').touch();expect(page.locator('.proof-language-controls')).to_contain_text('Language saved.');assert saved(base,sessions['alpha'])=='en';checks['latest_same_account_selection_wins_slow_previous_put']=True
-                    stage='account isolation, locale-only switch and native 320px layout';page.evaluate('window.switchLanguageAccount("beta")');expect(picker).to_have_value('sv');expect(page.locator('.fc-chat-account-person strong')).to_have_text('Oskar Lind');page.locator('.fc-chat-channel').filter(has_text='Lansering').click();expect(page.locator('.fc-chat-message-content').get_by_text('Settings',exact=True)).to_be_visible();page.set_viewport_size({'width':320,'height':900});expect(picker).to_be_visible();expect(composer).to_be_visible();page.wait_for_function('document.querySelector(".fc-chat-sidebar").getBoundingClientRect().width<.5');assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');checks['account_isolated_swedish_preference_and_native_320px_no_overflow']=True
+                    stage='account isolation, locale-only switch and native 320px layout';page.evaluate('window.switchLanguageAccount("beta")');expect(picker).to_have_value('sv');open_channels(page);expect(page.locator('.fc-chat-account-person strong')).to_have_text('Oskar Lind');choose_chat_channel(page, 'Lansering');expect(page.locator('.fc-chat-message-content').get_by_text('Settings',exact=True)).to_be_visible();page.set_viewport_size({'width':320,'height':900});expect(picker).to_be_visible();expect(composer).to_be_visible();expect(page.get_by_role('button',name=CHANNEL_SWITCH,exact=True)).to_have_attribute('aria-expanded','false');assert page.evaluate('document.documentElement.scrollWidth<=innerWidth');checks['account_isolated_swedish_preference_and_native_320px_no_overflow']=True
                     stage='anonymous language is independent of signed-in accounts';page.evaluate('window.switchLanguageAccount("guest")');expect(picker).to_have_value('auto');picker.select_option('sv');assert page.evaluate('localStorage.getItem("freecollab.language:guest")')=='sv';assert saved(base,sessions['alpha'])=='en'and saved(base,sessions['beta'])=='sv';checks['anonymous_language_cache_does_not_mutate_account_preferences']=True
                     stage='clean normal product screenshots with realistic Studio Nord content'
                     for identifier in['unchanged-note','known-source-word']:native(base,sessions['alpha'],'DELETE','/messages/'+identifier)
@@ -155,24 +253,113 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     for title,body in[('Veckans fokus','Vi färdigställer landningssidan och samlar återkoppling från teamet. Målet är ett tydligt förslag på fredag.'),('En gemensam riktning','Lugna färger, tydlig typografi och mer utrymme för innehållet. Det här blir utgångspunkten för nästa version.')]:native(base,sessions['alpha'],'POST','/channels/shared/activity-feed',{'id':secrets.token_hex(16),'expected_revision':0,'archived':False,'fields':{'title':title,'body':body,'poll':None}})
                     product_context=browser.new_context(viewport={'width':1440,'height':1000},locale='sv-SE');product_context.add_init_script('localStorage.setItem("freecollab_token",'+json.dumps(sessions['beta'])+');localStorage.setItem("freecollab_user_id","beta");localStorage.setItem("freecollab.workspace:beta","team")');product=product_context.new_page();product.set_default_timeout(45000);product.on('pageerror',lambda failure:errors.append(str(failure)))
                     try:
-                        product.goto(origin+'/product.html',wait_until='networkidle');expect(product.locator('.fc-chat-account-person strong')).to_have_text('Oskar Lind');product.locator('.fc-chat-channel').filter(has_text='Lansering').click();expect(product.locator('.fc-chat-message-content').get_by_text(messages[-1][1],exact=True)).to_be_visible();product.wait_for_function('document.documentElement.lang==="sv"&&document.fonts.status==="loaded"');product.wait_for_function('document.querySelector(".fc-chat-sidebar").getBoundingClientRect().width>263.5');assert product.locator('.proof-language-controls').count()==0;expect(product.get_by_role('button',name='Fler kanalverktyg',exact=True)).not_to_be_visible();assert all(product.locator('.fc-chat-secondary-action').nth(i).is_visible()for i in range(4));checks['desktop_channel_toolbar_all_four_existing_secondary_actions_stay_visible']=True;assert product.evaluate('document.documentElement.scrollWidth<=innerWidth');product.screenshot(path=str(REPORT.with_name('product-swedish-desktop.png')),full_page=True)
-                        product.locator('.fc-chat-topbar-action').filter(has_text='Arbete').click();product.get_by_role('tab',name='Aktivitetsflöde',exact=True).click();expect(product.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible();product.screenshot(path=str(REPORT.with_name('product-workhub-feed-desktop.png')),full_page=True);product.keyboard.press('Escape');expect(product.get_by_role('dialog')).to_have_count(0)
-                        product.set_viewport_size({'width':390,'height':844});product.wait_for_function('document.querySelector(".fc-chat-sidebar").getBoundingClientRect().width<.5');expect(product.locator('.fc-chat-composer textarea')).to_be_visible();assert product.evaluate('document.documentElement.scrollWidth<=innerWidth');product.locator('.fc-chat-channel-heading').click(position={'x':64,'y':20});product.screenshot(path=str(REPORT.with_name('product-swedish-mobile.png')),full_page=True);checks['clean_actual_production_entry_swedish_chat_and_workhub_screenshots']=True
+                        product.goto(origin+'/product.html',wait_until='networkidle')
+                        open_channels(product)
+                        expect(product.locator('.fc-chat-account-person strong')).to_have_text('Oskar Lind')
+                        choose_chat_channel(product, 'Lansering')
+                        expect(product.locator('.fc-chat-message-content').get_by_text(messages[-1][1],exact=True)).to_be_visible()
+                        product.wait_for_function('document.documentElement.lang==="sv"&&document.fonts.status==="loaded"')
+                        assert product.locator('.proof-language-controls').count()==0
+                        check_channels_drawer(product)
+                        trigger=product.get_by_role('button',name='Fler kanalverktyg',exact=True)
+                        expect(trigger).to_be_visible();trigger.click()
+                        group=product.get_by_role('group',name='Fler kanalverktyg',exact=True)
+                        for name in ['Inställningar för mobil och offline','Min arbetsdag','Sparade objekt och beslut','Kanalmedlemmar','Kanalfiler']:
+                            expect(group.get_by_role('button',name=name,exact=True)).to_be_visible()
+                        product.keyboard.press('Escape');expect(trigger).to_be_focused()
+                        checks['desktop_drawer_closed_and_all_existing_secondary_tools_reachable_through_more']=True
+                        assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                        product.screenshot(path=str(REPORT.with_name('product-swedish-desktop.png')),full_page=True)
+                        work=open_conversation_work(product,'feed',locale='sv');expect(work.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible();expect(work.get_by_role('tablist')).to_have_count(0);expect(product.locator('.fc-chat-composer textarea')).to_be_enabled();product.screenshot(path=str(REPORT.with_name('product-conversation-feed-desktop.png')),full_page=True);product.keyboard.press('Escape');expect(work).to_have_count(0);expect(product.get_by_role('dialog')).to_have_count(0)
+                        product.set_viewport_size({'width':390,'height':844})
+                        expect(product.get_by_role('button',name=CHANNEL_SWITCH,exact=True)).to_have_attribute('aria-expanded','false')
+                        expect(product.locator('.fc-chat-composer textarea')).to_be_visible()
+                        assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                        product.screenshot(path=str(REPORT.with_name('product-swedish-mobile.png')),full_page=True)
+                        checks['clean_actual_production_entry_swedish_chat_and_inline_conversation_screenshots']=True
                         for width in[390,320]:
-                            stage='normal mobile channel toolbar keyboard actions and visible return focus at '+str(width)+'px';product.set_viewport_size({'width':width,'height':844});channel_title=product.locator('.fc-chat-topbar-channel strong');expect(channel_title).to_have_text('Lansering');assert channel_title.evaluate('(node)=>node.clientWidth>=node.scrollWidth');trigger=product.get_by_role('button',name='Fler kanalverktyg',exact=True);expect(trigger).to_be_visible();assert all(not product.locator('.fc-chat-secondary-action').nth(i).is_visible()for i in range(4))
-                            actions=[('Inställningar för mobil och offline','Mobil och utan nätverk'),('Min arbetsdag','Min arbetsdag'),('Sparade objekt och beslut','Kanalens anteckningsbok'),('Kanalmedlemmar','Kanalmedlemmar'),('Kanalfiler','Kanalfiler')]
-                            for index,(action_name,dialog_name)in enumerate(actions):
-                                trigger.focus();trigger.press('Enter');expect(trigger).to_have_attribute('aria-expanded','true');group=product.get_by_role('group',name='Fler kanalverktyg',exact=True);expect(group).to_be_visible();assert group.get_by_role('button').count()==len(actions);assert group.evaluate('(node)=>{const box=node.getBoundingClientRect();return box.left>=0&&box.right<=innerWidth}')
-                                for _ in range(index+1):product.keyboard.press('Tab')
-                                expect(group.get_by_role('button',name=action_name,exact=True)).to_be_focused();product.keyboard.press('Enter');expect(group).to_have_count(0);expect(product.get_by_role('dialog',name=dialog_name,exact=True)).to_be_visible();product.keyboard.press('Escape');expect(product.get_by_role('dialog')).to_have_count(0);expect(trigger).to_be_focused();expect(trigger).to_have_attribute('aria-expanded','false')
+                            stage='normal mobile channel toolbar keyboard actions and visible return focus at '+str(width)+'px'
+                            product.set_viewport_size({'width':width,'height':844})
+                            channel_title=product.locator('.fc-chat-topbar-channel strong')
+                            expect(channel_title).to_have_text('Lansering')
+                            check_channels_drawer(product)
+                            trigger=product.get_by_role('button',name='Fler kanalverktyg',exact=True)
+                            expect(trigger).to_be_visible()
+                            actions=[('Inställningar för mobil och offline','dialog','Mobil och utan nätverk'),('Min arbetsdag','dialog','Min arbetsdag'),('Sparade objekt och beslut','region','Kanalens anteckningsbok'),('Kanalmedlemmar','dialog','Kanalmedlemmar'),('Kanalfiler','dialog','Kanalfiler')]
+                            for action_name,role,panel_name in actions:
+                                trigger.focus();trigger.press('Enter');expect(trigger).to_have_attribute('aria-expanded','true');group=product.get_by_role('group',name='Fler kanalverktyg',exact=True);expect(group).to_be_visible();assert all(group.get_by_role('button',name=required,exact=True).is_visible()for required,_,_ in actions);assert group.evaluate('(node)=>{const box=node.getBoundingClientRect();return box.left>=0&&box.right<=innerWidth}')
+                                target=group.get_by_role('button',name=action_name,exact=True)
+                                for _ in range(group.get_by_role('button').count()+1):
+                                    product.keyboard.press('Tab')
+                                    if target.evaluate('node=>node===document.activeElement'):break
+                                expect(group.get_by_role('button',name=action_name,exact=True)).to_be_focused();product.keyboard.press('Enter');expect(group).to_have_count(0);panel=product.get_by_role(role,name=panel_name,exact=True);expect(panel).to_be_visible();product.keyboard.press('Escape');expect(panel).to_have_count(0);expect(product.get_by_role('dialog')).to_have_count(0);expect(trigger).to_be_focused();expect(trigger).to_have_attribute('aria-expanded','false')
                             trigger.press('Enter');product.keyboard.press('Escape');expect(trigger).to_be_focused();expect(trigger).to_have_attribute('aria-expanded','false');trigger.press('ArrowDown');expect(product.locator('.fc-chat-mobile-tool').first).to_be_focused();product.keyboard.press('Shift+Tab');expect(trigger).to_be_focused();product.keyboard.press('Shift+Tab');expect(trigger).to_have_attribute('aria-expanded','false');trigger.focus();trigger.press('Enter')
                             if width==390:product.screenshot(path=str(REPORT.with_name('product-mobile-channel-tools.png')),full_page=True)
+                            outside=product.locator('.fc-chat-topbar')
+                            assert outside.bounding_box()['y']+4<group.bounding_box()['y']
+                            outside.click(position={'x':4,'y':4});expect(trigger).to_have_attribute('aria-expanded','false');expect(group).to_have_count(0)
                             product.locator('.fc-chat-composer textarea').click();expect(trigger).to_have_attribute('aria-expanded','false');expect(product.locator('.fc-chat-composer textarea')).to_be_focused();assert product.evaluate('document.documentElement.scrollWidth<=innerWidth');checks['mobile_'+str(width)+'px_full_channel_name_five_keyboard_tool_actions_escape_outside_tab_and_visible_focus_restoration']=True
-                            stage='normal mobile WorkHub selector and unsaved draft guard at '+str(width)+'px';product.locator('.fc-chat-topbar-action').filter(has_text='Arbete').click();tool=product.get_by_role('combobox',name='Verktyg',exact=True);expect(tool).to_be_visible();assert tool.locator('option').evaluate_all('(nodes)=>nodes.map(node=>node.value)')==['feed','copilot','cloud','external-meetings','tasks','meetings','documents','workflows','apps','data','mobile'];tool.select_option('feed');expect(product.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible();assert product.evaluate('document.documentElement.scrollWidth<=innerWidth&&document.querySelector(".fc-work-hub").scrollWidth<=document.querySelector(".fc-work-hub").clientWidth');tool.select_option('tasks');expect(product.locator('.fc-projects')).to_be_visible();tool.select_option('feed');expect(product.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible()
-                            if width==390:product.screenshot(path=str(REPORT.with_name('product-workhub-feed-mobile.png')),full_page=True)
-                            product.get_by_role('button',name='Skriv en uppdatering',exact=True).click();product.locator('#feed-title').fill('Ett osparat utkast');product.locator('#feed-body').fill('Behåll den här texten när jag väljer att stanna.');dialogs=[]
+                            stage='normal mobile eleven native conversation actions and unsaved draft guard at '+str(width)+'px'
+                            if width==390:
+                                # Oskar remains a real member; data controls are
+                                # deliberately an owner feature in the / list.
+                                product.get_by_role('button',name='Visa alla funktioner',exact=True).click()
+                                expect(product.locator('.fc-slash-commands [role="option"][id$="-data"]')).to_have_count(0)
+                                product.locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
+                                native(base,sessions['alpha'],'PUT','/preferences/language',{'locale':'sv'})
+                                product.evaluate('''async session=>{const{api}=await import('/src/lib/api.ts');api.applySession({access_token:session,user_id:'alpha',token_type:'bearer',public_key:'',encrypted_private_key:null})}''',sessions['alpha'])
+                                open_channels(product)
+                                expect(product.locator('.fc-chat-account-person strong')).to_have_text('Linnea Berg')
+                                choose_chat_channel(product,'Lansering')
+                                expect(product.locator('html')).to_have_attribute('lang','sv')
+                                checks['member_slash_inventory_excludes_owner_data_controls_and_real_owner_session_exposes_the_full_inventory']=True
+                                check_stationary_pointer_navigation(product)
+                                checks['owner_swedish390_stationary_pointer_keeps_keyboard_selection_and_real_pointer_motion_changes_only_the_active_row']=True
+                            opened_cards=[]
+                            for kind in ['feed','copilot','cloud','external-meetings','tasks','meetings','documents','workflows','apps','data','mobile']:
+                                work=open_flow_with_keyboard(product,kind)
+                                if kind!='mobile':opened_cards.append(capture_work_card(product,work))
+                                assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                            opened_ids=[card.get_attribute('data-collaboration-work-id') for card in opened_cards]
+                            assert len(opened_ids)==len(set(opened_ids))
+                            for card in opened_cards:expect(card.locator('.fc-conversation-work')).to_have_count(1)
+                            product.get_by_role('button',name='Visa alla funktioner',exact=True).click()
+                            expect(product.locator('.fc-slash-commands [role="option"][id$="-decision"]')).to_be_visible()
+                            product.locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
+                            work=open_flow_with_keyboard(product,'feed');expect(work.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible()
+                            if width==390:product.screenshot(path=str(REPORT.with_name('product-conversation-feed-mobile.png')),full_page=True)
+                            work.get_by_role('button',name='Skriv en uppdatering',exact=True).click()
+                            feed_title=work.get_by_label('Uppdateringens titel',exact=True)
+                            feed_body=work.get_by_label('Uppdateringens text',exact=True)
+                            feed_title.fill('Ett osparat utkast');feed_body.fill('Behåll den här texten när jag väljer att stanna.')
+                            retained_feed=feed_body.element_handle();dialogs=[]
                             def cancel_navigation(dialog):dialogs.append(dialog.message);dialog.dismiss()
-                            product.once('dialog',cancel_navigation);tool.select_option('tasks');assert len(dialogs)==1 and 'Ändringarna har inte sparats' in dialogs[0];expect(tool).to_have_value('feed');expect(product.locator('#feed-title')).to_have_value('Ett osparat utkast');expect(product.locator('#feed-body')).to_have_value('Behåll den här texten när jag väljer att stanna.');assert product.evaluate('document.documentElement.scrollWidth<=innerWidth');product.once('dialog',lambda dialog:dialog.accept());product.keyboard.press('Escape');expect(product.get_by_role('dialog')).to_have_count(0);checks['mobile_'+str(width)+'px_all_eleven_tools_tasks_feed_and_cancel_preserves_unsaved_update_without_overflow']=True
+                            product.on('dialog',cancel_navigation)
+                            activate_chat_feature(product,'task',keyboard=True)
+                            sibling=conversation_work_region(product,locale='sv',kind='tasks')
+                            assert capture_work_card(product,sibling).get_attribute('data-collaboration-work-id')!=capture_work_card(product,work).get_attribute('data-collaboration-work-id')
+                            assert not dialogs,'A sibling task must retain the unsaved update without discard'
+                            expect(work).to_have_attribute('data-work-kind','feed')
+                            expect(feed_title).to_have_value('Ett osparat utkast');expect(feed_body).to_have_value('Behåll den här texten när jag väljer att stanna.')
+                            assert feed_body.evaluate('(node,original)=>node===original&&original.isConnected',retained_feed)
+                            expect(product.locator('.fc-slash-commands')).to_have_count(0)
+                            close_work_card(product,sibling)
+                            assert not dialogs,'Closing a clean sibling must not discard the Feed draft'
+                            expect(feed_body).to_have_value('Behåll den här texten när jag väljer att stanna.')
+                            assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                            # Its own close remains guarded, independently of every other card.
+                            work.locator('[data-work-close]').click()
+                            assert len(dialogs)==1 and 'Ändringarna har inte sparats' in dialogs[0]
+                            expect(feed_title).to_have_value('Ett osparat utkast')
+                            product.remove_listener('dialog',cancel_navigation)
+                            product.once('dialog',lambda dialog:dialog.accept())
+                            feed_body.focus();product.keyboard.press('Escape')
+                            expect(work).to_have_count(0)
+                            expect(product.get_by_role('dialog')).to_have_count(0)
+                            for card in opened_cards:
+                                expect(card.locator('.fc-conversation-work')).to_have_count(1)
+                                close_work_card(product,card)
+                            checks['mobile_'+str(width)+'px_all_eleven_contextual_actions_keep_sibling_feed_task_drafts_and_own_close_guard_without_overflow']=True
                     finally:product_context.close()
                     assert not errors,'Unexpected native language browser page error';checks['zero_native_browser_page_errors']=True
                 finally:context.close();browser.close()
@@ -187,6 +374,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                 try:process.wait(timeout=10)
                 except subprocess.TimeoutExpired:process.kill();process.wait(timeout=5)
             for stream in logs:stream.close()
+    assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()),'Language proof sources changed during this private run'
     REPORT.parent.mkdir(parents=True,exist_ok=True);REPORT.write_text(json.dumps({'scope':'Production App/LocaleProvider/LanguagePicker/Chat source snapshot with private real API/SQLite/Socket.IO/Vite and fixture native sessions; real native API responses delayed after production handlers, no external service','checks':checks,'source_sha256':source_hashes,'cleanup':'Own API/Vite/database/keys/session fixtures/browser context removed'},indent=2)+'\n');print('Native language browser proof passed: '+str(len(checks))+' checks; Swedish/English, real server persistence, stale GET/PUT, account queues and composer preservation.')
 
 if __name__=='__main__':main()

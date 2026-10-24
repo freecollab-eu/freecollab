@@ -40,6 +40,33 @@ Configure the backend's exact CORS origins. Native components fail closed for
 encrypted channels; use `/embed` for those channels and the full application.
 Theme with documented `--fc-sdk-*` CSS variables. No external font is loaded.
 
+Custom native message composers can pass selected typed references after the
+existing optional `AbortSignal`. The package exports `ReferenceKind` and
+`MessageReference`; returned `CollaborationMessage` objects expose optional
+`references` metadata.
+
+```ts
+import type {MessageReference} from '@freecollab/components';
+
+// Use a real identity selected by the user; ranges are UTF-16 string offsets.
+const content = '🚀 @Åsa';
+const references: MessageReference[] = [
+  {kind: 'person', id: selectedUserId, start: 3, end: 7},
+];
+await client.sendMessage(content, signal, references);
+await client.replyMessage(loadedMessage.id, content, signal, references);
+await client.editMessage(loadedMessage.id, content, signal, references);
+```
+
+Load the current channel's messages before replying or editing; those operations
+retain their existing displayed-resource and session checks. Reconcile ranges
+when content changes and send `[]` to remove selected references. Omitted metadata
+keeps legacy request bodies; old editors do not preserve hidden recipients after
+an edit. Supported kinds are `person`, `group`, `document`, `task`, `file` and
+`channel`. The server validates selections and access; a visible `@name` alone
+does not establish identity. These native methods still reject encrypted channels;
+the trusted workspace provides its integrated reference picker and encrypted flow.
+
 Calendar field types include optional bounded recurrence and occurrence
 exceptions. Preserve these fields when updating an existing series. The small
 native calendar component lists series and creates individual events; use the

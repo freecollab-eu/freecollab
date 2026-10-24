@@ -73,7 +73,7 @@ class TestAuth:
         # Second registration with same email
         response = client.post(
             "/auth/register",
-            json={"name": "Second", "email": self.email, "password": "other123"},
+            json={"name": "Second", "email": self.email, "password": "other-password"},
         )
         assert response.status_code == 400
         assert "already registered" in response.json()["detail"].lower()
@@ -128,7 +128,7 @@ class TestChannels:
         email = f"channel-test-{uuid.uuid4().hex[:8]}@example.com"
         response = client.post(
             "/auth/register",
-            json={"name": "Channel Tester", "email": email, "password": "test123"},
+            json={"name": "Channel Tester", "email": email, "password": "test-account-password"},
         )
         token = response.json()["access_token"]
         return {"Authorization": f"Bearer {token}"}
@@ -190,7 +190,7 @@ class TestMessages:
         email = f"msg-test-{uuid.uuid4().hex[:8]}@example.com"
         reg_response = client.post(
             "/auth/register",
-            json={"name": "Msg Tester", "email": email, "password": "test123"},
+            json={"name": "Msg Tester", "email": email, "password": "test-account-password"},
         )
         token = reg_response.json()["access_token"]
         auth_header = {"Authorization": f"Bearer {token}"}

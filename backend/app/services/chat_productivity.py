@@ -10,7 +10,7 @@ import json
 from urllib.parse import urlencode
 
 from fastapi import HTTPException
-from sqlalchemy import update
+from sqlalchemy import delete, update
 from sqlmodel import select
 
 from ..models.channel import Channel, ChannelMember
@@ -25,6 +25,7 @@ from .access import lock_channel_writes, require_channel_member
 from .chat_notifications import record_message_change, require_native_channel, subscribe_participant, validate_mentions
 from .crypto import decrypt_message, encrypt_message
 from .request_guard import remember_request, recheck_actor
+from .message_references import validate_references, store_references, stored_references
 from .sso_scope import clear_scope
 from .workspaces import (channel_security_metadata, lock_workspace, require_direct_message_writable,
                          require_workspace_member, users_blocked, visible_workspace_user_ids)
@@ -117,6 +118,7 @@ def schedule_data(row, *, content=False):
     if content and row.status == "pending":
         data["content"] = decrypt_message(row.encrypted_content, row.channel_id)
         data["mentions"] = json.loads(row.mentions_json)
+        data['references'] = stored_references(row, scheduled=True)
     return data
 
 
@@ -161,7 +163,10 @@ def run_pending(session, *, limit=10, now=None):
                     values.update(encrypted_content="", claims_json="{}", failure_code="access_or_policy_changed", finished_at=now)
                 else:
                     values.update(claims_json="{}")
-                session.execute(update(model).where(model.id == identifier, model.status == "pending", model.due_at <= now).values(**values))
+                cancelled = session.execute(update(model).where(model.id == identifier, model.status == "pending", model.due_at <= now).values(**values))
+                if model is ScheduledMessage and cancelled.rowcount:
+                    from ..models.message_references import ScheduledMessageReference
+                    session.execute(delete(ScheduledMessageReference).where(ScheduledMessageReference.schedule_id == identifier))
                 session.commit()
             finally:
                 clear_scope(session)
@@ -185,8 +190,9 @@ def run_pending(session, *, limit=10, now=None):
 def deliver_scheduled(session, row, now):
     require_native_channel(session, row.channel_id)
     require_direct_message_writable(session, row.channel_id, row.user_id)
-    mentions = validate_mentions(session, row.channel_id, json.loads(row.mentions_json))
     content = decrypt_message(row.encrypted_content, row.channel_id)
+    references, mentions = validate_references(session, row.channel_id, row.user_id, content,
+        stored_references(row, session, scheduled=True), json.loads(row.mentions_json))
     from .enterprise_governance import enforce_native_content
     enforce_native_content(session, row.channel_id, row.user_id, content, surface="message")
     parent = session.get(Message, row.parent_id) if row.parent_id else None
@@ -196,6 +202,7 @@ def deliver_scheduled(session, row, now):
                       content=encrypt_message(content, row.channel_id), encrypted=True,
                       mentions=json.dumps(mentions), parent_id=row.parent_id)
     session.add(message)
+    store_references(session, message, references)
     if parent:
         parent.thread_count = (parent.thread_count or 0) + 1
         subscribe_participant(session, row.user_id, parent)
@@ -212,6 +219,7 @@ def deliver_scheduled(session, row, now):
         action_url="#channel=" + row.channel_id + "&message=" + message.id))
     row.status, row.message_id, row.finished_at = "sent", message.id, now
     row.encrypted_content, row.claims_json = "", "{}"
+    store_references(session, row, [], scheduled=True)
     session.add(row)
 
 

@@ -1,5 +1,10 @@
 # FreeCollab: produkt- och genomförandeplan för funktionerna 1–8
 
+**Aktuell status 2026-10-23:** [funktionsgranskningen](FEATURE_AUDIT.md)
+kopplar dessa krav och senare beslut till dagens kod, tester och luckor.
+Texten nedan är de historiska 0.5-kraven och får inte läsas som dagens
+versionsnummer eller ett löfte om att varje framtida utbyggnad är levererad.
+
 Status: arbetskrav för den nu byggda 0.5-kandidaten. Konton, arbetsytor, historiksökning, notiser, filversioner, sparade poster, beslut och direktmeddelanden har implementerats. Klientkrypteringen använder Matrix med Rust-kryptografi; integrationsverifieringen beskrivs separat i [E2EE_IMPLEMENTATION.md](E2EE_IMPLEMENTATION.md) och [VALIDATION.md](VALIDATION.md). Detaljerna nedan behålls som acceptanskrav och framtida utbyggnad, inte som ett påstående att varje framtidsönskemål är levererat.
 
 Målet är en sammanhållen samarbetsprodukt med personligt utseende, fungerande teamflöden och end-to-end-kryptering. 0.5 använder separata arbetsytor och en privat Matrix-tjänst för klientkrypterade kanaler. Listorna nedan beskriver produktkraven; verifieringsdokumentet skiljer genomförda kontroller från sådant som återstår inför en bredare lansering.

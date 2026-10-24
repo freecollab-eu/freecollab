@@ -6,6 +6,7 @@ import { api, type Channel } from '../lib/api';
 import { accountApi, type AccountSecurity } from '../lib/account-api';
 import { workspaceApi, type Workspace } from '../lib/workspace-api';
 import { useModalFocus } from '../lib/useModalFocus';
+import { ModalContinuationProvider, useCollaborationModal } from '../lib/useCollaborationModal';
 import { DocumentLinks } from './DocumentLinks';
 import { CalendarPanel } from './CalendarPanel';
 import { SSOConnections } from './SSOConnections';
@@ -27,11 +28,14 @@ import '../styles/account.css';
 import '../styles/integrations.css';
 
 type Tab = 'overview' | 'connections' | 'health' | 'documents' | 'calendar' | 'webhooks' | 'account' | 'people' | 'sync' | 'operations' | 'embedding' | 'connect' | 'apps' | 'governance' | 'slack-import' | 'library' | 'provider-accounts';
-interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations' | 'calendar' | 'provider-accounts'; initialConnectionId?: string | null }
+interface Props { workspaceId: string; channelId?: string | null; channels?: Channel[]; onClose: () => void; initialTab?: 'sync' | 'connections' | 'health' | 'operations' | 'calendar' | 'provider-accounts'; initialConnectionId?: string | null; initialRecipeId?: string }
 interface Capabilities { integrations?: { oidc?: boolean; webhooks?: boolean; document_links?: boolean; calendar_ics?: boolean; otrust?: boolean; workforce?: boolean; scim?: boolean; sync?: boolean } }
-export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId }: Props) {
+export function IntegrationsPanel({ workspaceId, channelId, channels: displayChannels = [], onClose, initialTab, initialConnectionId, initialRecipeId }: Props) {
   useI18n();
+  const writingLeave = useRef<(() => boolean) | null>(null);
   const dialog = useRef<HTMLElement>(null);
+  const overlay = useRef<HTMLDivElement>(null);
+  const modal = useCollaborationModal(overlay, t('Integrations'), `integrations:${workspaceId}`);
   const tabNavigation = useRef<HTMLElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const [tab, setTab] = useState<Tab>(initialTab || 'overview');
@@ -45,7 +49,7 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
   const [scopedSession, setScopedSession] = useState(false);
   const [managedAccount, setManagedAccount] = useState(false);
   const [ssoVersion, setSSOVersion] = useState(0);
-  const [connectionStart, setConnectionStart] = useState<{ recipeId?: string; channelId?: string; revision: number }>({ revision: 0 });
+  const [connectionStart, setConnectionStart] = useState<{ recipeId?: string; channelId?: string; revision: number }>({ revision: 0, recipeId: initialRecipeId });
   const [capabilities, setCapabilities] = useState<Capabilities>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -70,9 +74,10 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
   const close = () => {
     if (guard === 'busy') return;
     if (guard === 'secret') { setTab(guardOwner.current); setNotice(guardNotice(true)); return; }
+    if (writingLeave.current && !writingLeave.current()) return;
     onClose();
   };
-  useModalFocus(dialog, close);
+  useModalFocus(dialog, close, true, { suspended: modal.parked });
   useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; generation.current++; }; }, [workspaceId]);
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   useEffect(() => { const nav = tabNavigation.current; const active = nav?.querySelector<HTMLElement>('[aria-current="page"]'); if (nav && active && nav.scrollWidth > nav.clientWidth) nav.scrollTo({ left: Math.max(0, active.offsetLeft - nav.offsetLeft - nav.clientWidth / 2 + active.offsetWidth / 2), behavior: 'auto' }); }, [tab, loading]);
@@ -97,6 +102,8 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
     setLoading(false);
   }
   function select(next: Tab) {
+    if (next === tab) return;
+    if (writingLeave.current && !writingLeave.current()) return;
     if (guard === 'busy') return;
     if (guard === 'secret' && next !== guardOwner.current) { setNotice(guardNotice(false)); return; }
     setTab(next); setError(''); setNotice('');
@@ -120,7 +127,7 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
     ...(operator ? [{ id: 'operations' as const, label: t("Operations"), Icon: Activity }] : []),
   ];
   const features = capabilities.integrations || {};
-  return createPortal(<div className="fc-account-overlay" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
+  return createPortal(<ModalContinuationProvider modalId={modal.modalId}><div ref={overlay} hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined} className="fc-account-overlay" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
     <section ref={dialog} className="fc-account-panel fc-integrations-panel" data-section={tab} role="dialog" aria-modal="true" aria-label={t("Integrations")} tabIndex={-1}>
       <header className="fc-account-header"><div><span className="fc-kicker">{workspace?.name || t("Your shared workspace")}</span><h2>{t("Connected, thoughtfully.")}</h2><p>{t("Your documents, calendars and workflows. Access stays deliberate.")}</p></div><button type="button" data-autofocus className="fc-icon-button" aria-label={t("Close integrations")} onClick={close} disabled={guard === 'busy'}><X size={20} /></button></header>
       <nav ref={tabNavigation} className="fc-account-tabs" aria-label={t("Integration sections")}>{tabs.map(({ id, label, Icon }) => <button key={id} type="button" aria-current={tab === id ? 'page' : undefined} disabled={guard === 'busy'} onClick={() => select(id)}><Icon size={15} />{label}</button>)}</nav>
@@ -139,8 +146,8 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
             {operator && <button type="button" onClick={() => select('operations')}><Activity size={23} /><span className="fc-badge">{t("Operator access")}</span><strong>{t("Email & operations")}</strong><p>{t("Check private mail delivery, worker health and activity queues.")}</p><span className="fc-integration-card-action">{t("Open operations")}<ArrowUpRight size={15} /></span></button>}
           </div><div className="fc-integration-privacy"><ShieldCheck size={19} /><p>{t("Encrypted channel content stays on your trusted devices. Workflow events carry identifiers; opening an external document shares access with that document’s provider.")}</p></div></section>}
           {(tab === 'documents' || tab === 'calendar') && <>
-            <section className="fc-integration-channel-select"><label htmlFor="integration-channel">{t("Channel")}</label><select id="integration-channel" className="fc-input" value={selectedChannel} onChange={event => setSelectedChannel(event.target.value)}>{channels.map(channel => <option key={channel.id} value={channel.id}>{channel.name || t("Channel")}{channel.secure ? t(" · encrypted") : ''}</option>)}</select>{room?.secure && <span className="fc-account-muted"><ShieldCheck size={13} />{t("End-to-end encrypted")}</span>}</section>
-            {!room ? <div className="fc-integration-empty"><FolderOpen size={24} /><h3>{t("Choose a channel to get started.")}</h3><p>{t("Your channel memberships determine which documents and events you can access.")}</p></div> : tab === 'documents' ? <DocumentLinks key={`${room.id}:documents`} channelId={room.id} isAdmin={room.role === 'admin'} /> : <CalendarPanel key={`${room.id}:calendar`} channelId={room.id} isAdmin={room.role === 'admin'} />}
+            <section className="fc-integration-channel-select"><label htmlFor="integration-channel">{t("Channel")}</label><select id="integration-channel" className="fc-input" value={selectedChannel} onChange={event => { if (event.target.value !== selectedChannel && (!writingLeave.current || writingLeave.current())) setSelectedChannel(event.target.value); }}>{channels.map(channel => <option key={channel.id} value={channel.id}>{channel.name || t("Channel")}{channel.secure ? t(" · encrypted") : ''}</option>)}</select>{room?.secure && <span className="fc-account-muted"><ShieldCheck size={13} />{t("End-to-end encrypted")}</span>}</section>
+            {!room ? <div className="fc-integration-empty"><FolderOpen size={24} /><h3>{t("Choose a channel to get started.")}</h3><p>{t("Your channel memberships determine which documents and events you can access.")}</p></div> : tab === 'documents' ? <DocumentLinks workspaceId={workspaceId} leaveController={writingLeave} key={`${room.id}:documents`} channelId={room.id} isAdmin={room.role === 'admin'} /> : <CalendarPanel workspaceId={workspaceId} leaveController={writingLeave} key={`${room.id}:calendar`} channelId={room.id} isAdmin={room.role === 'admin'} />}
           </>}
           {tab === 'connections' && manages && !scopedSession && <ConnectionSetupPanel key={connectionStart.revision} workspaceId={workspaceId} channels={channels} security={security} isOwner={workspace?.role === 'owner'} initialRecipeId={connectionStart.recipeId} initialChannelId={connectionStart.channelId || channelId || undefined} onGuardChange={onGuardChange} />}
           {tab === 'health' && manages && !scopedSession && <ConnectionHealthPanel workspaceId={workspaceId} channels={channels} initialChannelId={channelId} onOpenSetup={(recipeId, selectedId) => { setConnectionStart(previous => ({ recipeId, channelId: selectedId, revision: previous.revision + 1 })); select('connections'); }} />}
@@ -160,5 +167,5 @@ export function IntegrationsPanel({ workspaceId, channelId, channels: displayCha
       </div>
       <footer className="fc-account-footer"><ShieldCheck size={15} /><span>{t("Connections follow your workspace and channel access.")}</span><button type="button" className="fc-button" disabled={guard === 'busy'} onClick={close}>{t("Done")}</button></footer>
     </section>
-  </div>, document.body);
+  </div></ModalContinuationProvider>, document.body);
 }

@@ -22,6 +22,7 @@ from .crypto import decrypt_message, encrypt_message
 from .matrix_bridge import is_secure_channel, validate_secure_event
 from .request_guard import recheck_actor
 from .workspaces import require_direct_message_writable
+from .field_references import ReferencedFields, require_field_reference_targets
 
 MAX_POSTS = 500
 MAX_COMMENTS = 200
@@ -86,10 +87,16 @@ class PollFields(Strict):
         return self
 
 
-class PostFields(Strict):
+class PostFields(ReferencedFields, Strict):
     title: str = Field(min_length=1, max_length=160)
     body: str = Field(default="", max_length=20000)
     poll: PollFields | None = None
+
+    def reference_texts(self):
+        return {"title": self.title, "body": self.body,
+                **({"poll.question": self.poll.question,
+                    **{"poll.option:" + item.id: item.label for item in self.poll.options}}
+                   if self.poll else {})}
 
     @field_validator("title")
     @classmethod
@@ -98,8 +105,11 @@ class PostFields(Strict):
         return value
 
 
-class CommentFields(Strict):
+class CommentFields(ReferencedFields, Strict):
     body: str = Field(min_length=1, max_length=4000)
+
+    def reference_texts(self):
+        return {"body": self.body}
 
     @field_validator("body")
     @classmethod
@@ -184,7 +194,7 @@ def poll_data(post):
     return json.loads(post.poll_json) if post.poll_json else None
 
 
-def validate_content(session, channel_id, kind, fields, event_id, actor_id):
+def validate_content(session, channel_id, kind, fields, event_id, actor_id, *, previous_item=None):
     if is_secure_channel(session, channel_id):
         if fields is not None or not event_id: raise HTTPException(409, "This channel requires an encrypted activity event")
         validate_secure_event(session, channel_id, event_id, actor_id)
@@ -194,6 +204,16 @@ def validate_content(session, channel_id, kind, fields, event_id, actor_id):
         payload = SCHEMAS[kind].model_validate(fields).model_dump(mode="json")
     except (ValueError, TypeError):
         raise HTTPException(422, "Invalid activity content") from None
+    previous = None
+    if previous_item and previous_item.revision and payload.get("field_references"):
+        if kind == "post" and previous_item.channel_id == channel_id:
+            previous = content_record(session, channel_id, kind, previous_item,
+                revision_for(session, kind, previous_item.id, previous_item.revision)).get("fields")
+        elif kind == "comment":
+            post = post_for(session, channel_id, previous_item.post_id)
+            previous = content_record(session, post.channel_id, kind, previous_item,
+                revision_for(session, kind, previous_item.id, previous_item.revision)).get("fields")
+    require_field_reference_targets(session, channel_id, actor_id, payload, previous=previous)
     from .enterprise_governance import enforce_native_document
     enforce_native_document(session, channel_id, actor_id, payload)
     return payload

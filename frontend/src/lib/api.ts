@@ -1,4 +1,5 @@
 // FreeCollab API client. Secure channels use the client-side Matrix adapter.
+import type { MessageReference } from './message-references';
 
 const getSecureMessaging = async () => (await import('./secure-client')).getSecureMessaging();
 
@@ -38,6 +39,8 @@ interface Channel {
   workspace_id?: string;
   secure?: boolean;
   matrix_room_id?: string;
+  description?: string;
+  metadata_version?: number;
 }
 
 interface ChannelInvite {
@@ -75,6 +78,7 @@ interface Message {
   parent_id?: string;
   thread_count?: number;
   mentions?: string[];
+  references?: MessageReference[];
   locked?: boolean;
 }
 
@@ -201,8 +205,9 @@ class FreeCollabAPI {
     return { adapter, channelId };
   }
 
-  // Embedded documents never adopt or modify the standalone application session.
-  private memoryOnly = typeof document !== 'undefined' && !!document.getElementById('root')?.hasAttribute('data-embed-application');
+  // Embedded clients and the real product demo never adopt a stored account.
+  // Decide before the constructor reads storage, including on a demo reload.
+  private memoryOnly = typeof document !== 'undefined' && ['data-embed-application', 'data-demo-application'].some(attribute => document.getElementById('root')?.hasAttribute(attribute));
   private token: string | null = null;
   private userId: string | null = null;
   private publicKey: string | null = null;
@@ -389,6 +394,16 @@ class FreeCollabAPI {
     return this.request<Channel>(`/channels/${channelId}`);
   }
 
+  async getChannelMetadata(channelId: string): Promise<import('./channel-metadata').ChannelMetadataRecord> {
+    return this.request<import('./channel-metadata').ChannelMetadataRecord>(`/channels/${encodeURIComponent(channelId)}/metadata`);
+  }
+
+  async updateChannelMetadata(channelId: string, input: { expected_version: number; name: string; description: string }): Promise<import('./channel-metadata').ChannelMetadataRecord> {
+    return this.request<import('./channel-metadata').ChannelMetadataRecord>(`/channels/${encodeURIComponent(channelId)}/metadata`, {
+      method: 'PATCH', body: JSON.stringify(input),
+    });
+  }
+
   async getChannelMembers(channelId: string): Promise<ChannelMember[]> {
     return this.request<ChannelMember[]>(`/channels/${channelId}/members`);
   }
@@ -422,21 +437,25 @@ class FreeCollabAPI {
   }
 
   // Messages
-  async sendMessage(channelId: string, content: string, mentions: string[] = []): Promise<Message> {
+  async sendMessage(channelId: string, content: string, mentions: string[] = [], references: MessageReference[] = []): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedMentions = [...mentions], selectedReferences = references.map(reference => ({ ...reference }));
     const secure = await this.secureChannel(channelId);
-    if (secure) return this.rememberMessage(await secure.sendMessage(channelId, content, undefined, mentions));
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) return this.rememberMessage(await secure.sendMessage(channelId, content, undefined, selectedMentions, selectedReferences));
     return this.request<Message>(`/messages/channels/${channelId}`, {
       method: 'POST',
-      body: JSON.stringify({ content, mentions }),
+      body: JSON.stringify({ content, mentions: selectedMentions, references: selectedReferences }),
     });
   }
 
-  async getMessages(channelId: string, options: { before?: string; limit?: number; signal?: AbortSignal } = {}): Promise<Message[]> {
+  async getMessages(channelId: string, options: { before?: string; limit?: number; signal?: AbortSignal; rootsOnly?: boolean } = {}): Promise<Message[]> {
     const secure = await this.secureChannel(channelId);
     if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
-    if (secure) return (await secure.getMessages(channelId, options.before, options.limit || 50)).map(message => this.rememberMessage(message));
+    if (secure) return (await secure.getMessages(channelId, options.before, options.limit || 50, options.rootsOnly || false)).map(message => this.rememberMessage(message));
     const params = new URLSearchParams({ limit: String(options.limit || 50) });
     if (options.before) params.set('before', options.before);
+    if (options.rootsOnly) params.set('roots_only', 'true');
     return (await this.request<Message[]>(`/messages/channels/${channelId}?${params}`, { signal: options.signal })).map(message => this.rememberMessage(message));
   }
 
@@ -544,19 +563,33 @@ class FreeCollabAPI {
   }
 
   // Threads
-  async replyToMessage(messageId: string, content: string): Promise<Message> {
+  async replyToMessage(messageId: string, content: string, mentions: string[] = [], references: MessageReference[] = []): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedMentions = [...mentions], selectedReferences = references.map(reference => ({ ...reference }));
     const secure = await this.secureMessage(messageId);
-    if (secure) return this.rememberMessage(await secure.adapter.sendMessage(secure.channelId, content, messageId));
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) return this.rememberMessage(await secure.adapter.sendMessage(secure.channelId, content, messageId, selectedMentions, selectedReferences));
     return this.request<Message>(`/threads/messages/${messageId}/reply`, {
       method: 'POST',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, mentions: selectedMentions, references: selectedReferences }),
     });
   }
 
-  async getThread(messageId: string): Promise<{ parent_id: string; thread_count: number; replies: Message[] }> {
+  async getThread(messageId: string, options: { before?: string; limit?: number; signal?: AbortSignal } = {}): Promise<{ parent_id: string; thread_count: number; replies: Message[]; has_more: boolean }> {
     const secure = await this.secureMessage(messageId);
-    if (secure) { const replies = (await secure.adapter.getThread(secure.channelId, messageId)).map(message => this.rememberMessage(message)); return { parent_id: messageId, thread_count: replies.length, replies }; }
-    return this.request(`/threads/messages/${messageId}`);
+    if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+    const limit = Math.max(1, Math.min(options.limit || 50, 100));
+    if (secure) {
+      const all = (await secure.adapter.getThread(secure.channelId, messageId)).map(message => this.rememberMessage(message));
+      if (options.signal?.aborted) throw new DOMException('Cancelled', 'AbortError');
+      const end = options.before ? all.findIndex(message => message.id === options.before) : all.length;
+      if (end < 0) throw new APIError('Thread cursor not found', 404);
+      const start = Math.max(0, end - limit);
+      return { parent_id: messageId, thread_count: all.length, replies: all.slice(start, end), has_more: start > 0 };
+    }
+    const query = new URLSearchParams({ limit: String(limit) });
+    if (options.before) query.set('before', options.before);
+    return this.request(`/threads/messages/${encodeURIComponent(messageId)}?${query}`, { signal: options.signal });
   }
 
   // Mentions
@@ -570,12 +603,15 @@ class FreeCollabAPI {
   }
 
   // Edit/Delete Messages
-  async editMessage(messageId: string, content: string): Promise<Message> {
+  async editMessage(messageId: string, content: string, references?: MessageReference[]): Promise<Message> {
+    const ownerToken = this.token, ownerUser = this.userId;
+    const selectedReferences = references?.map(reference => ({ ...reference }));
     const secure = await this.secureMessage(messageId);
-    if (secure) { await secure.adapter.editMessage(secure.channelId, messageId, content); return { id: messageId, channel_id: secure.channelId, author_id: this.userId!, content, encrypted: true, created_at: new Date().toISOString(), edited_at: new Date().toISOString() }; }
+    if (ownerToken !== this.token || ownerUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) { const updated = await secure.adapter.editMessage(secure.channelId, messageId, content, selectedReferences); return { id: messageId, channel_id: secure.channelId, author_id: this.userId!, content, ...updated, encrypted: true, created_at: new Date().toISOString(), edited_at: new Date().toISOString() }; }
     return this.request<Message>(`/messages/${messageId}`, {
       method: 'PUT',
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, references: selectedReferences || [], ...(selectedReferences !== undefined ? { mentions: [] } : {}) }),
     });
   }
 

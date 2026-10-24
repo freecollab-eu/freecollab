@@ -5,8 +5,10 @@ WORKDIR /app
 COPY package*.json ./
 RUN --mount=type=secret,id=proxy_ca,required=false \
     if [ -f /run/secrets/proxy_ca ]; then export NODE_EXTRA_CA_CERTS=/run/secrets/proxy_ca; fi; \
-    npm ci --strict-ssl=true --no-audit --no-fund
+    ONNXRUNTIME_NODE_INSTALL_CUDA=skip npm ci --strict-ssl=true --no-audit --no-fund
 COPY . .
+ARG VITE_PUBLIC_DEMO_URL
+ENV VITE_PUBLIC_DEMO_URL=$VITE_PUBLIC_DEMO_URL
 RUN npm run build && npm run build:widget
 FROM nginx:1.28-alpine
 ENV PORT=8080 FREECOLLAB_TRUSTED_EDGE_CIDR=127.0.0.1/32 NGINX_ENVSUBST_FILTER="^(PORT|FREECOLLAB_PUBLIC_HOST|FREECOLLAB_BACKEND_HOST|FREECOLLAB_TRUSTED_EDGE_CIDR)$"

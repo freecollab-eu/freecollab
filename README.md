@@ -2,15 +2,47 @@
 
 # FreeCollab
 
+**Current implementation audit (2026-10-23, review branch):**
+[Feature status, code, tests and remaining gaps](docs/FEATURE_AUDIT.md).
+This branch adds real channel details, native document stacks and message
+references, derived stack discussions and reviewed inline stack AI. The audit
+also corrects presence, thread history, app-AI consent and worker diagnostics.
+These changes are not yet a published release. The demo runs the actual product
+with isolated example accounts and data; the website shows a capture of that app.
+
 Self-hosted collaboration with workspaces, private and encrypted channels, direct messages, files and decisions. MIT licensed.
 
-![FreeCollab interactive product demo with sample conversations and workspace tools](docs/images/freecollab-demo.png)
+Run your own installation on a computer, private LAN/VPN server or chosen host.
+Accounts and data belong to that installation; no central FreeCollab account or
+cloud control plane is required. Microsoft, Google and AI are optional services.
+See [local and network self-hosting](docs/SELF_HOSTING.md) and [operations](docs/OPERATIONS.md).
+
+![FreeCollab conversation with its actual shared document and next step](docs/images/freecollab-demo.png)
 
 FreeCollab brings conversations, documents, tasks, files and meetings into a workspace you control. Choose personal colors/type and Swedish or English, use your own customer SSO and prepare your organization's Microsoft 365/Google apps. The MIT-licensed source has no per-seat software fee; you cover hosting and external provider costs. Start with one API process; additional replicas require the shared coordination and storage described in [SCALING.md](docs/SCALING.md).
 
-The website's **Explore the demo** opens a browser-only showroom at `/#demo`, with sample messages, tasks, editable Markdown, appearance and both provider setup guides. It requires no account and does not contact providers or save demo content. **Open App** enters the real authenticated application. For Railway, start with the [maintained deployment guide](RAILWAY_DEPLOY.md).
+The conversation, shared brief and next task use the same room components in
+the product and demo. Profile photos come from each person's account upload,
+with authenticated reads and initials when no photo is available. See
+[personal appearance and profile photos](docs/APPEARANCE.md).
 
-## Start the self-hosted pilot
+**Explore the demo** opens the same `Chat`, `WorkHub`, editors and settings as
+the product, backed by its normal API. Each visitor receives an isolated,
+temporary example workspace with real messages, Yjs documents, stacks, tasks,
+files, decisions, a calendar and an approval workflow. Reset creates a new
+example visit and revokes the previous one. Visits expire after one hour; this
+is not a place for real passwords, API keys or private files. External providers
+are disabled in the public sample installation. There are no template AI
+responses or separate demo feature components. See [the product demo](docs/PRODUCT_DEMO.md).
+
+The [independent website](deploy/website/README.md) serves the landing page and
+docs and embeds that separately deployed sample installation. An ordinary
+self-hosted installation does not expose anonymous demo bootstrap. Configure
+`VITE_PUBLIC_DEMO_URL` to your separate sample instance; without it, the demo
+entry reports that it is unavailable rather than adopting a real account or
+falling back to a simulated workspace.
+
+## Start your own installation
 
 Requirements: a Linux host, Python 3.11+, Docker with Compose v2, and a Docker daemon. From the repository root:
 
@@ -25,12 +57,13 @@ The pilot binds its frontend to loopback; the API and database have no host port
 
 ### First team workflow
 
-1. Open the app and create a personal account.
-2. Create a workspace and open **Get started** to set its name/logo, choose personal settings and create the first channel. Its creator is the channel admin.
-3. Use **Members** to create a single-use invitation link. Share it with the intended teammate; the recipient signs in and explicitly joins.
-4. Exchange messages, reply in threads and edit/delete your own messages.
-5. Upload a permitted file and download it from another member account. Nonmembers cannot read the channel or its files.
-6. Promote another member before the last channel admin leaves. Revoke an unused invitation or remove a member when access is no longer needed.
+1. Open the app and create a personal account with a password of at least 12 characters.
+2. Create a workspace. **Set up this workspace** appears in its empty room; **Get started** also remains in the tools menu for eligible administrators. Set the name/logo, choose personal settings and create the first channel. Its creator is the channel admin.
+3. In the guide, create a single-use workspace invitation and share it privately. The teammate signs in and explicitly accepts; this grants workspace membership, without access to existing channels.
+4. Choose **Open channel invitations** to open the selected channel's existing member panel. Its channel admin creates a separate invitation; the teammate accepts it to join that conversation. Workspace and channel administration are separate roles.
+5. Choose **Write the first message** to enter the conversation with the composer focused. Exchange messages, reply in threads and edit/delete your own messages.
+6. Upload a permitted file and download it from another member account. Nonmembers cannot read the channel or its files.
+7. Promote another member before the last channel admin leaves. Revoke an unused invitation or remove a member when access is no longer needed.
 
 Invitations expire and store only a token hash. They grant membership, not operator privileges. See [CHANNELS.md](docs/CHANNELS.md). Organization-managed teams can instead provision or invite people through their own SSO without creating personal passwords; see [customer onboarding](docs/OIDC.md).
 
@@ -45,7 +78,7 @@ There is no public self-promotion endpoint. Channel admins and installation admi
 
 ## Workspace tools
 
-Open **Work** in a channel for connected tools, including:
+Choose **/ All features** in a channel, or type `/`, for connected tools, including:
 
 1. [Projects and tasks](docs/PROJECT_TASKS.md): Kanban boards, assignees, deadlines, checklists, current file/decision links and immutable revision history.
 2. [Meetings](docs/MEETINGS.md): actual browser voice/video and screen sharing, host-admitted guests and explicit encryption status. Small calls support up to six admitted participants; Internet/NAT deployment needs operator-provided TURN.
@@ -60,15 +93,39 @@ Workflows, export and erasure jobs use the durable integration worker, included 
 
 The reference client includes email verification and recovery, MFA and sessions, workspace roles and guests, private channel membership, direct messages, real-time chat, threads, read receipts, reactions, mentions, local history search, file versions, private bookmarks and revisioned decisions. Optional client-side encryption uses a private Matrix service; see [the implementation and setup](docs/E2EE_IMPLEMENTATION.md). Member removal and logout are checked by REST and Socket.IO, including already connected clients.
 
-The reference client uses a Scandinavian-inspired layout with warm surfaces, restrained colors and generous spacing. Open **Appearance** in the chat sidebar to preview your own palette, typeface, text size, spacing and corners. Choose Linen, Fjord, Clay or Ink, or enter custom accent and canvas colors; light, dark and system modes are available. **Save changes** stores preferences on your account, **Cancel** restores your saved appearance, and **Reset** previews the defaults until you save. The four type choices use bundled fonts or your device's system font, with no font CDN. See [personal appearance and its API](docs/APPEARANCE.md).
+The reference client uses an open room with warm stone, ink, a vermilion accent and generous space for the conversation. Open **Appearance** in **More channel tools** or the channel drawer to preview your own palette, typeface, text size, spacing and corners. Choose Studio, Linen, Fjord, Clay or Ink, or enter custom accent and canvas colors; light, dark and system modes are available. **Save changes** stores preferences on your account, **Cancel** restores your saved appearance, and **Reset** previews the defaults until you save. Existing saved appearances stay intact. The four type choices use bundled fonts or your device's system font, with no font CDN. See [personal appearance and its API](docs/APPEARANCE.md).
+
+Use **/ All features** to open documents, tasks, decisions, meetings and the other permitted tools inside the current conversation. The composer keeps writing, attachments and sending primary; **Message options** holds scheduling, focus and relevant draft assistance. A message's actions can start a real document, task or decision. A compact expandable discussion summary links saved work, including work from replies that have not been opened. Work has shared **Full screen / Split view**, **Minimize** and close controls. Minimize or **Back to conversation** keeps the active editor and session open; **Continue work** restores its last view and field. Changing the layout saves nothing. Real close and target/channel/workspace changes retain pending-write and unsaved-draft guards. View state resets on scope changes and reload; direct resource links open their exact record. Saved documents open as readable pages with **Edit document / Done editing**; changing this view retains the live editor without saving. See [the six everyday flows](docs/FLOW_FIRST_UX.md), [work inside the conversation](docs/CONVERSATION_WORK.md) and [workspace modes](docs/WORKSPACE_MODES.md).
 
 ### Keyboard and reading
 
-Open **Search & switch** in the sidebar or press **Cmd/Ctrl+K** to find your channels, open Appearance/Files/Members or create a channel. Quick-switcher matches use the current loaded conversation. **Search all history** separately loads authorized channel history onto the device, displays synchronization progress and supports channel, person and date filters. Its decrypted search data is cleared when the dialog closes; it is not sent to a server search index. Use **↑/↓** to choose a result, **Enter** to open it and **Escape** to close; prefix a query with `#` to show channels only.
+Choose the full channel name in the topbar to **Switch channel**. The adjacent **Channel menu** opens members, files, details and the optional **Channel introduction**. Open **Quick switcher** in **More channel tools** or press **Cmd/Ctrl+K** to find your channels, open Appearance/Files/Members or create a channel. Quick-switcher matches use the current loaded conversation. **Search all history** separately loads authorized channel history onto the device, displays synchronization progress and supports channel, person and date filters. Its decrypted search data is cleared when the dialog closes; it is not sent to a server search index. Use **↑/↓** to choose a result, **Enter** to open it and **Escape** to close; prefix a query with `#` to show channels only.
 
-In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. When you scroll back, incoming messages preserve your reading position; **Jump to latest** takes you to the new messages and updates the read receipt. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
+Type **`/`** in the message composer, or choose **/ All features**, to search all
+available feature entry points in English or Swedish. Documents, tasks and
+decisions open in the conversation; normal save and consent controls remain.
+The feature button preserves an existing message draft. Commands also accept
+arguments: `/task "Review budget" @Ada` opens a reviewed task draft with the
+chosen person, and `/document "Meeting notes"` prepares a real document.
+The same **`/`** and **`@`** controls are available in document and collaboration
+writing fields. Open another task, document or discussion without replacing
+your existing work; each retained work area has its own view and close controls.
+Type **`@`** in a message, reply, edit or supported work field to choose people, channel
+groups, documents, tasks, files or the current channel. References keep stable
+identities. Chat mentions notify current members without granting access;
+links in autosaved documents do not send a notification on every edit.
+See the [command list](docs/SLASH_COMMANDS.md) and
+[references and groups](docs/MENTIONS_REFERENCES.md), and
+[concurrent collaboration and its boundaries](docs/UNIVERSAL_COLLABORATION.md).
 
-Advanced posts/flows, comments and the server AI-demo routes are **disabled by default**. `ENABLE_EXPERIMENTAL_FEATURES=true` opts into the advanced API routes; `ENABLE_DEMO_AI=true` separately opts into the AI-demo API. These are not dependencies of ordinary chat and need separate validation before use with real content.
+In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. Opening a channel prioritizes an explicit source, then your scoped reading position, then the first unread incoming message established by actual receipts. Messages remain oldest to newest, with the latest beside the composer. When you scroll back, incoming messages preserve your position; **Jump to latest** explicitly resumes following. Unknown or locked history is not automatically marked read. A successful own send or newer navigation takes precedence over an older pending history load. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
+
+Legacy posts/flows and their generic comments remain **disabled by default**;
+`ENABLE_EXPERIMENTAL_FEATURES=true` opts into those experimental API routes.
+Production activity feeds and document comments have their own authenticated
+APIs. The old anonymous server AI-demo routes are removed; `ENABLE_DEMO_AI` is
+deprecated and ignored. Use the opt-in, customer-configured [Copilot](docs/COPILOT.md)
+for real AI and the browser-only showroom for local demo examples.
 
 The typed **`@freecollab/components@0.13.0`** SDK provides independently mounted chat, files, feed, notifications, tasks, shared documents, calendar, meetings, workflows, decisions and local search, with Web Components and optional React wrappers. Native components handle server-readable channels. The trusted-origin embed runs the full client, including its Matrix encryption, device verification and recovery, inside a customer's product. Configure **Integrations → Embedding** with the product's exact origin; the customer-owned SSO popup supplies a one-use PKCE launch code. See the [component and embedding guide](docs/COMPONENT_SDK.md), [identity model](docs/EMBED_IDENTITY.md) and [versioned artifact/publication procedure](docs/SDK_RELEASES.md). The package is locally buildable and packable; npm publication is a separate authenticated release step.
 
@@ -82,7 +139,7 @@ In an active cross-installation Connect channel, **Work → Shared work** adds e
 
 [Native calling](docs/NATIVE_CALLING.md) adds iOS CallKit/PushKit and Android Telecom with LiveKit media. Customers configure their own push and LiveKit services. Admission requires the current signed-in source and channel access, and secure-channel participants explicitly acknowledge that this audio is readable by the SFU. Platform signing and physical-device acceptance remain customer release steps.
 
-[Distribution](docs/DISTRIBUTION.md) provides exact-version container/SDK pipelines, digest-pinned installation metadata, native signing workflows and a separate static website/demo image. A configured workflow is distinct from a published registry artifact or deployed website.
+[Distribution](docs/DISTRIBUTION.md) provides exact-version container/SDK pipelines, digest-pinned installation metadata, native signing workflows and a separate static website image. The [product demo](docs/PRODUCT_DEMO.md) runs its own disposable app/API installation. A configured workflow is distinct from a published registry artifact or deployed website.
 
 Native installation administrators also have **Integrations → Operations**: private security configuration, operator MFA coverage, upload-storage headroom, stalled queue claims and recent authenticated security actions. The bounded activity log excludes request bodies, query strings, IP addresses, email and credentials; it is a server-observed history under the database administrator's control. Configuration checks do not verify public certificates, provider delivery or backup freshness. See [security operations](docs/SECURITY_OPERATIONS.md).
 
@@ -153,7 +210,7 @@ The Compose frontend also proxies `/api` and `/socket.io`, so its `VITE_API_URL`
 | `SECURITY_AUDIT_RETENTION_DAYS` | Selected authenticated security activity age window; default 90 days, accepts 7–365. Existing backup copies have separate retention. |
 | `SECURITY_AUDIT_MAX_RECORDS` | Activity record target; default 100,000, accepts 1,000–1,000,000. Age/cap cleanup is bounded per recorded write. |
 | `ENABLE_EXPERIMENTAL_FEATURES` | Advanced API opt-in; default `false`. |
-| `ENABLE_DEMO_AI` | Demo-AI API opt-in; default `false`. |
+| `ENABLE_DEMO_AI` | Deprecated and ignored; legacy server demo routes are removed. |
 
 Use [OPERATIONS.md](docs/OPERATIONS.md) for initialization, health/readiness, database/file/key backup, restoration into a separate installation and deployment checks. The Railway, Fly and Render templates are configuration examples; they do not replace these checks or provision a complete verified hosted installation automatically.
 

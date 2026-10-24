@@ -1,5 +1,6 @@
 """Private production HTTPS/SSE proof and AI disclosure/action boundaries."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import hashlib
 import json
 import ssl
 import threading
@@ -30,31 +31,37 @@ def conversation(ai,channel='native'):
     return result.json()
 
 def ask(ai,row,**changes):
-    return ai[0].post(PREFIX+'/conversations/'+row['id']+'/turns',headers=headers(ai),json={'request_id':'private-request-1','expected_revision':row['revision'],'prompt':'@helper summarize','sources':[{'kind':'message','id':'old-root'}],'disclose_to_provider':True,**changes})
+    return ai[0].post(PREFIX+'/conversations/'+row['id']+'/turns',headers=headers(ai),json={'request_id':'private-request-1','expected_revision':row['revision'],'expected_config_revision':1,'prompt':'@helper summarize','sources':[{'kind':'message','id':'old-root'}],'disclose_to_provider':True,**changes})
 
 @pytest.fixture
 def provider(tmp_path,monkeypatch):
-    certificate,key=tls_fixture(tmp_path/'tls'); state={'requests':[],'tool':False,'truncate':False}
-    class Handler(BaseHTTPRequestHandler):
-        protocol_version='HTTP/1.1'
-        def log_message(self,*_): pass
-        def do_POST(self):
-            assert self.headers['Authorization']=='Bearer '+KEY
-            state['requests'].append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
-            delta={'tool_calls':[{'index':0,'id':'call_1','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'project','title':'Approved private task'})}}]} if state['tool'] else {'content':'Private answer [S1]'}
-            packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls' if state['tool'] else 'stop'}]}
-            body=('data: '+json.dumps(packet)+'\r\n\r\n'+('' if state['truncate'] else 'data: [DONE]\r\n\r\n')).encode()
-            self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Content-Length',str(len(body))); self.end_headers()
-            for index in range(0,len(body),7):self.wfile.write(body[index:index+7]);self.wfile.flush()
-    server=ThreadingHTTPServer(('127.0.0.1',0),Handler); context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(certificate,key);server.socket=context.wrap_socket(server.socket,server_side=True)
-    thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();endpoint='https://localhost:'+str(server.server_port)+'/v1/chat/completions'
+    certificate,key=tls_fixture(tmp_path/'tls'); servers=[]; endpoints=set()
+    def recipient():
+        state={'requests':[],'tool':False,'truncate':False,'create_recipient':recipient}
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version='HTTP/1.1'
+            def log_message(self,*_): pass
+            def do_POST(self):
+                assert self.headers['Authorization']=='Bearer '+KEY
+                state['requests'].append(json.loads(self.rfile.read(int(self.headers['Content-Length']))))
+                delta={'tool_calls':[{'index':0,'id':'call_1','type':'function','function':{'name':'create_task','arguments':json.dumps({'project_id':'project','title':'Approved private task'})}}]} if state['tool'] else {'content':'Private answer [S1]'}
+                packet={'choices':[{'index':0,'delta':delta,'finish_reason':'tool_calls' if state['tool'] else 'stop'}]}
+                body=(''.join('data: '+json.dumps(frame)+'\r\n\r\n' for frame in state.get('packets',[packet]))+('' if state['truncate'] else 'data: [DONE]\r\n\r\n')).encode()
+                self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Content-Length',str(len(body))); self.end_headers()
+                for index in range(0,len(body),7):self.wfile.write(body[index:index+7]);self.wfile.flush()
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler); context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(certificate,key);server.socket=context.wrap_socket(server.socket,server_side=True)
+        thread=threading.Thread(target=server.serve_forever,daemon=True);thread.start();servers.append((server,thread))
+        endpoint='https://localhost:'+str(server.server_port)+'/v1/chat/completions';endpoints.add(endpoint)
+        return endpoint,state
+    endpoint,state=recipient()
     normal=service.transport.normalize_url;addresses=service.transport.public_addresses;proxy=service.transport._proxy
     monkeypatch.setenv('SSL_CERT_FILE',certificate)
-    monkeypatch.setattr(service.transport,'normalize_url',lambda value,**kw:(urlsplit(value),'localhost') if value==endpoint else normal(value,**kw))
+    monkeypatch.setattr(service.transport,'normalize_url',lambda value,**kw:(urlsplit(value),'localhost') if value in endpoints else normal(value,**kw))
     monkeypatch.setattr(service.transport,'public_addresses',lambda host,**kw:['127.0.0.1'] if host=='localhost' else addresses(host,**kw))
     monkeypatch.setattr(service.transport,'_proxy',lambda host,port:None if host=='localhost' else proxy(host,port))
     try:yield endpoint,state
-    finally:server.shutdown();server.server_close();thread.join(timeout=5)
+    finally:
+        for server,thread in servers:server.shutdown();server.server_close();thread.join(timeout=5)
 
 def use_provider(ai,endpoint):
     with Session(ai[1]) as session:
@@ -93,6 +100,107 @@ def test_truncated_real_provider_stream_never_publishes_partial_answer(ai,provid
     with Session(ai[1]) as session:
         turn=session.exec(select(CopilotTurn)).one();assert turn.status=='failed' and turn.encrypted_result is None and turn.completed_at is not None
 
+def test_turn_requires_a_strict_positive_reviewed_provider_revision_before_allocating_or_sending(ai,provider):
+    endpoint,state=provider;use_provider(ai,endpoint);row=conversation(ai)
+    body={'request_id':'provider-revision-validation','expected_revision':row['revision'],'prompt':'@helper summarize','sources':[{'kind':'message','id':'old-root'}],'disclose_to_provider':True}
+    for payload in [body,*[{**body,'expected_config_revision':value} for value in (None,0,-1,True,'1',1.0)]]:
+        response=ai[0].post(PREFIX+'/conversations/'+row['id']+'/turns',headers=headers(ai),json=payload)
+        assert response.status_code==422,response.text
+    assert not state['requests']
+    with Session(ai[1]) as session:assert not session.exec(select(CopilotTurn)).all()
+
+def test_old_review_cannot_send_to_a_reconsented_new_provider_but_fresh_review_reaches_only_that_recipient(ai,provider):
+    old_endpoint,old_state=provider;use_provider(ai,old_endpoint);row=conversation(ai)
+    changed=ai[0].put(PREFIX+'/config',headers=headers(ai),json={'password':PASSWORD,'expected_revision':1,'enabled':True,'endpoint':'https://reviewed-provider.example/v1/chat/completions','model':'reviewed-fixture-model','api_key':KEY,'agents':[{'name':'helper','tools':['context_sources']}]})
+    assert changed.status_code==200,changed.text
+    assert changed.json()['revision']==2
+    assert ai[0].put(PREFIX+'/consent',headers=headers(ai),json={'enabled':True,'config_revision':2}).status_code==200
+    new_endpoint,new_state=old_state['create_recipient']();assert new_endpoint!=old_endpoint
+    use_provider(ai,new_endpoint)
+    current=ai[0].get(PREFIX,headers=headers(ai)).json()
+    assert current['consented'] and current['config_revision']==2 and current['provider']=={'endpoint':new_endpoint,'model':'reviewed-fixture-model'}
+    stale=ask(ai,row)
+    assert stale.status_code==409,stale.text
+    assert not old_state['requests'] and not new_state['requests']
+    with Session(ai[1]) as session:assert not session.exec(select(CopilotTurn)).all()
+    fresh=ask(ai,row,expected_config_revision=2)
+    assert fresh.status_code==200,fresh.text
+    assert not old_state['requests'] and len(new_state['requests'])==1
+    assert new_state['requests'][0]['model']=='reviewed-fixture-model'
+    assert 'OLD PRIVATE CONTENT' in json.dumps(new_state['requests'][0])
+    assert ask(ai,row,expected_config_revision=2).json()['id']==fresh.json()['id'] and len(new_state['requests'])==1
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one();assert turn.config_revision==2 and turn.status=='complete'
+
+def test_reviewed_native_text_digest_blocks_a_source_edited_after_review_before_sending_or_allocating(ai,provider):
+    from app.models.message import Message
+    from app.services.crypto import encrypt_message
+    endpoint,state=provider;use_provider(ai,endpoint);row=conversation(ai)
+    reviewed=hashlib.sha256(b'OLD PRIVATE CONTENT').hexdigest();current='CHANGED AFTER REVIEW – rätt källa'
+    with Session(ai[1]) as session:
+        message=session.get(Message,'old-root');message.content=encrypt_message(current,'native');session.add(message);session.commit()
+    stale=ask(ai,row,sources=[{'kind':'message','id':'old-root','expected_text_sha256':reviewed}])
+    assert stale.status_code==409,stale.text
+    assert not state['requests']
+    with Session(ai[1]) as session:assert not session.exec(select(CopilotTurn)).all()
+    matching=hashlib.sha256(current.encode('utf-8')).hexdigest()
+    fresh=ask(ai,row,sources=[{'kind':'message','id':'old-root','expected_text_sha256':matching}])
+    assert fresh.status_code==200,fresh.text
+    assert len(state['requests'])==1 and current in json.dumps(state['requests'][0],ensure_ascii=False)
+    assert 'OLD PRIVATE CONTENT' not in json.dumps(state['requests'][0])
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one();refs=service.opened(turn.encrypted_sources,'sources',turn.id)
+        assert turn.status=='complete' and 'expected_text_sha256' not in refs[0]
+    legacy=ask(ai,conversation(ai),sources=[{'kind':'message','id':'old-root'}])
+    assert legacy.status_code==200,legacy.text
+    assert len(state['requests'])==2
+
+def test_reviewed_text_digest_accepts_only_lowercase_sha256_shape_before_any_provider_request(ai,provider):
+    endpoint,state=provider;use_provider(ai,endpoint);row=conversation(ai)
+    for digest in ('','a'*63,'a'*65,'g'*64,'A'*64):
+        response=ask(ai,row,sources=[{'kind':'message','id':'old-root','expected_text_sha256':digest}])
+        assert response.status_code==422,response.text
+    assert not state['requests']
+    with Session(ai[1]) as session:assert not session.exec(select(CopilotTurn)).all()
+
+@pytest.mark.parametrize('ending,truncate,expected',[
+    ('stop',False,200),
+    ('end_turn',False,502),
+    (None,False,502),
+    ('stop',True,502),
+    ('length',False,502),
+    ('unknown_finish',False,502),
+],ids=['normal-stop','end-turn-is-not-terminal','missing-terminal','missing-done','truncated-length','unknown-finish'])
+def test_real_https_end_turn_is_an_intermediate_marker_not_a_terminal_finish(ai,provider,ending,truncate,expected):
+    endpoint,state=provider;state['truncate']=truncate
+    state['packets']=[
+        {'choices':[{'index':0,'delta':{'content':'Private '},'finish_reason':'end_turn'}]},
+        {'choices':[{'index':0,'delta':{'content':'answer [S1]'},'finish_reason':None}]},
+        {'choices':[{'index':0,'delta':{},'finish_reason':ending}]},
+    ]
+    use_provider(ai,endpoint);row=conversation(ai);response=ask(ai,row)
+    assert response.status_code==expected,response.text
+    assert len(state['requests'])==1 and state['requests'][0]['stream'] is True
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one()
+        if expected==200:
+            assert response.json()['text']=='Private answer [S1]' and turn.status=='complete'
+            assert service.opened(turn.encrypted_result,'result',turn.id)['text']==response.json()['text']
+        else:
+            assert turn.status=='failed' and turn.encrypted_result is None and turn.completed_at is not None
+            assert ai[0].get(PREFIX+'/conversations/'+row['id'],headers=headers(ai)).json()['turns']==[]
+
+def test_real_https_end_turn_cannot_reopen_an_actually_finished_choice(ai,provider):
+    endpoint,state=provider
+    state['packets']=[
+        {'choices':[{'index':0,'delta':{'content':'Private answer [S1]'},'finish_reason':'stop'}]},
+        {'choices':[{'index':0,'delta':{'content':' must not be published'},'finish_reason':'end_turn'}]},
+    ]
+    use_provider(ai,endpoint);response=ask(ai,conversation(ai))
+    assert response.status_code==502
+    with Session(ai[1]) as session:
+        turn=session.exec(select(CopilotTurn)).one();assert turn.status=='failed' and turn.encrypted_result is None
+
 def test_revoked_membership_after_provider_network_discards_output(ai,monkeypatch):
     def revoke(*_):
         with Session(ai[1]) as session:session.delete(session.get(ChannelMember,('native','owner')));session.commit()
@@ -106,7 +214,10 @@ def test_secure_device_context_needs_per_request_disclosure_and_has_no_stored_pl
     monkeypatch.setattr(service,'completion',lambda provider,payload:seen.append(payload) or {'text':'Ephemeral [S1]','tool_calls':[]})
     row=conversation(ai,'secure');sources=[{'kind':'message','id':'$selected','event_ids':['$selected'],'text':'DEVICE DECRYPTED SECRET'}]
     assert ask(ai,row,sources=sources).status_code==422
-    response=ask(ai,row,sources=sources,disclose_decrypted_content=True);assert response.status_code==200,response.text
+    mismatched=[{**sources[0],'expected_text_sha256':'0'*64}]
+    assert ask(ai,row,sources=mismatched,disclose_decrypted_content=True).status_code==409 and not seen
+    reviewed=[{**sources[0],'expected_text_sha256':hashlib.sha256(sources[0]['text'].encode('utf-8')).hexdigest()}]
+    response=ask(ai,row,sources=reviewed,disclose_decrypted_content=True);assert response.status_code==200,response.text
     assert response.json()['ephemeral'] and 'DEVICE DECRYPTED SECRET' in json.dumps(seen)
     assert validated and all(channel=='secure' for channel,_,_ in validated)
     assert all(tool['function']['name']!='create_task' for tool in seen[0]['tools'])

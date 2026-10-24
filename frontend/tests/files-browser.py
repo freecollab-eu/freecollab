@@ -4,6 +4,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/files-br
 CHAT_BASE_URL defaults to http://127.0.0.1:3000; FILE_API_URL defaults to the Vite
 /api proxy. To test a separate disposable API, set FILE_API_URL to its origin.
 """
+from ui_navigation import open_chat_tool
 import base64
 import json
 import os
@@ -72,8 +73,8 @@ with sync_playwright() as p:
         if API != BASE + '/api':
             page.route('**/api/**', lambda route: route.fulfill(response=route.fetch(url=API + route.request.url.split('/api', 1)[1])))
         page.goto(BASE, wait_until='domcontentloaded', timeout=90000)
-        expect(page.get_by_placeholder('Message #' + channel['name'])).to_be_visible(timeout=90000)
-        page.get_by_role('button', name='Channel files', exact=True).click()
+        expect(page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)).to_be_visible(timeout=90000)
+        open_chat_tool(page, 'Channel files')
         text = f'file-{RUN}.txt'; png = f'image-{RUN}.png'; pdf = f'reference-{RUN}.pdf'
         png_bytes = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0e8AAAAASUVORK5CYII=')
         page.get_by_label('Choose a file', exact=True).set_input_files([
@@ -116,15 +117,20 @@ with sync_playwright() as p:
         print('PASS: local image preview revokes blob URLs; PDF canvas renders and paginates with local worker', flush=True)
 
         held = []; retry_keys = []; upload_path = '**/api/files/channels/' + channel_id
+        page.evaluate('window.__filesProofHeldPostCount = 0')
         def hold(route):
             if route.request.method == 'POST':
                 retry_keys.append(route.request.headers.get('idempotency-key')); held.append(route)
+                page.evaluate('(count) => { window.__filesProofHeldPostCount = count; }', len(held))
             else:
                 route.fallback()
         page.route(upload_path, hold)
         cancel_name = f'cancel-{RUN}.txt'
         page.get_by_label('Choose a file', exact=True).set_input_files({'name': cancel_name, 'mimeType': 'text/plain', 'buffer': b'cancel then retry'})
         expect(page.get_by_role('button', name='Cancel upload ' + cancel_name, exact=True)).to_be_visible()
+        # Cancel is also valid while queued. This proof requires an in-flight
+        # request so its retry compares two actual idempotency headers.
+        page.wait_for_function('() => window.__filesProofHeldPostCount === 1', timeout=10000)
         page.get_by_role('button', name='Cancel upload ' + cancel_name, exact=True).click()
         queue_row = page.locator('.fc-upload-item').filter(has_text=cancel_name)
         expect(queue_row).to_contain_text('Cancelled locally')
@@ -142,6 +148,8 @@ with sync_playwright() as p:
         page.route(upload_path, retry)
         page.get_by_role('button', name='Retry upload ' + cancel_name, exact=True).click()
         expect(page.get_by_role('button', name='Download ' + cancel_name, exact=True)).to_be_visible()
+        assert len(retry_keys) == 2
+        assert all(retry_keys)
         assert retry_keys[0] == retry_keys[1]
         page.unroute(upload_path, retry)
         print('PASS: cancel does not claim delivery; safe retry uses the same upload identity', flush=True)
@@ -172,7 +180,7 @@ with sync_playwright() as p:
         page.get_by_role('button', name='Close channel panel', exact=True).click()
         decision_title = 'Searchable decision ' + RUN
         decision = api('POST', '/channels/' + channel_id + '/decisions', auth['access_token'], {'title': decision_title, 'content': 'Decision reasoning ' + RUN, 'status': 'accepted'})
-        page.get_by_role('button', name='Search all history', exact=True).click()
+        open_chat_tool(page, 'Search all history')
         search = page.get_by_role('dialog', name='Search all history', exact=True)
         expect(search.get_by_text('Loading full history', exact=False)).to_have_count(0, timeout=90000)
         search.get_by_label('Search content type', exact=True).select_option('files')
@@ -193,12 +201,12 @@ with sync_playwright() as p:
         search.get_by_label('Search messages', exact=True).fill('Decision reasoning ' + RUN)
         expect(search.locator('.fc-history-result')).to_have_count(1)
         search.locator('.fc-history-result').click()
-        notebook = page.get_by_role('dialog', name='Channel notebook', exact=True)
+        notebook = page.get_by_role('region', name='Decisions in this conversation', exact=True)
         expect(notebook.get_by_text(decision_title, exact=True)).to_be_visible()
         expect(page.locator('#decision-' + decision['id'])).to_be_focused()
-        page.get_by_role('button', name='Close channel notebook', exact=True).click()
+        page.get_by_role('button', name='Close this work', exact=True).click()
         print('PASS: latest-filename search, file type filter, result download/preview, decision text search and jump to focused decision', flush=True)
-        page.get_by_role('button', name='Channel files', exact=True).click()
+        open_chat_tool(page, 'Channel files')
         page.set_viewport_size({'width': 390, 'height': 844})
         assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
         page.get_by_role('button', name='Preview ' + png, exact=True).click()

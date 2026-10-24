@@ -15,6 +15,27 @@ const issues: Record<string, string> = {
   smtp_authentication_missing: 'SMTP authentication has not been configured.',
   public_url_not_https: 'The public application URL needs HTTPS before external use.',
 };
+const queueNames: Record<string, string> = {
+  'avatar-cleanup': 'Profile photo cleanup',
+  webhooks: 'Webhooks', otrust: 'Version proofs', sync: 'Cloud synchronization',
+  'calendar-delivery': 'Calendar delivery', workflows: 'Workflows', data: 'Data controls',
+  push: 'Web Push', native_push: 'Native push', apps: 'App commands', recaps: 'Private recap schedules',
+  chat: 'Scheduled messages and reminders', 'native-call-cleanup': 'Call capability cleanup',
+  'slack-import-cleanup': 'Slack preview cleanup', 'personal-oauth-cleanup': 'Provider consent checks',
+};
+const queueStates: Record<string, string> = {
+  pending: 'Pending', processing: 'Processing', delivered: 'Delivered', failed: 'Failed', cancelled: 'Cancelled',
+  completed: 'Completed', uncertain: 'Uncertain', scheduled: 'Scheduled', disabled: 'Disabled', inactive: 'Inactive',
+  sent: 'Sent', notified: 'Reminder created', notification_pending: 'Notifications waiting', draft: 'Draft',
+  oauth_required: 'Authorization required', oauth_pending: 'Authorization pending', tested: 'Tested',
+  connected: 'Connected', attention: 'Needs attention', disconnected: 'Disconnected',
+  waiting_approval: 'Waiting for approval', rejected: 'Rejected', expired: 'Expired', ready: 'Ready',
+  erasing_files: 'Erasing files', proof_available: 'Available proof',
+};
+function queueSummary(counts: Record<string, number | null | undefined>) {
+  const states = Object.entries(counts).filter(([name, count]) => name !== 'oldest_pending_seconds' && typeof count === 'number' && count > 0);
+  return states.length ? states.map(([name, count]) => `${count} ${t(queueStates[name] || name.replace(/_/g, ' '))}`).join(' · ') : t('No retained records');
+}
 export function OperationsPanel({ security }: { security: AccountSecurity | null }) {
   useI18n();
   const [status, setStatus] = useState<OperationsStatus | null>(null);
@@ -75,7 +96,7 @@ export function OperationsPanel({ security }: { security: AccountSecurity | null
         {status.mail.issues.length > 0 && <ul className="fc-integration-issues">{status.mail.issues.map(issue => <li key={issue}><AlertCircle size={14} /><span>{issues[issue] || issue.replace(/_/g, ' ')}</span></li>)}</ul>}
         <p className="fc-account-muted">{t("Mail worker last seen: ")}{date(status.worker.last_seen_at)}</p>
         <div className="fc-integration-queue-grid">{Object.entries(status.queue).filter(([key]) => ['pending', 'processing', 'failed', 'delivered'].includes(key)).map(([key, count]) => <div key={key}><strong>{count ?? 0}</strong><span>{key}</span></div>)}</div>
-        {status.integration_queues && <div className="fc-integration-queue-details">{Object.entries(status.integration_queues).map(([name, counts]) => <p key={name}><strong>{name === 'otrust' ? t("Version proofs") : name === 'webhooks' ? t("Webhooks") : name}</strong><span>{counts.pending || 0} {t(" pending · ")}{counts.processing || 0} {t(" processing · ")}{counts.failed || 0} {t(" failed")}</span></p>)}</div>}
+        {status.integration_queues && <><p className="fc-account-muted">{t('Counts describe retained work and local cleanup checks. Scheduled work is not a completed delivery.')}</p><div className="fc-integration-queue-details">{Object.entries(status.integration_queues).map(([name, counts]) => <p key={name} data-worker-queue={name}><strong>{t(queueNames[name] || name)}</strong><span>{queueSummary(counts)}</span></p>)}</div></>}
         <div className="fc-account-actions"><button type="button" className="fc-button" disabled={!!busy || status.mail.mode === 'disabled' || !security?.email_verified} onClick={() => choose('test')}><Send size={15} />{t("Send test email")}</button><button type="button" className="fc-button" disabled={!!busy} onClick={() => void metrics()}><Download size={15} />{t("Download metrics")}</button></div>
         {!security?.email_verified && <p className="fc-account-muted">{t("Verify your own account email before sending a test message.")}</p>}
       </> : <button type="button" className="fc-button" onClick={() => void load()}><RefreshCw size={15} />{t("Try again")}</button>}

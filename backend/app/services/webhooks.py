@@ -5,7 +5,6 @@ verification, including through an inherited HTTP(S) proxy. No redirect or direc
 fallback can turn a delivery into access to a private network.
 """
 import argparse
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 import hashlib
@@ -14,7 +13,6 @@ import ipaddress
 import json
 import re
 import secrets
-import socket
 import ssl
 import time
 from urllib.parse import urlsplit, urlunsplit, unquote
@@ -33,13 +31,12 @@ from ..models.user import User
 from ..models.webhook import WebhookDelivery, WebhookEndpoint
 from ..models.workspace import WorkspaceChannel
 from .account_security import seal_private, unseal_private
+from . import oidc_transport as public_transport
 from .workspaces import lock_workspace, require_workspace_admin, workspace_allows_channel
 
 EVENT_TYPES = {"message.created", "file.created", "file.version.created", "decision.created", "decision.updated", "channel.activity"}
 MAX_ATTEMPTS = 8
 LEASE_SECONDS = 90
-_FORBIDDEN_IPV6 = tuple(ipaddress.ip_network(value) for value in ("64:ff9b::/96", "64:ff9b:1::/48", "2001::/32", "2002::/16"))
-_DNS_RESOLVER = ThreadPoolExecutor(max_workers=4, thread_name_prefix="webhook-dns")
 
 
 def webhooks_enabled() -> bool:
@@ -79,27 +76,17 @@ def normalize_url(value: str) -> tuple[str, str, str]:
 
 
 def public_ip(address) -> bool:
-    value = ipaddress.ip_address(address)
-    if not value.is_global:
-        return False
-    if value.version == 6:
-        if value.ipv4_mapped and not value.ipv4_mapped.is_global:
-            return False
-        if any(value in network for network in _FORBIDDEN_IPV6):
-            return False
-    return True
+    return public_transport.public_ip(address)
 
 
 def public_addresses(host: str) -> list[str]:
-    lookup = _DNS_RESOLVER.submit(socket.getaddrinfo, host, 443, type=socket.SOCK_STREAM)
+    # Share the bounded admission pool and public-unicast policy used by the
+    # other customer-configured transports. A DNS timeout cannot leave an
+    # unlimited queue of work behind four stalled operating-system lookups.
     try:
-        addresses = sorted({row[4][0] for row in lookup.result(timeout=5)})
-    except (OSError, ValueError, FutureTimeout):
-        lookup.cancel()
-        raise HTTPException(400, "Webhook hostname could not be resolved") from None
-    if not addresses or any(not public_ip(value) for value in addresses):
-        raise HTTPException(400, "Webhook destinations must resolve only to public addresses")
-    return addresses
+        return public_transport.public_addresses(host)
+    except public_transport.TransportError:
+        raise HTTPException(400, "Webhook destinations must resolve only to public addresses") from None
 
 
 def validate_destination(value: str):
@@ -182,7 +169,7 @@ def _enqueue(session, row, event_type: str, resource_id: str | None, channel_id:
     return delivery
 
 
-def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id: str):
+def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id: str, *, workflow_metadata: dict | None = None):
     """Join the caller's content transaction; disabled installations do no work."""
     if getattr(settings, "workflows_enabled", False):
         kind = {"file.created": "file_uploaded", "file.version.created": "file_uploaded",
@@ -191,7 +178,7 @@ def enqueue_channel_event(session, channel_id: str, event_type: str, resource_id
             mapping = session.get(WorkspaceChannel, channel_id)
             if mapping:
                 from .workflow import queue_event
-                queue_event(session, event_type + ":" + resource_id, mapping.workspace_id, channel_id, kind, resource_id)
+                queue_event(session, event_type + ":" + resource_id, mapping.workspace_id, channel_id, kind, resource_id, metadata=workflow_metadata)
     if not webhooks_enabled():
         return 0
     if event_type not in EVENT_TYPES or not isinstance(resource_id, str) or not 1 <= len(resource_id) <= 1024:
@@ -221,9 +208,10 @@ def signature_headers(secret: str, payload: bytes, event_id: str, event_type: st
 
 
 class _TLSNameStream(httpcore.NetworkStream):
-    def __init__(self, stream, ip, hostname, deadline=None):
+    def __init__(self, stream, ip, hostname, deadline=None, *, proxy_tls=False):
         self.stream, self.ip, self.hostname = stream, ip, hostname
         self.deadline = time.monotonic() + 30 if deadline is None else deadline
+        self.proxy_tls = proxy_tls
 
     def timeout(self, value):
         remaining = self.deadline - time.monotonic()
@@ -246,21 +234,32 @@ class _TLSNameStream(httpcore.NetworkStream):
     def start_tls(self, ssl_context, server_hostname=None, timeout=None):
         # A proxy's own HTTPS certificate keeps its own name. Only the pinned
         # destination's inner TLS handshake uses the original webhook hostname.
-        name = self.hostname if server_hostname == self.ip else server_hostname
+        name = server_hostname if self.proxy_tls else self.hostname if server_hostname == self.ip else server_hostname
         return _TLSNameStream(self.stream.start_tls(ssl_context, name, self.timeout(timeout)), self.ip, self.hostname, self.deadline)
 
 
 class _PinnedBackend(httpcore.NetworkBackend):
-    def __init__(self, ip, hostname):
+    def __init__(self, ip, hostname, *, proxy_tls=False):
         self.ip, self.hostname, self.backend = ip, hostname, httpcore.SyncBackend()
         self.deadline = time.monotonic() + 30
+        self.proxy_tls = proxy_tls
 
     def connect_tcp(self, host, port, timeout=None, local_address=None, socket_options=None):
         remaining = self.deadline - time.monotonic()
         if remaining <= 0:
             raise httpcore.ConnectTimeout("Webhook delivery deadline reached")
+        # The pinned destination is numeric, but a trusted inherited proxy may
+        # have a hostname. Resolve it under the same deadline rather than leave
+        # an unbounded getaddrinfo call inside socket.create_connection.
+        try:
+            ipaddress.ip_address(host)
+        except ValueError:
+            host = public_transport._resolve(host, port, min(timeout, remaining) if timeout is not None else remaining)[0]
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise httpcore.ConnectTimeout("Webhook delivery deadline reached")
         stream = self.backend.connect_tcp(host, port, min(timeout, remaining) if timeout is not None else remaining, local_address, socket_options)
-        return _TLSNameStream(stream, self.ip, self.hostname, self.deadline)
+        return _TLSNameStream(stream, self.ip, self.hostname, self.deadline, proxy_tls=self.proxy_tls)
 
     def connect_unix_socket(self, *args, **kwargs):
         raise httpcore.ConnectError("Unix sockets are not webhook destinations")
@@ -277,19 +276,20 @@ def post_webhook(url: str, payload: bytes, headers: dict):
     pinned_url = urlunsplit(("https", authority, parts.path, parts.query, ""))
     # Honor the worker's CA and outbound proxy. There is deliberately no retry
     # through a direct connection when a configured proxy denies a destination.
-    context = ssl.create_default_context()
-    backend = _PinnedBackend(address, host)
     proxy = getproxies().get("https")
-    options = {"ssl_context": context, "network_backend": backend, "max_connections": 1, "max_keepalive_connections": 0}
+    proxy_tls = False
     if proxy:
         parsed = urlsplit(proxy)
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise ValueError("Unsupported outbound proxy")
         auth = (unquote(parsed.username).encode(), unquote(parsed.password or "").encode()) if parsed.username else None
         proxy_url = urlunsplit((parsed.scheme, ("[" + parsed.hostname + "]" if ":" in parsed.hostname else parsed.hostname) + (":" + str(parsed.port) if parsed.port else ""), "", "", ""))
-        pool = httpcore.HTTPProxy(proxy_url, proxy_auth=auth, proxy_ssl_context=context if parsed.scheme == "https" else None, **options)
-    else:
-        pool = httpcore.ConnectionPool(**options)
+        proxy_tls = parsed.scheme == "https"
+    context = ssl.create_default_context()
+    backend = _PinnedBackend(address, host, proxy_tls=proxy_tls)
+    options = {"ssl_context": context, "network_backend": backend, "max_connections": 1, "max_keepalive_connections": 0}
+    pool = (httpcore.HTTPProxy(proxy_url, proxy_auth=auth, proxy_ssl_context=context if proxy_tls else None, **options)
+            if proxy else httpcore.ConnectionPool(**options))
     outgoing = {**headers, "Host": parts.netloc}
     with pool:
         with pool.stream("POST", pinned_url, headers=outgoing, content=payload,

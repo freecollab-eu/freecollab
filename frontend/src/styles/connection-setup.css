@@ -25,7 +25,7 @@
 .fc-connection-title h3 { margin: .45rem 0 .65rem; font-family: var(--fc-heading-font); font-weight: 400; font-size: 1.8rem; letter-spacing: -.025em; }
 .fc-connection-title h3:focus { outline: none; }
 .fc-connection-steps { display: flex; margin: 0 0 1.5rem; border-bottom: 1px solid var(--fc-border); }
-.fc-connection-steps button { flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; padding: .7rem .5rem; border: 0; border-bottom: 2px solid transparent; color: var(--fc-muted); background: transparent; font: inherit; font-size: .8rem; cursor: pointer; }
+.fc-connection-steps button { flex: 1; min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 48px; padding: .7rem .5rem; border: 0; border-bottom: 2px solid transparent; color: var(--fc-muted); background: transparent; font: inherit; font-size: .8rem; overflow-wrap: anywhere; cursor: pointer; }
 .fc-connection-steps button > span { display: grid; place-items: center; width: 1.4rem; height: 1.4rem; border: 1px solid currentColor; border-radius: 50%; font-size: .65rem; }
 .fc-connection-steps button[aria-current="step"] { color: var(--fc-accent); border-bottom-color: currentColor; }
 .fc-connection-steps button:disabled { opacity: .5; cursor: default; }
@@ -73,7 +73,7 @@
   .fc-connection-choice label { flex-basis: 100%; }
   .fc-connection-title { flex-wrap: wrap; }
   .fc-connection-title h3 { font-size: 1.65rem; }
-  .fc-connection-steps button { gap: .3rem; padding-inline: .2rem; font-size: .74rem; }
+  .fc-connection-steps button { flex-direction: column; gap: .3rem; padding-inline: .2rem; font-size: .74rem; }
   .fc-connection-steps button > span { width: 1.15rem; height: 1.15rem; font-size: .6rem; }
   .fc-connection-next > button { width: 100%; justify-content: center; }
   .fc-connection-channel { padding: .8rem; }

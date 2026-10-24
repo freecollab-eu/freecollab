@@ -6,6 +6,7 @@ from urllib.parse import urlsplit
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, SecretStr, field_validator, model_validator
 from typing import Literal
+from pathlib import Path
 
 
 class Settings(BaseSettings):
@@ -13,6 +14,12 @@ class Settings(BaseSettings):
 
     environment: Literal["development", "test", "production"] = "development"
     database_url: str = "sqlite:///./freecollab.db"
+    # A separate disposable sample-data installation, never an operator database.
+    demo_instance: bool = False
+    demo_data_path: str = "/data/public-demo"
+    demo_session_minutes: int = Field(default=60, ge=5, le=240)
+    demo_max_visits: int = Field(default=40, ge=2, le=100)
+    demo_session_rate_limit_per_minute: int = Field(default=6, ge=1, le=20)
     jwt_secret: str = "change-me-in-production"
     storage_path: str = "./data/files"
     storage_backend: Literal["local", "s3"] = "local"
@@ -27,6 +34,8 @@ class Settings(BaseSettings):
     s3_allow_insecure_http: bool = False
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000"]
     enable_experimental_features: bool = False
+    # Deprecated compatibility setting: the anonymous provider demo is retired.
+    # This flag never enables routes; production AI uses copilot_enabled.
     enable_demo_ai: bool = False
     message_encryption_keys: dict[str, SecretStr] = Field(default_factory=dict)
     message_encryption_active_key_id: str = "local-dev"
@@ -112,6 +121,41 @@ class Settings(BaseSettings):
     def optional_redis_url(cls, value):
         raw = value.get_secret_value() if isinstance(value, SecretStr) else value
         return None if raw is None or raw == "" else value
+
+    @model_validator(mode="after")
+    def validate_public_demo(self):
+        if not self.demo_instance:
+            return self
+        from sqlalchemy.engine import make_url
+        root = Path(self.demo_data_path)
+        if not root.is_absolute() or root.name not in {"public-demo", "freecollab-public-demo"} or root.is_symlink():
+            raise ValueError("DEMO_DATA_PATH must be an absolute dedicated public-demo directory")
+        root = root.resolve()
+        try:
+            url = make_url(self.database_url)
+        except Exception:
+            raise ValueError("Public demo requires its dedicated SQLite database") from None
+        if (url.drivername != "sqlite" or url.host or url.username or url.password or url.query
+                or not url.database or Path(url.database).resolve() != root / "public-demo.sqlite"):
+            raise ValueError("Public demo requires DATABASE_URL at DEMO_DATA_PATH/public-demo.sqlite")
+        required_paths = {
+            "STORAGE_PATH": (self.storage_path, root / "files"),
+            "MESSAGE_ENCRYPTION_KEY_FILE": (self.message_encryption_key_file, root / "message-keys.json"),
+            "ACCOUNT_SECURITY_KEY_FILE": (self.account_security_key_file, root / "account-security.key"),
+        }
+        for name, (actual, expected) in required_paths.items():
+            if Path(actual).resolve() != expected or Path(actual).is_symlink():
+                raise ValueError(name + " must use its dedicated public demo path")
+        if self.storage_backend != "local" or self.mail_delivery_mode != "disabled" or self.redis_url:
+            raise ValueError("Public demo requires local isolated storage, disabled mail and no shared runtime")
+        flags = (self.matrix_enabled, self.connect_federation_enabled, self.oidc_enabled,
+                 self.webhooks_enabled, self.sync_enabled, self.otrust_enabled,
+                 self.cloud_files_enabled, self.external_meetings_enabled, self.copilot_enabled,
+                 self.push_enabled, self.native_push_enabled, self.native_calls_enabled,
+                 self.enable_experimental_features, self.enterprise_search_enabled, self.data_controls_enabled)
+        if any(flags) or self.meetings_sfu_provider != "disabled" or self.meetings_ice_servers or self.meetings_turn_urls:
+            raise ValueError("Public demo cannot enable external providers, federation, push or public media services")
+        return self
 
     @model_validator(mode="after")
     def validate_object_storage(self):

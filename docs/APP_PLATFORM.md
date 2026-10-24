@@ -163,6 +163,18 @@ after the provider returns. Summaries must cite real supplied `[S1]` identifiers
 private drafts retain the checked citation metadata. Opening the panel or loading
 drafts never makes a provider request.
 
+Immediate draft requests and new/updated recap schedules require a strict positive
+`expected_config_revision` from the saved provider configuration the user reviewed.
+A stale revision returns HTTP409 before draft creation, scheduling or provider
+networking, even if another tab has already opted in to the replacement provider.
+Refresh and review the destination/model again; clients must not silently substitute
+a new revision. The channel UI shows the actual hostname/model, source count, API
+charges, separate chat subscriptions, retention and output fallibility before Send.
+Selected message text is fully readable in its scrollable review list. It is not
+silently truncated. The client binds each selected native message with
+`expected_text_sha256`; a message edited after review is rejected before disclosure.
+Selections over eight messages or 24,000 context characters are refused.
+
 AI can produce one of three private drafts:
 
 * A cited summary, published as a channel card only after a separate review.
@@ -181,7 +193,13 @@ Channel administrators who also administer the workspace can explicitly consent
 to a recurring private recap tied to the current provider revision. Each run uses
 at most the **eight most recent new native messages** in its bounded time window;
 this is not a complete-history digest. The schedule supports 1–168 hour intervals,
-durable due/claim state, manual stop, and automatic pause after consent, grant or
+with the first check due after one interval. Every explicit enable/regrant starts
+a new future-only disclosure cursor: messages from before that grant, including
+messages written while paused or under a previous provider, are not backfilled.
+The existing `last_run_at` field is this last disclosure/check cursor, initialized
+at consent; it is not proof that a successful completion already occurred.
+Legacy rows without a cursor start at their first check without sending history.
+Schedules retain durable due/claim state, manual stop, and automatic pause after consent, grant or
 provider failure. A schedule being stopped while the provider runs discards the
 new draft. Recaps never publish automatically. Revoked membership/consent or
 changed sources make private drafts unavailable; owners can delete their private
@@ -211,3 +229,7 @@ real Integrations and Work Hub, stores a once-only secret, invokes a reviewed
 command, delivers to a real receiver, publishes a real signed callback card,
 checks honest unconfigured AI, persisted Swedish and mobile layout. No production
 accounts, provider keys, external messages or external browser requests are used.
+The same browser proof now configures a private loopback HTTPS/SSE provider, checks
+full selected text and the actual revision/digest request fields, keeps a generated
+summary private until separate publication, and rejects an old recap-schedule
+review after a provider change and fresh consent in another tab.

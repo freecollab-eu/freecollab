@@ -5,6 +5,7 @@ CHAT_BASE_URL defaults to http://127.0.0.1:3000. With no CHROMIUM_PATH, use the
 browser installed by `playwright install chromium`. Creates unique accounts and
 channels; never target a customer database. Requires Python Playwright.
 """
+from ui_navigation import choose_chat_channel, close_channels, open_channels, open_chat_tool
 import json
 import os
 import re
@@ -53,25 +54,26 @@ def credentials(page):
 
 
 def create_channel(page, name):
+    open_channels(page)
     page.get_by_role('button', name='Create channel', exact=True).click()
     page.get_by_label('Channel name', exact=True).fill(name)
     encrypted = page.get_by_role('checkbox', name=re.compile('^End-to-end encrypted'))
     if encrypted.count():
         encrypted.uncheck()
     page.get_by_role('button', name='Create', exact=True).click()
-    expect(page.get_by_placeholder('Message #' + name)).to_be_visible()
+    expect(page.get_by_role('textbox', name='Message #' + name, exact=True)).to_be_visible()
 
 
 def write(page, channel, content):
-    composer = page.get_by_placeholder('Message #' + channel)
+    composer = page.get_by_role('textbox', name='Message #' + channel, exact=True)
     composer.fill(content)
     composer.press('Enter')
     expect(composer).to_have_value('')
 
 
 def choose_channel(page, name):
-    page.get_by_role('button').filter(has=page.get_by_text(name, exact=True)).click()
-    expect(page.get_by_placeholder('Message #' + name)).to_be_visible()
+    choose_chat_channel(page, name)
+    expect(page.get_by_role('textbox', name='Message #' + name, exact=True)).to_be_visible()
 
 
 with sync_playwright() as p:
@@ -85,10 +87,11 @@ with sync_playwright() as p:
             page.set_default_timeout(45000)
             page.on('pageerror', lambda error: errors.append(str(error)))
         register_ui(alice, 'Pilot Alice', f'alice-{RUN}@example.com')
+        open_channels(alice)
         expect(alice.get_by_text('No channels yet', exact=True)).to_be_visible(timeout=90000)
         shared = 'Pilot-shared-' + RUN
         create_channel(alice, shared)
-        alice.get_by_role('button', name='Channel members', exact=True).click()
+        open_chat_tool(alice, 'Channel members')
         alice.get_by_role('button', name='Create invitation link', exact=True).click()
         link = alice.get_by_label('Invitation link', exact=True)
         expect(link).to_have_value(re.compile(r'.*#invite=.+'))
@@ -100,7 +103,7 @@ with sync_playwright() as p:
         expect(bob.get_by_role('button', name='Join channel', exact=True)).to_be_visible(timeout=90000)
         bob.reload(wait_until='domcontentloaded')
         bob.get_by_role('button', name='Join channel', exact=True).click()
-        expect(bob.get_by_placeholder('Message #' + shared)).to_be_visible(timeout=90000)
+        expect(bob.get_by_role('textbox', name='Message #' + shared, exact=True)).to_be_visible(timeout=90000)
         assert '#invite=' not in bob.url
         print('PASS: UI registration, channel creation, invitation across signup/reload, explicit join and last-admin guard', flush=True)
 
@@ -111,8 +114,10 @@ with sync_playwright() as p:
         expect(alice.get_by_text(bob_text, exact=True)).to_be_visible()
         expect(bob.get_by_text(bob_text, exact=True)).to_have_count(1)
         assert alice.get_by_label('Channel messages', exact=True).evaluate("""element => [...element.querySelectorAll('*')].flatMap(node => [...node.childNodes]).every(node => node.nodeType !== Node.TEXT_NODE || node.textContent.trim() !== '0')"""), 'A zero-count thread rendered a stray zero'
+        open_channels(alice)
         sidebar = alice.locator('.fc-chat-sidebar')
         assert sidebar.evaluate("element => getComputedStyle(element).borderRadius") == '0px', 'Sidebar inherited the loading-spinner circle'
+        close_channels(alice)
         bob.reload(wait_until='domcontentloaded')
         expect(bob.get_by_text(alice_text, exact=True)).to_be_visible()
         print('PASS: two-user realtime, deduplication and persisted history', flush=True)
@@ -131,10 +136,10 @@ with sync_playwright() as p:
                 route.continue_()
         alice.route(pattern, fail_send)
         draft = 'Retained failed draft ' + RUN
-        alice.get_by_placeholder('Message #' + shared).fill(draft)
+        alice.get_by_role('textbox', name='Message #' + shared, exact=True).fill(draft)
         alice.get_by_role('button', name='Send message', exact=True).click()
         expect(alice.get_by_role('alert')).to_contain_text('Message was not sent')
-        expect(alice.get_by_placeholder('Message #' + shared)).to_have_value(draft)
+        expect(alice.get_by_role('textbox', name='Message #' + shared, exact=True)).to_have_value(draft)
         alice.unroute(pattern, fail_send)
         alice.get_by_role('button', name='Send message', exact=True).click()
         expect(bob.get_by_text(draft, exact=True)).to_be_visible()
@@ -168,14 +173,14 @@ with sync_playwright() as p:
             expect(alice.locator('.fc-channel-panel')).to_have_attribute('aria-busy', 'false')
 
         alice.route(file_pattern, hold_file_list)
-        alice.get_by_role('button', name='Channel files', exact=True).click()
+        open_chat_tool(alice, 'Channel files')
         wait_for_held_file_lists()
         assert all(response.json() == [] for _, response in held_file_lists)
         alice.get_by_label('Choose a file', exact=True).set_input_files({'name': filename, 'mimeType': 'text/plain', 'buffer': content})
         expect(alice.get_by_text(filename, exact=True)).to_be_visible()
         release_file_lists()
         expect(alice.get_by_text(filename, exact=True)).to_be_visible()
-        bob.get_by_role('button', name='Channel files', exact=True).click()
+        open_chat_tool(bob, 'Channel files')
         expect(bob.get_by_text(filename, exact=True)).to_be_visible()
         expect(bob.get_by_role('button', name='Delete ' + filename, exact=True)).to_have_count(0)
         with bob.expect_download() as download_info:
@@ -209,18 +214,18 @@ with sync_playwright() as p:
         write(alice, private, private_text)
         expect(bob.get_by_text(private_text, exact=True)).to_have_count(0)
         choose_channel(alice, shared)
-        alice.get_by_role('button', name='Channel members', exact=True).click()
+        open_chat_tool(alice, 'Channel members')
         bob_member = alice.locator('li').filter(has=alice.get_by_text('Pilot Bob', exact=True))
         alice.once('dialog', lambda dialog: dialog.accept())
         bob_member.get_by_role('button', name='Remove', exact=True).click()
-        expect(bob.get_by_placeholder('Message #' + shared)).to_have_count(0)
+        expect(bob.get_by_role('textbox', name='Message #' + shared, exact=True)).to_have_count(0)
         expect(bob.get_by_text('Select a channel', exact=True)).to_be_visible()
         expect(bob.get_by_text(alice_text, exact=True)).to_have_count(0)
         print('PASS: private-channel isolation and immediate membership revocation in UI', flush=True)
 
         alice.get_by_role('button', name='Close channel panel', exact=True).click()
         alice.set_viewport_size({'width': 390, 'height': 844})
-        expect(alice.get_by_placeholder('Message #' + shared)).to_be_visible()
+        expect(alice.get_by_role('textbox', name='Message #' + shared, exact=True)).to_be_visible()
         assert alice.evaluate('document.documentElement.scrollWidth <= window.innerWidth'), 'Core chat overflowed a mobile viewport'
         alice.get_by_role('button', name='More channel tools', exact=True).click()
         alice.get_by_role('group', name='More channel tools', exact=True).get_by_role('button', name='Channel files', exact=True).click()
@@ -230,7 +235,7 @@ with sync_playwright() as p:
         print('PASS: mobile chat and files panel fit the viewport', flush=True)
 
         bob_auth = credentials(bob)
-        bob.get_by_role('button', name='Sign out', exact=True).click()
+        open_chat_tool(bob, 'Sign out')
         expect(bob.get_by_role('navigation').get_by_role('button', name='Open App', exact=True)).to_be_visible()
         assert bob.evaluate("localStorage.getItem('freecollab_token')") is None
         api('GET', '/auth/me', bob_auth['token'], expected=401)

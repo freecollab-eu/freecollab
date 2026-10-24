@@ -22,6 +22,7 @@ import tempfile
 import time
 
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import activate_chat_feature, capture_work_card, conversation_work_region, close_work_card
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('document_proof_helpers', Path(__file__).with_name('remote-sync-browser.py'))
@@ -233,10 +234,10 @@ def secure_proof(base, private, workspace, users, pages, results, environment, p
 
 
 def open_documents(page):
-    page.get_by_role('button', name='Open workspace tools', exact=True).click()
-    panel = page.get_by_role('dialog', name='Workspace tools', exact=True)
-    panel.get_by_role('tab', name='Documents', exact=True).click()
-    expect(panel.get_by_role('heading', name='Shared documents', exact=True)).to_be_visible()
+    from ui_navigation import open_conversation_work
+    panel = open_conversation_work(page, 'documents')
+    expect(panel).to_have_attribute('data-work-kind', 'documents')
+    expect(panel.get_by_role('tablist')).to_have_count(0)
     return panel
 
 
@@ -252,6 +253,10 @@ def login(page, app, email, workspace_id, user_id):
 
 def select_document(panel):
     panel.get_by_role('button', name=re.compile('^' + re.escape(TITLE))).click()
+    expect(panel.locator('.fc-shared-reading-page')).to_be_visible()
+    expect(panel.locator('.fc-shared-reading-title')).to_have_text(TITLE)
+    expect(panel.get_by_label('Document text', exact=True)).to_be_hidden()
+    panel.get_by_role('button', name='Edit document', exact=True).click()
     expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
     expect(panel.get_by_text('All edits synchronized', exact=True)).to_be_visible()
 
@@ -318,6 +323,7 @@ def main():
                     expect(first.get_by_label('Document text', exact=True)).to_be_editable()
                     first.get_by_label('Document text', exact=True).fill(BASELINE)
                     expect(first.get_by_text('All edits synchronized', exact=True)).to_be_visible()
+                    first.locator('details.fc-shared-flow-options > summary').click()
                     first.get_by_role('button', name='Named revisions', exact=True).click()
                     first.get_by_label('Revision name', exact=True).fill('Before concurrent edits')
                     first.get_by_role('button', name='Save revision', exact=True).click()
@@ -329,6 +335,27 @@ def main():
                     document_id = records[0]['id']; endpoint = '/channels/' + channel['id'] + '/shared-documents/' + document_id
                     results['real_two_member_editor_and_named_baseline'] = True
 
+                    stage = 'read/edit retains the actual shared editor without publishing a view change'
+                    editor = first.get_by_label('Document text', exact=True)
+                    retained = editor.element_handle()
+                    editor.focus(); editor.press('Home'); editor.press('Shift+ArrowRight'); editor.press('Shift+ArrowRight')
+                    selection = editor.evaluate('node=>({start:node.selectionStart,end:node.selectionEnd,top:node.scrollTop})')
+                    before_view_updates = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    first.get_by_role('button', name='Done editing', exact=True).click()
+                    expect(first.locator('.fc-shared-reading-page')).to_be_visible()
+                    expect(first.locator('.fc-shared-reading-body')).to_have_text(BASELINE)
+                    assert retained.evaluate('node=>node.isConnected'), 'Reading view remounted the real Yjs editor'
+                    expect(editor).to_be_hidden()
+                    first.get_by_role('button', name='Edit document', exact=True).click()
+                    assert editor.evaluate('(node,previous)=>node===previous', retained), 'Edit reopened a different textarea'
+                    expect(editor).to_be_focused()
+                    expect(editor).to_have_js_property('selectionStart', selection['start'])
+                    expect(editor).to_have_js_property('selectionEnd', selection['end'])
+                    expect(editor).to_have_js_property('scrollTop', selection['top'])
+                    after_view_updates = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    assert after_view_updates == before_view_updates, 'Read/edit controls published a document update'
+                    results['saved_reading_page_and_same_editor_selection_without_view_writes'] = True
+
                     stage = 'simultaneous disconnected edits with no last-write-wins replacement'
                     for context in contexts: context.set_offline(True)
                     first.get_by_label('Document text', exact=True).fill(BASELINE + 'Alice concurrent note.\n')
@@ -337,11 +364,31 @@ def main():
                         expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
                         expect(panel.get_by_text(re.compile('edit[s]? waiting to sync'))).to_be_visible()
                         expect(panel.get_by_role('button', name='Retry synchronization', exact=True)).to_be_visible()
-                    pages[0].once('dialog', lambda dialog: dialog.dismiss())
-                    first.get_by_role('tab', name='Tasks', exact=True).click()
-                    expect(first.get_by_role('tab', name='Documents', exact=True)).to_have_attribute('aria-selected', 'true')
+                    first_editor = first.get_by_label('Document text', exact=True).element_handle()
+                    second_editor = second.get_by_label('Document text', exact=True).element_handle()
+                    queued_before = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    sibling_writes, sibling_dialogs = [], []
+                    def record_sibling_write(request):
+                        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and any(part in request.url for part in ('/projects', '/messages/channels/', '/mobile/offline/channels/', '/threads/messages/')): sibling_writes.append(request.url)
+                    def reject_sibling_discard(dialog):
+                        sibling_dialogs.append(dialog.message); dialog.dismiss()
+                    pages[0].on('request', record_sibling_write)
+                    pages[0].on('dialog', reject_sibling_discard)
+                    activate_chat_feature(pages[0], 'task')
+                    sibling = conversation_work_region(pages[0], kind='tasks')
+                    assert capture_work_card(pages[0], sibling).get_attribute('data-collaboration-work-id') != capture_work_card(pages[0], first).get_attribute('data-collaboration-work-id')
+                    expect(first).to_have_attribute('data-work-kind', 'documents')
                     expect(first.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Alice concurrent note.\n')
-                    results['offline_editing_and_unsynced_navigation_guard'] = True
+                    expect(second.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Bob concurrent note.\n')
+                    assert first.get_by_label('Document text', exact=True).evaluate('(node,original)=>node===original&&original.isConnected', first_editor)
+                    assert second.get_by_label('Document text', exact=True).evaluate('(node,original)=>node===original&&original.isConnected', second_editor)
+                    close_work_card(pages[0], sibling)
+                    assert not sibling_dialogs, 'Opening and closing a clean sibling must retain both queued document editors'
+                    assert not sibling_writes, 'Opening a sibling must not create native tasks or deliver messages'
+                    assert helpers.api(base, 'GET', endpoint + '/updates', alice) == queued_before, 'Opening a sibling must not flush either real offline document edit'
+                    pages[0].remove_listener('request', record_sibling_write)
+                    pages[0].remove_listener('dialog', reject_sibling_discard)
+                    results['offline_editing_and_queued_yjs_survive_independent_sibling_work'] = True
                     for context in reversed(contexts): context.set_offline(False)
                     for panel in [first, second]:
                         editor = panel.get_by_label('Document text', exact=True)

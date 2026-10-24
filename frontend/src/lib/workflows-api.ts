@@ -1,3 +1,5 @@
+import { validateFieldReferences, type FieldReferences } from './field-references';
+import { validateResourceReferenceTargets } from './resource-reference-targets';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import type { SSOReauthentication } from './integrations-api';
@@ -18,6 +20,7 @@ export interface WorkflowDefinition {
   created_by: string; granted_by: string; created_at: string; updated_at: string; fields: WorkflowFields;
 }
 export interface WorkflowVote {
+  field_references?: FieldReferences;
   user_id: string; step_index: number; choice: 'approve' | 'reject'; created_at: string;
   matrix_event_id: string | null; note: string | null; resolution_error?: string | null;
 }
@@ -46,7 +49,7 @@ async function resolvedRun(row: WorkflowRun): Promise<WorkflowRun> {
           || event.getSender() !== `@fc_${vote.user_id}:${domain}` || content.run_id !== row.id
           || content.step_index !== vote.step_index || content.choice !== vote.choice
           || typeof content.note !== 'string' || content.note.length > 2000) throw new Error('Encrypted approval note could not be verified.');
-      return { ...vote, note: content.note, resolution_error: null };
+      return { ...vote, note: content.note, field_references: validateFieldReferences({ note: content.note }, content.field_references), resolution_error: null };
     } catch (failure) { return { ...vote, note: null, resolution_error: failure instanceof Error ? failure.message : 'Unlock recovery to read this encrypted note.' }; }
   }));
   if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
@@ -76,16 +79,19 @@ export const workflowsApi = {
     api.request<{ id: string; status: string }>(path(workspaceId, channelId) + '/' + segment(id) + '/run', post({})),
   cancel: (workspaceId: string, channelId: string, id: string, values: SSOReauthentication) =>
     api.request<WorkflowRun>(path(workspaceId, channelId) + '/runs/' + segment(id) + '/cancel', post(values)),
-  async vote(workspaceId: string, channelId: string, run: WorkflowRun, choice: 'approve' | 'reject', note: string) {
+  async vote(workspaceId: string, channelId: string, run: WorkflowRun, choice: 'approve' | 'reject', note: string, references?: FieldReferences) {
     const token = api.getAccessToken(), secure = await getSecureMessaging();
     const encrypted = await secure.handles(channelId);
     if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
-    let body: Record<string, unknown> = { choice, ...(note.trim() ? { note: note.trim() } : {}) };
+    const field_references = validateFieldReferences({ note }, references);
+    note = field_references?.note?.length ? note : note.trim();
+    await validateResourceReferenceTargets(channelId, { note }, field_references, token, encrypted);
+    let body: Record<string, unknown> = { choice, ...(note.trim() ? { note, ...(field_references ? { field_references } : {}) } : {}) };
     if (encrypted) {
       let matrix_event_id: string | undefined;
       if (note.trim()) {
         const event = await secure.sendEvent(channelId, 'eu.freecollab.workflow.vote', {
-          run_id: run.id, step_index: run.step_index, choice, note: note.trim(),
+          run_id: run.id, step_index: run.step_index, choice, note, ...(field_references ? { field_references } : {}),
         });
         matrix_event_id = event.event_id;
       }

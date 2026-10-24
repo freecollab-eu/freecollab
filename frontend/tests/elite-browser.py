@@ -12,6 +12,7 @@ import uuid
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import reveal_message_actions
 
 
 BASE = os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
@@ -41,12 +42,12 @@ def login(page, user, channel):
     page.get_by_label('Email', exact=True).fill(user['email'])
     page.get_by_label('Password', exact=True).fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
-    expect(page.get_by_placeholder('Message #' + channel['name'])).to_be_visible(timeout=90000)
+    expect(page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)).to_be_visible(timeout=90000)
     page.evaluate('() => document.fonts.ready')
 
 
 def composer(page, channel):
-    return page.get_by_placeholder('Message #' + channel['name'])
+    return page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)
 
 
 def send(channel, user, content):
@@ -56,7 +57,7 @@ def send(channel, user, content):
 def choose_channel(page, channel):
     nav = page.get_by_role('navigation', name='Channels', exact=True)
     if not nav.is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
+        page.get_by_role('button', name='Switch channel', exact=True).click()
     nav.get_by_role('button').filter(has=page.get_by_text(channel['name'], exact=True)).click()
     expect(composer(page, channel)).to_be_visible()
 
@@ -119,13 +120,19 @@ notes = api('POST', '/channels', alice, {
 old_needle = 'archived-needle-' + RUN
 loaded_needle = 'diagram-needle-' + RUN
 private_needle = 'notes-only-' + RUN
+history = []
 for index in range(60):
     content = old_needle if index == 0 else loaded_needle if index == 48 else (
         f'Conversation {index:02d} · {RUN}\n'
         'A clear thought with enough room to read.\n'
         'A second detail worth returning to.'
     )
-    send(studio, alice if index % 2 else bob, content)
+    history.append(send(studio, alice if index % 2 else bob, content))
+# This proof exercises the quick switcher's loaded-window boundary. Give its
+# person a genuine receipt within that window so the new unread-entry seeker
+# does not correctly load all sixty unread roots before the search assertions.
+api('POST', '/read-receipts/channels/' + studio['id'], alice, {'message_id': history[11]['id']})
+assert last_read(studio, alice) == history[11]['id']
 send(notes, alice, private_needle)
 
 
@@ -162,7 +169,7 @@ with sync_playwright() as p:
         assert any(record['content'] == multiline for record in api('GET', '/messages/channels/' + studio['id'], alice))
         assert len(submitted) == 1, 'Enter must make exactly one durable multiline delivery request'
         article = page.locator('article').filter(has=page.get_by_text(multiline, exact=True))
-        article.hover()
+        reveal_message_actions(article)
         article.get_by_role('button', name='Edit', exact=True).click()
         edit = page.get_by_label('Edit message', exact=True)
         expect(edit).to_have_value(multiline)
@@ -237,6 +244,7 @@ with sync_playwright() as p:
         wait_bottom(page)
         own_message = api('GET', '/messages/channels/' + studio['id'], alice)[0]
         wait_read(page, studio, alice, own_message)
+        page.get_by_role('button', name='More channel tools', exact=True).click()
         page.get_by_role('button', name='Channel files', exact=True).click()
         files = page.get_by_role('dialog', name='Channel files', exact=True)
         expect(files).to_be_visible()
@@ -361,14 +369,19 @@ with sync_playwright() as p:
             ('Notifications', 'Notifications', 'Close notifications'),
         ):
             trigger = page.get_by_role('button', name=trigger_name, exact=True)
-            trigger.click()
+            if not trigger.is_visible():
+                trigger = page.get_by_role('button', name='More channel tools', exact=True)
+                trigger.click()
+                page.get_by_role('button', name=trigger_name, exact=True).click()
+            else:
+                trigger.click()
             panel = page.get_by_role('dialog', name=dialog_name, exact=True)
             expect(panel.get_by_role('button', name=close_name, exact=True)).to_be_focused()
             assert_modal(page, panel, entry)
             page.keyboard.press('Escape')
             expect(panel).to_have_count(0)
             expect(trigger).to_be_focused()
-        loaded_article.hover()
+        reveal_message_actions(loaded_article)
         reply_trigger = loaded_article.get_by_role('button', name='Reply in thread', exact=True)
         reply_trigger.click()
         thread = page.get_by_role('dialog', name='Thread', exact=True)
@@ -391,9 +404,9 @@ with sync_playwright() as p:
         expect(composer(page, studio)).to_be_visible()
         for width, height in ((390, 844), (320, 568)):
             page.set_viewport_size({'width': width, 'height': height})
-            expect(page.get_by_role('button', name='Toggle channels', exact=True)).to_have_attribute('aria-expanded', 'false')
+            expect(page.get_by_role('button', name='Switch channel', exact=True)).to_have_attribute('aria-expanded', 'false')
             assert_fit(page, f'Chat overflowed at {width}px')
-            page.get_by_role('button', name='Toggle channels', exact=True).click()
+            page.get_by_role('button', name='Switch channel', exact=True).click()
             page.get_by_role('button', name='Quick switcher', exact=True).click()
             palette = page.get_by_role('dialog', name='Quick switcher', exact=True)
             search = palette.get_by_role('combobox', name='Search channels, messages or actions', exact=True)

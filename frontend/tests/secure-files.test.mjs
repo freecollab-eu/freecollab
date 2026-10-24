@@ -22,7 +22,7 @@ function fixture({ peerServer } = {}) {
       if (control.upload) return control.upload(blob, options);
       const uri = 'mxc://local.test/' + crypto.randomUUID(); media.set(uri.split('/').at(-1), await blob.arrayBuffer()); return { content_uri: uri };
     } };
-  const secureMessaging = { handles: async () => true, roomFor: async () => ({ c, room: { oldState: {} }, roomId: '!room:local.test', federatedPeerServer: peerServer }),
+  const secureMessaging = { handles: async () => true, roomFor: async channel => ({ c, room: { oldState: {} }, roomId: channel === 'channel' ? '!room:local.test' : '!other-room:local.test', federatedPeerServer: peerServer }),
     events: async () => events,
     sendEvent: async (channel, type, content, transactionId) => {
       if (transactionId && transactions.has(transactionId)) return { event_id: transactions.get(transactionId) };
@@ -36,7 +36,7 @@ function fixture({ peerServer } = {}) {
   vm.runInNewContext(compiled, { exports, require: name => name === 'matrix-encrypt-attachment' ? { encryptAttachment, decryptAttachment } : name === '../file-preview' ? previewHelpers : { secureMessaging },
     crypto, TextEncoder, Uint8Array, Blob, File, DOMException, AbortController,
     fetch: async (url, options) => { downloads.push({ url, options }); return new Response(media.get(decodeURIComponent(url.split('/').at(-1))) || new Uint8Array([1])); } });
-  return { provider: exports.secureFileProvider, events, media, uploads, downloads, event, control };
+  return { provider: exports.secureFileProvider, verifyReferences: exports.verifiedSecureFileReferenceIds, getReference: exports.getVerifiedSecureFileReference, events, media, uploads, downloads, event, control };
 }
 const file = () => new File(['private attachment bytes'], 'private-name.txt', { type: 'text/plain' });
 const opts = () => ({ requestId: crypto.randomUUID() });
@@ -81,6 +81,34 @@ test('secure deletion hides all versions, prevents old download and does not res
   const { provider } = fixture(), options = opts(); const first = await provider.upload('channel', file(), options);
   await provider.delete(first); assert.equal((await provider.list('channel')).length, 0);
   await assert.rejects(provider.download(first), /no longer available/); await assert.rejects(provider.upload('channel', file(), options), /no longer available/);
+});
+
+test('file references require actual verified room events and do not survive deletion', async () => {
+  const { provider, verifyReferences, events, event } = fixture();
+  const first = await provider.upload('channel', file(), opts());
+  const second = await provider.upload('channel', new File(['new'], 'revision.txt', { type: 'text/plain' }), { ...opts(), documentId: first.document_id });
+  events.push(event({ ...events[0].getContent(), name: 'forged.txt' }, '@fc_intruder:local.test', '$forged'));
+  const available = await verifyReferences('channel', [first.id, second.id, '$forged', '$missing']);
+  assert.deepEqual([...available].sort(), [first.id, second.id].sort());
+  await provider.delete(second);
+  assert.equal((await verifyReferences('channel', [first.id, second.id])).size, 0);
+});
+
+test('exact secure file reference lookup opens historical verified versions only in their genuine channel', async () => {
+  const { provider, getReference, events, event } = fixture();
+  const first = await provider.upload('channel', file(), opts());
+  const second = await provider.upload('channel', new File(['revision'], 'revision.txt', { type: 'text/plain' }), { ...opts(), documentId: first.document_id });
+  assert.equal((await provider.list('channel'))[0].id, second.id);
+  const historical = await getReference('channel', first.id);
+  assert.equal(historical.id, first.id); assert.equal(historical.filename, 'private-name.txt');
+  assert.equal(historical.version_number, 1); assert.equal(historical.version_count, 2);
+  assert.equal((await getReference('channel', second.id)).id, second.id);
+  assert.equal(await getReference('another-channel', first.id), undefined);
+  events.push(event({ ...events[0].getContent(), version_number: 3, name: 'forged.txt' }, '@fc_intruder:local.test', '$forged'));
+  assert.equal(await getReference('channel', '$forged'), undefined);
+  assert.equal(await getReference('channel', '$missing'), undefined);
+  await provider.delete(second);
+  assert.equal(await getReference('channel', first.id), undefined);
 });
 
 test('secure download rejects a ciphertext integrity failure', async () => {

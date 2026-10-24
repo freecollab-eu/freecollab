@@ -3,6 +3,7 @@
 Uses real API fixture sessions and delayed browser responses against disposable services.
 CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/account-race-browser.py
 """
+from ui_navigation import open_chat_tool, reveal_chat_tool
 import json
 import os
 import re
@@ -66,6 +67,7 @@ with sync_playwright() as p:
         page.get_by_label('Email', exact=True).fill(alice['email'])
         page.get_by_label('Password', exact=True).fill(PASSWORD)
         page.get_by_role('button', name='Sign In', exact=True).click()
+        reveal_chat_tool(page, 'Account settings')
         expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible()
         held_security = []
 
@@ -76,14 +78,14 @@ with sync_playwright() as p:
                 route.continue_()
 
         page.route('**/api/account/security', delay_security)
-        page.get_by_role('button', name='Account settings', exact=True).click()
+        open_chat_tool(page, 'Account settings')
         expect(page.get_by_text('Loading your account…', exact=True)).to_be_visible()
         security_route = wait_for_held_route(page, held_security, 'account security')
         page.evaluate(SWITCH_ACCOUNT, {'session': bob, 'workspace': bob_workspace['id']})
         security_route.fulfill(status=200, json=alice_security)
         expect(page.get_by_role('dialog', name='Account settings', exact=True)).to_have_count(0)
         expect(page.get_by_role('button', name=re.compile('^Switch workspace, Bob private'))).to_be_visible()
-        page.get_by_role('button', name='Account settings', exact=True).click()
+        open_chat_tool(page, 'Account settings')
         account = page.get_by_role('dialog', name='Account settings', exact=True)
         expect(account.get_by_text(bob['email'], exact=True)).to_be_visible()
         expect(account.get_by_text(alice['email'], exact=True)).to_have_count(0)
@@ -92,6 +94,7 @@ with sync_playwright() as p:
 
         # A pending list from one account cannot reselect that workspace in the next account.
         page.evaluate(SWITCH_ACCOUNT, {'session': alice})
+        reveal_chat_tool(page, 'Account settings')
         expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible()
         held_workspaces = []
 

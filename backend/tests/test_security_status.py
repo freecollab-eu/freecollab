@@ -165,7 +165,8 @@ def test_configuration_checks_are_exact_and_do_not_claim_external_verification(o
     monkeypatch.setattr(settings, "enable_demo_ai", True)
     changed = checks(client.get("/operations/security", headers=headers()).json())
     assert changed["cors_https_origins"] == "attention"
-    assert changed["experimental_features"] == changed["demo_ai"] == "attention"
+    assert changed["experimental_features"] == "attention"
+    assert changed["demo_ai"] == "disabled"
     monkeypatch.setattr(settings, "cors_origins", ["https://another.example"])
     assert checks(client.get("/operations/security", headers=headers()).json())["cors_https_origins"] == "attention"
     monkeypatch.setattr(settings, "public_app_url", "http://127.0.0.1:3000")

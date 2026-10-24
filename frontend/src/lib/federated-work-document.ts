@@ -1,4 +1,5 @@
 import * as Y from 'yjs';
+const codePointBoundary = (text: string, index: number) => !(index > 0 && index < text.length && /[\uD800-\uDBFF]/.test(text[index - 1]) && /[\uDC00-\uDFFF]/.test(text[index]));
 export interface FederatedDocumentState { title: string; body: string; update_base64: string; update_ids: string[] }
 export const encodeWorkUpdate = (bytes: Uint8Array) => { let text = ''; for (let offset = 0; offset < bytes.length; offset += 8192) text += String.fromCharCode(...bytes.subarray(offset, offset + 8192)); return btoa(text); };
 export function decodeWorkUpdate(value: unknown, maximum = 256 * 1024, minimum = 2) {
@@ -27,6 +28,10 @@ export function replaceWorkText(doc: Y.Doc, field: 'title' | 'body', value: stri
   const text = doc.getText(field), previous = text.toString();
   let prefix = 0, suffix = 0;
   while (prefix < value.length && prefix < previous.length && value[prefix] === previous[prefix]) prefix++;
+  // Match complete codepoints before mutating Y.Text; splitting a shared high
+  // or low surrogate corrupts both the insertion and the retained neighbour.
+  while (prefix && (!codePointBoundary(previous, prefix) || !codePointBoundary(value, prefix))) prefix--;
   while (suffix < value.length - prefix && suffix < previous.length - prefix && value[value.length - 1 - suffix] === previous[previous.length - 1 - suffix]) suffix++;
+  while (suffix && (!codePointBoundary(previous, previous.length - suffix) || !codePointBoundary(value, value.length - suffix))) suffix--;
   doc.transact(() => { const removed = previous.length - prefix - suffix; if (removed) text.delete(prefix, removed); const added = value.slice(prefix, value.length - suffix); if (added) text.insert(prefix, added); });
 }

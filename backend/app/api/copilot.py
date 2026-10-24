@@ -147,7 +147,9 @@ def citations(workspace_id: str,conversation_id: str,turn_id: str,user=Depends(g
 def send_turn(workspace_id: str,conversation_id: str,data: service.TurnInput,user=Depends(get_current_user),session=Depends(get_session)):
     account_limit(session,'copilot-turn',user.id,30,3600)
     row=service.conversation_for(session,workspace_id,conversation_id,user.id,lock=True)
-    config=service.configuration(session,workspace_id); service.consent_for(session,workspace_id,user.id,config.revision)
+    config=service.configuration(session,workspace_id)
+    if data.expected_config_revision!=config.revision: raise HTTPException(409,'Provider configuration changed; review the current destination before sending')
+    service.consent_for(session,workspace_id,user.id,config.revision)
     if not data.disclose_to_provider or row.secure and not data.disclose_decrypted_content: raise HTTPException(422,'Explicitly approve this request and selected decrypted content disclosure')
     digest=hmac.new(_secret_key(),(row.id+service.dump(data.model_dump())).encode(),hashlib.sha256).hexdigest()
     existing=session.exec(select(CopilotTurn).where(CopilotTurn.conversation_id==row.id,CopilotTurn.request_id==data.request_id)).first()

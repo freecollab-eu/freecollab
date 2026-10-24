@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { AlertCircle, ArrowLeft, ArrowRight, CheckCircle2, Loader2, Mail, KeyRound } from 'lucide-react';
 import { api } from '../lib/api';
 import { accountApi } from '../lib/account-api';
+import { newPasswordValidationError } from '../lib/password-policy';
 import { Brand } from './Brand';
 import '../styles/account.css';
 
@@ -29,6 +30,8 @@ export function AuthenticationFlow({ kind, token, onSuccess, onBack }: Authentic
     event.preventDefault();
     if (busy) return;
     setError('');
+    const passwordError = reset ? newPasswordValidationError(password) : null;
+    if (passwordError) { setError(t(passwordError)); requestAnimationFrame(() => errorRef.current?.focus()); return; }
     if (reset && password !== confirm) { setError(t("The passwords do not match.")); requestAnimationFrame(() => errorRef.current?.focus()); return; }
     setBusy(true);
     const userId = api.getCurrentUserId();
@@ -56,8 +59,9 @@ export function AuthenticationFlow({ kind, token, onSuccess, onBack }: Authentic
       </> : <form onSubmit={submit} aria-busy={busy}>
         <p>{reset ? t("Create a password you have not used on another service.") : t("Confirm this address so you can receive account recovery messages.")}</p>
         {reset && <>
-          <label htmlFor="reset-new-password">{t("New password")}</label><input className="fc-input" id="reset-new-password" type="password" autoComplete="new-password" minLength={6} value={password} onChange={event => setPassword(event.target.value)} disabled={busy} required />
-          <label htmlFor="reset-confirm-password">{t("Confirm new password")}</label><input className="fc-input" id="reset-confirm-password" type="password" autoComplete="new-password" minLength={6} value={confirm} onChange={event => setConfirm(event.target.value)} disabled={busy} required />
+          <label htmlFor="reset-new-password">{t("New password")}</label><input className="fc-input" id="reset-new-password" type="password" autoComplete="new-password" aria-describedby="reset-password-help" value={password} onChange={event => { setPassword(event.target.value); setError(''); }} disabled={busy} required />
+          <p id="reset-password-help" className="fc-account-muted">{t("At least 12 characters. Make it something only you know.")}</p>
+          <label htmlFor="reset-confirm-password">{t("Confirm new password")}</label><input className="fc-input" id="reset-confirm-password" type="password" autoComplete="new-password" value={confirm} onChange={event => { setConfirm(event.target.value); setError(''); }} disabled={busy} required />
           <p className="fc-account-muted">{t("Resetting this password restores account access. It does not replace a key for encrypted history.")}</p>
         </>}
         {error && <div ref={errorRef} className="fc-alert fc-account-error" role="alert" tabIndex={-1}><AlertCircle size={17} /><p>{error}</p></div>}

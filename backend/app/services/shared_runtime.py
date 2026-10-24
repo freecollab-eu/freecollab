@@ -95,17 +95,19 @@ class SharedRuntime:
             for identifier, raw in zip(members, rows):
                 try:
                     row = json.loads(raw) if raw else None
+                    custom = row.get("custom_status") if isinstance(row, dict) else None
                     if (not row or row["user_id"] != user_id or row["status"] not in {"online","away","busy","offline"}
+                            or custom is not None and (not isinstance(custom, str) or len(custom) > 50 or any(ord(char) < 32 or ord(char) == 127 for char in custom))
                             or not validator(row)): stale.append(identifier)
                     else: valid.append(row)
                 except (KeyError, ValueError, TypeError): stale.append(identifier)
             if stale: self.client.zrem(key, *stale)
         except (redis.RedisError, OSError): raise unavailable() from None
-        if not valid: return {"status":"offline", "last_seen":None}
+        if not valid: return {"status":"offline", "custom_status":None, "last_seen":None}
         # Most recently explicit status change wins across devices. A periodic
         # lease refresh preserves that timestamp rather than overriding status.
         latest = max(valid, key=lambda row: row["changed_at"])
-        return {"status":latest["status"], "last_seen":latest["last_seen"]}
+        return {"status":latest["status"], "custom_status":latest.get("custom_status"), "last_seen":latest["last_seen"]}
 
     def close(self):
         self.client.close()

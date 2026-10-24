@@ -1,0 +1,91 @@
+/* The feature index stays attached to the place where a message begins. */
+.fc-chat-composer-row:has(> .fc-slash-commands) { position: relative; }
+.fc-slash-commands {
+  position: absolute;
+  z-index: 35;
+  inset-inline: 0;
+  bottom: calc(100% + .5rem);
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  max-height: min(32rem, var(--fc-slash-available-height, calc(100dvh - 14rem)));
+  overflow: hidden;
+  border: 1px solid var(--fc-border);
+  border-radius: var(--fc-radius);
+  background: var(--fc-surface);
+  color: var(--fc-text);
+  font-family: var(--fc-font);
+  box-shadow: var(--fc-shadow);
+}
+.fc-slash-commands-header { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; gap: .75rem; min-width: 0; padding: .65rem .75rem .65rem 1rem; border-bottom: 1px solid var(--fc-border); }
+.fc-slash-commands-header > div { display: flex; align-items: baseline; gap: .8rem; min-width: 0; }
+.fc-slash-commands-mark { flex-shrink: 0; color: var(--fc-accent); font-family: var(--fc-heading-font); font-size: 1.55rem; font-weight: 400; line-height: 1; }
+.fc-slash-commands-header h2 { margin: 0; font-family: var(--fc-heading-font); font-size: 1.1rem; font-weight: 450; line-height: 1.35; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.fc-slash-commands-header > button { display: grid; place-items: center; flex-shrink: 0; width: 44px; min-height: 44px; padding: 0; border: 0; border-radius: calc(var(--fc-radius) * .6); background: transparent; color: var(--fc-muted); cursor: pointer; }
+.fc-slash-commands-header > button:hover { color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-slash-commands-header > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -3px; }
+.fc-slash-commands-argument-help { flex: 0 1 auto; min-height: 0; max-height: min(8rem, calc(var(--fc-slash-available-height, 32rem) * .3)); overflow-y: auto; overscroll-behavior: contain; padding: .55rem 1rem; border-bottom: 1px solid var(--fc-border); scrollbar-width: thin; }
+.fc-slash-commands-argument-help p { margin: 0; min-width: 0; font-size: var(--fc-caption-size, .75rem); line-height: 1.6; overflow-wrap: anywhere; }
+.fc-slash-commands-argument-help p + p { margin-top: .35rem; }
+.fc-slash-commands-usage, .fc-slash-commands-preview { display: grid; grid-template-columns: minmax(0, 1fr); gap: .1rem; }
+.fc-slash-commands-usage > span, .fc-slash-commands-preview > span:first-child { color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); }
+.fc-slash-commands-usage > code { white-space: pre-wrap; font-size: var(--fc-caption-size, .75rem); color: var(--fc-accent); }
+.fc-slash-commands-preview > span:last-child { white-space: pre-wrap; color: var(--fc-text); }
+.fc-slash-commands-argument-help .fc-slash-commands-error { color: var(--fc-danger, var(--fc-text)); }
+.fc-slash-commands-search { display: flex; align-items: center; flex-shrink: 0; gap: .65rem; min-width: 0; padding: .4rem 1rem; border-bottom: 1px solid var(--fc-border); color: var(--fc-muted); }
+.fc-slash-commands-search > svg { flex-shrink: 0; }
+.fc-slash-commands-search > input { width: 100%; min-width: 0; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-text); font: inherit; font-size: max(.875rem, var(--fc-body-size)); line-height: 1.5; outline: none; }
+.fc-slash-commands-search > input::placeholder { color: var(--fc-muted); opacity: 1; }
+.fc-slash-commands-search:focus-within { box-shadow: inset 0 -2px var(--fc-accent); }
+.fc-slash-commands-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--fc-border) transparent; padding: .35rem .45rem; }
+.fc-slash-commands-group { margin: .75rem .65rem .35rem; color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); font-weight: 500; line-height: 1.5; letter-spacing: .06em; text-transform: uppercase; }
+.fc-slash-command { display: flex; align-items: center; justify-content: space-between; gap: 1rem; min-width: 0; min-height: 54px; padding: .65rem .7rem; border-inline-start: 2px solid transparent; border-radius: calc(var(--fc-radius) * .4); cursor: pointer; }
+.fc-slash-command.is-active { border-inline-start-color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-slash-command-copy { display: flex; flex: 1; flex-direction: column; gap: .12rem; min-width: 0; }
+.fc-slash-command-copy > strong { color: var(--fc-text); font-size: var(--fc-detail-size, .8125rem); font-weight: 550; line-height: 1.5; overflow-wrap: anywhere; }
+.fc-slash-command-copy > span { color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); line-height: 1.6; overflow-wrap: anywhere; }
+.fc-slash-command > code { flex-shrink: 0; max-width: 44%; padding: .12rem .4rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .4); color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); line-height: 1.55; overflow-wrap: anywhere; }
+.fc-slash-command.is-active > code { color: var(--fc-accent); }
+.fc-slash-commands-empty { flex: 1; min-width: 0; padding: 1.5rem 1rem; text-align: center; }
+.fc-slash-commands-empty > strong { color: var(--fc-text); font-size: .85rem; font-weight: 550; }
+.fc-slash-commands-empty > p { margin: .4rem auto 0; max-width: 24rem; color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); line-height: 1.6; }
+.fc-slash-commands-footer { display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; flex-wrap: wrap; gap: .35rem .8rem; padding: .65rem 1rem; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); line-height: 1.6; }
+.fc-slash-commands-key-help { display: inline-flex; align-items: center; flex-wrap: wrap; gap: .25rem; }
+.fc-slash-commands-key-help > svg:last-of-type { margin-inline-start: .45rem; }
+.fc-slash-commands-key-help > kbd { margin-inline-start: .45rem; padding: 0 .2rem; border: 1px solid var(--fc-border); border-radius: 2px; font: inherit; }
+.fc-slash-commands-count { font-variant-numeric: tabular-nums; }
+.fc-slash-commands.is-compact .fc-slash-commands-header { padding-block: .15rem; }
+.fc-slash-commands.is-compact .fc-slash-commands-argument-help { max-height: min(4.5rem, calc(var(--fc-slash-available-height, 32rem) * .3)); padding-block: .3rem; }
+.fc-slash-commands.is-compact .fc-slash-commands-footer { display: none; }
+.fc-slash-commands.is-compact .fc-slash-commands-group { margin-block: .25rem; }
+.fc-chat-composer-footer:has(> .fc-chat-slash-trigger) { flex-wrap: wrap; justify-content: flex-start; gap: .2rem .9rem; }
+.fc-chat-composer-footer:has(> .fc-chat-slash-trigger) > button { min-height: 44px; }
+.fc-chat-composer-footer:has(> .fc-chat-slash-trigger) > .fc-chat-composer-hint { flex: 1 1 14rem; min-width: 0; max-width: 100%; margin-inline-start: auto; }
+.fc-chat-composer-footer > .fc-chat-slash-trigger { align-items: center; gap: .4rem; padding-block: .4rem; }
+.fc-chat-slash-trigger > span:first-child { color: var(--fc-accent); font-family: var(--fc-heading-font); font-size: 1.15rem; line-height: 1; }
+.fc-chat-composer-footer > .fc-chat-slash-trigger:hover,
+.fc-chat-composer-footer > .fc-chat-slash-trigger[aria-expanded="true"] { color: var(--fc-accent); }
+.fc-chat-slash-trigger:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-chat-slash-trigger:disabled { opacity: .5; cursor: not-allowed; }
+@media (max-width: 480px) {
+  .fc-slash-commands-header { padding-inline: .75rem .35rem; gap: .35rem; }
+  .fc-slash-commands-header > div { gap: .5rem; }
+  .fc-slash-commands-header h2 { font-size: 1rem; }
+  .fc-slash-commands-search { padding-inline: .75rem; }
+  .fc-slash-commands-argument-help { padding-inline: .75rem; }
+  .fc-slash-commands-search > input { font-size: max(1rem, var(--fc-body-size)); }
+  .fc-slash-commands-list { padding-inline: .25rem; }
+  .fc-slash-command { align-items: flex-start; gap: .6rem; padding: .65rem .5rem; }
+  .fc-slash-command > code { margin-top: .12rem; max-width: 38%; }
+  .fc-slash-commands-footer { padding-inline: .75rem; }
+  .fc-chat-composer-footer:has(> .fc-chat-slash-trigger) { column-gap: .75rem; }
+}
+/* A thread owns the same picker, anchored above its reply field. */
+.fc-chat-thread-composer-area { position: relative; flex: 0 0 auto; min-width: 0; border-top: 1px solid var(--fc-border); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.fc-chat-thread-composer-area .fc-chat-thread-composer { position: relative; min-width: 0; padding-bottom: .25rem; border-top: 0; }
+.fc-chat-thread-composer-tools { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: 0 1.5rem .5rem; }
+.fc-chat-thread-composer-tools > button { min-width: 44px; min-height: 44px; }
+.fc-chat-thread-composer-tools .fc-chat-slash-trigger { display: inline-flex; align-items: center; gap: .4rem; }
+.fc-chat-thread-composer-area .fc-chat-thread-composer > input { font-size: max(1rem, var(--fc-body-size)); }

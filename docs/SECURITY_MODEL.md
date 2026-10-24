@@ -12,7 +12,7 @@ This describes current product boundaries. The default is one API process; confi
 | JWT signing | Separate private secret signs seven-day login tokens. New logins have random identifiers; current-token logout persists a digest/expiry. | Signing-key holders and trusted server operators. |
 | Old unversioned ciphertext | Reads require an explicitly retained legacy content key. It is never implicitly derived from the live signing secret for new writes. | Retained old key and controlled offline migration. |
 | Native uploaded files | Original bytes use a local volume or explicitly configured S3-compatible storage. Native file bytes do not receive application-level content encryption. | Storage/backup administrators, server and authorized members; provider storage encryption is separate. |
-| Passwords | bcrypt; the API validates the UTF-8 byte limit rather than silently truncating. Passwords reach the backend over the configured transport. | Backend and TLS termination. |
+| Passwords | bcrypt; new native registrations and administrator-created accounts require at least 12 Unicode code points and at most 72 UTF-8 bytes. Passwords reach the backend over the configured transport. | Backend and TLS termination. |
 | Legacy user/channel key helpers | Registration creates key material on the server; Argon2id wraps the generated private key. These helpers are not the active content-encryption protocol. | The server handles the submitted password and generated key material. |
 | Browser credentials | The standalone app retains its bearer in localStorage; the trusted embedded client keeps its child session in memory. The legacy widget takes a user-scoped host token. | Trusted client origins and host integration authorization. XSS can expose an origin’s credentials. |
 | Offline browser copies | Opted-in history/file metadata and bytes, drafts and queued content use account-bound AES-GCM ciphertext with nonextractable browser keys. No private API/media responses enter service-worker CacheStorage. | Trusted same-origin code and the unlocked browser; offline copies cannot observe revocation until reconnection. |
@@ -34,6 +34,8 @@ A bearer token identifies an account; a channel ID is not a credential. REST and
 Only a channel admin can issue/revoke invitations or change another member's role. Invitations are expiring single-use bearer tokens with hashes stored in the database; links carry the token in a URL fragment and acceptance sends it in an authenticated request body. They grant a member role only. Token possession is not verified ownership of an email address. Expired/revoked/used invitations or invitations from an inactive former admin are rejected. The final channel admin must hand over before leaving/removal/demotion. See [CHANNELS.md](CHANNELS.md).
 
 Installation administration starts through an operator command for an existing account, not a public first-registrant promotion. Channel administration and installation staff roles are separate. Email verification, one-use password recovery, TOTP MFA, hashed backup codes and session management are implemented. Customer-owned OIDC defaults to explicit native password/MFA linking for existing verified members. An administrator can instead admit separate workspace-managed identities through provisioning, organization invitations or explicit just-in-time policy. Email claims never merge these with personal accounts. Customer SSO stays workspace-restricted and cannot manage global account security or installation settings. Provider revisions, active principals and current membership are rechecked across REST, sockets and Matrix. Provider edits/disabling invalidate sessions; connected SCIM deactivation revokes managed sessions and membership. Without provisioning synchronization, an IdP-only disable takes effect at the next IdP login.
+
+The 12-character minimum applies when creating new native accounts; existing short passwords remain valid for sign-in and reauthentication. The 72-byte bcrypt limit is checked without truncation, including for multibyte characters. Customer-managed SSO does not acquire a native-password requirement.
 
 Personal Matrix identity and backup span the native account, requiring a separate native password/MFA unlock lasting at most 30 minutes per scoped token. Managed accounts have a separate per-workspace native/Matrix identity and can initialize it with valid scoped SSO. Both paths require device trust and separate recovery keys; SSO does not recover content keys. Managed namespace checks fail closed for owner promotion, personal homes or outside memberships. Recent managed SSO can revoke an owned encryption device with explicit confirmation; remote deletion precedes local revocation. See [AUTH_SESSIONS.md](AUTH_SESSIONS.md) and [WORKFORCE_IDENTITY.md](WORKFORCE_IDENTITY.md).
 
@@ -61,9 +63,18 @@ Recording is best effort after the action. A failed activity write emits only a 
 
 ## Optional integrations and advanced routes
 
-Experimental posts and comments are disabled by default. Core mentions are enabled and member-scoped. Advanced routes are disabled with `ENABLE_EXPERIMENTAL_FEATURES=false`; the server AI-demo routes use separate `ENABLE_DEMO_AI=false`. Opt-in is an operator choice and requires validation of the enabled surface. When the AI demo is enabled and `GROQ_API_KEY` is configured, demo messages/history can be sent to Groq. Do not send private production content to a demo provider.
+Experimental posts and their generic comments are disabled by default via
+`ENABLE_EXPERIMENTAL_FEATURES=false`; production activity feeds and document
+comments have their own authenticated contracts. Core mentions are member-scoped.
+The anonymous server AI-demo endpoints are removed, and `ENABLE_DEMO_AI` is
+deprecated and ignored even when true. Production AI uses the separately
+configured [Copilot](COPILOT.md), reviewed sources, provider revision and explicit
+disclosure/consent. The public [product demo](PRODUCT_DEMO.md) uses the same
+product UI/API in an isolated temporary sample installation; external providers
+are disabled and no model replies or authorizations are fabricated. Its native
+example session is separate from any retained customer credentials.
 
-The legacy widget sends plaintext to the authenticated server and is refused access to secure channels. Its current protocol cannot join or send to encrypted rooms. It polls the latest 50 messages every three seconds. It does not reconcile edits/deletions or fill larger gaps. Render all host/user text as text. A host page must protect its user token, host a trusted bundle and never embed operator credentials. The [standalone example](../examples/widget/README.md) stores no token in the URL or persistent browser storage.
+The legacy widget sends plaintext to the authenticated server and is refused access to secure channels. Its current protocol cannot join or send to encrypted rooms. It polls the latest 50 messages every three seconds. It does not reconcile edits/deletions or fill larger gaps. API URLs require HTTPS except HTTP loopback development. Requests omit cookies, disable caching and reject redirects. Changing the account or channel clears the displayed history and draft and cancels old work; destroying the instance is terminal. Render all host/user text as text. A host page must protect its user token, host a trusted bundle and never embed operator credentials. The [standalone example](../examples/widget/README.md) stores no token in the URL or persistent browser storage.
 
 [External integrations](INTEGRATIONS.md) retain channel grants and encryption boundaries. Webhooks use HMAC-signed generic events, encrypted destination/secrets, durable retries and public HTTPS/DNS/TLS checks. Saved document links are not automatically fetched. Explicit secure-calendar export decrypts locally. Optional two-way [remote synchronization](REMOTE_SYNC.md) shares selected native-channel file/calendar content with the customer's provider under an explicit current administrator grant. Secure Matrix channels, including channels preparing encryption, reject background sync; there is no server plaintext fallback. Channel members see a sharing notice. Credentials are encrypted, OAuth consent is account-bound and changing a selected resource requires fresh provider authorization. Operator diagnostics expose aggregate/redacted queue information; optional metrics credentials can read only metrics.
 
@@ -124,6 +135,8 @@ content its recipients already received. Neither path recalls recipient-held key
 ## Verification and remaining responsibilities
 
 See [VALIDATION.md](VALIDATION.md) for exact executed checks and [DEPENDENCIES.md](DEPENDENCIES.md) for pinned installs/advisory reports. Positive happy-path tests alone are insufficient: include outsiders, blocked/deleted users, expired/revoked credentials, connected clients, failed provider/storage operations and recovery copies.
+
+The [2026-10-22 internal review](SECURITY_REVIEW_2026_10_22.md) records the fixes and regression checks for the Open Studio design candidate. It is not an external security audit.
 
 External pilot onboarding, alert routing using the private metrics, TLS issuance/renewal, off-host encrypted backup scheduling, organizational identity policy and any required independent security review remain deployment/product responsibilities. Do not infer those outcomes from a local build, isolated tests or a saved configuration file.
 

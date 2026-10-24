@@ -7,6 +7,7 @@ from ..database import get_session
 from ..models.message import Message
 from ..models.collaboration import ThreadSubscription, EncryptedThreadSubscription, EncryptedMessageActivity
 from ..services.auth import get_current_user
+from ..services.request_guard import recheck_actor
 from ..services.access import require_channel_member, lock_channel_writes
 from ..services.workspaces import require_direct_message_writable
 from ..services.direct_messages import restore_direct_inbox
@@ -17,6 +18,7 @@ from ..realtime.socket import broadcast_to_channel
 from datetime import datetime
 import uuid
 from nacl.exceptions import CryptoError
+from ..services.message_references import ReferenceInput, validate_references, store_references, stored_references
 
 router = APIRouter(prefix="/threads", tags=["threads"])
 
@@ -24,6 +26,7 @@ router = APIRouter(prefix="/threads", tags=["threads"])
 class ThreadReply(BaseModel):
     content: MessageText
     mentions: list[Annotated[str, StringConstraints(min_length=1, max_length=128)]] = Field(default_factory=list, max_length=50)
+    references: list[ReferenceInput] = Field(default_factory=list, max_length=50)
 
 
 class SubscriptionUpdate(BaseModel):
@@ -101,10 +104,11 @@ async def reply_to_message(
         raise HTTPException(404, "Message not found")
     
     lock_channel_writes(session, parent.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, parent.channel_id, user.id)
     require_direct_message_writable(session, parent.channel_id, user.id)
     require_native_channel(session, parent.channel_id)
-    mention_ids = validate_mentions(session, parent.channel_id, data.mentions)
+    references, mention_ids = validate_references(session, parent.channel_id, user.id, data.content, data.references, data.mentions)
     
     from ..services.enterprise_governance import enforce_native_content
     warnings = enforce_native_content(session, parent.channel_id, user.id, data.content)
@@ -119,6 +123,7 @@ async def reply_to_message(
         mentions=json.dumps(mention_ids),
     )
     session.add(reply)
+    store_references(session, reply, references)
     
     # Update thread count on parent
     parent.thread_count = (parent.thread_count or 0) + 1
@@ -139,6 +144,7 @@ async def reply_to_message(
         "parent_id": reply.parent_id,
         "created_at": reply.created_at.isoformat(),
         "mentions": mention_ids,
+        "references": references,
         "policy_warnings": warnings,
     }
     
@@ -192,7 +198,8 @@ def get_thread(
             and_(Message.created_at == before_msg.created_at, Message.id < before_msg.id),
         ))
     
-    replies = list(reversed(query.limit(limit).all()))
+    page = query.limit(limit + 1).all()
+    replies = list(reversed(page[:limit]))
 
     # Older clients could incorrectly mark plaintext as encrypted. Do not
     # silently expose unauthenticated content or fail with an unhandled error.
@@ -209,6 +216,7 @@ def get_thread(
     return {
         "parent_id": message_id,
         "thread_count": parent.thread_count or 0,
+        "has_more": len(page) > limit,
         "replies": [
             {
                 "id": r.id,
@@ -220,6 +228,7 @@ def get_thread(
                 "created_at": r.created_at.isoformat(),
                 "edited_at": r.edited_at.isoformat() if r.edited_at else None,
                 "mentions": message_mentions(r),
+                "references": stored_references(r),
             }
             for r in replies
         ],

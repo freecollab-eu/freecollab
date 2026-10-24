@@ -5,6 +5,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/security
 Uses temporary native accounts, directory/session metadata and private file mail.
 No customer account, existing database, provider, SMTP server or Docker is used.
 """
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import json
@@ -38,9 +39,7 @@ def login(page, app, user, workspace):
     page.get_by_label('Password', exact=True).fill(PASSWORD)
     page.get_by_role('button', name='Sign In', exact=True).click()
     expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-    if not page.get_by_role('button', name='Integrations', exact=True).is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
-    page.get_by_role('button', name='Integrations', exact=True).click()
+    open_chat_tool(page, 'Integrations')
     panel = page.get_by_role('dialog', name='Integrations', exact=True)
     expect(panel).to_be_visible()
     return panel

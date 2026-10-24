@@ -1,0 +1,9 @@
+.fc-public-product-preview { margin: 0; }
+.fc-public-product-open { display: block; position: relative; width: 100%; padding: 0; overflow: hidden; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); color: var(--fc-text); background: var(--fc-surface); cursor: pointer; transition: border-color .16s var(--fc-ease); }
+.fc-public-product-image { display: block; width: 100%; height: auto; }
+.fc-public-product-open-label { position: absolute; right: clamp(12px, 2vw, 28px); bottom: clamp(12px, 2vw, 28px); display: inline-flex; align-items: center; gap: 12px; min-height: 44px; padding: 12px 17px; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); font: 450 13px/1.4 var(--fc-font); transition: color .16s var(--fc-ease), border-color .16s var(--fc-ease); }
+.fc-public-product-open:hover, .fc-public-product-open:hover .fc-public-product-open-label { border-color: var(--fc-accent); }
+.fc-public-product-open:hover .fc-public-product-open-label { color: var(--fc-accent); }
+.fc-public-product-open:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 5px; }
+.fc-public-product-preview figcaption { margin-top: 14px; color: var(--fc-muted); font-size: 13px; line-height: 1.7; }
+@media (max-width: 480px) { .fc-public-product-open-label { gap: 8px; padding: 10px 12px; font-size: 12px; } .fc-public-product-preview figcaption { font-size: 12px; } }

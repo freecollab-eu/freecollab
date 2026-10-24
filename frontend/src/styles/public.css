@@ -13,7 +13,7 @@
 .fc-public-text-button > svg, .fc-preview-file > svg:last-child { transition: transform .16s ease; }
 .fc-public-text-button:hover > svg { transform: translateX(2px); }
 .fc-public-text-button:focus-visible, .fc-public a:focus-visible, .fc-preview button:focus-visible, .fc-preview input:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 5px; }
-.fc-public-source-link { display: inline-flex; align-items: center; gap: 5px; }
+.fc-public-source-link { display: inline-flex; align-items: center; gap: 5px; min-height: 44px; }
 .fc-public-nav .fc-button { min-height: 41px; padding-inline: 17px; font-size: 12px; }
 .fc-public-hero { display: grid; grid-template-columns: .9fr 1.1fr; align-items: center; gap: 56px; padding-block: 86px 73px; }
 .fc-public-eyebrow { display: flex; align-items: center; gap: 9px; }
@@ -157,7 +157,7 @@
 .fc-public-footer { display: flex; align-items: center; justify-content: space-between; gap: 30px; min-height: 115px; }
 .fc-public-footer > p { color: var(--fc-muted); font-size: 9px; }
 .fc-public-footer > div:last-child { display: flex; align-items: center; gap: 23px; font-size: 9px; color: var(--fc-muted); }
-.fc-public-footer a { display: inline-flex; align-items: center; gap: 4px; }
+.fc-public-footer a { display: inline-flex; align-items: center; gap: 4px; min-height: 44px; }
 .fc-public-footer .fc-public-text-button { font-size: 9px; }
 
 .fc-auth { min-height: 100dvh; display: grid; grid-template-columns: .92fr 1.08fr; }
@@ -168,62 +168,62 @@
 .fc-auth-editorial-copy > p:last-child { color: var(--fc-muted); max-width: 260px; font-size: 14px; line-height: 1.85; }
 .fc-auth-editorial-footer { border-top: 1px solid var(--fc-border); display: flex; align-items: center; gap: 15px; padding-top: 24px; }
 .fc-auth-editorial-footer .fc-brand-mark { width: 35px; height: 35px; }
-.fc-auth-editorial-footer p { font-size: 11px; line-height: 1.8; margin: 0; }
+.fc-auth-editorial-footer p { font-size: .8125rem; line-height: 1.7; margin: 0; }
 .fc-auth-editorial-footer p > span { color: var(--fc-muted); }
 .fc-auth-form-panel { display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 107px 56px 70px; position: relative; min-width: 0; }
-.fc-auth-back { position: absolute; left: 56px; top: 51px; font-size: 11px; color: var(--fc-muted); }
-.fc-auth-form-wrap { width: min(100%, 380px); margin-block: auto; }
+.fc-auth-back { position: absolute; left: 56px; top: 39px; min-height: 44px; font-size: .8125rem; color: var(--fc-muted); }
+.fc-auth-form-wrap { width: min(100%, 400px); min-width: 0; margin-block: auto; }
 .fc-auth-form-wrap > .fc-kicker { margin: 0 0 21px; }
 .fc-auth h1 { font-size: 47px; line-height: 1.1; margin: 0 0 18px; }
-.fc-auth-intro { font-size: 12px; line-height: 1.7; color: var(--fc-muted); margin: 0 0 32px; }
-.fc-auth-form { display: flex; flex-direction: column; gap: 21px; }
-.fc-auth-field label { display: block; font-size: 11px; font-weight: 500; margin-bottom: 9px; }
-.fc-auth-field .fc-input { width: 100%; min-height: 46px; font-size: 12px; }
-.fc-auth-field-help { font-size: 10px; color: var(--fc-muted); margin: 8px 0 0; }
+.fc-auth-intro { font-size: max(.9375rem, var(--fc-body-size)); line-height: 1.75; color: var(--fc-muted); margin: 0 0 32px; }
+.fc-auth-form { display: flex; flex-direction: column; gap: 24px; }
+.fc-auth-field label { display: block; font-size: .8125rem; font-weight: 500; margin-bottom: 8px; }
+.fc-auth-field .fc-input { width: 100%; min-width: 0; min-height: 48px; font-size: max(.9375rem, var(--fc-body-size)); background: var(--fc-surface); }
+.fc-auth-field-help { font-size: .8125rem; line-height: 1.65; color: var(--fc-muted); margin: 8px 0 0; overflow-wrap: anywhere; }
 .fc-auth-password { position: relative; }
 .fc-auth-password .fc-input { padding-right: 49px; }
-.fc-auth-password button { position: absolute; right: 2px; top: 1px; width: 44px; min-height: 44px; padding: 0; border: 0; color: var(--fc-muted); background: transparent; display: grid; place-items: center; border-radius: var(--fc-radius); }
+.fc-auth-password button { position: absolute; right: 2px; top: 2px; bottom: 2px; width: 44px; min-height: 44px; padding: 0; border: 0; color: var(--fc-muted); background: transparent; display: grid; place-items: center; border-radius: var(--fc-radius); }
 .fc-auth-password button:hover, .fc-auth-password button[aria-pressed="true"] { color: var(--fc-accent); }
 .fc-auth .fc-input:disabled { opacity: 1; background: var(--fc-sidebar); cursor: wait; }
-.fc-auth-submit { width: 100%; display: flex; justify-content: space-between; min-height: 47px; font-size: 12px; margin-top: 3px; }
+.fc-auth-submit { width: 100%; display: flex; justify-content: space-between; min-height: 48px; font-size: max(.9375rem, var(--fc-body-size)); margin-top: 3px; }
 .fc-auth-notice { display: flex; align-items: flex-start; gap: 10px; margin-bottom: 23px; }
 .fc-auth-notice > svg { flex-shrink: 0; margin-top: 1px; }
 .fc-auth-notice p { margin: 0; }
 .fc-auth .fc-alert-error, .fc-invite .fc-alert-error { color: var(--fc-danger); border-color: color-mix(in srgb, var(--fc-danger) 35%, var(--fc-border)); background: color-mix(in srgb, var(--fc-danger) 5%, var(--fc-surface)); }
 .fc-public-error { display: flex; align-items: flex-start; gap: 10px; outline-offset: 3px; }
 .fc-public-error > svg { flex-shrink: 0; margin-top: 2px; }
-.fc-public-error strong { display: block; font-size: 11px; font-weight: 600; }
-.fc-public-error p { margin: 5px 0 0; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.fc-public-error strong { display: block; font-size: .875rem; font-weight: 600; }
+.fc-public-error p { margin: 5px 0 0; font-size: .875rem; line-height: 1.7; overflow-wrap: anywhere; }
 .fc-public-error:focus { outline: 2px solid var(--fc-danger); outline-offset: 3px; }
 .fc-auth .fc-auth-submit:disabled, .fc-invite .fc-button-primary:disabled { cursor: wait; opacity: 1; }
 .fc-public-spinner { animation: fc-public-spin .9s linear infinite; flex-shrink: 0; }
 @keyframes fc-public-spin { to { transform: rotate(360deg); } }
 .fc-auth-switch { border-top: 1px solid var(--fc-border); margin-top: 28px; padding-top: 24px; }
-.fc-auth-switch .fc-public-text-button { font-size: 11px; justify-content: flex-start; }
-.fc-auth-switch > span { display: block; color: var(--fc-muted); font-size: 10px; margin-top: 6px; }
-.fc-auth-trust { display: flex; align-items: flex-start; gap: 8px; font-size: 9px; color: var(--fc-muted); line-height: 1.7; margin: 30px 0 0; }
+.fc-auth-switch .fc-public-text-button { font-size: .875rem; justify-content: flex-start; text-align: left; }
+.fc-auth-switch > span { display: block; color: var(--fc-muted); font-size: .8125rem; line-height: 1.65; margin-top: 6px; }
+.fc-auth-trust { display: flex; align-items: flex-start; gap: 8px; font-size: .8125rem; color: var(--fc-muted); line-height: 1.7; margin: 30px 0 0; }
 .fc-auth-trust > svg { flex-shrink: 0; margin-top: 2px; }
-.fc-auth-panel-footer { color: var(--fc-muted); font-size: 9px; position: absolute; bottom: 25px; }
+.fc-auth-panel-footer { color: var(--fc-muted); font-size: .75rem; position: absolute; bottom: 25px; left: 24px; right: 24px; text-align: center; overflow-wrap: anywhere; }
 .fc-auth .fc-auth-mobile-brand { display: none; }
 
 .fc-invite { min-height: 100dvh; display: flex; align-items: center; flex-direction: column; justify-content: center; padding: 50px 24px 31px; }
 .fc-invite > .fc-brand { margin-bottom: 40px; font-size: 19px; }
 .fc-invite-card { width: min(100%, 580px); border: 1px solid var(--fc-border); background: var(--fc-surface); border-radius: var(--fc-radius); padding: 46px 49px; }
-.fc-invite-card-overline { display: flex; align-items: center; justify-content: space-between; gap: 15px; font-size: 8px; letter-spacing: .1em; color: var(--fc-muted); margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid var(--fc-border); }
+.fc-invite-card-overline { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 15px; font-size: .6875rem; letter-spacing: .1em; color: var(--fc-muted); margin-bottom: 30px; padding-bottom: 15px; border-bottom: 1px solid var(--fc-border); }
 .fc-invite-icon { display: grid; place-items: center; width: 62px; height: 62px; border: 1px solid var(--fc-border); background: var(--fc-sidebar); color: var(--fc-accent); border-radius: var(--fc-radius); margin-bottom: 30px; }
 .fc-invite-card > .fc-kicker { margin: 0 0 20px; }
 .fc-invite h1 { font-size: 43px; line-height: 1.1; margin: 0 0 23px; }
-.fc-invite-description { font-size: 14px; line-height: 1.9; color: var(--fc-muted); }
+.fc-invite-description { font-size: max(.9375rem, var(--fc-body-size)); line-height: 1.8; color: var(--fc-muted); overflow-wrap: anywhere; }
 .fc-invite-detail { border-block: 1px solid var(--fc-border); display: flex; align-items: flex-start; gap: 13px; padding-block: 20px; margin: 26px 0; }
 .fc-invite-detail > svg { color: var(--fc-accent); flex-shrink: 0; margin-top: 2px; }
-.fc-invite-detail > p { font-size: 13px; margin: 0; line-height: 1.8; }
-.fc-invite-detail span { display: block; color: var(--fc-muted); font-size: 12px; margin-top: 4px; }
-.fc-invite-actions { display: flex; gap: 11px; }
-.fc-invite-actions .fc-button { min-height: 44px; font-size: 12px; }
+.fc-invite-detail > p { min-width: 0; font-size: .9375rem; margin: 0; line-height: 1.75; overflow-wrap: anywhere; }
+.fc-invite-detail span { display: block; color: var(--fc-muted); font-size: .8125rem; margin-top: 4px; }
+.fc-invite-actions { display: flex; flex-wrap: wrap; gap: 11px; }
+.fc-invite-actions .fc-button { min-height: 48px; font-size: .875rem; }
 .fc-invite-actions .fc-button-primary { gap: 25px; }
-.fc-invite-help { font-size: 11px; line-height: 1.8; color: var(--fc-muted); margin: 20px 0 0; }
+.fc-invite-help { font-size: .8125rem; line-height: 1.75; color: var(--fc-muted); margin: 20px 0 0; overflow-wrap: anywhere; }
 .fc-invite-card .fc-alert-error { margin-bottom: 20px; }
-.fc-invite-footer { color: var(--fc-muted); font-size: 10px; margin: 29px 0 0; }
+.fc-invite-footer { color: var(--fc-muted); font-size: .75rem; margin: 29px 0 0; text-align: center; }
 
 @media (min-width: 1600px) {
   .fc-public-hero { gap: 85px; }
@@ -298,10 +298,10 @@
   .fc-auth-editorial { padding: 37px 30px 30px; }
   .fc-auth-editorial h2 { font-size: 46px; }
   .fc-auth-editorial-copy { padding-block: 55px; }
-  .fc-auth-editorial-copy > p:last-child { font-size: 12px; }
+  .fc-auth-editorial-copy > p:last-child { font-size: .9375rem; }
   .fc-auth-form-panel { padding: 105px 30px 70px; }
   .fc-auth h1 { font-size: 38px; }
-  .fc-auth-back { left: 30px; top: 43px; }
+  .fc-auth-back { left: 30px; top: 31px; }
 }
 @media (max-width: 580px) {
   .fc-public-container, .fc-public-header { width: calc(100% - 40px); }
@@ -391,30 +391,30 @@
   .fc-auth { display: block; }
   .fc-auth-editorial { display: none; }
   .fc-auth-form-panel { min-height: 100dvh; padding: 104px 27px 78px; }
-  .fc-auth-back { left: 27px; top: 31px; font-size: 10px; }
+  .fc-auth-back { left: 27px; top: 23px; font-size: .8125rem; }
   .fc-auth-form-wrap { max-width: 360px; }
   .fc-auth .fc-auth-mobile-brand { display: inline-flex; font-size: 22px; letter-spacing: -.8px; margin-bottom: 48px; }
   .fc-auth h1 { font-size: 46px; }
-  .fc-auth-form-wrap > .fc-kicker { font-size: 8px; letter-spacing: .13em; margin-bottom: 20px; }
-  .fc-auth-intro { margin-bottom: 29px; font-size: 12px; }
-  .fc-auth-field .fc-input { min-height: 48px; font-size: 16px; }
-  .fc-auth-field label { font-size: 12px; }
+  .fc-auth-form-wrap > .fc-kicker { font-size: .6875rem; letter-spacing: .1em; margin-bottom: 20px; }
+  .fc-auth-intro { margin-bottom: 29px; }
+  .fc-auth-field .fc-input { min-height: 48px; font-size: max(16px, var(--fc-body-size)); }
+  .fc-auth-field label { font-size: .8125rem; }
   .fc-auth-form { gap: 21px; }
-  .fc-auth-submit { min-height: 48px; font-size: 13px; }
-  .fc-auth-panel-footer { font-size: 8px; bottom: 22px; }
+  .fc-auth-submit { min-height: 48px; }
+  .fc-auth-panel-footer { font-size: .75rem; bottom: 22px; }
   .fc-invite { justify-content: flex-start; padding: 35px 20px 25px; }
   .fc-invite > .fc-brand { margin-bottom: 33px; font-size: 19px; }
   .fc-invite-card { padding: 30px 24px; }
   .fc-invite-icon { width: 53px; height: 53px; margin-bottom: 28px; }
   .fc-invite-icon > svg { width: 27px; }
-  .fc-invite-card > .fc-kicker { font-size: 7px; letter-spacing: .1em; }
+  .fc-invite-card > .fc-kicker { font-size: .6875rem; letter-spacing: .1em; }
   .fc-invite h1 { font-size: 35px; }
-  .fc-invite-description { font-size: 14px; }
+  .fc-invite-description { font-size: max(.9375rem, var(--fc-body-size)); }
   .fc-invite-detail { gap: 10px; padding-block: 18px; }
-  .fc-invite-detail > p { font-size: 12px; }
-  .fc-invite-detail span { font-size: 11px; margin-top: 4px; }
+  .fc-invite-detail > p { font-size: .9375rem; }
+  .fc-invite-detail span { font-size: .8125rem; margin-top: 4px; }
   .fc-invite-actions { gap: 9px; }
-  .fc-invite-actions .fc-button { min-height: 45px; font-size: 11px; }
+  .fc-invite-actions .fc-button { min-height: 48px; font-size: .875rem; }
   .fc-invite-actions .fc-button-primary { gap: 16px; }
 }
 
@@ -467,4 +467,255 @@
  .fc-public-nav .fc-language-compact label > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
  .fc-public-nav .fc-language-compact select { min-width: 0; max-width: 100%; width: 100%; font-size: .75rem; }
  .fc-public-nav .fc-public-source-link { display: none; }
+}
+
+/* The public studio shares the product's personal palette and type tokens.
+   Every rule here is scoped to the landing page; authentication keeps its layout. */
+.fc-public { --fc-public-rule: color-mix(in srgb, var(--fc-text) 16%, transparent); }
+.fc-public .fc-brand-mark { color: var(--fc-accent-original, var(--fc-accent)); }
+.fc-public .fc-public-header { min-height: 108px; border-bottom-color: var(--fc-public-rule); }
+.fc-public .fc-public-nav { gap: 24px; font-size: 13px; }
+.fc-public .fc-public-nav .fc-button { min-height: 44px; padding-inline: 19px; }
+.fc-public .fc-button-primary { background: var(--fc-accent-original, var(--fc-accent)); color: var(--fc-on-accent-original, var(--fc-on-accent)); border-color: transparent; }
+.fc-public .fc-button-primary:hover { filter: brightness(.96); }
+.fc-public .fc-public-hero { display: block; padding-block: 65px 52px; }
+.fc-public .fc-public-hero-copy { max-width: none; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 60px; align-items: center; }
+.fc-public .fc-public-eyebrow { font-size: 10px; line-height: 1.5; letter-spacing: .12em; margin: 0; }
+.fc-public .fc-public-eyebrow > span { background: var(--fc-accent-original, var(--fc-accent)); }
+.fc-public h1, .fc-public h2 { font-family: var(--fc-heading-font); font-weight: 350; letter-spacing: -.055em; text-wrap: balance; overflow-wrap: anywhere; }
+.fc-public h1 { font-size: clamp(70px, 7.7vw, 112px); line-height: 1.03; margin: 25px 0 30px; }
+.fc-public h1 em, .fc-public h2 em { font-style: normal; }
+.fc-public h1 em { color: var(--fc-muted); }
+.fc-public h2 { font-size: clamp(42px, 4.7vw, 68px); line-height: 1.04; }
+.fc-public h2 em { color: inherit; }
+.fc-public .fc-public-hero-details { max-width: 445px; padding-top: 20px; }
+.fc-public .fc-public-hero-description { max-width: 40ch; color: var(--fc-text); font-size: clamp(16px, 1.45vw, 20px); font-weight: 350; line-height: 1.7; margin: 0; letter-spacing: -.02em; text-wrap: pretty; }
+.fc-public .fc-public-hero-actions { flex-direction: row; align-items: center; gap: 24px; margin-top: 26px; }
+.fc-public .fc-public-hero-actions .fc-button { min-height: 48px; font-size: 13px; gap: 20px; }
+.fc-public .fc-public-hero-note { max-width: 40ch; font-size: 12px; line-height: 1.7; margin: 20px 0 0; }
+.fc-public .fc-public-principles { margin: 0; gap: 15px; font-size: 10px; line-height: 1.7; letter-spacing: .09em; }
+.fc-public .fc-public-principles span + span { padding-left: 15px; border-color: var(--fc-public-rule); }
+.fc-public .fc-public-preview-wrap { margin-top: 55px; }
+.fc-public .fc-public-preview-overline { font-size: 11px; line-height: 1.6; margin-bottom: 16px; letter-spacing: .09em; }
+.fc-public .fc-preview { background: var(--fc-surface); border: 1px solid var(--fc-public-rule); border-radius: var(--fc-radius); box-shadow: none; }
+.fc-public .fc-preview-titlebar { min-height: 77px; padding: 14px 30px; border-bottom: 1px solid var(--fc-public-rule); }
+.fc-public .fc-preview-studio-identity { min-width: 0; display: flex; align-items: center; gap: 24px; font-weight: 450; }
+.fc-public .fc-preview-titlebar .fc-brand { font-size: 17px; gap: 9px; }
+.fc-public .fc-preview-titlebar .fc-brand-mark { width: 24px; height: 24px; }
+.fc-public .fc-preview-workspace-name { font-size: 13px; font-weight: 450; padding-left: 24px; border-left: 1px solid var(--fc-public-rule); white-space: nowrap; }
+.fc-public .fc-preview-channel-picker { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--fc-text); }
+.fc-public .fc-preview-channel-picker select { appearance: none; background: transparent; border: 0; color: inherit; font: 450 13px/1.4 var(--fc-font); width: 96px; min-height: 44px; padding: 8px 0; cursor: pointer; }
+.fc-public .fc-preview-channel-picker option { background: var(--fc-surface); color: var(--fc-text); }
+.fc-public .fc-preview-channel-picker > svg { flex-shrink: 0; }
+.fc-public .fc-preview-icon-button { color: var(--fc-muted); border-radius: 50%; }
+.fc-public .fc-preview-layout { grid-template-columns: 1.05fr 1fr; gap: 62px; padding: 45px 48px 12px; height: auto; min-height: 520px; align-items: stretch; }
+.fc-public .fc-preview-conversation { min-width: 0; justify-content: space-between; padding-top: 4px; }
+.fc-public .fc-preview-messages { min-height: 245px; max-height: 430px; flex: 1; padding: 0 8px 10px 0; }
+.fc-public .fc-preview-message { gap: 14px; margin-bottom: 27px; }
+.fc-public .fc-preview-avatar { width: 41px; height: 41px; border: 0; border-radius: 50%; background-color: var(--fc-accent-soft); color: var(--fc-accent); font-size: 13px; }
+.fc-public .fc-preview-portrait { background-image: var(--fc-preview-portraits); background-size: 200% 200%; background-repeat: no-repeat; }
+.fc-public .fc-preview-portrait-0 { background-position: 0 0; }
+.fc-public .fc-preview-portrait-1 { background-position: 100% 0; }
+.fc-public .fc-preview-portrait-2 { background-position: 0 100%; }
+.fc-public .fc-preview-portrait-3 { background-position: 100% 100%; }
+.fc-public .fc-preview-message-meta { gap: 9px; padding-top: 3px; line-height: 1.4; }
+.fc-public .fc-preview-message-meta strong { font-size: 11px; font-weight: 550; }
+.fc-public .fc-preview-message-meta time { font-size: 10px; }
+.fc-public .fc-preview-message p { margin: 8px 0 0; font-size: 17px; color: var(--fc-text); line-height: 1.45; font-weight: 350; letter-spacing: -.025em; }
+.fc-public .fc-preview-message.is-lead { gap: 17px; margin-bottom: 28px; }
+.fc-public .fc-preview-message.is-lead .fc-preview-avatar { width: 51px; height: 51px; }
+.fc-public .fc-preview-message.is-lead p { font-size: clamp(31px, 3.1vw, 46px); font-weight: 330; line-height: 1.06; letter-spacing: -.06em; margin-top: 12px; }
+.fc-public .fc-preview-file { width: min(100%, 275px); gap: 10px; background: transparent; margin-top: 13px; border-color: var(--fc-public-rule); padding: 11px 12px; }
+.fc-public .fc-preview-file strong { font-size: 11px; font-weight: 450; }
+.fc-public .fc-preview-file span { font-size: 9px; margin-top: 3px; }
+.fc-public .fc-preview-file > span { margin-top: 0; }
+.fc-public .fc-preview-file-excerpt { width: min(100%, 275px); background: var(--fc-sidebar); padding: 14px; }
+.fc-public .fc-preview-file-excerpt > strong { font-family: var(--fc-font); font-size: 14px; }
+.fc-public .fc-preview-file-excerpt > p { font-size: 11px; line-height: 1.8; letter-spacing: 0; }
+.fc-public .fc-preview-reaction { min-height: 32px; min-width: 40px; font-size: 10px !important; border-radius: 20px; margin-top: 12px; padding: 4px 10px; }
+.fc-public .fc-preview-composer { margin: 12px 0 0; padding: 0 0 9px; border: 0; border-bottom: 1px solid var(--fc-public-rule); border-radius: 0; gap: 14px; }
+.fc-public .fc-preview-composer:focus-within { border-bottom-color: var(--fc-accent); }
+.fc-public .fc-preview-composer input { font-family: var(--fc-font); font-size: 16px; font-weight: 350; color: var(--fc-text); padding: 8px 0; min-height: 44px; background: transparent; min-width: 0; }
+.fc-public .fc-preview-composer button { width: 44px; height: 44px; min-height: 44px; flex-shrink: 0; border-radius: 50%; background: var(--fc-accent-original, var(--fc-accent)); color: var(--fc-on-accent-original, var(--fc-on-accent)); }
+.fc-public .fc-preview-composer button:disabled { opacity: .45; }
+.fc-public .fc-preview-material { min-width: 0; margin: 0 0 0 3px; position: relative; align-self: start; }
+.fc-public .fc-preview-material > img { display: block; width: 100%; height: auto; max-height: 475px; aspect-ratio: 4 / 5; object-fit: cover; object-position: center; border-radius: 2px; transform: rotate(1deg); }
+.fc-public .fc-preview-material-note { position: absolute; right: 9px; top: -31px; display: flex; align-items: center; gap: 9px; color: var(--fc-muted); font-size: 12px; font-weight: 350; transform: rotate(-4deg); }
+.fc-public .fc-preview-material-note > svg { transform: rotate(-25deg); }
+.fc-public .fc-preview-material figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 5px 14px; color: var(--fc-muted); margin-top: 15px; font-size: 10px; line-height: 1.5; }
+.fc-public .fc-preview-studio-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 13px; padding: 18px 48px 25px; color: var(--fc-muted); font-size: 10px; }
+.fc-public .fc-preview-team { display: flex; padding-left: 0; }
+.fc-public .fc-preview-team > span { width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--fc-surface); margin-left: -6px; }
+.fc-public .fc-preview-team > span:first-child { margin-left: 0; }
+.fc-public .fc-preview-local-label { margin-left: auto; font-size: 9px; }
+.fc-public .fc-preview-empty { min-height: 250px; }
+.fc-public .fc-preview-empty h3 { font-family: var(--fc-font); font-size: 28px; line-height: 1.2; font-weight: 350; }
+.fc-public .fc-preview-empty p { font-size: 13px; }
+.fc-public .fc-preview-empty button { font-size: 12px; }
+.fc-public .fc-public-preview-personalize { padding-block: 18px 14px; border-color: var(--fc-public-rule); gap: 12px 20px; }
+.fc-public .fc-public-preview-personalize > div:first-child > span { font-size: 9px; letter-spacing: .1em; }
+.fc-public .fc-public-preview-personalize p { font-size: 13px; }
+.fc-public .fc-public-preview-font { min-width: 143px; }
+.fc-public .fc-public-preview-font select { font-size: 12px; padding-inline: 12px 28px; }
+.fc-public .fc-public-preview-caption { font-size: 10px; min-height: 25px; gap: 8px 13px; }
+.fc-public .fc-public-preview-sample-label { font-size: 8px; }
+.fc-public .fc-public-preview-sample-label::before { top: 5px; }
+.fc-public .fc-public-intro-line { padding-block: 5px 30px; font-size: 15px; font-weight: 350; border-color: var(--fc-public-rule); }
+.fc-public .fc-public-intro-line > span { font-size: 9px; }
+.fc-public .fc-public-essentials { padding-block: 90px; }
+.fc-public .fc-public-section-heading .fc-kicker { font-size: 10px; letter-spacing: .1em; }
+.fc-public .fc-public-section-heading > p:not(.fc-kicker) { font-size: 16px; line-height: 1.8; }
+.fc-public .fc-public-feature-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 52px 40px; margin-top: 55px; }
+.fc-public .fc-public-feature-grid article { border-color: var(--fc-public-rule); padding-top: 24px; }
+.fc-public .fc-public-feature-grid article > svg { width: 24px; height: 24px; stroke-width: 1.2; }
+.fc-public .fc-public-feature-grid h3 { margin: 25px 0 12px; font-size: 21px; line-height: 1.3; font-weight: 450; letter-spacing: -.03em; text-wrap: balance; }
+.fc-public .fc-public-feature-grid p { font-size: 14px; line-height: 1.8; }
+.fc-public .fc-public-feature-detail { font-size: 11px; line-height: 1.7; letter-spacing: .06em; }
+.fc-public .fc-public-connections { gap: 70px; border-color: var(--fc-public-rule); }
+.fc-public .fc-public-provider-grid { gap: 28px; }
+.fc-public .fc-public-provider-grid article { padding: 24px 0; border: 0; border-top: 1px solid var(--fc-public-rule); border-radius: 0; background: transparent; }
+.fc-public .fc-public-provider-mark { border: 0; background: var(--fc-accent-soft); border-radius: 50%; font-size: 18px; }
+.fc-public .fc-public-provider-grid h3 { font-size: 21px; font-weight: 450; }
+.fc-public .fc-public-provider-grid article > p { font-size: 14px; line-height: 1.8; }
+.fc-public .fc-public-provider-grid article > button, .fc-public .fc-public-provider-note { font-size: 12px; }
+.fc-public .fc-public-ownership { border: 0; border-block: 1px solid var(--fc-public-rule); border-radius: 0; background: transparent; padding: 60px 0; }
+.fc-public .fc-public-ownership > div:last-child p { font-size: 16px; font-weight: 350; line-height: 1.8; }
+.fc-public .fc-public-how { border-color: var(--fc-public-rule); }
+.fc-public .fc-public-steps li { border-color: var(--fc-public-rule); }
+.fc-public .fc-public-steps li > span { font-family: var(--fc-font); font-style: normal; font-size: 12px; padding-top: 5px; }
+.fc-public .fc-public-steps h3 { font-size: 21px; font-weight: 450; letter-spacing: -.035em; }
+.fc-public .fc-public-steps p { font-size: 14px; line-height: 1.8; }
+.fc-public .fc-public-faq details, .fc-public .fc-public-faq details:last-child { border-color: var(--fc-public-rule); }
+.fc-public .fc-public-faq summary { font-size: 16px; font-weight: 450; }
+.fc-public .fc-public-faq details p { font-size: 14px; line-height: 1.85; padding-right: 2rem; }
+.fc-public .fc-public-cta { background: var(--fc-text); color: var(--fc-bg); }
+.fc-public .fc-public-cta .fc-kicker { color: inherit; font-size: 10px; }
+.fc-public .fc-public-cta h2 { font-size: clamp(62px, 7.3vw, 106px); font-weight: 330; }
+.fc-public .fc-public-cta h2 em { color: var(--fc-accent-original, var(--fc-bg)); }
+.fc-public .fc-public-cta-aside p { font-size: 15px; font-weight: 350; }
+.fc-public .fc-public-inverse-button { background: var(--fc-accent-original, var(--fc-bg)) !important; color: var(--fc-on-accent-original, var(--fc-text)) !important; border-color: transparent !important; }
+.fc-public .fc-public-cta .fc-public-cta-mark { display: none; }
+.fc-public .fc-public-footer { min-height: 120px; }
+.fc-public .fc-public-footer > p, .fc-public .fc-public-footer > div:last-child, .fc-public .fc-public-footer .fc-public-text-button { font-size: 12px; line-height: 1.7; }
+
+@media (max-width: 1100px) {
+  .fc-public .fc-public-hero-copy { gap: 40px; }
+  .fc-public .fc-public-hero-actions { gap: 12px; }
+  .fc-public .fc-preview-layout { gap: 35px; padding-inline: 30px; }
+  .fc-public .fc-preview-message.is-lead p { font-size: 35px; }
+  .fc-public .fc-preview-message p { font-size: 15px; }
+  .fc-public .fc-preview-studio-footer { padding-inline: 30px; }
+  .fc-public .fc-public-connections { grid-template-columns: 1fr; gap: 35px; }
+}
+@media (max-width: 800px) {
+  .fc-public .fc-public-hero { padding-top: 45px; }
+  .fc-public .fc-public-hero-copy { grid-template-columns: 1fr; gap: 25px; }
+  .fc-public .fc-public-hero-details { max-width: 590px; padding-top: 0; }
+  .fc-public h1 { font-size: clamp(65px, 11vw, 90px); }
+  .fc-public .fc-public-hero-description { font-size: 18px; }
+  .fc-public .fc-public-preview-wrap { margin-top: 40px; }
+  .fc-public .fc-preview-studio-identity { gap: 16px; }
+  .fc-public .fc-preview-workspace-name { padding-left: 16px; }
+  .fc-public .fc-preview-layout { gap: 25px; padding: 36px 25px 10px; min-height: 430px; }
+  .fc-public .fc-preview-titlebar { padding-inline: 20px; }
+  .fc-public .fc-preview-message { gap: 10px; }
+  .fc-public .fc-preview-avatar { width: 33px; height: 33px; }
+  .fc-public .fc-preview-message.is-lead { gap: 10px; }
+  .fc-public .fc-preview-message.is-lead .fc-preview-avatar { width: 39px; height: 39px; }
+  .fc-public .fc-preview-message.is-lead p { font-size: 29px; }
+  .fc-public .fc-preview-messages { max-height: 375px; }
+  .fc-public .fc-preview-material figcaption { font-size: 9px; }
+  .fc-public .fc-public-feature-grid { grid-template-columns: 1fr 1fr; gap: 30px; }
+  .fc-public .fc-public-intro-line { gap: 20px; align-items: flex-start; flex-direction: column; }
+  .fc-public .fc-public-intro-line > p { margin-bottom: 0; }
+}
+@media (max-width: 620px) {
+  .fc-public .fc-public-header { min-height: 88px; flex-wrap: wrap; gap: 10px; padding-block: 20px 14px; }
+  .fc-public .fc-public-nav { flex: 1 1 100%; min-width: 0; justify-content: space-between; gap: 8px; }
+  .fc-public .fc-public-nav > .fc-public-text-button, .fc-public .fc-public-source-link { display: none; }
+  .fc-public .fc-public-nav .fc-language-compact { flex: 1 1 auto; min-width: 0; max-width: 170px; }
+  .fc-public .fc-public-nav .fc-language-compact label { gap: 0; }
+  .fc-public .fc-public-nav .fc-language-compact label > span { position: absolute; width: 1px; height: 1px; clip-path: inset(50%); overflow: hidden; }
+  .fc-public .fc-public-nav .fc-language-compact select { width: 100%; min-width: 0; font-size: 12px; }
+  .fc-public .fc-public-nav .fc-button { padding-inline: 12px; flex-shrink: 0; }
+  .fc-public .fc-public-hero { padding-block: 35px 35px; }
+  .fc-public .fc-public-eyebrow { font-size: 10px; }
+  .fc-public h1 { font-size: clamp(54px, 12vw, 73px); line-height: 1.02; margin-block: 20px 25px; }
+  .fc-public .fc-public-hero-copy { gap: 25px; }
+  .fc-public .fc-public-principles { font-size: 10px; gap: 8px 10px; letter-spacing: .05em; }
+  .fc-public .fc-public-principles span + span { padding-left: 10px; }
+  .fc-public .fc-public-hero-description { font-size: 17px; line-height: 1.7; }
+  .fc-public .fc-public-hero-actions { gap: 10px 18px; }
+  .fc-public .fc-public-hero-actions .fc-button { font-size: 12px; gap: 10px; }
+  .fc-public .fc-public-hero-actions .fc-public-text-button { font-size: 12px; }
+  .fc-public .fc-public-hero-note { font-size: 12px; margin-top: 15px; }
+  .fc-public .fc-public-preview-overline { font-size: 10px; gap: 8px; letter-spacing: .06em; }
+  .fc-public .fc-preview-titlebar { min-height: 65px; padding: 10px 14px; }
+  .fc-public .fc-preview-titlebar .fc-brand { font-size: 15px; }
+  .fc-public .fc-preview-titlebar .fc-brand-mark { width: 20px; height: 20px; }
+  .fc-public .fc-preview-studio-identity { gap: 15px; }
+  .fc-public .fc-preview-workspace-name { display: none; }
+  .fc-public .fc-preview-channel-picker { gap: 3px; }
+  .fc-public .fc-preview-channel-picker select { width: 77px; font-size: 11px; }
+  .fc-public .fc-preview-channel-picker > svg:first-child { display: none; }
+  .fc-public .fc-preview-icon-button { min-width: 36px; width: 36px; padding: 8px; }
+  .fc-public .fc-preview-layout { display: grid; grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 25px 18px 10px; min-height: 0; }
+  .fc-public .fc-preview-conversation { display: contents; }
+  .fc-public .fc-preview-messages { grid-row: 1; min-height: 0; max-height: 430px; padding: 0 3px 0 0; }
+  .fc-public .fc-preview-message, .fc-public .fc-preview-message.is-lead { gap: 11px; margin-bottom: 22px; }
+  .fc-public .fc-preview-message:last-child { margin-bottom: 0; }
+  .fc-public .fc-preview-message.is-lead p { font-size: clamp(28px, 7.5vw, 38px); margin-top: 10px; }
+  .fc-public .fc-preview-message p { font-size: 15px; }
+  .fc-public .fc-preview-message-meta strong { font-size: 10px; }
+  .fc-public .fc-preview-message-meta time { font-size: 9px; }
+  .fc-public .fc-preview-file { gap: 7px; padding: 9px; }
+  .fc-public .fc-preview-file strong { font-size: 10px; }
+  .fc-public .fc-preview-file span { font-size: 8px; }
+  .fc-public .fc-preview-material { grid-row: 2; margin: 0; }
+  .fc-public .fc-preview-material > img { aspect-ratio: 4 / 3; height: auto; max-height: 320px; transform: none; }
+  .fc-public .fc-preview-material-note { display: none; }
+  .fc-public .fc-preview-material figcaption { gap: 3px 8px; font-size: 9px; margin-top: 9px; }
+  .fc-public .fc-preview-composer { grid-row: 3; margin-top: 0; gap: 10px; }
+  .fc-public .fc-preview-composer input { font-size: 16px; }
+  .fc-public .fc-preview-studio-footer { padding: 14px 18px 20px; gap: 9px; font-size: 9px; }
+  .fc-public .fc-preview-team > span { width: 25px; height: 25px; }
+  .fc-public .fc-preview-local-label { margin-left: 0; width: 100%; font-size: 9px; }
+  .fc-public .fc-public-preview-personalize { grid-template-columns: 1fr; gap: 8px; }
+  .fc-public .fc-public-preview-personalize > div:first-child { display: block; grid-column: auto; }
+  .fc-public .fc-public-preview-personalize > div:first-child p { margin-top: 5px; }
+  .fc-public .fc-public-preview-palette { flex-wrap: wrap; }
+  .fc-public .fc-public-preview-font { min-width: 0; max-width: 220px; }
+  .fc-public .fc-public-preview-caption { font-size: 9px; }
+  .fc-public .fc-public-preview-sample-label { font-size: 7px; }
+  .fc-public .fc-public-intro-line { font-size: 16px; padding-block: 0 24px; gap: 13px; }
+  .fc-public .fc-public-intro-line > span { font-size: 10px; line-height: 1.8; letter-spacing: .05em; }
+  .fc-public h2 { font-size: 44px; }
+  .fc-public .fc-public-essentials { padding-block: 55px; }
+  .fc-public .fc-public-essentials > .fc-public-section-heading { grid-template-columns: 1fr; gap: 20px; }
+  .fc-public .fc-public-section-heading .fc-kicker { margin-bottom: 5px; font-size: 10px; }
+  .fc-public .fc-public-section-heading > p:not(.fc-kicker) { font-size: 15px; max-width: none; }
+  .fc-public .fc-public-feature-grid { grid-template-columns: 1fr; gap: 28px; margin-top: 35px; }
+  .fc-public .fc-public-feature-grid h3 { min-height: 0; margin-top: 20px; }
+  .fc-public .fc-public-feature-grid p { max-width: none; }
+  .fc-public .fc-public-feature-detail { padding-top: 18px; font-size: 10px; }
+  .fc-public .fc-public-connections { padding-block: 45px; gap: 30px; }
+  .fc-public .fc-public-provider-grid { grid-template-columns: 1fr; gap: 12px; }
+  .fc-public .fc-public-provider-grid article { padding-block: 24px; }
+  .fc-public .fc-public-provider-grid h3 { margin-top: 20px; }
+  .fc-public .fc-public-provider-note { font-size: 11px; }
+  .fc-public .fc-public-ownership { margin-bottom: 30px; padding-block: 38px; }
+  .fc-public .fc-public-ownership h2 { font-size: 40px; }
+  .fc-public .fc-public-ownership > div:last-child p { font-size: 15px; }
+  .fc-public .fc-public-how { grid-template-columns: 1fr; padding-block: 45px; gap: 20px; }
+  .fc-public .fc-public-steps p { max-width: none; }
+  .fc-public .fc-public-steps h3 { font-size: 20px; }
+  .fc-public .fc-public-faq { padding-bottom: 45px; }
+  .fc-public .fc-public-faq summary { font-size: 15px; }
+  .fc-public .fc-public-cta > .fc-public-container { padding-block: 44px; }
+  .fc-public .fc-public-cta h2 { font-size: clamp(50px, 12vw, 70px); }
+  .fc-public .fc-public-cta > div > div:not(.fc-public-cta-mark) { align-items: flex-start; flex-direction: column; gap: 27px; }
+  .fc-public .fc-public-cta-aside p { font-size: 14px; }
+  .fc-public .fc-public-footer { align-items: flex-start; flex-direction: column; gap: 13px; padding-block: 30px; }
+  .fc-public .fc-public-footer > p { margin: 0; }
+  .fc-public .fc-public-footer > div:last-child { gap: 13px 18px; margin: 0; }
 }

@@ -148,12 +148,14 @@ def test_shared_presence_leases_keep_other_devices_and_recheck_authority(valkey_
         await left.start(deliver);await right.start(deliver)
         try:
             first={'user_id':'member','status':'online','last_seen':'2026-10-21T10:00:00','changed_at':1,'session_hash':'one','claims':{'sub':'member','exp':9999999999}}
-            second={**first,'session_hash':'two','changed_at':2}
+            second={**first,'session_hash':'two','changed_at':2,'custom_status':'Reviewing the brief 🧭'}
             await left.write_presence('device-a',first);await right.write_presence('device-b',second)
             assert valkey_tls.shared.presence('member',lambda _:True)['status']=='online'
+            assert valkey_tls.shared.presence('member',lambda _:True)['custom_status']=='Reviewing the brief 🧭'
             await left.remove_presence('device-a','member')
             assert valkey_tls.shared.presence('member',lambda _:True)['status']=='online'
             assert valkey_tls.shared.presence('member',lambda row:row['session_hash']!='two')['status']=='offline'
+            assert valkey_tls.shared.presence('member',lambda row:row['session_hash']!='two')['custom_status'] is None
             await right.remove_presence('device-b','member')
             assert valkey_tls.shared.presence('member',lambda _:True)['status']=='offline'
         finally:await left.stop();await right.stop()

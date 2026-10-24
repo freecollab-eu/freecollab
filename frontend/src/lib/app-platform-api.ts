@@ -24,10 +24,10 @@ export const appPlatformApi = {
   invoke: (id: string, installation: string, data: { request_id: string; channel_id: string; command: string; arguments: Record<string, string>; confirm: boolean; disclose_to_app: boolean }) => api.request<AppJob>(base(id) + '/' + encodeURIComponent(installation) + '/commands', json(data)),
   cards: (id: string, room: string) => api.request<{ cards: AppCard[] }>(channel(id, room) + '/cards'),
   drafts: (id: string, room: string) => api.request<{ drafts: AppAIDraft[] }>(channel(id, room) + '/ai/drafts'),
-  generate: (id: string, room: string, data: { kind: AppAIDraft['kind']; prompt: string; sources: CopilotSource[]; installation_ids: string[]; recipient_ids: string[]; disclose_to_provider: boolean }) => api.request<AppAIDraft>(channel(id, room) + '/ai/drafts', json(data)),
+  generate: (id: string, room: string, data: { expected_config_revision: number; kind: AppAIDraft['kind']; prompt: string; sources: CopilotSource[]; installation_ids: string[]; recipient_ids: string[]; disclose_to_provider: boolean }) => api.request<AppAIDraft>(channel(id, room) + '/ai/drafts', json(data)),
   approve: (id: string, room: string, draft: string, password?: string, code?: string) => api.request(channel(id, room) + '/ai/drafts/' + encodeURIComponent(draft) + '/approve', json({ confirm: true, ...(password ? { password } : {}), ...(code ? { code } : {}) })),
   deleteDraft: (id: string, room: string, draft: string) => api.request(channel(id, room) + '/ai/drafts/' + encodeURIComponent(draft), { method: 'DELETE' }),
   recaps: (id: string, room: string) => api.request<{ schedules: RecapSchedule[] }>(channel(id, room) + '/ai/recaps'),
-  schedule: (id: string, room: string, hours: number) => api.request(channel(id, room) + '/ai/recaps', json({ interval_hours: hours, enabled: true, disclose_future_native_messages: true })),
+  schedule: (id: string, room: string, hours: number, reviewedConfigRevision: number) => api.request(channel(id, room) + '/ai/recaps', json({ interval_hours: hours, expected_config_revision: reviewedConfigRevision, enabled: true, disclose_future_native_messages: true })),
   stopRecap: (id: string, room: string, schedule: string) => api.request(channel(id, room) + '/ai/recaps/' + encodeURIComponent(schedule), { method: 'DELETE' }),
 };

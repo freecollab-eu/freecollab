@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Narrow actual-App operator/health repair proof with private real API only."""
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import json
@@ -94,9 +95,9 @@ def main():
                 expect(readiness.get_by_text('Off-host backup and restore evidence',exact=True)).to_be_visible()
                 assert readiness.get_by_text('Needs external verification',exact=True).count() >= 3
                 checks['real_native_installation_operator_readiness_14_checks_and_honest_unknown_offhost_proxy_host'] = True
-                dialog.get_by_role('button',name='Done',exact=True).click(); page.get_by_role('button',name='Account settings',exact=True).click()
+                dialog.get_by_role('button',name='Done',exact=True).click(); open_chat_tool(page, 'Account settings')
                 page.get_by_label('Language',exact=True).select_option('sv'); expect(page.locator('.fc-language-status')).to_have_text('Språket har sparats.'); page.locator('.fc-account-panel .fc-account-header button').click()
-                page.get_by_role('button',name='Integrationer',exact=True).click(); dialog = page.get_by_role('dialog',name='Integrationer',exact=True)
+                open_chat_tool(page, 'Integrationer'); dialog = page.get_by_role('dialog',name='Integrationer',exact=True)
                 dialog.get_by_role('button',name='Drift',exact=True).click(); readiness = dialog.get_by_role('region',name='Driftkontroll',exact=True)
                 expect(readiness.get_by_role('heading',name='Er installation, under uppsikt.',exact=True)).to_be_visible(); expect(readiness.get_by_text('Bevis för extern säkerhetskopia och återställning',exact=True)).to_be_visible()
                 page.screenshot(path=str(REPORT.parent/'open-release-readiness-sv-desktop.png'),full_page=True,animations='disabled')

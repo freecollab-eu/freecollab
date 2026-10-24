@@ -1,5 +1,6 @@
+import { validateFieldReferences, type FieldReferences } from './field-references';
 export type DocumentProvider = 'nextcloud' | 'google_drive' | 'sharepoint';
-export interface DocumentFields { title: string; provider: DocumentProvider; url: string; notes: string }
+export interface DocumentFields { field_references?: FieldReferences; title: string; provider: DocumentProvider; url: string; notes: string }
 export const documentProviders: Record<DocumentProvider, string> = { nextcloud: 'Nextcloud', google_drive: 'Google Drive', sharepoint: 'SharePoint' };
 export function validateDocument(value: unknown): DocumentFields {
   if (!value || typeof value !== 'object') throw new Error('Invalid document link.');
@@ -18,5 +19,6 @@ export function validateDocument(value: unknown): DocumentFields {
     : host === 'drive.google.com' ? /^\/(?:file\/d\/|drive\/(?:u\/\d+\/)?folders\/)[A-Za-z0-9_-]+/.test(path)
     : host === 'docs.google.com' && /^\/(?:document|spreadsheets|presentation|forms|drawings)\/d\/[A-Za-z0-9_-]+/.test(path);
   if (!valid) throw new Error('The URL does not match the selected document provider.');
-  return { title: f.title.trim(), provider, url: url.origin + url.pathname, notes: f.notes };
+  const field_references = validateFieldReferences({ title: f.title, notes: f.notes }, f.field_references);
+  return { title: field_references?.title?.length ? f.title : f.title.trim(), provider, url: url.origin + url.pathname, notes: f.notes, ...(field_references ? { field_references } : {}) };
 }

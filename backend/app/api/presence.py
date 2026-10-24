@@ -25,6 +25,7 @@ def get_presence(
         "user_id": user_id,
         "status": presence["status"],
         "last_seen": presence["last_seen"],
+        **({"custom_status": presence["custom_status"]} if presence.get("custom_status") else {}),
     }
 
 

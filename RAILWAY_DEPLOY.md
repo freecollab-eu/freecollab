@@ -87,7 +87,7 @@ Register the intended native operator, then through trusted backend access run `
 
 ```bash
 python scripts/pilot-preflight.py https://app.your-company.example \
-  --expect-version 0.9.0 --require-capability integrations.connection_setup
+  --expect-version 0.13.0 --require-capability integrations.connection_setup
 python scripts/pilot-preflight.py https://app.your-company.example \
   --metrics-token-file /private/freecollab-metrics-token
 ```

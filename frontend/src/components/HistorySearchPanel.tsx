@@ -11,14 +11,14 @@ import { loadSearchSources, sourceMatches, verifySearchSource, type SearchSource
 import { EnterpriseSearchPanel } from './EnterpriseSearchPanel';
 import '../styles/history-search.css';
 
-interface Props { channels: Channel[]; onClose: () => void; onMessage: (message: Message) => void }
+interface Props { channels: Channel[]; onClose: () => void; onMessage: (message: Message) => void; initialQuery?: string }
 
 /** Plaintext lives only in this account-scoped dialog, never in browser storage. */
-export function HistorySearchPanel({ channels, onClose, onMessage }: Props) {
+export function HistorySearchPanel({ channels, onClose, onMessage, initialQuery = '' }: Props) {
   useI18n();
   const dialog = useRef<HTMLElement>(null);
   useModalFocus(dialog, onClose);
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialQuery);
   const [channelId, setChannelId] = useState('');
   const [author, setAuthor] = useState('');
   const [after, setAfter] = useState('');

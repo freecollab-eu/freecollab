@@ -62,9 +62,18 @@ JWT rotation is independent once historical content has been migrated or its leg
 
 Back up content keys separately from the database with access controls appropriate to decryption material. Encryption offers no recovery from a lost key, and storing a database and all its keys together offers limited protection against a backup disclosure.
 
-## Additional server-encrypted records in 0.5
+## Additional server-encrypted records
 
 The message key ring also protects native decision/document/calendar revision payloads and private Matrix service/session credentials. The existing `app.crypto_migration` command audits and rewrites native message rows; its report is not a complete inventory of these additional records. Retain older key IDs after a message migration until those credential/decision/document/calendar records and retained backups have also been migrated and verified. Removing a still-referenced server key can break Matrix authentication even though client-held message keys remain intact. Client Megolm rotation and a user's separate recovery key are independent of this server key-ring lifecycle.
+
+Native channel names/descriptions saved through the channel-metadata API and
+native shared-document stack titles also use this retained ring. Their encrypted
+payloads bind the channel and metadata revision or stack generation. Moving a
+document changes its separate placement record and does not rewrite its Yjs
+history. The message-only migration command does not rotate these payloads:
+keep every key ID they still reference, including in backups. Matrix channel
+details retain only a verified encrypted event reference on the application
+server; native document organization is unavailable in Matrix channels.
 
 ## Account factors and customer SSO secrets
 

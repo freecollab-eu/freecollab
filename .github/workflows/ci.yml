@@ -61,7 +61,10 @@ jobs:
           python -m pip install --require-hashes -r requirements-dev.lock
 
       - name: Install TLS Redis-compatible integration fixture
-        run: sudo apt-get update && sudo apt-get install -y redis-server
+        timeout-minutes: 5
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y redis-server
 
       - name: Run tests
         working-directory: backend
@@ -115,14 +118,20 @@ jobs:
           node --test tests/*.test.mjs
           npm run build:widget
           npm run build:website
+          npm run build:demo
           npm ci --prefix ../packages/components
           npm test --prefix ../packages/components
           npm pack ../packages/components --dry-run
 
-      - name: Verify reverse proxy capability privacy
+      - name: Install reverse proxy integration fixture
+        timeout-minutes: 5
         run: |
-          sudo apt-get update
-          sudo apt-get install -y nginx
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y nginx
+
+      - name: Verify reverse proxy capability privacy
+        timeout-minutes: 3
+        run: |
           python3 frontend/tests/nginx-capability-logging.py --nginx /usr/sbin/nginx --report "$RUNNER_TEMP/nginx-capability-privacy.json"
 
   product-e2e:
@@ -177,11 +186,17 @@ jobs:
           with open(os.environ['GITHUB_PATH'], 'a') as output:
               output.write(os.path.join(os.environ['GITHUB_WORKSPACE'], 'backend', '.venv', 'bin') + '\n')
           PY
-          sudo apt-get update && sudo apt-get install -y ffmpeg
           npm ci --prefix frontend
           npm ci --prefix packages/components --ignore-scripts
-          npm run build --prefix frontend
+          VITE_PUBLIC_DEMO_URL=http://127.0.0.1:3011/product-demo/ npm run build --prefix frontend
           npm run build:widget --prefix frontend
+      - name: Install media integration fixture
+        # Slow Ubuntu mirrors can take several minutes for codec dependencies.
+        timeout-minutes: 30
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version
       - name: Start API and reference client
         run: |
           (cd backend && python -m uvicorn app.main:socket_app --host 127.0.0.1 --port 8000 --no-proxy-headers) > /tmp/freecollab-api.log 2>&1 &
@@ -207,8 +222,22 @@ jobs:
           python frontend/tests/pilot-browser.py
           python frontend/tests/chat-browser.py
           python frontend/tests/widget-browser.py
+          python frontend/tests/widget-security-browser.py
           python frontend/tests/appearance-browser.py
           python frontend/tests/elite-browser.py
+          python frontend/tests/open-studio-browser.py
+          python frontend/tests/conversation-flow-browser.py
+          BACKEND_PYTHON=python python frontend/tests/slash-commands-browser.py
+          BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
+          BACKEND_PYTHON=python python frontend/tests/thread-commands-browser.py
+          python frontend/tests/work-surface-layout-browser.py
+          BACKEND_PYTHON=python python frontend/tests/workspace-modes-browser.py
+          BACKEND_PYTHON=python COLLABORATION_INPUT_REPORT="$RUNNER_TEMP/freecollab-universal/collaboration-input/browser.json" python frontend/tests/collaboration-input-browser.py
+          BACKEND_PYTHON=python COLLABORATION_WORKBENCH_REPORT="$RUNNER_TEMP/freecollab-universal/workbench/browser.json" python frontend/tests/collaboration-workbench-browser.py
+          BACKEND_PYTHON=python COLLABORATION_MODAL_REPORT="$RUNNER_TEMP/freecollab-universal/modal/browser.json" python frontend/tests/collaboration-modal-browser.py
+          BACKEND_PYTHON=python REFERENCED_MESSAGE_REPORT="$RUNNER_TEMP/freecollab-universal/reference-lifetime/browser.json" python frontend/tests/referenced-message-browser.py
+          BACKEND_PYTHON=python UNIVERSAL_PROOF_REPORT="$RUNNER_TEMP/freecollab-universal/product/current.json" python frontend/tests/universal-collaboration-browser.py
+          BACKEND_PYTHON=python python frontend/tests/flow-first-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
           python frontend/tests/account-race-browser.py
@@ -246,6 +275,7 @@ jobs:
           python frontend/tests/file-experience-browser.py
           python frontend/tests/activity-feed-browser.py
           python frontend/tests/cloud-files-browser.py
+          python frontend/tests/cloud-picker-focus-browser.py
           python frontend/tests/external-meetings-browser.py
           python frontend/tests/copilot-browser.py
           python frontend/tests/language-browser.py
@@ -253,9 +283,27 @@ jobs:
           python frontend/tests/workspace-launch-browser.py
           python frontend/tests/workspace-feedback-browser.py
           python frontend/tests/connection-health-browser.py
-          python frontend/tests/demo-showroom-browser.py
-          python frontend/tests/public-launch-browser.py
+          BACKEND_PYTHON=python python frontend/tests/product-demo-browser.py
+          PUBLIC_LAUNCH_DEMO_URL=http://127.0.0.1:3011/product-demo/ python frontend/tests/public-launch-browser.py
           python packages/components/tests/browser-proof.py
+      - name: Retain universal collaboration browser proofs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-collaboration-browser-proofs
+          path: |
+            ${{ runner.temp }}/freecollab-universal/collaboration-input/browser.json
+            ${{ runner.temp }}/freecollab-universal/collaboration-input/*.png
+            ${{ runner.temp }}/freecollab-universal/workbench/browser.json
+            ${{ runner.temp }}/freecollab-universal/workbench/*.png
+            ${{ runner.temp }}/freecollab-universal/modal/browser.json
+            ${{ runner.temp }}/freecollab-universal/modal/*.png
+            ${{ runner.temp }}/freecollab-universal/reference-lifetime/browser.json
+            ${{ runner.temp }}/freecollab-universal/reference-lifetime/*.png
+            ${{ runner.temp }}/freecollab-universal/product/current.json
+            ${{ runner.temp }}/freecollab-universal/product/*.png
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload service diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -336,6 +384,7 @@ jobs:
         # Connect deliberately checks the separate reviewed release artifact.
         run: |
           npm run release:artifact --prefix packages/components
+          python packages/components/tests/test_sdk_artifact_binding.py
           python packages/components/tests/connect-browser-proof.py --skip-build
       - name: Verify encrypted messages and files across independent installations
         run: BACKEND_PYTHON=python python frontend/tests/connect-federation-browser.py

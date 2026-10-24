@@ -2,14 +2,18 @@ import { api } from './api';
 import { io, Socket } from 'socket.io-client';
 
 const API_URL = import.meta.env.VITE_API_URL || undefined;
+// REST prefixes such as /api are not Socket.IO namespaces. The realtime
+// service uses its default namespace and /socket.io path on the API origin.
+const SOCKET_ORIGIN = API_URL ? new URL(API_URL, window.location.href).origin : undefined;
 
 // Singleton socket instance
 let socket: Socket | null = null;
+let socketCredential: string | null = null;
 
 export function getSocket(): Socket {
   if (!socket) {
-    socket = io(API_URL, {
-      auth: (callback) => callback({ token: api.getAccessToken() }),
+    socket = io(SOCKET_ORIGIN, {
+      auth: (callback) => { socketCredential = api.getAccessToken(); callback({ token: socketCredential }); },
       transports: ['websocket', 'polling'],
     });
 
@@ -23,6 +27,7 @@ export function getSocket(): Socket {
     });
 
     socket.on('disconnect', (reason) => {
+      socketCredential = null;
       console.log('Socket disconnected:', reason);
     });
   }
@@ -33,6 +38,7 @@ export function disconnectSocket() {
   if (socket) {
     socket.disconnect();
     socket = null;
+    socketCredential = null;
   }
 }
 
@@ -45,9 +51,16 @@ export function reconnectSocket() {
 }
 
 // Presence helpers
-export function setPresenceStatus(status: 'online' | 'away' | 'busy' | 'offline', customStatus?: string) {
+export async function setPresenceStatus(status: 'online' | 'away' | 'busy' | 'offline', customStatus?: string | null) {
+  const token = api.getAccessToken();
+  if (!token) throw new Error('Sign in again before changing your status.');
   const s = getSocket();
-  s.emit('set_status', { status, custom_status: customStatus });
+  // Do not buffer profile text across a disconnect or another account's next
+  // handshake. A retry must be an explicit action in the current sign-in.
+  if (!s.connected || socketCredential !== token) throw new Error('Your status could not be updated. Please try again.');
+  const result = await s.volatile.timeout(10000).emitWithAck('set_status', { status, ...(customStatus !== undefined ? { custom_status: customStatus } : {}) });
+  if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
+  if (result?.ok !== true) throw new Error('Your status could not be updated. Please try again.');
 }
 
 // Typing indicator helpers

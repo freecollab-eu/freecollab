@@ -9,6 +9,7 @@ export default {
   'Good work. Across organizations.': 'Bra arbete. Över organisationsgränser.',
   'Shared tasks, calendar and documents stay encrypted between verified participant devices. Each organization keeps its own accounts.': 'Gemensamma uppgifter, kalender och dokument är krypterade mellan deltagarnas verifierade enheter. Varje organisation behåller sina egna konton.',
   'This shared view is synchronized across both installations. The other workspace tools keep their own local records.': 'Den här gemensamma vyn synkroniseras mellan båda installationerna. Arbetsytans övriga verktyg har sina egna lokala poster.',
+  'Use / to open local tools. For shared task owners, use Assigned participant.': 'Använd / för att öppna lokala verktyg. Välj ansvarig för gemensamma uppgifter under Ansvarig deltagare.',
   'Shared work type': 'Typ av gemensamt arbete',
   '{count} shared participants': '{count} gemensamma deltagare',
   'Current participant access required': 'Aktuell deltagarbehörighet krävs',

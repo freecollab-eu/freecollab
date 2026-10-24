@@ -6,6 +6,7 @@ import type { PDFDocumentProxy } from 'pdfjs-dist';
 import { downloadChannelFile, type ManagedFile, wasCancelled } from '../lib/files-api';
 import { api } from '../lib/api';
 import { useModalFocus } from '../lib/useModalFocus';
+import { ModalContinuationProvider, useCollaborationModal } from '../lib/useCollaborationModal';
 import '../styles/panels-files.css';
 import { SafeFilePreview } from './SafeFilePreview';
 import { FileExperiencePanel } from './FileExperiencePanel';
@@ -43,8 +44,11 @@ function PdfPage({ document, page }: { document: PDFDocumentProxy; page: number 
 
 export function FilePreview({ file, onClose, onVersionSaved }: { file: ManagedFile; onClose: () => void; onVersionSaved?: () => void }) {
   useI18n();
+  const writingLeave = useRef<(() => boolean) | null>(null);
+  const close = () => { if (!writingLeave.current || writingLeave.current()) onClose(); };
   const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(dialog, onClose);
+  const modal = useCollaborationModal(dialog, t("Preview {value0}", { value0: String(file.filename) }), `file:${file.channel_id}:${file.id}`);
+  useModalFocus(dialog, close, true, { suspended: modal.parked });
   const [url, setUrl] = useState('');
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [page, setPage] = useState(1);
@@ -99,12 +103,12 @@ export function FilePreview({ file, onClose, onVersionSaved }: { file: ManagedFi
     return () => { stopped = true; controller.abort(); if (localUrl) URL.revokeObjectURL(localUrl); void destroyPdf?.(); };
   }, [file.id, file.channel_id]);
 
-  return createPortal(<div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Preview {value0}", { value0: String(file.filename) })} className="fc-file-preview-layer" onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+  return createPortal(<ModalContinuationProvider modalId={modal.modalId}><div ref={dialog} hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Preview {value0}", { value0: String(file.filename) })} className="fc-file-preview-layer" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
     <section className="fc-file-preview">
-      <header><div><span className="fc-kicker">{file.content_type === 'application/pdf' ? t("PDF preview") : imageTypes.has(file.content_type) ? t("Image preview") : t("File preview")} {t(" · Version ")}{file.version_number || 1}</span><h2>{file.filename}</h2></div><button type="button" data-autofocus className="fc-icon-button" aria-label={t("Close file preview")} onClick={onClose}><X size={20} /></button></header>
+      <header><div><span className="fc-kicker">{file.content_type === 'application/pdf' ? t("PDF preview") : imageTypes.has(file.content_type) ? t("Image preview") : t("File preview")} {t(" · Version ")}{file.version_number || 1}</span><h2>{file.filename}</h2></div><button type="button" data-autofocus className="fc-icon-button" aria-label={t("Close file preview")} onClick={close}><X size={20} /></button></header>
       <div className="fc-file-preview-content" aria-busy={loading}>{loading && <p role="status" className="fc-file-preview-status"><span className="fc-panel-spinner" />{t("Opening file…")}</p>}{error && <p role="alert" className="fc-alert">{error}</p>}{!loading && !error && (canPreviewExpanded(file) ? <SafeFilePreview file={file} /> : pdf ? <PdfPage document={pdf} page={page} /> : url && <img src={url} alt={file.filename} onError={() => setError(t("This image could not be displayed. Download it to open it."))} onLoad={event => { if (event.currentTarget.naturalWidth * event.currentTarget.naturalHeight > 32_000_000) setError(t("This image is too large to preview. Download it to open it.")); }} />)}</div>
-      <div className="fc-file-experience-scroll"><FileExperiencePanel key={`${file.channel_id}:${file.id}`} file={file} onVersionSaved={onVersionSaved} /></div>
+      <div className="fc-file-experience-scroll"><FileExperiencePanel key={`${file.channel_id}:${file.id}`} file={file} onVersionSaved={onVersionSaved} leaveController={writingLeave} /></div>
       <footer>{pdf ? <div className="fc-pdf-pagination"><button type="button" className="fc-icon-button" aria-label={t("Previous PDF page")} disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={17} /></button><span aria-live="polite">{t("Page ")}{page} {t(" of ")}{pdf.numPages}</span><button type="button" className="fc-icon-button" aria-label={t("Next PDF page")} disabled={page >= pdf.numPages} onClick={() => setPage(value => value + 1)}><ChevronRight size={17} /></button></div> : <span>{file.encrypted ? t("Decrypted on this device.") : t("Available to channel members.")}</span>}{url ? <a href={url} download={file.filename} className="fc-button fc-panel-button"><Download size={14} />{t("Download")}</a> : <button type="button" className="fc-button fc-panel-button" disabled={downloading} onClick={() => void download()}><Download size={14} />{t("Download")}</button>}</footer>
     </section>
-  </div>, document.body);
+  </div></ModalContinuationProvider>, document.body);
 }

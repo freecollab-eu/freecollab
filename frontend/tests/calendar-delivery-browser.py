@@ -5,6 +5,7 @@ No customer credentials or live provider claims. The disposable launchers change
 only public DNS resolution and CONNECT proxy selection for the exact two vendor
 hosts; production TLS, Host/SNI, destination validation and request code run.
 """
+from ui_navigation import open_chat_tool
 import base64
 from copy import deepcopy
 from datetime import datetime, timedelta
@@ -110,7 +111,7 @@ def main():
                 except Exception:
                     print('STARTUP BODY '+page.locator('body').inner_text()[:2000],flush=True)
                     raise
-                page.get_by_role('button',name='Integrations',exact=True).click();panel=page.get_by_role('dialog',name='Integrations',exact=True)
+                open_chat_tool(page, 'Integrations');panel=page.get_by_role('dialog',name='Integrations',exact=True)
                 panel.get_by_role('navigation',name='Integration sections').get_by_role('button',name='Calendar',exact=True).click();panel.get_by_label('Channel',exact=True).select_option(channel['id'])
                 panel.get_by_role('button',name='External calendars & subscription links',exact=True).click();delivery=panel.get_by_role('region',name='External calendar delivery and subscriptions',exact=True)
                 try:expect(delivery.get_by_label('Provider calendar connection',exact=True)).to_be_visible(timeout=5000)

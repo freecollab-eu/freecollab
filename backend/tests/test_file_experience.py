@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta
 import io
 import json
+import struct
 from types import SimpleNamespace
 from zipfile import ZIP_DEFLATED, ZipFile, ZipInfo
 
@@ -90,6 +91,46 @@ def test_bounded_xlsx_and_pptx_previews_never_evaluate_formulas():
     assert service.office_preview(slides,pptx)['blocks']==['Slide 1','Safe title']
 
 
+@pytest.mark.parametrize('forged_count', [False, True])
+def test_office_directory_limit_is_checked_before_zipinfo_allocation(monkeypatch, forged_count):
+    raw = bytearray(docx(extra={'part' + str(number): b'' for number in range(1001)}))
+    if forged_count:
+        end = len(raw) - 22
+        struct.pack_into('<H', raw, end + 8, 1)
+        struct.pack_into('<H', raw, end + 10, 1)
+    decoder = service.ZipFile
+    calls = []
+
+    def allocated(*args, **kwargs):
+        calls.append(True)
+        return decoder(*args, **kwargs)
+
+    monkeypatch.setattr(service, 'ZipFile', allocated)
+    with pytest.raises(Exception) as failure:
+        service.office_preview(bytes(raw), MIME)
+    assert getattr(failure.value, 'status_code', None) == 422
+    assert calls == []
+
+
+def test_office_preview_rejects_invalid_utf8_directory_names():
+    raw = bytearray(docx())
+    directory = raw.index(b'PK\x01\x02')
+    flags = struct.unpack_from('<H', raw, directory + 8)[0]
+    struct.pack_into('<H', raw, directory + 8, flags | 0x800)
+    raw[directory + 46] = 0xff
+    with pytest.raises(Exception) as failure:
+        service.office_preview(bytes(raw), MIME)
+    assert getattr(failure.value, 'status_code', None) == 422
+
+
+def test_office_zip_comment_cannot_select_an_unchecked_directory():
+    raw = bytearray(docx('Checked directory'))
+    comment = b'comment-prefix' + b'PK\x05\x06' + b'\x00' * 18 + b'tail'
+    struct.pack_into('<H', raw, len(raw) - 2, len(comment))
+    raw.extend(comment)
+    assert service.office_preview(bytes(raw), MIME)['blocks'] == ['Checked directory']
+
+
 def test_comments_are_authenticated_encrypted_idempotent_and_document_scoped(api):
     data={'id':'note','text':'Private file review'};endpoint=path(api)+'/comments'
     assert api.client.post(endpoint,json=data,headers=api.headers).status_code==201
@@ -154,6 +195,33 @@ def test_office_reauth_owner_path_and_macro_guards(api):
     assert api.client.request('DELETE',grant['path']).status_code==405
     assert api.client.delete(path(api)+'/office-sessions/'+grant['id'],headers=api.headers).status_code==200
     assert api.client.get(grant['path']).status_code==404
+
+
+@pytest.mark.parametrize('method', ['GET', 'HEAD'])
+@pytest.mark.parametrize('change', ['logout', 'blocked', 'membership'])
+def test_office_download_rechecks_authority_after_storage_read(api, monkeypatch, method, change):
+    grant = opened(api)
+    read = service.bounded_file
+
+    def read_then_revoke(record):
+        content = read(record)
+        with Session(api.engine) as session:
+            if change == 'logout':
+                revoke_token(api.token, session)
+            elif change == 'blocked':
+                actor = session.get(User, 'owner')
+                actor.is_blocked = True
+                session.add(actor)
+            else:
+                session.delete(session.get(ChannelMember, ('room', 'owner')))
+            session.commit()
+        return content
+
+    monkeypatch.setattr(service, 'bounded_file', read_then_revoke)
+    result = api.client.request(method, grant['path'])
+    assert result.status_code in {401, 403, 404, 409}
+    if method == 'GET':
+        assert b'Original private text' not in result.content
 
 
 @pytest.mark.parametrize('stage',['body','storage'])

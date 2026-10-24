@@ -14,6 +14,7 @@ from ..services import workflow as service
 from ..services.account_security import account_limit, ensure_reauthentication
 from ..services.auth import get_current_user, security
 from ..services.crypto import encrypt_message
+from ..services.field_references import ReferencedFields, require_field_reference_targets
 
 
 def no_store(response: Response):
@@ -36,11 +37,14 @@ class SaveWorkflow(Confirmation):
     enabled: bool = True
 
 
-class Vote(BaseModel):
+class Vote(ReferencedFields):
     model_config = ConfigDict(extra="forbid", strict=True)
     choice: str = Field(pattern="^(approve|reject)$")
     note: str | None = Field(default=None, max_length=2000)
     matrix_event_id: str | None = Field(default=None, min_length=1, max_length=1024)
+
+    def reference_texts(self):
+        return {"note": self.note or ""}
 
 
 def definition_for(session, workspace_id, channel_id, identifier):
@@ -189,11 +193,8 @@ def read_run(workspace_id: str, channel_id: str, run_id: str, user=Depends(get_c
         {"kind": entry.kind, "step_index": entry.step_index, "actor_id": entry.actor_id, "created_at": entry.created_at} for entry in events]}
 
 
-@router.post("/runs/{run_id}/vote")
-def vote(workspace_id: str, channel_id: str, run_id: str, data: Vote, user=Depends(get_current_user),
-         credentials=Depends(security), session=Depends(get_session)):
-    account_limit(session, "workflow-vote", user.id, 60, 3600)
-    service.lock_actor(session, workspace_id, channel_id, user.id, credentials.credentials)
+def active_approval(session, workspace_id, channel_id, run_id, actor, token):
+    service.lock_actor(session, workspace_id, channel_id, actor, token)
     row = run_for(session, workspace_id, channel_id, run_id)
     definition = definition_for(session, workspace_id, channel_id, row.workflow_id)
     if row.status != "waiting_approval" or row.workflow_revision != definition.current_revision or not service.grant_valid(session, definition):
@@ -202,25 +203,47 @@ def vote(workspace_id: str, channel_id: str, run_id: str, data: Vote, user=Depen
         raise HTTPException(409, "This approval has expired")
     fields = service.definition_fields(session, definition, row.workflow_revision)
     step = fields.steps[row.step_index]
-    if step.kind != "approval" or user.id not in service.eligible(session, row, step):
+    if step.kind != "approval" or actor not in service.eligible(session, row, step):
         raise HTTPException(403, "You are not a current approver for this step")
+    return row
+
+
+@router.post("/runs/{run_id}/vote")
+def vote(workspace_id: str, channel_id: str, run_id: str, data: Vote, user=Depends(get_current_user),
+         credentials=Depends(security), session=Depends(get_session)):
+    account_limit(session, "workflow-vote", user.id, 60, 3600)
+    actor = user.id
+    row = active_approval(session, workspace_id, channel_id, run_id, actor, credentials.credentials)
+    expected_step, expected_revision = row.step_index, row.workflow_revision
+    secure = service.secure_channel(session, channel_id)
+    if secure and (data.note is not None or "field_references" in data.model_fields_set):
+        raise HTTPException(409, "Approval notes in this channel require an encrypted event")
     previous = session.get(WorkflowVote, (row.id, row.step_index, user.id))
     if previous:
         if previous.choice != data.choice or previous.matrix_event_id != data.matrix_event_id:
             raise HTTPException(409, "Your approval choice was already recorded")
+        if data.note is not None and not service.secure_channel(session, channel_id):
+            stored = service.native_vote_fields(previous, row)
+            if stored.get("note") != data.note or stored.get("field_references", {}) != data.model_dump(mode="json").get("field_references", {}):
+                raise HTTPException(409, "Your approval note was already recorded")
         return service.run_data(session, row, viewer_id=user.id)
-    secure = service.secure_channel(session, channel_id)
     if secure:
-        if data.note is not None:
-            raise HTTPException(409, "Approval notes in this channel require an encrypted event")
         if data.matrix_event_id:
             from ..services.matrix_bridge import validate_secure_event
             validate_secure_event(session, channel_id, data.matrix_event_id, user.id)
     elif data.matrix_event_id:
         raise HTTPException(400, "Encrypted note references require an encrypted channel")
-    record = WorkflowVote(run_id=row.id, step_index=row.step_index, user_id=user.id, choice=data.choice,
+    refs = data.model_dump(mode="json").get("field_references", {})
+    if not secure:
+        require_field_reference_targets(session, channel_id, actor, {"note": data.note or "", "field_references": refs})
+    row = active_approval(session, workspace_id, channel_id, run_id, actor, credentials.credentials)
+    if (row.step_index, row.workflow_revision) != (expected_step, expected_revision):
+        raise HTTPException(409, "This approval step changed; review the current step before approving")
+    if service.secure_channel(session, channel_id) != secure:
+        raise HTTPException(409, "Channel encryption changed; reload before approving")
+    record = WorkflowVote(run_id=row.id, step_index=row.step_index, user_id=actor, choice=data.choice,
         matrix_event_id=data.matrix_event_id,
-        encrypted_note=encrypt_message(data.note, "workflow-vote:" + row.id) if data.note else None)
+        encrypted_note=service.seal_vote_note(row, actor, data.note, refs))
     session.add(record)
     service.activity(session, row, "approval_" + data.choice, user.id)
     row.due_at = datetime.utcnow()

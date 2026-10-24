@@ -6,7 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 import jwt
 from sqlalchemy.pool import StaticPool
-from sqlmodel import Session, SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine, select
 
 from app.api import admin, auth
 from app.cli import bootstrap_admin
@@ -160,3 +160,47 @@ def test_admin_creation_uses_same_canonical_email_as_registration_and_login(auth
     assert client.post("/auth/register", json={**user, "email": "new@example.com"}).status_code == 400
     assert client.post("/admin/users", headers=headers(), json={**user, "email": "New@example.com"}).status_code == 400
     assert client.post("/auth/login", json={"email": "NEW@example.com", "password": "new-password"}).status_code == 200
+
+
+@pytest.mark.parametrize("password", ["x", "short6", "x" * 11, "😀" * 6])
+def test_new_accounts_require_twelve_characters_on_public_and_admin_paths(password, auth_context, monkeypatch):
+    client, engine = auth_context
+    monkeypatch.setattr(auth, "mail_available", lambda: False)
+    with Session(engine) as session:
+        bootstrap_admin("member@example.com", session)
+    payload = {"name": "New account", "email": "new@example.com", "password": password}
+    assert client.post("/auth/register", json=payload).status_code == 422
+    assert client.post("/admin/users", headers=headers(), json=payload).status_code == 422
+    with Session(engine) as session:
+        assert session.exec(select(User).where(User.email == payload["email"])).first() is None
+
+
+@pytest.mark.parametrize("password", ["twelve-chars", "😀" * 12])
+def test_twelve_character_new_password_is_accepted_on_both_creation_paths(password, auth_context, monkeypatch):
+    client, engine = auth_context
+    monkeypatch.setattr(auth, "mail_available", lambda: False)
+    with Session(engine) as session:
+        bootstrap_admin("member@example.com", session)
+    assert len(password) == 12
+    registered = client.post("/auth/register", json={
+        "name": "Registered", "email": "registered-new@example.com", "password": password,
+    })
+    created = client.post("/admin/users", headers=headers(), json={
+        "name": "Created", "email": "admin-created@example.com", "password": password,
+    })
+    assert registered.status_code == created.status_code == 200
+    for email in ("registered-new@example.com", "admin-created@example.com"):
+        assert client.post("/auth/login", json={"email": email, "password": password}).status_code == 200
+
+
+@pytest.mark.parametrize("password", ["x", "short6", "short-pass"])
+def test_existing_short_passwords_can_still_sign_in(password, auth_context):
+    client, engine = auth_context
+    with Session(engine) as session:
+        user = session.get(User, "registered-user")
+        user.password_hash = hash_password(password)
+        session.add(user)
+        session.commit()
+    assert client.post("/auth/login", json={
+        "email": "member@example.com", "password": password,
+    }).status_code == 200

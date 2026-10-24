@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Actual React/API calendar proof with isolated data and no provider accounts."""
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime, timedelta
 import importlib.util
@@ -23,7 +24,7 @@ PYTHON = str(ROOT / 'backend/.venv/bin/python')
 
 
 def calendar(page, channel):
-    page.get_by_role('button', name='Integrations', exact=True).click()
+    open_chat_tool(page, 'Integrations')
     panel = page.get_by_role('dialog', name='Integrations', exact=True)
     panel.get_by_role('navigation', name='Integration sections').get_by_role('button', name='Calendar', exact=True).click()
     panel.get_by_label('Channel', exact=True).select_option(channel)

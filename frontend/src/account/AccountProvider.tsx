@@ -2,6 +2,7 @@ import { t, useI18n } from '../i18n';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type Channel } from '../lib/api';
 import { workspaceApi, type Workspace } from '../lib/workspace-api';
+import { mayLeaveConversationWork, setConversationNavigationWorkspace } from '../lib/conversation-navigation';
 import { AccountPanel } from './AccountPanel';
 import { WorkspaceManager } from '../components/WorkspaceManager';
 import { DirectMessagePicker } from '../components/DirectMessagePicker';
@@ -24,7 +25,7 @@ interface AccountContextValue {
 }
 const AccountContext = createContext<AccountContextValue | null>(null);
 const preferenceKey = (userId: string) => `freecollab.workspace:${userId}`;
-function savedWorkspace(userId: string) { try { return localStorage.getItem(preferenceKey(userId)); } catch { return null; } }
+function savedWorkspace(userId: string) { if (api.isMemorySession()) return null; try { return localStorage.getItem(preferenceKey(userId)); } catch { return null; } }
 
 export function AccountProvider({ children }: { children: ReactNode }) {
   useI18n();
@@ -45,22 +46,32 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const choose = useCallback((id: string | null, userId: string) => {
     if (userId !== api.getCurrentUserId() || userId !== identityRef.current) return;
     const changed = selectedRef.current !== id;
+    setConversationNavigationWorkspace(id);
     selectedRef.current = id; setSelected(id);
-    try { if (id) localStorage.setItem(preferenceKey(userId), id); else localStorage.removeItem(preferenceKey(userId)); } catch { /* Selection remains usable without storage. */ }
+    if (!api.isMemorySession()) {
+      try { if (id) localStorage.setItem(preferenceKey(userId), id); else localStorage.removeItem(preferenceKey(userId)); } catch { /* Selection remains usable without storage. */ }
+    }
     if (changed) window.dispatchEvent(new CustomEvent('freecollab:workspace-changed', { detail: { workspace_id: id } }));
   }, []);
 
   const refreshWorkspaces = useCallback(async (selectedId?: string) => {
     const userId = api.getCurrentUserId();
+    const session = api.getAccessToken();
     if (!userId || userId !== identityRef.current) return;
     const request = ++generation.current;
     setWorkspacesLoading(true); setWorkspacesError('');
     try {
       const records = await workspaceApi.list();
-      if (!mounted.current || request !== generation.current || userId !== api.getCurrentUserId() || userId !== identityRef.current) return;
+      if (!mounted.current || request !== generation.current || userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken()) return;
       setWorkspaces(records);
-      const candidates = [selectedId, selectedRef.current, savedWorkspace(userId)];
-      const next = candidates.find(candidate => candidate && records.some(record => record.id === candidate)) || records[0]?.id || null;
+      const previousWorkspace = selectedRef.current;
+      const candidates = [selectedId, previousWorkspace, savedWorkspace(userId)];
+      let next = candidates.find(candidate => candidate && records.some(record => record.id === candidate)) || records[0]?.id || null;
+      // Creation may request a new selection. Keep still-authorized work open
+      // when declined, while always accepting membership removal/fallback.
+      if (selectedId && next === selectedId && next !== previousWorkspace
+        && records.some(record => record.id === previousWorkspace) && !mayLeaveConversationWork()) next = previousWorkspace;
+      if (!mounted.current || request !== generation.current || userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken() || previousWorkspace !== selectedRef.current) return;
       choose(next, userId);
     } catch (failure) {
       if (mounted.current && request === generation.current && userId === api.getCurrentUserId() && userId === identityRef.current) setWorkspacesError(failure instanceof Error ? failure.message : 'Workspaces could not be loaded.');
@@ -69,11 +80,13 @@ export function AccountProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     mounted.current = true;
+    setConversationNavigationWorkspace(selectedRef.current);
     const sync = () => {
       const next = api.getCurrentUserId();
       const session = api.getAccessToken();
       if (next === identityRef.current && session === sessionRef.current) return;
       const changedAccount = next !== identityRef.current;
+      setConversationNavigationWorkspace(null);
       sessionRef.current = session;
       generation.current += 1; identityRef.current = next; selectedRef.current = null;
       setIdentity(next); setWorkspaces([]); setSelected(null); if (changedAccount || !next) setPanel(null); setWorkspacesError(''); setWorkspacesLoading(!!next);
@@ -86,14 +99,18 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     };
     window.addEventListener('freecollab:auth-changed', sync);
     window.addEventListener('storage', sync);
-    return () => { mounted.current = false; generation.current += 1; window.removeEventListener('freecollab:auth-changed', sync); window.removeEventListener('storage', sync); };
+    return () => { mounted.current = false; generation.current += 1; setConversationNavigationWorkspace(null); window.removeEventListener('freecollab:auth-changed', sync); window.removeEventListener('storage', sync); };
   }, []);
 
   useEffect(() => { if (identity) void refreshWorkspaces(); }, [identity, refreshWorkspaces]);
 
   const selectWorkspace = useCallback((id: string) => {
     const userId = api.getCurrentUserId();
+    const session = api.getAccessToken();
+    const previousWorkspace = selectedRef.current;
     if (!userId || userId !== identityRef.current || !workspaces.some(record => record.id === id)) return;
+    if (id !== selectedRef.current && !mayLeaveConversationWork()) return;
+    if (userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken() || previousWorkspace !== selectedRef.current) return;
     setPanel(null); choose(id, userId);
   }, [workspaces, choose]);
 

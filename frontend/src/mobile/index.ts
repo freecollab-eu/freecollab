@@ -1,30 +1,67 @@
 import { api, APIError, type Message } from '../lib/api';
+import { normalizeMessageReferences, reconcileReferences, validateMessageReferences, type MessageReference } from '../lib/message-references';
 import { attachmentOutbox, offlineLibrary } from './library';
 import { assertOwner, fingerprint, listPrivate, owner, purgeOtherAccounts, removePrivate, savePrivate, type Owner } from './storage';
 
-export interface QueuedMessage { id: string; channelId: string; content: string; mentions: string[]; secure: boolean; createdAt: string; tokenFingerprint: string; state: 'queued' | 'review'; sendAt?: string; error?: string }
-export interface PrivateDraft { channelId: string; content: string; updatedAt: string; secure?: boolean }
+export interface QueuedMessage { id: string; channelId: string; content: string; mentions: string[]; references?: MessageReference[]; secure: boolean; createdAt: string; tokenFingerprint: string; state: 'queued' | 'review'; sendAt?: string; error?: string }
+export interface PrivateDraft { channelId: string; content: string; references?: MessageReference[]; updatedAt: string; secure?: boolean }
+export interface RichDraft { text: string; references: MessageReference[] }
 export type SendResult = { kind: 'sent'; message: Message } | { kind: 'queued'; id: string };
 const changed = () => window.dispatchEvent(new Event('freecollab:mobile-state'));
 let installed = false, flushing: Promise<void> | null = null;
 let installPrompt: (Event & { prompt(): Promise<void>; userChoice: Promise<{ outcome: string }> }) | null = null;
 const challenges = new Map<string, { challenge: string; received: number }>();
+const draftWrites = new Map<string, Promise<void>>();
+const draftWriteKey = (channelId: string, expected: Owner) => expected.user + '\0' + expected.token + '\0' + channelId;
+
+function changeDraft(channelId: string, update: (expected: Owner) => Promise<void>) {
+  if (!channelId) return Promise.reject(new Error('Choose a conversation for this draft.'));
+  const expected = owner(), key = draftWriteKey(channelId, expected);
+  const pending = (draftWrites.get(key) || Promise.resolve()).catch(() => {}).then(async () => {
+    assertOwner(expected); await update(expected); assertOwner(expected);
+  });
+  draftWrites.set(key, pending);
+  void pending.finally(() => { if (draftWrites.get(key) === pending) draftWrites.delete(key); }).catch(() => {});
+  return pending;
+}
+
+async function writeDraft(channelId: string, value: RichDraft, secure: boolean | undefined, expected: Owner, rows?: Awaited<ReturnType<typeof listPrivate<PrivateDraft>>>) {
+  if (value.text.length > 20000) throw new Error('This draft is too large.');
+  const references = validateMessageReferences(value.text, value.references);
+  if (!value.text) { await removePrivate('draft', channelId, expected); changed(); return; }
+  const previous = rows || await listPrivate<PrivateDraft>('draft', expected);
+  assertOwner(expected);
+  if (previous.length >= 100 && !previous.some(row => row.id === channelId)) throw new Error('Remove an old draft before creating another.');
+  await savePrivate('draft', channelId, { content: value.text, references, updatedAt: new Date().toISOString(), secure: secure ?? previous.find(row => row.id === channelId)?.value.secure }, expected);
+  changed();
+}
 
 export const mobileDrafts = {
   async save(channelId: string, content: string, secure?: boolean) {
-    if (!channelId || content.length > 20000) throw new Error('This draft is too large.');
-    const expected = owner();
-    if (!content) return removePrivate('draft', channelId, expected);
-    const rows = await listPrivate<PrivateDraft>('draft', expected);
-    if (rows.length >= 100 && !rows.some(row => row.id === channelId)) throw new Error('Remove an old draft before creating another.');
-    await savePrivate('draft', channelId, { content, updatedAt: new Date().toISOString(), secure: secure ?? rows.find(row => row.id === channelId)?.value.secure }, expected); changed();
+    return changeDraft(channelId, async expected => {
+      const rows = await listPrivate<PrivateDraft>('draft', expected), previous = rows.find(row => row.id === channelId)?.value;
+      const before = typeof previous?.content === 'string' ? previous.content : '';
+      const references = reconcileReferences(before, content, normalizeMessageReferences(before, previous?.references));
+      await writeDraft(channelId, { text: content, references }, secure, expected, rows);
+    });
+  },
+  async saveRich(channelId: string, draft: RichDraft, secure?: boolean) {
+    // Snapshot before yielding: callers may continue editing while encryption runs.
+    const value = { text: draft.text, references: validateMessageReferences(draft.text, draft.references) };
+    return changeDraft(channelId, expected => writeDraft(channelId, value, secure, expected));
   },
   async load(channelId: string): Promise<string> {
-    const rows = await listPrivate<{ content: string }>('draft');
-    return rows.find(row => row.id === channelId)?.value.content || '';
+    return (await mobileDrafts.loadRich(channelId)).text;
   },
-  clear: (channelId: string) => removePrivate('draft', channelId),
-  async list(): Promise<PrivateDraft[]> { return (await listPrivate<PrivateDraft>('draft')).map(row => ({ ...row.value, channelId: row.id })); },
+  async loadRich(channelId: string): Promise<RichDraft> {
+    const expected = owner();
+    await draftWrites.get(draftWriteKey(channelId, expected)); assertOwner(expected);
+    const rows = await listPrivate<PrivateDraft>('draft', expected), value = rows.find(row => row.id === channelId)?.value;
+    const text = typeof value?.content === 'string' && value.content.length <= 20000 ? value.content : '';
+    return { text, references: normalizeMessageReferences(text, value?.references) };
+  },
+  clear: (channelId: string) => changeDraft(channelId, async expected => { await removePrivate('draft', channelId, expected); changed(); }),
+  async list(): Promise<PrivateDraft[]> { return (await listPrivate<PrivateDraft>('draft')).map(row => ({ ...row.value, references: normalizeMessageReferences(row.value.content, row.value.references), channelId: row.id })); },
 };
 
 async function deliver(row: QueuedMessage, expected: Owner): Promise<Message> {
@@ -37,15 +74,15 @@ async function deliver(row: QueuedMessage, expected: Owner): Promise<Message> {
   assertOwner(expected); if (!members.some(member => member.user_id === expected.user)) throw new Error('You no longer belong to this channel.');
   const secure = await (await import('../lib/secure-client')).getSecureMessaging();
   const encrypted = await secure.handles(row.channelId); assertOwner(expected);
+  const references = validateMessageReferences(row.content, row.references || []);
   if (encrypted !== row.secure) throw new Error('This channel’s encryption mode changed. Review the queued message first.');
   if (encrypted) {
-    const result = await secure.sendEvent(row.channelId, 'm.room.message', { msgtype: 'm.text', body: row.content, 'eu.freecollab.mentions': row.mentions }, 'mobile-' + row.id);
+    const result = await secure.sendMessage(row.channelId, row.content, undefined, row.mentions, references, 'mobile-' + row.id);
     assertOwner(expected);
-    return api.rememberMessage({ id: result.event_id, channel_id: row.channelId, author_id: expected.user,
-      content: row.content, encrypted: true, created_at: new Date().toISOString(), mentions: row.mentions });
+    return api.rememberMessage(result);
   }
   const result = await api.request<Message>('/mobile/offline/channels/' + encodeURIComponent(row.channelId) + '/messages', {
-    method: 'POST', body: JSON.stringify({ client_id: row.id, content: row.content, mentions: row.mentions }), signal: AbortSignal.timeout(20000),
+    method: 'POST', body: JSON.stringify({ client_id: row.id, content: row.content, mentions: row.mentions, references }), signal: AbortSignal.timeout(20000),
   });
   assertOwner(expected); return api.rememberMessage(result);
 }
@@ -57,22 +94,23 @@ async function queued(row: QueuedMessage, expected: Owner) { await savePrivate('
 export const mobileOutbox = {
   async list(): Promise<QueuedMessage[]> { return (await listPrivate<QueuedMessage>('outbox')).map(row => row.value).sort((a, b) => a.createdAt.localeCompare(b.createdAt)); },
   async remove(id: string) { await removePrivate('outbox', id); changed(); },
-  async schedule(channelId: string, content: string, mentions: string[], sendAt: string) {
+  async schedule(channelId: string, content: string, mentions: string[], sendAt: string, references: MessageReference[] = []) {
     if (api.isMemorySession()) throw new Error('Scheduled encrypted messages need the standalone app on this trusted device.');
     const due = Date.parse(sendAt), expected = owner();
     if (!content.trim() || content.length > 10000 || mentions.length > 50 || !Number.isFinite(due) || due <= Date.now() || due > Date.now() + 7 * 86400000)
       throw new Error('Choose a future time within seven days and a message within the supported size.');
+    const selectedMentions = [...mentions], checked = validateMessageReferences(content, references);
     if ((await listPrivate('outbox', expected)).length >= 100) throw new Error('The offline queue is full.');
-    const row: QueuedMessage = { id: crypto.randomUUID(), channelId, content, mentions, secure: true,
+    const row: QueuedMessage = { id: crypto.randomUUID(), channelId, content, mentions: selectedMentions, references: checked, secure: true,
       createdAt: new Date().toISOString(), sendAt: new Date(due).toISOString(),
       tokenFingerprint: await fingerprint(expected.token), state: 'queued' };
     await queued(row, expected); return row;
   },
-  async sendOrQueue(channelId: string, content: string, mentions: string[] = [], secure = false): Promise<SendResult> {
+  async sendOrQueue(channelId: string, content: string, mentions: string[] = [], secure = false, references: MessageReference[] = []): Promise<SendResult> {
     if (!content.trim() || content.length > 20000 || mentions.length > 50) throw new Error('Enter a message within the supported size.');
-    const expected = owner();
+    const expected = owner(), selectedMentions = [...mentions], checked = validateMessageReferences(content, references);
     if ((await listPrivate('outbox', expected)).length >= 100) throw new Error('The offline queue is full. Review queued messages first.');
-    const row: QueuedMessage = { id: crypto.randomUUID(), channelId, content, mentions, secure,
+    const row: QueuedMessage = { id: crypto.randomUUID(), channelId, content, mentions: selectedMentions, references: checked, secure,
       createdAt: new Date().toISOString(), tokenFingerprint: await fingerprint(expected.token), state: 'queued' };
     if (api.isMemorySession()) {
       if (!navigator.onLine) throw new Error('Embedded collaboration needs a connection. Keep your draft open and try again online.');

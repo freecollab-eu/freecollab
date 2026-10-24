@@ -2,15 +2,16 @@ import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Bell, Check, Clock, RefreshCw, X } from 'lucide-react';
 import { api, type Channel, type Message } from '../lib/api';
+import type { MessageReference } from '../lib/message-references';
 import { chatProductivity, type MessageReminder, type ScheduledMessage } from '../lib/chat-productivity';
 import { mobileOutbox, type QueuedMessage } from '../mobile';
 import { useModalFocus } from '../lib/useModalFocus';
 import { t, useI18n, currentLocale } from '../i18n';
 import '../styles/chat-productivity.css';
 
-interface Props {channel:Channel;draft?:string;mentions?:string[];message?:Message;onScheduled?:()=>void;onClose:()=>void}
+interface Props {channel:Channel;draft?:string;mentions?:string[];references?:MessageReference[];message?:Message;onScheduled?:()=>void;onClose:()=>void}
 const initialTime = () => {const value=new Date(Date.now()+3600000);value.setMinutes(value.getMinutes()-value.getTimezoneOffset());return value.toISOString().slice(0,16);};
-export function ChatProductivityPanel({channel,draft='',mentions=[],message,onScheduled,onClose}:Props) {
+export function ChatProductivityPanel({channel,draft='',mentions=[],references=[],message,onScheduled,onClose}:Props) {
   useI18n();
   const dialog=useRef<HTMLElement>(null), token=useRef(api.getAccessToken()),live=useRef(true);
   const [due,setDue]=useState(initialTime),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
@@ -30,8 +31,8 @@ export function ChatProductivityPanel({channel,draft='',mentions=[],message,onSc
       {(message||draft.trim())&&<form className="fc-productivity-form" onSubmit={event=>{event.preventDefault();void run(async()=>{
         const dueAt=new Date(due).toISOString();
         if(message)await chatProductivity.remind(channel.id,message.id,dueAt);
-        else if(channel.secure)await mobileOutbox.schedule(channel.id,draft,mentions,dueAt);
-        else await chatProductivity.schedule(channel.id,draft,mentions,dueAt);
+        else if(channel.secure)await mobileOutbox.schedule(channel.id,draft,mentions,dueAt,references);
+        else await chatProductivity.schedule(channel.id,draft,mentions,dueAt,references);
         if(current()){setNotice(message?t('Reminder saved.'):t('Message scheduled.'));if(!message)onScheduled?.();}
       });}}><blockquote>{message?.content||draft}</blockquote><label htmlFor="chat-schedule-time">{t('When?')}</label><input id="chat-schedule-time" className="fc-input" type="datetime-local" value={due} required disabled={busy} onChange={event=>setDue(event.target.value)}/>
         <p>{channel.secure&&!message?t('This message stays encrypted on this device. Keep the app connected and this sign-in active for delivery.'):t('The server checks your sign-in and channel access again before delivery. Signing out cancels pending delivery.')}</p>

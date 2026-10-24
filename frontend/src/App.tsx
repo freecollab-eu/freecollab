@@ -16,6 +16,7 @@ import { api } from './lib/api'
 import { disconnectSocket } from './lib/socket'
 import { type MFAChallenge, needsSecondFactor } from './lib/account-api'
 import type { SSOExchange } from './lib/integrations-api'
+import { demoDestinationHash, readDemoDestination, type DemoDestination } from './lib/demo-showroom'
 
 type View = 'landing' | 'demo' | 'auth' | 'chat' | 'admin' | 'docs' | 'invite' | 'account-link' | 'workspace-invite' | 'sso' | 'meeting'
 const INVITE_KEY = 'freecollab_pending_invite'
@@ -41,6 +42,7 @@ export default function App() {
   const [accountLink, setAccountLink] = useState<{ kind: 'verify-email' | 'reset-password'; token: string } | null>(null)
   const [workspaceInvite, setWorkspaceInvite] = useState<string | null>(null)
   const [view, setView] = useState<View>('landing')
+  const [demoDestination, setDemoDestination] = useState<DemoDestination>(() => readDemoDestination(window.location.hash) ?? {})
   const [invite, setInvite] = useState<string | null>(() => readInvite())
   const [initialChannelId, setInitialChannelId] = useState<string | null>(null)
   const [notice, setNotice] = useState('')
@@ -58,7 +60,8 @@ export default function App() {
   useEffect(() => {
     const route = () => {
       const params = new URLSearchParams(window.location.hash.slice(1))
-      if (params.has('demo')) { setView('demo'); return }
+      const demo = readDemoDestination(window.location.hash)
+      if (demo) { setDemoDestination(demo); setView('demo'); return }
       const meetingId = params.get('meeting')
       if (meetingId && /^[A-Za-z0-9_-]{1,128}$/.test(meetingId)) {
         const invitationToken = params.get('meeting_invite')
@@ -169,7 +172,7 @@ export default function App() {
   }, [])
 
   const handleTryDemo = () => setView(api.isAuthenticated() ? 'chat' : 'auth')
-  const handleExploreDemo = () => { window.history.replaceState(null, '', window.location.pathname + window.location.search + '#demo'); setView('demo'); window.scrollTo(0, 0) }
+  const handleExploreDemo = (destination: DemoDestination = {}) => { window.history.pushState(null, '', window.location.pathname + window.location.search + demoDestinationHash(destination)); setDemoDestination(destination); setView('demo'); window.scrollTo(0, 0) }
   const leaveDemo = () => { window.history.replaceState(null, '', window.location.pathname + window.location.search); setView('landing'); window.scrollTo(0, 0) }
 
   const handleAuthSuccess = () => {
@@ -214,7 +217,7 @@ export default function App() {
 
   switch (view) {
     case 'demo':
-      return <Demo onBack={leaveDemo} onOpenApp={() => { window.history.replaceState(null, '', window.location.pathname + window.location.search); handleTryDemo() }} />
+      return <Demo destination={demoDestination} onBack={leaveDemo} onOpenApp={() => { window.history.replaceState(null, '', window.location.pathname + window.location.search); handleTryDemo() }} />
     case 'meeting':
       return meetingRoute ? <MeetingGuest key={meetingRoute.id} meetingId={meetingRoute.id} invitationToken={meetingRoute.invitationToken} onLeave={() => { setMeetingRoute(null); window.history.replaceState(null, '', window.location.pathname + window.location.search); setView(api.isAuthenticated() ? 'chat' : 'landing') }} /> : null
     case 'sso':

@@ -35,6 +35,22 @@ test('modular native reads share one authenticated, scoped preflight; no cookie 
   client.destroy();
 });
 
+test('a busy thread cannot crowd its root out of the timeline while replies remain searchable', async () => {
+  const root = { id: 'root', channel_id: 'shared', content: 'Original discussion', created_at: '2026-10-23', parent_id: null };
+  const history = [...Array.from({ length: 105 }, (_, n) => ({ ...root, id: 'reply-' + (104 - n), content: 'Thread response ' + (104 - n), parent_id: root.id })), root];
+  const { client } = fixture({ fetch: async url => {
+    const request = new URL(url);
+    if (request.pathname !== '/api/messages/channels/shared') return null;
+    const candidates = request.searchParams.get('roots_only') === 'true' ? history.filter(row => !row.parent_id) : history;
+    const cursor = request.searchParams.get('before');
+    const start = cursor ? candidates.findIndex(row => row.id === cursor) + 1 : 0;
+    return Response.json(candidates.slice(start, start + Number(request.searchParams.get('limit'))));
+  } });
+  assert.deepEqual((await client.listMessages()).map(row => row.id), [root.id]);
+  assert.deepEqual((await client.searchMessages('Thread response 104')).map(row => row.id), ['reply-104']);
+  client.destroy();
+});
+
 test('host reauthentication clears old user resources synchronously and binds fresh user', async () => {
   const { client, setToken, requests } = fixture(); const notifications = await client.listNotifications();
   setToken('beta-token'); const reauth = client.reauthenticate(); assert.equal(client.state.status, 'authenticating');
@@ -48,6 +64,76 @@ test('an account change discovered during submit cannot send an old draft as the
   await assert.rejects(client.sendMessage('Private old draft'), error => error.name === 'AbortError');
   assert.equal(requests.filter(r => r.init.method === 'POST').length, 0);
   await client.sendMessage('New user chose to send'); assert.equal(requests.at(-1).auth, 'Bearer beta-token'); client.destroy();
+});
+
+test('native send, reply and edit serialize explicit UTF-16 references before asynchronous authorization', async () => {
+  const content = '🚀 @Åsa och @Design', first = content.indexOf('@Åsa'), second = content.indexOf('@Design');
+  const selected = [
+    {kind: 'person', id: 'person-asa', start: first, end: first + '@Åsa'.length},
+    {kind: 'group', id: 'group-design', start: second, end: second + '@Design'.length},
+  ];
+  const root = {id: 'root', channel_id: 'shared', author_id: 'alpha-token', content, created_at: '2026-11-01', references: selected};
+  const {client, requests} = fixture({fetch: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === '/api/messages/channels/shared') return Response.json(init.method === 'POST' ? {...root, id: 'sent', ...JSON.parse(init.body)} : [root]);
+    if (path === '/api/threads/messages/root') return Response.json({parent_id: 'root', replies: [{...root, id: 'reply', parent_id: 'root'}]});
+    if (path === '/api/threads/messages/root/reply' || path === '/api/messages/root') return Response.json({...root, ...JSON.parse(init.body)});
+  }});
+  const [loaded] = await client.listMessages();
+  assert.deepEqual(loaded.references, selected);
+  assert.deepEqual((await client.listThread(root.id))[0].references, selected);
+  assert.equal(selected[0].start, 3, 'range positions use UTF-16 after the supplementary emoji');
+  const signal = new AbortController().signal;
+  const operations = [
+    refs => client.sendMessage(content, signal, refs),
+    refs => client.replyMessage(root.id, content, signal, refs),
+    refs => client.editMessage(root.id, content, signal, refs),
+  ];
+  for (const run of operations) {
+    const references = structuredClone(selected), snapshot = structuredClone(references);
+    const pending = run(references);
+    assert.deepEqual(references, snapshot, 'the SDK must not alter caller-owned references');
+    references[0].id = 'later-selection'; references[0].start = 0; references.push({kind: 'file', id: 'later-file', start: 0, end: 1});
+    const response = await pending;
+    assert.deepEqual(JSON.parse(requests.at(-1).init.body), {content, references: selected});
+    assert.deepEqual(response.references, selected);
+  }
+  client.destroy();
+});
+
+test('message reference arguments are additive: omitted metadata stays omitted and explicit empty selection is serialized', async () => {
+  const {client, requests} = fixture({fetch: async (url, init) => {
+    const path = new URL(url).pathname;
+    if (path === '/api/threads/messages/alpha-token/reply' || path === '/api/messages/alpha-token') return Response.json(JSON.parse(init.body));
+  }});
+  await client.listMessages();
+  const operations = [
+    refs => client.sendMessage('Message', undefined, refs),
+    refs => client.replyMessage('alpha-token', 'Message', undefined, refs),
+    refs => client.editMessage('alpha-token', 'Message', undefined, refs),
+  ];
+  for (const run of operations) {
+    await run(undefined); assert.deepEqual(JSON.parse(requests.at(-1).init.body), {content: 'Message'});
+    await run([]); assert.deepEqual(JSON.parse(requests.at(-1).init.body), {content: 'Message', references: []});
+  }
+  client.destroy();
+});
+
+test('selected message references cannot follow an old draft into a refreshed account', async () => {
+  const operations = [
+    (client, refs) => client.sendMessage('@Åsa', undefined, refs),
+    (client, refs) => client.replyMessage('alpha-token', '@Åsa', undefined, refs),
+    (client, refs) => client.editMessage('alpha-token', '@Åsa', undefined, refs),
+  ];
+  for (const run of operations) {
+    const {client, requests, setToken} = fixture(); await client.listMessages();
+    const references = [{kind: 'person', id: 'person-asa', start: 0, end: 4}];
+    setToken('beta-token');
+    await assert.rejects(run(client, references), error => error.name === 'AbortError');
+    assert.equal(requests.some(request => ['POST', 'PUT'].includes(request.init.method)), false);
+    assert.deepEqual(references, [{kind: 'person', id: 'person-asa', start: 0, end: 4}]);
+    client.destroy();
+  }
 });
 
 test('logout produces no native content request and destroys usable file/notification grants', async () => {

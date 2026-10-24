@@ -23,6 +23,7 @@ export function stableDraft(value: unknown): string {
 export const copilotPresets = [
   { id: 'openai-mini', label: 'OpenAI · GPT-4o mini', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4o-mini' },
   { id: 'openai-41-mini', label: 'OpenAI · GPT-4.1 mini', endpoint: 'https://api.openai.com/v1/chat/completions', model: 'gpt-4.1-mini' },
+  { id: 'xai-grok', label: 'Grok · xAI', endpoint: 'https://api.x.ai/v1/chat/completions', model: 'grok-4.20-0309-non-reasoning' },
   { id: 'custom', label: 'Your OpenAI-compatible service', endpoint: '', model: '' },
 ] as const;
 export function copilotPresetFor(endpoint: string, model: string): string {

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { fieldReferences } from './load-field-references.mjs';
 
 const task = overrides => ({ title: 'Private next step', description: 'Notes', status: 'todo', priority: 'normal', assignee_user_id: null,
   due_date: null, checklist: [{ id: 'one', title: 'Verify result', done: false }], file_ids: [], decision_ids: [], ...overrides });
@@ -10,7 +11,7 @@ const project = { title: 'Private launch', description: 'Project notes', color: 
 const plain = value => JSON.parse(JSON.stringify(value));
 
 function fixture({ encrypted = true } = {}) {
-  const state = { token: 'account-one', requests: [], events: [], pages: [], members: [{ user_id: 'member' }], files: [], decisions: [], tamper: null };
+  const state = { token: 'account-one', requests: [], events: [], pages: [], members: [{ user_id: 'member' }], files: [], decisions: [], tamper: null, resolutions: [], available: true };
   const secure = {
     handles: async () => encrypted,
     sendEvent: async (channel, type, content) => { const event_id = '$event-' + state.events.length; state.events.push({ event_id, channel, type, content: plain(content) }); return { event_id }; },
@@ -34,7 +35,7 @@ function fixture({ encrypted = true } = {}) {
         ...(!event ? { fields: body.fields } : {}) };
     },
   };
-  const dependencies = { './api': { api }, './secure-client': { getSecureMessaging: async () => secure },
+  const dependencies = { './field-references': fieldReferences, './message-references-api': { messageReferencesApi: { resolve: async (_, refs) => { state.resolutions.push(plain(refs)); return refs.map(ref => ({ ...ref, available: state.available })); } } }, './api': { api }, './secure-client': { getSecureMessaging: async () => secure },
     './files-api': { listChannelFiles: async () => state.files }, './collaboration-api': { collaborationApi: { decisions: async () => state.decisions } } };
   const source = readFileSync(new URL('../src/lib/project-tasks-api.ts', import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
@@ -112,4 +113,27 @@ test('task pages are combined without exposing partially resolved rows after log
   f.api.request = async (...args) => { const result = await original(...args); f.state.token = 'account-two'; return result; };
   f.state.pages.push([row('one')]);
   await assert.rejects(f.projectTasksApi.projects('channel'), /account changed/);
+});
+
+const typedRef = (id = 'real-person') => ({ kind: 'person', id, start: 2, end: 6 });
+test('actual field references preserve exact native text and remain inside the encrypted event', async () => {
+  for (const encrypted of [false, true]) {
+    const f = fixture({ encrypted });
+    const fields = task({ title: '  @Ada  ', field_references: { title: [typedRef()] } });
+    const saved = await f.projectTasksApi.saveTask('channel', 'project', fields, undefined, { id: 'task' });
+    assert.equal(saved.fields.title, fields.title);
+    assert.deepEqual(plain(saved.fields.field_references), fields.field_references);
+    assert.equal(f.state.resolutions.length, 1);
+    const body = JSON.parse(f.state.requests[0].options.body);
+    if (encrypted) { assert.equal(body.fields, undefined); assert.equal(body.field_references, undefined); assert.deepEqual(f.state.events[0].content.fields.field_references, fields.field_references); }
+    else assert.deepEqual(body.fields.field_references, fields.field_references);
+  }
+});
+test('historical references allow status edits after target removal but new bindings fail safely', async () => {
+  const f = fixture({ encrypted: false }); f.state.available = false;
+  const previous = { id: 'task', kind: 'task', revision: 2, archived: false, project_id: 'project', fields: task({ title: '  @Ada  ', field_references: { title: [typedRef()] } }) };
+  await f.projectTasksApi.saveTask('channel', 'project', { ...previous.fields, status: 'done' }, previous);
+  assert.equal(f.state.resolutions.length, 0);
+  await assert.rejects(f.projectTasksApi.saveTask('channel', 'project', { ...previous.fields, field_references: { title: [typedRef('forged-new')] } }, previous), /no longer available/);
+  assert.equal(f.state.requests.length, 1);
 });

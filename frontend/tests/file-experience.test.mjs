@@ -4,13 +4,14 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { randomUUID } from 'node:crypto';
 import ts from 'typescript';
+import { fieldReferences, resourceReferenceTargets } from './load-field-references.mjs';
 
 const plain = value => JSON.parse(JSON.stringify(value));
 function load(file, dependencies = {}, globals = {}) {
   const source = readFileSync(new URL('../src/lib/' + file, import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, require: name => dependencies[name], Set, Map, Date, URL, File, crypto: { randomUUID }, location: { origin: 'http://127.0.0.1:3000' }, ...globals });
+  vm.runInNewContext(compiled, { exports, require: name => name === './field-references' ? fieldReferences : name === './resource-reference-targets' ? resourceReferenceTargets(dependencies['./api']?.api) : dependencies[name], Set, Map, Date, URL, File, crypto: { randomUUID }, location: { origin: 'http://127.0.0.1:3000' }, ...globals });
   return exports;
 }
 
@@ -46,7 +47,7 @@ function fixture() {
   };
   const api = { getAccessToken: () => state.token, getCurrentUserId: () => 'actor', getBaseUrl: () => '/api', request: async (...args) => { state.requests.push(args); return []; } };
   const exports = load('file-experience-api.ts', { './api': { api }, './secure-client': { getSecureMessaging: async () => secure }, './files-api': { listFileVersions: async () => state.available ? [file] : [] } });
-  return { ...exports, file, secure, state };
+  return { ...exports, file, secure, state, api };
 }
 
 test('encrypted file comments verify room, author, document target and redaction', async () => {
@@ -74,4 +75,19 @@ test('desktop Office never accepts encrypted files and rejects insecure remote h
   const f = fixture(); await assert.rejects(f.fileExperienceApi.office(f.file, 'password'), /standard channel/); assert.equal(f.state.requests.length, 0);
   const exported = load('file-experience-api.ts', { './api': { api: { getBaseUrl: () => 'http://api.remote.invalid/api' } }, './secure-client': {}, './files-api': {} });
   assert.throws(() => exported.officeHandoff({ path: '/office-edit/id/secret/brief.docx', handler: 'ms-word' }), /HTTPS/);
+});
+
+for (const encrypted of [false, true]) test(`file comments retain explicit field references ${encrypted ? 'inside Matrix' : 'inside the native encrypted snapshot'}`, async () => {
+  const f = fixture(); if (!encrypted) { f.secure.handles = async () => false; f.file.encrypted = false; delete f.file.secure_locator; }
+  const refs = { text: [{ kind: 'document', id: 'actual-document', start: 2, end: 7 }] };
+  await f.fileExperienceApi.comment(f.file, '  @Plan  ', 'stable', refs);
+  const payload = encrypted ? f.state.sent[0][2] : JSON.parse(f.state.requests[0][1].body);
+  assert.equal(payload.text, '  @Plan  '); assert.deepEqual(plain(payload.field_references), refs);
+  if (encrypted) assert.equal(f.state.requests.length, 0);
+});
+test('secure file comment read validates ranges and never guesses missing identity metadata', async () => {
+  const f = fixture(); f.state.tamper.content = { text: '@Plan', field_references: { text: [{ kind: 'document', id: 'actual', start: 0, end: 5 }] } };
+  assert.equal((await f.fileExperienceApi.comments(f.file))[0].field_references.text[0].id, 'actual');
+  f.state.tamper.content.field_references.text[0].end = 99;
+  await assert.rejects(f.fileExperienceApi.comments(f.file), /references/);
 });

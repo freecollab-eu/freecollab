@@ -4,6 +4,7 @@ Run against disposable local services with the Matrix service enabled:
 CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/secure-account-browser.py
 No fixture tokens, private keys or plaintext messages are printed.
 """
+from ui_navigation import open_chat_tool, reveal_chat_tool
 import json
 import os
 import re
@@ -61,6 +62,7 @@ def login(page, user):
     if user.get('mfa_codes'):
         page.get_by_label('Authentication or recovery code', exact=True).fill(user['mfa_codes'].pop(0))
         page.get_by_role('button', name='Verify and sign in', exact=True).click()
+    reveal_chat_tool(page, 'Account settings')
     expect(page.get_by_role('button', name='Account settings', exact=True)).to_be_visible(timeout=90000)
     page.get_by_role('button', name=re.compile('^Switch workspace, ')).click()
     page.get_by_role('menuitemradio', name=re.compile('Secure Studio')).click()
@@ -75,7 +77,7 @@ def direct_picker(page):
 
 
 def encryption_settings(page):
-    page.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+    open_chat_tool(page, 'End-to-end encrypted')
     dialog = page.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
     expect(dialog.get_by_role('heading', name='Encrypted history recovery', exact=True)).to_be_visible(timeout=90000)
     return dialog
@@ -112,6 +114,7 @@ with sync_playwright() as p:
         print('Secure UI: sender workspace opened.', flush=True)
         picker = direct_picker(left)
         picker.get_by_role('button', name=re.compile('^SecureUIBob')).click()
+        reveal_chat_tool(left, 'End-to-end encrypted')
         expect(left.get_by_role('button', name='End-to-end encrypted', exact=True)).to_be_visible(timeout=90000)
         print('Secure UI: encrypted DM provisioned.', flush=True)
         # The sender opens real recovery settings; setup key is shown once, then only supplied to unlock.
@@ -139,6 +142,7 @@ with sync_playwright() as p:
         login(right, bob)
         picker = direct_picker(right)
         picker.get_by_role('button', name=re.compile('^SecureUIAlice')).click()
+        reveal_chat_tool(right, 'End-to-end encrypted')
         expect(right.get_by_role('button', name='End-to-end encrypted', exact=True)).to_be_visible(timeout=90000)
         print('Secure UI: recipient encryption device opened.', flush=True)
         other_security = encryption_settings(right)

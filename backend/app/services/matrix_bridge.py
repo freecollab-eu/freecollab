@@ -7,7 +7,7 @@ from urllib.parse import quote
 
 import httpx
 from fastapi import HTTPException
-from sqlmodel import select
+from sqlmodel import Session, select
 from ..config import settings
 from ..models.channel import ChannelMember
 from ..models.secure_channel import SecureChannel, MatrixAccount, MatrixServiceAccount
@@ -198,15 +198,32 @@ def remove_secure_member(session, channel_id, user_id):
 def validate_secure_event(session, channel_id, event_id, user_id, *, require_sender=True):
     """Validate an opaque event pointer without decrypting its content."""
     from .access import require_channel_member
-    require_channel_member(session, channel_id, user_id)
+    member = require_channel_member(session, channel_id, user_id)
+    initial_role = member.role
     binding = session.get(SecureChannel, channel_id)
     account = session.get(MatrixAccount, user_id)
     if not binding or not binding.matrix_room_id or binding.status != "active" or not account:
         raise HTTPException(409, "Encrypted channel is not ready")
+    initial_room, initial_identity = binding.matrix_room_id, account.matrix_user_id
     _, token = service_token(session, allow_provision=False)
     event = matrix_request("GET", f"/_matrix/client/v3/rooms/{quote(binding.matrix_room_id, safe='')}/event/{quote(event_id, safe='')}", token=token)
-    if event.get("room_id") != binding.matrix_room_id or event.get("type") != "m.room.encrypted" or (require_sender and event.get("sender") != account.matrix_user_id) or event.get("unsigned", {}).get("redacted_because") or not event.get("content", {}).get("ciphertext"):
-        raise HTTPException(400, "Encrypted event does not belong to this sender and channel")
+    # Remote I/O must not preserve a cached session, membership or room grant.
+    # Use a fresh identity map on this transaction without flushing/expiring the
+    # caller's pending content. Closing this read session cannot end its owner.
+    from .request_guard import recheck_actor
+    with Session(session.connection(), autoflush=False, join_transaction_mode="rollback_only") as current:
+        current.info.update(session.info)
+        recheck_actor(current, user_id)
+        member = require_channel_member(current, channel_id, user_id)
+        if member.role != initial_role:
+            raise HTTPException(403, "Channel access changed; try again")
+        binding = current.get(SecureChannel, channel_id)
+        account = current.get(MatrixAccount, user_id)
+        if (not binding or not binding.matrix_room_id or binding.status != "active" or not account
+                or binding.matrix_room_id != initial_room or account.matrix_user_id != initial_identity):
+            raise HTTPException(409, "Encrypted channel is not ready")
+        if event.get("room_id") != binding.matrix_room_id or event.get("type") != "m.room.encrypted" or (require_sender and event.get("sender") != account.matrix_user_id) or event.get("unsigned", {}).get("redacted_because") or not event.get("content", {}).get("ciphertext"):
+            raise HTTPException(400, "Encrypted event does not belong to this sender and channel")
     return event
 
 

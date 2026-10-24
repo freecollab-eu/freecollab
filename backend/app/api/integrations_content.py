@@ -11,14 +11,15 @@ from sqlmodel import select
 from ..database import get_session
 from ..models.integration_content import IntegrationContent, IntegrationContentRevision
 from ..models.calendar_planning import CalendarAttendee  # Register additive invitation tables with content.
-from ..services.access import lock_channel_writes, require_channel_member
-from ..services.auth import get_current_user
+from ..services.access import require_channel_member
+from ..services.auth import get_current_user, security
 from ..services.chat_notifications import require_native_channel
 from ..services.crypto import decrypt_message, encrypt_message
 from ..services.integration_content import CalendarFields, DocumentFields
 from ..services.matrix_bridge import is_secure_channel, validate_secure_event
-from ..services.workspaces import require_direct_message_writable
 from ..services.webhooks import enqueue_channel_event
+from ..services.field_references import require_field_reference_targets
+from ..services import shared_documents as content_service
 
 router = APIRouter(tags=["document and calendar integrations"])
 Kind = Literal["documents", "calendar"]
@@ -92,15 +93,17 @@ def list_revisions(channel_id: str, kind: Kind, item_id: str, user=Depends(get_c
 
 
 @router.post("/channels/{channel_id}/integrations/{kind}")
-def write_content(channel_id: str, kind: Kind, data: ContentWrite, user=Depends(get_current_user), session=Depends(get_session)):
-    lock_channel_writes(session, channel_id)
-    member = require_channel_member(session, channel_id, user.id)
-    require_direct_message_writable(session, channel_id, user.id)
+def write_content(channel_id: str, kind: Kind, data: ContentWrite, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+    actor = user.id
+    member = content_service.locked_member(session, channel_id, actor, credentials.credentials)
     secure = is_secure_channel(session, channel_id)
     if secure != (data.matrix_event_id is not None):
         raise HTTPException(409, "Use encrypted events for a secure channel, and native fields for a legacy channel")
     if secure:
         validate_secure_event(session, channel_id, data.matrix_event_id, user.id)
+        member = content_service.locked_member(session, channel_id, actor, credentials.credentials)
+        if not is_secure_channel(session, channel_id):
+            raise HTTPException(409, "Channel encryption changed; reload before trying again")
     item = session.get(IntegrationContent, data.id)
     previous = latest_revision(session, item.id) if item else None
     if item:
@@ -132,6 +135,12 @@ def write_content(channel_id: str, kind: Kind, data: ContentWrite, user=Depends(
             raise HTTPException(422, "Invalid integration fields: " + str(error).split("\n")[0]) from None
     number = previous.revision + 1 if previous else 1
     if not secure and fields:
+        previous_fields = serialize(session, item, previous).get("fields") if previous else None
+        require_field_reference_targets(session, channel_id, actor, fields, previous=previous_fields)
+        member = content_service.locked_member(session, channel_id, actor, credentials.credentials)
+        require_native_channel(session, channel_id)
+        if item.created_by != actor and member.role != "admin":
+            raise HTTPException(403, "Only the author or channel administrator can change this item")
         from ..services.enterprise_governance import enforce_native_document
         enforce_native_document(session, channel_id, user.id, fields)
     payload = {"id": item.id, "kind": kind, "revision": number, "fields": fields, "deleted": data.deleted}

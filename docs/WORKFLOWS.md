@@ -4,7 +4,7 @@ Open **Workspace tools → Workflows** inside a channel. A personal account that
 
 ## Events and actions
 
-Supported events are a manual start, native file upload/new version, shared-document creation, decision creation/revision and task creation/revision. Producers enqueue metadata in the same database transaction as the resource change. A manual start runs only the selected workflow. The creator condition can limit events to the administrator who saved the current revision. The editor also supports native task status conditions.
+Supported events are a manual start, native file upload/new version, shared-document creation, decision creation/revision and task creation/revision. Producers enqueue metadata in the same database transaction as the resource change. A manual start runs only the selected workflow. The creator condition can limit events to the administrator who saved the current revision. The editor supports native task status conditions and native decision status conditions (`proposed`, `accepted`, `superseded`). Decision producers forward only that validated status to the local workflow queue; it is not added to outgoing webhook payloads. Encrypted decision events retain no readable status condition.
 
 Actions are an approval request, a generic in-app notification to selected current channel members, and creation of a To do task in an existing native project. There are no arbitrary URLs, scripts, email actions, file exports or external-provider destinations. Generated tasks do not trigger more workflows. A task action creates one task per run and does not overwrite subsequent user edits.
 

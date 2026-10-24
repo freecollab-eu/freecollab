@@ -86,6 +86,7 @@ Thumbs.db
 # Node (for frontend)
 node_modules/
 dist-website/
+dist-demo/
 npm-debug.log
 yarn-error.log
 

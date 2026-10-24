@@ -1,6 +1,36 @@
 # Dependency baseline and audits
 
-## 0.11 audit — 2026-10-21
+## Security review — 2026-10-22
+
+The exact Python locks contain 76 runtime packages and 87 development packages.
+An OSV lookup of all 87 pinned package/version pairs reported no published
+advisories. Full npm audits reported no advisories for the frontend and component
+SDK. These are dated registry results, rather than an application or container-OS
+security certification.
+
+The native packaging toolchains initially reported eight desktop and three
+mobile moderate findings; both production-only native audits were already clear.
+The desktop findings shared the deprecated `roarr`/`sprintf-js` path beneath
+`@electron/get` 3.1.0. A scoped `global-agent` 4.1.3 override removes that path.
+The mobile findings came from `xcode` 3.0.1's old UUID dependency; its scoped
+override selects patched UUID 11.1.1. The direct Electron, Electron Builder and
+Capacitor versions and application runtime dependencies remain unchanged. Full
+npm audits of both updated native locks now report no advisories.
+
+Compatibility checks included clean native installs, the existing native unit
+suites, an actual unsigned Linux directory package with checksum-verified
+Electron 45.0.0, and private Android/iOS Capacitor synchronization. The patched
+Xcode dependency parsed, changed and rewrote a real project and generated 200
+unique project IDs. Electron's actual proxy initializer passed an owned loopback
+proxy round trip. These checks do not establish macOS/Windows signing, mobile
+device behavior or store acceptance; three platform-specific mobile tests were
+skipped because their toolchains were unavailable on this Linux worker.
+
+The Railway frontend builder now uses the same documented CUDA-download skip as
+the other frontend builds. Browser inference still uses WASM; TLS, proxy trust,
+normal installation scripts and lockfile integrity checks remain enabled.
+
+## Historical 0.11 audit — 2026-10-21
 
 The current hash-locked Python runtime resolves **73 packages**, with zero known
 vulnerabilities reported by `pip-audit` 2.10.1's PyPI service. Production npm

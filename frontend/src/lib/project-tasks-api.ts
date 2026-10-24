@@ -1,11 +1,13 @@
+import { changedFieldReferences, taskReferenceTexts, validateFieldReferences, type FieldReferences } from './field-references';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import { listChannelFiles } from './files-api';
 import { collaborationApi } from './collaboration-api';
 
-export interface ProjectFields { title: string; description: string; color: 'sage' | 'blue' | 'sand' | 'rose' }
+export interface ProjectFields { field_references?: FieldReferences; title: string; description: string; color: 'sage' | 'blue' | 'sand' | 'rose' }
 export interface ChecklistItem { id: string; title: string; done: boolean }
 export interface TaskFields {
+  field_references?: FieldReferences;
   title: string; description: string; status: 'todo' | 'doing' | 'done'; priority: 'low' | 'normal' | 'high';
   assignee_user_id: string | null; due_date: string | null; checklist: ChecklistItem[]; file_ids: string[]; decision_ids: string[];
 }
@@ -23,7 +25,7 @@ const eventType = (kind: 'project' | 'task') => 'eu.freecollab.product.' + kind;
 const fail = (): never => { throw new Error('This project or task contains unsupported fields.'); };
 const object = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : fail();
 function text(value: unknown, max: number, required = false) {
-  if (typeof value !== 'string' || value.trim().length > max || required && !value.trim()) return fail();
+  if (typeof value !== 'string' || value.length > max || required && !value.trim()) return fail();
   return value.trim();
 }
 function references(value: unknown): string[] {
@@ -32,12 +34,14 @@ function references(value: unknown): string[] {
 }
 export function validateProject(value: unknown): ProjectFields {
   const v = object(value);
-  if (Object.keys(v).some(key => !['title', 'description', 'color'].includes(key)) || !['sage', 'blue', 'sand', 'rose'].includes(String(v.color))) return fail();
-  return { title: text(v.title, 160, true), description: text(v.description, 4000), color: v.color as ProjectFields['color'] };
+  if (Object.keys(v).some(key => !['title', 'description', 'color', 'field_references'].includes(key)) || !['sage', 'blue', 'sand', 'rose'].includes(String(v.color))) return fail();
+  text(v.title, 160, true); text(v.description, 4000);
+  const field_references = validateFieldReferences({ title: v.title as string, description: v.description as string }, v.field_references);
+  return { title: field_references?.title ? v.title as string : text(v.title, 160, true), description: field_references?.description ? v.description as string : text(v.description, 4000), color: v.color as ProjectFields['color'], ...(field_references ? { field_references } : {}) };
 }
 export function validateTask(value: unknown): TaskFields {
   const v = object(value);
-  if (Object.keys(v).some(key => !['title', 'description', 'status', 'priority', 'assignee_user_id', 'due_date', 'checklist', 'file_ids', 'decision_ids'].includes(key))) return fail();
+  if (Object.keys(v).some(key => !['title', 'description', 'status', 'priority', 'assignee_user_id', 'due_date', 'checklist', 'file_ids', 'decision_ids', 'field_references'].includes(key))) return fail();
   if (!['todo', 'doing', 'done'].includes(String(v.status)) || !['low', 'normal', 'high'].includes(String(v.priority))) return fail();
   if (v.assignee_user_id !== null && (typeof v.assignee_user_id !== 'string' || !v.assignee_user_id || v.assignee_user_id.length > 128)) return fail();
   if (v.due_date !== null && (typeof v.due_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(v.due_date) || !Number.isFinite(Date.parse(v.due_date)) || new Date(v.due_date).toISOString().slice(0, 10) !== v.due_date)) return fail();
@@ -45,11 +49,14 @@ export function validateTask(value: unknown): TaskFields {
   const checklist = v.checklist.map(value => {
     const item = object(value);
     if (Object.keys(item).some(key => !['id', 'title', 'done'].includes(key)) || typeof item.id !== 'string' || !/^[A-Za-z0-9_-]{1,80}$/.test(item.id) || typeof item.done !== 'boolean') return fail();
-    return { id: item.id, title: text(item.title, 200, true), done: item.done };
+    text(item.title, 200, true);
+    return { id: item.id, title: item.title as string, done: item.done };
   });
   if (new Set(checklist.map(item => item.id)).size !== checklist.length) return fail();
-  return { title: text(v.title, 200, true), description: text(v.description, 12000), status: v.status as TaskFields['status'], priority: v.priority as TaskFields['priority'],
-    assignee_user_id: v.assignee_user_id as string | null, due_date: v.due_date as string | null, checklist, file_ids: references(v.file_ids), decision_ids: references(v.decision_ids) };
+  text(v.title, 200, true); text(v.description, 12000);
+  const field_references = validateFieldReferences(taskReferenceTexts({ title: v.title as string, description: v.description as string, checklist }), v.field_references);
+  return { title: field_references?.title ? v.title as string : text(v.title, 200, true), description: field_references?.description ? v.description as string : text(v.description, 12000), status: v.status as TaskFields['status'], priority: v.priority as TaskFields['priority'],
+    assignee_user_id: v.assignee_user_id as string | null, due_date: v.due_date as string | null, checklist: checklist.map(item => ({ ...item, title: field_references?.['checklist:' + item.id] ? item.title : item.title.trim() })), file_ids: references(v.file_ids), decision_ids: references(v.decision_ids), ...(field_references ? { field_references } : {}) };
 }
 const validate = (kind: 'project' | 'task', value: unknown) => kind === 'project' ? validateProject(value) : validateTask(value);
 async function resolve<T>(record: ProjectTaskRecord<T>): Promise<ProjectTaskRecord<T>> {
@@ -91,6 +98,12 @@ async function write<T>(channelId: string, kind: 'project' | 'task', fields: T, 
   const revision = (previous?.revision || 0) + 1, archived = options?.archived ?? previous?.archived ?? false;
   const secure = await getSecureMessaging(); current();
   const encrypted = await secure.handles(channelId); current();
+  const mentioned = changedFieldReferences(taskReferenceTexts(normalized), normalized.field_references, previous?.fields ? taskReferenceTexts(previous.fields as unknown as ProjectFields | TaskFields) : undefined, (previous?.fields as unknown as ProjectFields | TaskFields | undefined)?.field_references);
+  if (mentioned.length) {
+    const { messageReferencesApi } = await import('./message-references-api'); current();
+    const resolved = await messageReferencesApi.resolve(channelId, mentioned, undefined, encrypted); current();
+    if (resolved.some(row => !row.available)) throw new Error('A selected reference is no longer available in this conversation.');
+  }
   let payload: Record<string, unknown> = { id, expected_revision: revision - 1, archived, fields: normalized };
   if (encrypted) {
     const event = await secure.sendEvent(channelId, eventType(kind), { id, kind, project_id: projectId, revision, archived, fields: normalized });

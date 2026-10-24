@@ -10,6 +10,7 @@ Two public-shaped HTTPS/443 names map to private TLS sockets only in this
 disposable API launcher and Chromium. No production validator is replaced.
 No real organization credentials, external provider calls or email are used.
 """
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime
 import json
@@ -146,9 +147,6 @@ def reauth(user, correct=True):
 
 def authenticated(page):
     expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-    page.wait_for_selector('[aria-label="Account settings"]', state='attached', timeout=30000)
-    if not page.get_by_role('button', name='Account settings', exact=True).is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
     assert token(page), 'The browser has no native session after authentication'
     assert '#sso=' not in page.url and 'access_token=' not in page.url, 'A callback credential remained in the URL'
 
@@ -168,7 +166,7 @@ def login(page, base, user, workspace):
 
 def integrations(page):
     authenticated(page)
-    page.get_by_role('button', name='Integrations', exact=True).click()
+    open_chat_tool(page, 'Integrations')
     panel = page.get_by_role('dialog', name='Integrations', exact=True)
     panel.get_by_role('button', name='Sign-in', exact=True).click()
     return panel
@@ -548,7 +546,7 @@ def main():
                             payload['enabled'] = True
                         route.fulfill(response=response, json=payload)
                     sso_page.route('**/api/secure/status', show_unlock_form)
-                    sso_page.get_by_role('button', name='Server-encrypted messages', exact=True).click()
+                    open_chat_tool(sso_page, 'Server-encrypted messages')
                     encryption = sso_page.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
                     unlock = encryption.get_by_role('form', name='Unlock encrypted messaging', exact=True)
                     expect(unlock).to_be_visible()

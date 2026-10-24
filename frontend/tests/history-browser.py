@@ -1,4 +1,5 @@
 """Real UI full-history/search/mentions verification using disposable local accounts."""
+from ui_navigation import open_chat_tool
 import json, os, uuid
 from pathlib import Path
 from urllib.request import Request, urlopen
@@ -19,20 +20,26 @@ i=api('POST',f"/workspaces/{w['id']}/invites",a['access_token'],{'role':'member'
 api('POST','/workspaces/invites/accept',b['access_token'],{'token':i['token']})
 c=api('POST','/channels',a['access_token'],{'name':'History-'+RUN,'type':'group','workspace_id':w['id'],'member_ids':[b['user_id']]})
 old=api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':'Oldest searchable needle '+RUN})
-for index in range(121): api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':f'Historical entry {index:03d} '+RUN})
+history=[]
+for index in range(121): history.append(api('POST',f"/messages/channels/{c['id']}",a['access_token'],{'content':f'Historical entry {index:03d} '+RUN}))
+# Exercise explicit cursor pagination from a genuine recent reading boundary.
+# With no receipt, first-unread entry correctly seeks through older history.
+api('POST',f"/read-receipts/channels/{c['id']}",a['access_token'],{'message_id':history[95]['id']})
+receipts=api('GET',f"/read-receipts/channels/{c['id']}",a['access_token'])
+assert next(row['last_read_message_id'] for row in receipts if row['user_id']==a['user_id'])==history[95]['id'], 'Pagination fixture must use its canonical native receipt'
 with sync_playwright() as p:
     browser=p.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or None,headless=True,args=['--no-sandbox'])
     page=browser.new_page(viewport={'width':1440,'height':1000}); page.set_default_timeout(30000)
     errors=[]; page.on('pageerror',lambda error:errors.append(str(error)))
     page.goto(BASE)
     page.evaluate('''({auth,workspace})=>{localStorage.setItem('freecollab_token',auth.access_token);localStorage.setItem('freecollab_user_id',auth.user_id);localStorage.setItem('freecollab.workspace:'+auth.user_id,workspace)}''',{'auth':a,'workspace':w['id']})
-    page.reload(); expect(page.get_by_placeholder('Message #'+c['name'])).to_be_visible()
+    page.reload(); expect(page.get_by_role('textbox', name='Message #'+c['name'], exact=True)).to_be_visible()
     expect(page.get_by_text('Historical entry 120 '+RUN,exact=True)).to_be_visible()
     expect(page.get_by_text(old['content'],exact=True)).to_have_count(0)
     page.get_by_role('button',name='Load older messages',exact=True).click()
     expect(page.get_by_text(old['content'],exact=True)).to_be_visible()
     print('PASS: cursor pagination loads history beyond the initial page',flush=True)
-    page.get_by_role('button',name='Search all history',exact=True).click()
+    open_chat_tool(page, 'Search all history')
     dialog=page.get_by_role('dialog',name='Search all history')
     expect(dialog.get_by_text('Loading full history',exact=False)).to_have_count(0,timeout=60000)
     dialog.get_by_role('textbox',name='Search messages',exact=True).fill('Oldest searchable needle')
@@ -47,18 +54,22 @@ with sync_playwright() as p:
     expect(page.locator('#message-'+old['id'])).to_contain_text(updated)
     expect(page.locator('#message-'+old['id'])).to_be_focused()
     print('PASS: complete local search, edits synchronized and jump to older context',flush=True)
-    composer=page.get_by_placeholder('Message #'+c['name'])
+    composer=page.get_by_role('textbox', name='Message #'+c['name'], exact=True)
     composer.fill('@History')
-    page.get_by_role('option',name='HistoryBob',exact=True).click()
+    person=page.locator('[role="option"][data-reference-kind="person"][data-reference-id='+json.dumps(b['user_id'])+']')
+    expect(person).to_be_visible()
+    expect(person.locator('strong')).to_have_text('HistoryBob')
+    person.click()
     composer.press('End'); composer.press('Space'); composer.press('H'); composer.press('i')
     page.get_by_role('button',name='Send message',exact=True).click()
     expect(composer).to_have_value('')
     latest=api('GET',f"/messages/channels/{c['id']}?limit=1",a['access_token'])[0]
     assert latest['mentions']==[b['user_id']], 'Selected mention must use member ID'
+    assert latest['references']==[{'kind':'person','id':b['user_id'],'start':0,'end':len('@HistoryBob')}], 'Selected typed reference must retain the chosen person ID and visible range'
     mentions=api('GET','/mentions/me',b['access_token'])
     assert any(item['id']==latest['id'] for item in mentions)
     print('PASS: mention picker sends member IDs and recipient inbox receives mention',flush=True)
-    page.get_by_role('button',name='Search all history',exact=True).click()
+    open_chat_tool(page, 'Search all history')
     dialog=page.get_by_role('dialog',name='Search all history')
     dialog.get_by_role('textbox',name='Search messages',exact=True).fill(updated)
     expect(dialog.locator('.fc-history-result')).to_have_count(1,timeout=60000)

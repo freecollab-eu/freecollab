@@ -28,15 +28,15 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, expect, sync_playwright
 import requests
 import socketio
+from sdk_artifact_binding import EXPECTED_PACKAGE, verify_sdk_artifact
 
 ROOT = Path(__file__).resolve().parents[3]
 PACKAGE = ROOT / 'packages/components'
 PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT / 'backend/.venv/bin/python')
 REPORT = Path(os.getenv('CONNECT_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/connect-browser-0.13.0.json')))
-EXPECTED_PACKAGE = 'a7209bc812ae65928d8df8226e4d7fc4e15a29d325a22731776b908cb7fffcc1'
 SPEC = importlib.util.spec_from_file_location('owned_embed_proof_helpers', Path(__file__).with_name('embed-browser-proof.py'))
 helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(helpers)
@@ -157,7 +157,7 @@ def make_host(web, api_base, app_base, host_origin, identity, application, chann
 
 
 def open_devices(frame):
-    frame.get_by_role('button', name='End-to-end encrypted', exact=True).click()
+    helpers.navigation.open_chat_tool(frame, 'End-to-end encrypted')
     dialog = frame.get_by_role('dialog', name='Encryption devices and recovery', exact=True)
     dialog.get_by_role('button', name='Channel devices', exact=True).click()
     expect(dialog.locator('.fc-secure-fingerprint code')).to_be_visible(timeout=90000)
@@ -175,6 +175,20 @@ def wait_peer(dialog, peer_id, page):
     return row
 
 
+def confirm_revoked_embed(frame, refresh):
+    signed_out = frame.locator('[data-embed-state="signed-out"]')
+    if frame.locator('[data-embed-state="ready"]').count():
+        try:
+            # A sync/lease denial may already be removing this control. The
+            # optional refresh must not make successful fail-closed UI a failure.
+            refresh.click(timeout=3000)
+        except PlaywrightTimeoutError:
+            if not signed_out.is_visible() or frame.locator('.fc-chat').count():
+                raise
+    expect(signed_out).to_be_visible(timeout=45000)
+    expect(frame.locator('.fc-chat')).to_have_count(0)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--skip-build', action='store_true', help='Use the explicitly approved frozen frontend and SDK release artifact')
@@ -187,7 +201,7 @@ def main():
     container = 'freecollab-connect-proof-' + secrets.token_hex(6)
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     archive = PACKAGE / 'artifacts/freecollab-components-0.13.0.tgz'
-    assert hashlib.sha256(archive.read_bytes()).hexdigest() == EXPECTED_PACKAGE
+    package_binding = verify_sdk_artifact(archive, PACKAGE)
     frontend_dist = ROOT / 'frontend/dist'
     frontend_manifest = {str(path.relative_to(frontend_dist)): hashlib.sha256(path.read_bytes()).hexdigest()
                          for path in sorted(frontend_dist.rglob('*')) if path.is_file()}
@@ -204,8 +218,9 @@ def main():
                 assert all(member.name.startswith('package/') and '..' not in Path(member.name).parts for member in tar.getmembers())
                 tar.extractall(private / 'packed', filter='data')
             release = json.loads((private / 'packed/package/dist/release.json').read_text())
-            assert release['version'] == '0.13.0' and release['apiLine'] == '0.13'
+            assert release == package_binding['release']
             checks['exact_packed_0_13_sdk_and_frozen_trusted_frontend'] = True
+            checks['reviewed_sdk_bytes_match_distribution_and_current_source_digest'] = True
             api_port, app_port, host_a_port, host_b_port = (helpers.port() for _ in range(4))
             api_base, app_base, host_a, host_b = ('http://127.0.0.1:' + str(port) for port in (api_port, app_port, host_a_port, host_b_port))
             environment = dict(os.environ)
@@ -335,6 +350,9 @@ def main():
                                     headers={'Origin':app_base}, wait_timeout=15)
                 assert peer_socket.call('join', {'channel_id':channel_id}, timeout=10).get('ok')
                 checks['recipient_child_matrix_gateway_and_actual_socket_join_authorized_before_revoke'] = True
+                # Reveal the real control while access is still active; after
+                # revocation only its bounded click or actual sign-out is valid.
+                refresh = helpers.navigation.reveal_chat_tool(frames[1], 'Refresh messages')
                 stage = 'own-organization recipient grant revocation'
                 succeeds(api_base, '/connect/workspaces/org-b/connections/' + connection_id + '/members/' + beta['user_id'],
                     token=admin_b['access_token'], method='DELETE')
@@ -343,10 +361,7 @@ def main():
                 assert request(api_base, '/channels/' + channel_id, token=beta['access_token'])[0] == 403
                 assert request(api_base, '/_matrix/client/v3/sync?timeout=0', token=matrix_tokens['beta'])[0] == 401
                 assert peer_socket.call('join', {'channel_id':channel_id}, timeout=10).get('error')
-                if frames[1].locator('[data-embed-state="ready"]').count():
-                    frames[1].get_by_role('button', name='Refresh messages', exact=True).click()
-                expect(frames[1].locator('[data-embed-state="signed-out"]')).to_be_visible(timeout=45000)
-                expect(frames[1].locator('.fc-chat')).to_have_count(0)
+                confirm_revoked_embed(frames[1], refresh)
                 checks['recipient_revoke_denies_existing_child_renewal_matrix_and_socket_and_clears_private_dom'] = True
                 assert succeeds(api_base, '/auth/me', token=beta['access_token'])['workspace_id'] == 'org-b'
                 assert succeeds(api_base, '/channels/' + channel_id, token=alpha['access_token'])['workspace_id'] == 'org-a'

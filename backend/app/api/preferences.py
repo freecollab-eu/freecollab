@@ -4,6 +4,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session
 
@@ -27,9 +28,9 @@ class AppearancePreferences(BaseModel):
 
     version: Literal[1] = 1
     mode: Mode = "light"
-    accent_color: HexColor = "#36594c"
-    background_color: HexColor = "#f6f5f1"
-    dark_background_color: HexColor = "#151b18"
+    accent_color: HexColor = "#ee593f"
+    background_color: HexColor = "#f1eee8"
+    dark_background_color: HexColor = "#252321"
     font_family: FontFamily = "inter"
     font_size: FontSize = "medium"
     density: Density = "comfortable"
@@ -70,6 +71,13 @@ class LanguagePreferences(BaseModel):
     locale: Literal["auto", "en", "sv"]
 
 
+def lock_preference_account(session: Session, user_id: str):
+    """Serialize saves with account erasure and recheck the live sign-in."""
+    from ..services.request_guard import recheck_actor
+    session.execute(update(User).where(User.id == user_id).values(name=User.name))
+    recheck_actor(session, user_id)
+
+
 @router.get("/language", response_model=LanguagePreferences)
 def get_language(response: Response, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
     response.headers["Cache-Control"] = "private, no-store"
@@ -79,13 +87,10 @@ def get_language(response: Response, user: User = Depends(get_current_user), ses
 
 @router.put("/language", response_model=LanguagePreferences)
 def put_language(data: LanguagePreferences, response: Response, user: User = Depends(get_current_user), session: Session = Depends(get_session)):
-    from sqlalchemy import update
-    from ..services.request_guard import recheck_actor
     response.headers["Cache-Control"] = "private, no-store"
     # Serialize the first insert on the account row, and recheck the live grant
     # after acquiring it. Scoped SSO accounts can change their own UI language.
-    session.execute(update(User).where(User.id == user.id).values(name=User.name))
-    recheck_actor(session, user.id)
+    lock_preference_account(session, user.id)
     preference = session.get(UserLanguage, user.id) or UserLanguage(user_id=user.id)
     preference.locale, preference.updated_at = data.locale, datetime.utcnow()
     session.add(preference)
@@ -93,7 +98,7 @@ def put_language(data: LanguagePreferences, response: Response, user: User = Dep
         session.commit()
     except IntegrityError:
         session.rollback()
-        recheck_actor(session, user.id)
+        lock_preference_account(session, user.id)
         preference = session.get(UserLanguage, user.id)
         if preference is None:
             raise
@@ -125,6 +130,7 @@ def put_appearance(
 ):
     response.headers["Cache-Control"] = "private, no-store"
     user_id = user.id
+    lock_preference_account(session, user_id)
     values = data.model_dump_json()
     appearance = session.get(UserAppearance, user_id)
     if appearance is None:
@@ -137,6 +143,7 @@ def put_appearance(
         session.commit()
     except IntegrityError:
         session.rollback()
+        lock_preference_account(session, user_id)
         # Two clients may save an account's first settings simultaneously.
         # The winner creates the row; the other request becomes an update.
         appearance = session.get(UserAppearance, user_id)

@@ -12,7 +12,7 @@ function moduleFor(file, dependencies = {}, globals = {}) {
 }
 const helpers = moduleFor('lib/workspace-launch.ts');
 const appearance = moduleFor('lib/appearance.ts');
-const swedish = moduleFor('i18n/workspace-launch.sv.ts').default;
+const swedish = { ...moduleFor('i18n/workspace-launch.sv.ts').default, ...moduleFor('i18n/workspace-first-conversation.sv.ts').default };
 const workspace = { id: 'own-workspace', name: 'Our studio', logo_url: null, role: 'owner', is_legacy: false, member_count: 1 };
 const me = { id: 'native-admin', account_type: 'personal', session_scope: 'account' };
 const room = { id: 'shared-room', workspace_id: workspace.id, name: 'Our room', type: 'group', secure: false, encrypted_channel_key: null, role: 'admin' };
@@ -52,13 +52,13 @@ test('live invitation and connection summaries stay in their selected scope and 
 
 async function fixture(options = {}) {
   const hooks = [], effects = [], listeners = new Map(); let cursor = 0, rerender = false;
-  const state = { token: 'native-session', userId: me.id, user: { ...me, ...options.user }, workspace: { ...workspace }, rooms: [], invites: [], writes: [], copies: [], close: 0, selected: [], appearance: 0, connections: [], changed: 0, guards: [], channelRefresh: [], confirm: true, locale: 'en', ...options.state };
+  const state = { token: 'native-session', userId: me.id, user: { ...me, ...options.user }, workspace: { ...workspace }, rooms: [], invites: [], writes: [], copies: [], close: 0, selected: [], members: [], appearance: 0, connections: [], changed: 0, guards: [], channelRefresh: [], confirm: true, locale: 'en', ...options.state };
   const react = {
     useState(initial) { const index = cursor++; if (!(index in hooks)) hooks[index] = { value: typeof initial === 'function' ? initial() : initial }; return [hooks[index].value, next => { const value = typeof next === 'function' ? next(hooks[index].value) : next; if (!Object.is(value, hooks[index].value)) { hooks[index].value = value; rerender = true; } }]; },
     useRef(value) { const index = cursor++; if (!(index in hooks)) hooks[index] = { current: value }; return hooks[index]; },
     useEffect(effect, dependencies) { const index = cursor++, previous = hooks[index]; if (!previous || dependencies.some((value, key) => !Object.is(value, previous.dependencies[key]))) { hooks[index] = { dependencies, cleanup: previous?.cleanup }; effects.push(() => { hooks[index].cleanup?.(); hooks[index].cleanup = effect(); }); } },
   };
-  const props = { workspace: { ...workspace }, channels: [], onClose: () => state.close++, onChanged: () => state.changed++, onChannelsChanged: value => state.channelRefresh.push(value), onSelectChannel: value => state.selected.push(value), onOpenAppearance: () => state.appearance++, onOpenConnections: value => state.connections.push(value), onGuardChange: value => state.guards.push(value) };
+  const props = { workspace: { ...workspace }, channels: [], onClose: () => state.close++, onChanged: () => state.changed++, onChannelsChanged: value => state.channelRefresh.push(value), onSelectChannel: value => state.selected.push(value), onOpenChannelMembers: value => state.members.push(value), onOpenAppearance: () => state.appearance++, onOpenConnections: value => state.connections.push(value), onGuardChange: value => state.guards.push(value) };
   const api = {
     getAccessToken: () => state.token, getCurrentUserId: () => state.userId,
     getMe: async () => { if (state.pauseMe) await state.pauseMe; return state.user; },
@@ -116,6 +116,37 @@ test('issued links require explicit copying and acknowledgement or revocation be
   await f.click('I have saved this invitation privately'); assert.equal(f.state.guards.at(-1), null);
   assert.ok(!f.text().includes(invitation().token)); await f.click('Language & appearance'); assert.equal(f.state.appearance, 1);
   await f.click('Close workspace launch guide'); assert.equal(f.state.close, 1);
+});
+
+test('channel access is a separate explicit action bound to the selected channel, never an invitation or membership write', async () => {
+  const f = await fixture({ state: { rooms: [room] } });
+  assert.ok(f.text().includes('Workspace membership does not grant channel access.'));
+  await f.click('Open channel invitations');
+  assert.equal(f.state.members.length, 1); assert.equal(f.state.members[0].id, room.id);
+  assert.equal(f.state.members[0].workspace_id, workspace.id);
+  assert.equal(f.state.writes.length, 0); assert.equal(f.state.selected.length, 0);
+  const member = await fixture({ state: { rooms: [{ ...room, role: 'member' }] } });
+  assert.ok(member.text().includes('Ask one of its channel admins'));
+  assert.ok(!member.text().includes('Open channel invitations'));
+  await member.click('View channel members'); assert.equal(member.state.members[0].id, room.id);
+  const empty = await fixture({ state: { rooms: [{ ...room, workspace_id: 'foreign' }, { ...room, secure: true }] } });
+  assert.ok(!empty.text().includes('Open channel invitations')); assert.ok(!empty.text().includes('Write the first message'));
+  assert.equal(empty.state.members.length, 0); assert.equal(empty.state.writes.length, 0);
+});
+
+test('channel invitations and first-message navigation preserve issued-link, draft and live role guards', async () => {
+  const f = await fixture({ state: { rooms: [room] } }); await f.click('Create single-use invitation');
+  await f.click('Open channel invitations'); await f.click('Write the first message');
+  assert.equal(f.state.members.length, 0); assert.equal(f.state.selected.length, 0);
+  assert.equal(f.state.guards.at(-1), 'secret');
+  await f.click('I have saved this invitation privately');
+  f.change('launch-channel-name', 'Keep this draft'); f.state.confirm = false;
+  await f.click('Open channel invitations'); assert.equal(f.state.members.length, 0);
+  assert.equal(f.byId('launch-channel-name').props.value, 'Keep this draft');
+  f.state.confirm = true; await f.click('Open channel invitations');
+  assert.equal(f.state.members.length, 1); assert.equal(f.byId('launch-channel-name').props.value, '');
+  f.props.workspace.role = 'member'; f.render();
+  assert.ok(!f.text().includes('Open channel invitations'));
 });
 
 test('revocation consumes the current guarded invitation and does not create another link automatically', async () => {

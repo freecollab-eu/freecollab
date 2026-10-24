@@ -1,12 +1,16 @@
 # FreeCollab och Weavy: praktisk produktjämförelse
 
-Bedömt **2026-10-21** utifrån denna arbetskopia och de officiella Weavy-källorna i [den daterade jämförelsen](WEAVY_COMPARISON.md). Weavy har inte funktionstestats här. Dokumentet använder inga poäng, prisantaganden eller generella säkerhetsrankningar.
+Uppdaterat **2026-10-23** mot 0.13-källan och den efterföljande granskningsgrenen.
+[Funktionsgranskningen](FEATURE_AUDIT.md) anger kod, tester och återstående
+luckor. Weavy-underlaget är de officiella källorna från 2026-10-21 i
+[den daterade jämförelsen](WEAVY_COMPARISON.md); Weavy har inte funktionstestats
+här. Dokumentet använder inga poäng, prisantaganden eller generella säkerhetsrankningar.
 
 **FreeCollabs tydligaste erbjudande är en komplett, anpassningsbar arbetsyta med MIT-licens, egen drift och kundägd identitet.** Weavys dokumenterade erbjudande är särskilt inriktat på färdiga samarbetskomponenter att bädda in i andra produkter. Vilket som passar bäst beror därför på om man behöver en hel arbetsyta eller främst ett etablerat komponentpaket.
 
 | Område | Verifierat i FreeCollab | Skillnad och kvarvarande arbete |
 | --- | --- | --- |
-| Komplett arbetsyta | Chatt, filer, uppgifter, delade dokument, aktivitetsflöde, möten, notifieringar och arbetsflöden i samma app. [Aktuellt produktomfång](PRODUCT_012.md). | Funktionerna finns; sammanhängande användbarhet, belastning och långvarig drift behöver fortsatt mätas. En funktionslista bevisar ingen generell fördel mot Weavy. |
+| Komplett arbetsyta | Chatt, filer, uppgifter, delade dokument, aktivitetsflöde, möten, notifieringar och arbetsflöden i samma app. [0.13](PRODUCT_013.md), [aktuell granskning](FEATURE_AUDIT.md). | Funktionerna har dokumenterade gränser; sammanhängande användbarhet, belastning och långvarig drift behöver fortsatt mätas. En funktionslista bevisar ingen generell fördel mot Weavy. |
 | Öppen källkod och egen drift | [MIT-licens](../LICENSE), egen databas/lagring, installations- och återställningsverktyg. | Programlicensen innebär inte kostnadsfri infrastruktur, e-post, modellförbrukning eller leverantörslicenser. Weavy dokumenterar också självhostning; jämförelsen belägger inte att detta är unikt för FreeCollab. |
 | Personlig form och språk | Sparade färger, fyra typsnittsval, ljus/mörk vy, textstorlek, täthet och svenska/engelska. [Utseende](APPEARANCE.md), [språk](LANGUAGES.md). | Anpassningen är genomförd och testad. Weavy dokumenterar också stil- och språkstöd; designpreferens är ingen objektiv produktrankning. |
 | Kundens Microsoft 365 och Google | Kundägd Entra/Google-OIDC, separata fil-/kalender-/mötesgrants och personligt OAuth för lässökning eller uttryckliga Google/Microsoft-kalenderkommandon. [Guide](CONNECTION_SETUP.md), [SSO](OIDC.md), [personliga konton](PERSONAL_OAUTH.md). | Kunden registrerar sina appar och ger uttryckligt samtycke. SSO ger inte automatiskt åtkomst till Drive, OneDrive eller Calendar. Personlig sökning och kalenderåtgärder har skilda samtycken; manuella/custom-anslutningar behåller sin manuella tokenlivscykel. Privata HTTPS-protokolltester är genomförda; riktiga kundkonton och tenantlicenser återstår att verifiera. Weavys dokumentation beskriver förkonfigurerade molnfilväljare på weavy.io. |

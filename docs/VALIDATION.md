@@ -1,5 +1,884 @@
 # FreeCollab validation record
 
+## Commands, references and concurrent collaboration — 2026-10-24
+
+The [shared collaboration contract](UNIVERSAL_COLLABORATION.md) is implemented
+in the product writing fields. Commands and selected references now work in
+documents, comments, tasks, decisions and other supported editors. New work
+retains existing drafts and Yjs sessions. Explicit modal continuation keeps
+file previews, calendar forms, nested file/member views and private mobile
+drafts mounted while related work is used. Real close and navigation retain
+their appropriate local or all-work guards.
+
+The previous `5d5b391` source was reproduced in a disposable native installation:
+document `/task` and `@` had no picker, and opening another feature from an
+unsaved document asked to discard it. Actual tests also exposed sticky work
+overlap, offscreen modal palettes, stale reader callbacks, lost command-draft
+reference IDs, reading-position/focus races and split-surrogate Yjs corruption.
+These are fixed in the current candidate; diagnostic and intermediate attempts
+are retained separately from accepted final evidence.
+
+Validation of the frozen runtime:
+
+- **712 frontend Node tests** and application/embedded production builds passed.
+  All 445 recorded build/unit inputs remained identical throughout the checks.
+- **235 focused backend regressions** passed across document comments, projects,
+  feeds, calendar/provider integration, files, clips and workflows. The 11
+  recorded backend input hashes still match the final source. Separate
+  document-organization reference checks passed as well; no schema migration
+  is required.
+- **34 actual product checks** passed in four disposable native, demo,
+  modal-writer and security-transition fixtures. All 612 copied source hashes
+  matched the same final checkout at completion. The run executed **102 real
+  command handlers**, 34 each from document text, task description and a
+  document comment, without publishing a target resource merely by opening it.
+- That run independently checked six reference kinds, exact selected-ID transfer
+  into slash-created task/decision/document records, real saves and READ links,
+  disconnected two-peer Unicode edits, anchored references, named revision
+  restoration and reload. Actual role/member/token revocation and delayed READ
+  cancellation passed. Swedish 390/320/short-viewport touch, Escape and IME
+  checks also passed. There were no HTTP 429 responses.
+- All six modal cases used actual pointer access and strict same-node,
+  draft/caret/focus assertions: file and calendar commands, a posted file-comment
+  READ link, nested Files/Members return, non-destructive ancestor close and a
+  private mobile draft opening a document. No force clicks or hidden-field
+  substitutes were used. The four fixtures and their eight owned API/Vite
+  processes stopped; the owned example visit was deleted.
+- Focused real React/browser checks passed for shared input (**9**), retained
+  workbench (**12**), modal continuation (**4**), reader lifetimes (**13**) and
+  existing layout/focus behavior (**8**). The older reader reproduced a late
+  navigation after unmount; the current implementation rejects it, including
+  after a host's second await and newer deliberate input.
+- The complete **33-group Product workflow**, **17-group Copilot** and
+  **7-group slash** regressions passed on the preceding full candidate with unchanged
+  wrapper source graphs. The Product workflow's copied/current-source equality
+  check passed too. Conversation (**15**), workspace modes (**17**), shared
+  documents (**8**), threads (**11**), commands/references (**18**) and language
+  (**18**) also passed on their recorded earlier candidates. The later nested
+  modal focus receipt is covered separately by the final modal/product tests;
+  earlier results are not relabeled as whole-final-source acceptance.
+- **55 document/federation regressions** passed after reproducing actual Yjs
+  high-surrogate corruption before the fix. Text replacement now respects full
+  Unicode scalar boundaries, preserving reference anchors and reloads.
+
+The first full CI run (`5f87239`) passed frontend, all four backend shards,
+native client artifacts and real-client encryption/recovery. Its Product job
+found an older primary-only document field selector in `flow-first-browser.py`.
+The fixture now scopes its accessible field and resume controls to the captured
+work area. All 55 original Python assertions and 73 Playwright expectations
+remain; editability and exact automatic thread return are checked explicitly.
+
+That corrected fixture also reproduced a real retained-document reading-focus
+bug: expanding a resumed reading page let the modal's default header button
+take focus before its saved reader. Retained work now restores the saved visible
+field before modal defaults and acknowledges only its own successful focus.
+Newer user, scope and credential activity still wins. The same actual React
+regression failed before the hook change and passed afterward, including a
+later sibling-field/scroll veto.
+
+The latest source passed the complete **10-group flow-first proof** (native,
+three actual receipt/network races and Swedish 320 px demo), with 609 unchanged
+wrapper inputs and three matching 612-file runtime snapshots. Its owned example
+visit was revoked with HTTP 204. The complete **34-group/102-dispatch** product
+proof and **712 Node tests/application builds** were rerun on this corrected
+hook with zero source drift. Earlier whole-product results retain their original
+source binding; they are not promoted to the later hook revision.
+
+The security-transition browser witness uses a real empty native channel and
+an owned unavailable loopback Matrix endpoint: enable durably enters preparing
+then returns 503; authoritative channel refresh purges old native draft DOM,
+and a later native write returns 409. It uses no forged Matrix response or
+database mutation. This is not real Matrix acceptance. Component fixtures with
+controlled promises are explicitly separate from native persistence evidence;
+short viewports are not a physical mobile-keyboard claim.
+
+The new five browser proofs are included in Product CI with narrowly scoped
+JSON/image artifacts. Federation retains its verified Matrix participant picker;
+general peer `@` spans remain outside protocol v1. AI prompts and provider-bound
+titles do not acquire automatic source disclosure. Work-field references are
+links; autosaved document edits do not emit chat mention notifications.
+
+## Commands in thread reply fields — 2026-10-24
+
+A Swedish mobile screenshot exposed a missing composer integration. The exact
+previous commit `d44aae3` was reproduced in a disposable native thread: `/docs`
+showed no palette, left Send enabled and was persisted as a literal reply on
+Enter. The correction uses one surface-scoped command parser and palette for
+both main messages and thread replies, with guarded send paths and normal
+permission checks. Bare commands browse existing work; argument commands open
+review drafts. Explicit work Close can restore the originating live thread.
+Main activity, a newer thread or a changed identity invalidates older returns.
+Thread scheduling opens a parent reminder and never schedules the reply as a
+channel message.
+
+Validation:
+
+- All 600 frontend Node tests passed, plus TypeScript and production application
+  and embedded builds.
+- Eleven actual native/demo browser groups passed, with 596 copied source hashes
+  per fixture and zero drift. They cover `/docs` keyboard and touch selection,
+  exact thread return, independent main/thread drafts, thread `@` task assignee
+  and explicit save with canonical parent link, ordinary referenced replies,
+  Escape/literal opt-out, direct submit protection, declined dirty navigation,
+  superseding main `@` activity, identity/thread/channel changes and Swedish
+  390/320/short-viewport bounds. The owned demo visit was revoked with HTTP 204.
+- All 18 existing main-command/reference browser groups also passed unchanged
+  against the same runtime: 590 wrapper hashes and 595 actual native/demo source
+  hashes per fixture, with zero drift and normal fixture cleanup.
+- Seven real-hook scope tests passed. The unchanged old hook fails exactly the
+  three stale-thread response/selection/focus cases; optional thread context
+  now prevents reuse across identical drafts in the same channel.
+
+The new browser regression is wired into Product CI. The prior complete
+`d44aae3` workflow passed frontend, all four backend shards, real-client
+cryptography/recovery and the full product browser workflow before this fix.
+
+
+## Recent-read history pagination fixture — 2026-10-24
+
+The 122-root history proof now records and verifies a genuine recent own receipt
+before entering the channel. This keeps its original older-message pagination,
+search, edits, deletion, mentions and storage assertions meaningful with the new
+receipt-based entry policy. All 4 original Python assertions and 15 browser
+expectations remain; the canonical-receipt assertion is additional.
+
+The actual history proof passed all 4 groups. Files, collaboration, office files
+(7 groups) and security operations (9 groups) also passed in disposable native
+fixtures with no source drift. Read-only review of all 66 Product CI browser
+scripts found no further affected fresh-root pagination fixture. The preceding
+CI candidate passed frontend, all four backend shards and real-client encryption
+and recovery; its Product job identified this fixture adjustment. Final workflow
+status is tracked on the review branch.
+
+## Feature-list keyboard and pointer intent — 2026-10-24
+
+A real Swedish 390 px owner flow exposed keyboard scrolling triggering trusted
+mouse-enter events under a stationary pointer, which changed the active command
+while the combobox retained focus. Hover selection now responds to actual mouse
+movement. Clicking still selects explicitly.
+
+TypeScript and 35 focused command tests passed. All 18 language-browser groups
+passed against the patched source, retaining all 32 original Python assertions
+and adding a deterministic stationary-pointer Home/End/Arrow regression plus
+actual later mouse motion. The test also verifies that a real member cannot see
+owner-only data controls, then uses a real owner session to open all 11 work
+features at 390/320 px. No role override, pointer-away workaround or automatic
+resource write is used. The preceding 33-group full product proof remains bound
+to its recorded source candidate; follow-up work-view/flow runs record the narrow
+pointer change separately.
+
+## Everyday work follows the conversation — 2026-10-24
+
+The six [conversation-first UX changes](FLOW_FIRST_UX.md) are implemented in the
+shared product interface: receipt-based/scoped reading entry, a quiet composer,
+read-first documents, actual discussion work summaries, clear channel navigation
+and concrete contextual AI review. Saved document modes retain the same editor
+and live session; opening review never sends to a provider or applies a result.
+
+Executed against the final runtime candidate:
+
+- TypeScript and application/embedded production builds passed; all 593 frontend
+  Node tests passed, including the 20 entry-policy cases.
+- Ten actual native/demo flow groups passed with 596 source hashes per fixture
+  and no drift. They include a 65-message paged unread boundary and remembered
+  message/offset, genuine delayed cloud errors, read/edit/Yjs/comments, work from
+  unopened replies, explicit contextual AI, measured full mobile channel names,
+  membership loss and the isolated Swedish 320 px demo.
+- Three of those groups exercise actual network timing: an older receipt POST
+  is held while a real peer arrives; the newer receipt waits and remains current
+  after release. A failed receipt GET preserves unread state through pointer and
+  composer events until explicit Jump to latest. Sending during held initial
+  history wins over the older unread plan. Production handlers are not replaced.
+- The configured private-provider browser proof passed all 17 groups (590 source
+  hashes); the real two-member document/offline/Yjs proof passed all 8 groups
+  (585 hashes), each without source drift. These are private fixtures, not live
+  external-provider or Matrix acceptance.
+- Final native Elite navigation/reading passed 6 groups, commands and references
+  passed 18 native/demo groups, and document organization passed 15 groups.
+  Eleven legacy browser adapters retain all 234 original Python assertions,
+  with 2 additional measured/receipt assertions. They now use actual channel
+  menus, `/`, read/edit transitions and role-permitted feature entry.
+- The 55 focused backend discussion tests and 17 resolver/hook tests remain
+  applicable: all 12 recorded source hashes match. Derived native routing stays
+  bounded, same-channel and content-free; no migration or encrypted plaintext
+  fallback was introduced. The dedicated cloud focus proof passed 13 cases.
+
+Read-only review caught and checked fixes for stale source/AI frames, early own
+sends, unknown/locked read boundaries and a real concurrent receipt-write race.
+Read writes are now serialized and coalesced per scoped channel. The new flow
+and delayed-cloud-focus browser proofs are included in the Product CI job.
+The full product, language and work-view browser suites retain their existing
+business, privacy, focus, write and reading-anchor checks through the new entry
+controls; their run outputs and publication verification are recorded separately.
+
+
+## Returning from work retains the reading position — 2026-10-23
+
+The public style acceptance caught a mobile source return that moved 90 px.
+A private actual-product reproduction confirmed that the source position was
+first restored correctly; a queued composer measurement then treated its
+distance of less than 96 px from the bottom as a choice to follow latest.
+Closing back to an unchanged authorized source now retains the explicit
+reading choice before those measurements run. Deliberate chat navigation,
+own sends and **Jump to latest** retain their normal precedence.
+
+- **543 frontend cases passed**, together with TypeScript and application/
+  trusted-embed production builds.
+- All **17 actual native/example-product workspace groups passed**, including
+  two added regressions with the original 15 groups preserved. The genuine
+  source/footer offset remains 102.203125 px after save, all work modes,
+  minimization and explicit close. The 90 px distance from the bottom remains;
+  it is not replaced by following. Deliberate message reading while work is
+  parked remains in place, and actual own-send/jump actions still follow.
+  All 586 source hashes per fixture match; both owned example visits were
+  revoked with HTTP204 and the fixtures removed.
+- The unchanged **15-group conversation regression passed** with all 576
+  recorded source hashes matching. Current-source screenshots were reviewed.
+  All 59 stylesheets recorded by the earlier 11-group visual proof remain
+  byte-identical; this increment changes the return behavior and its tests.
+- The next CI startup failure was reproduced in the isolated external-meeting
+  fixture with the same missing scheduled-message model. Its explicit model
+  import fixes startup; production model initialization is unchanged. All
+  **nine external-meeting browser checks passed** using private TLS provider
+  fixtures, including create/recovery/cancel/calendar and Swedish mobile.
+  These are not live customer-provider consent tests. An audit accounts for
+  all 11 explicit browser database launchers: the other launchers register the
+  full model graph, and the meeting fixture has its earlier explicit fix.
+  Original containers remain unchanged; owned fixtures are removed.
+
+The failed public attempt and its cleanup remain preserved separately. Public
+acceptance is recorded against the new frozen source; the earlier 10-of-11
+result is not substituted for that source's final acceptance.
+
+## Shared interface polish — 2026-10-23
+
+Conversation, documents, stacks, tasks, decisions, account/appearance settings,
+discovery menus, authentication and public surfaces share a refined type and
+control scale. The mobile composer keeps its three labeled discovery controls
+in one row with 44 px targets. Provider accounts, federated work and imported
+history now use the actual personal theme tokens. The existing approved layout,
+message order, editor sessions, permissions and explicit saves remain intact.
+
+Executed against the final styles:
+
+- All **24 changed stylesheets parsed successfully**. TypeScript and the
+  application/trusted-embed production builds passed.
+- All **15 real native/example-product workspace groups passed**, with 586
+  source hashes per installation matching the final runtime. The same editor,
+  pending-write guards, draft/selection/scroll retention, typed references and
+  saved Swedish at 320 px remain covered. The owned example visit was revoked
+  with HTTP204 and its disposable fixture removed.
+- **11 additional real native browser groups passed**, with the same 586-source
+  runtime snapshot. They save and reload custom light/dark palettes and actual
+  Manrope/Source Serif preferences through ordinary account APIs; inspect long
+  content, two real documents placed in one stack, command/reference menus,
+  account keyboard focus, auth/invite forms, and three Swedish mobile work
+  modes. Provider-account views show actual empty/unconfigured states without
+  external consent or customer credentials. All three mobile discovery buttons
+  share one row with targets at least 44 px; tested text pairs have measured
+  contrast above 5.4:1. Reduced-motion behavior, narrow bounds and 34 actual
+  screenshots were reviewed. No browser errors, unintended external requests or
+  HTTP429 responses occurred. This is targeted browser validation, not an
+  independent complete accessibility audit.
+- The previous CI meeting failure was reproduced before readiness: its minimal
+  fixture registered `ScheduledMessageReference` without the `ScheduledMessage`
+  model. An explicit fixture import fixes that metadata dependency; production
+  initialization already imports it. Both services then start, and all **12
+  actual WebRTC/media/guest checks pass**, preserving the original assertions.
+  A private loopback TURN relay supplies media connectivity without changing
+  managed browser policy. Startup errors now report bounded process statuses
+  and exception classes without raw private logs. Original containers remain
+  unchanged and owned fixtures are removed.
+
+No product TypeScript, backend behavior, schema migration or provider consent
+flow changed. The shared design guide documents the type tokens and controls.
+
+## One workspace, three views — 2026-10-23
+
+[Workspace modes](WORKSPACE_MODES.md) adds shared split, expanded and minimized
+views to the retained conversation work area. Documents, tasks, decisions and
+channel groups use the same controls. The actual editor and session stay
+mounted; the footer sets work aside and the separate X retains its normal
+close guards. Native/encrypted routing and backend data models are unchanged.
+
+Executed for this increment:
+
+- **543 frontend Node cases passed**, together with TypeScript and application/
+  trusted-embed production builds.
+- **Seven isolated real React/Chromium hook groups passed**. They verify retained
+  DOM, pointer and keyboard focus, selection and scroll, both resume modes,
+  nested legacy dialogs, popup/default-prevented Escape, IME, tab containment,
+  scope changes, unmount cancellation and deliberate newer focus. This fixture
+  exercises the hooks; it is not substituted for a real document session.
+- **15 actual product browser groups passed**: 12 native and three genuine
+  example-product groups, with 586 source hashes per fixture matching the final
+  runtime. They retain the same editor nodes through all three views, create
+  and synchronize real Yjs documents, hold and then deliver a genuine pending
+  update, preserve all four editor types, send typed-reference chat while work
+  is parked, reveal real source messages and enforce authoritative account/
+  channel changes. English and saved Swedish at 320 px remain usable. The own
+  example visit was revoked with HTTP204 and all fixtures removed.
+- The **six-group elite**, **15-group conversation**, **seven-group slash** and
+  **18-group typed-reference** regressions passed. Their actual executed-script
+  and runtime manifests match the current source. Four close-intent selectors
+  now use the real header X; every old behavioral assertion remains. An earlier
+  aggregate with unused harness hashes is retained separately and is not the
+  final binding.
+- The complete **33-group example-product regression passed**, with all 579
+  runtime source hashes matching. Five close-intent clicks now use the header
+  X; all 33 original groups and 195 assertions are preserved. It includes
+  visitor isolation/reset, draft and reading anchors, document synchronization,
+  workflows and saved Swedish at 320 px. There were no HTTP429 responses, and
+  the owned fixture processes and temporary data were removed.
+- The earlier CI failures were reproduced and corrected at their actual
+  fixture boundaries. **Four history groups passed** with unchanged search,
+  live-edit/delete, pagination and recipient assertions plus an exact selected
+  person-reference check. The real **14-check two-organization Connect/Matrix
+  proof passed** against the reviewed SDK artifact and current source. It uses
+  real signed managed fixture identities, not live customer IdP popups. All
+  five original containers retained their IDs, start times and running state.
+- **Five artifact-binding cases passed**: the Connect harness retains an
+  explicit reviewed SHA-256 pin and also verifies all packed public bytes and
+  the current SDK source digest. Tampered archives, source drift and stale
+  distributions are rejected. No SDK runtime, version or publication changed.
+- Both new browser proofs and the artifact-binding checks are wired into CI.
+  The workspace contract, design guide, conversation contract, feature audit
+  and README describe the shared view and close behavior.
+
+The conversation keeps its existing order: newest messages sit at the bottom,
+next to the composer. Reading older messages retains the reader's position;
+this increment does not reverse the timeline. All 204 relative documentation
+links checked across the updated guides resolve locally.
+
+## Command arguments and typed references — 2026-10-23
+
+The conversation composer accepts [command arguments](SLASH_COMMANDS.md) and
+[typed references](MENTIONS_REFERENCES.md). Task, document, decision and search
+commands prefill their actual native interfaces. `@` chooses people, real
+channel notification groups, documents, tasks, files or the current channel in
+messages, thread replies and message edits. Creation and changes still require
+normal explicit saves.
+
+Executed for this increment:
+
+- **543 frontend Node cases passed**, including command parsing, explicit
+  person identity, typed UTF-16 spans, secure resource resolution, rich draft,
+  outbox, edit and encrypted payload checks. TypeScript and application/trusted
+  embed production builds passed.
+- **53 focused backend cases passed** against frozen source, covering current
+  authority, UTF-16 validation, same-channel isolation, actual group membership,
+  native writes/threads/offline idempotency, scheduled delivery, export and
+  erasure. **180 related backend regression cases passed** before the final
+  small reference-label/scheduling cleanup; the 53-case run covers the final
+  backend source. These are targeted runs, not a new complete backend suite.
+- **56 focused transport cases passed**, including exact historical encrypted
+  file lookup, actor changes during routing, reference-preserving edits and
+  queue payloads. Unit fixtures isolate external Matrix and storage boundaries;
+  they do not substitute for a real customer Matrix/device acceptance run.
+- **18 actual browser groups passed** in independent disposable native and
+  example-product installations, with **582 source hashes per installation**
+  matching the final runtime. They exercise actual prefilled command saves,
+  first-project continuation, all six reference types, group CRUD/current
+  recipients, thread replies, edits, exact resource opening, unavailable
+  targets, rich draft reload, real offline delivery, genuine account changes,
+  and saved Swedish command/reference interaction at 320 px. IndexedDB
+  inspection confirms AES-GCM-256 draft ciphertext, a 12-byte IV and a
+  nonextractable key; the same draft then reloads and sends with its bound IDs.
+  All owned fixtures were removed and the owned example visit revoked204.
+- The unchanged **six-group elite**, **15-group conversation** and
+  **seven-group slash-discovery** browser suites also passed against the final
+  runtime, each with 579 bound sources and no mismatch. Their existing IME,
+  reading-position, profile-photo, draft, permission and appearance checks remain.
+- The public component SDK exposes optional reference types and arguments on
+  send/reply/edit while preserving old call signatures. **30 SDK checks passed**,
+  including actual build, consumer declarations, serialized identities and
+  account changes during authorization. No SDK version or publication changed.
+- The self-contained new browser proof is included in CI. README, design,
+  command and reference contracts and feature audit are updated; 203 local
+  documentation links resolved during review.
+- Read-only integration review corrected stale edit acknowledgements, IME
+  selection fences, unauthorized group-draft consumption and genuine encrypted
+  historical-file opening. A recognized command keeps its identity while
+  arguments are entered, including after a mouse selection from `@`.
+  Reference selection binds stable IDs, and group
+  recipients are expanded from current membership at actual delivery.
+
+The existing secure-device/provider acceptance requirements remain. Native
+channels retain server encryption at rest; these references do not turn them
+into E2EE channels or grant resource access. See the reference contract for
+same-channel scope, current limits and on-device encrypted scheduling.
+
+## Composer feature discovery — 2026-10-23
+
+The shared product composer now opens the [available feature list](SLASH_COMMANDS.md)
+with `/`, or through an explicit search that preserves an existing message.
+Its 35 defined entry points are filtered by the current account, channel,
+workspace and embedding scope; the visible count varies with that context.
+The normal editors, approval forms and encryption clients remain authoritative.
+
+Executed for this increment:
+
+- **484 frontend Node cases passed**, including ten new parser, bilingual
+  matching, complete-inventory, permission and encrypted/embedded-context cases.
+- TypeScript, application, trusted-embed and demo production builds passed.
+- The existing complete **six-group composer regression** also passed on 567
+  unchanged bound files: multiline/IME, exact-once outbox recovery, reading
+  position, quick switching, modal focus and 320/390 px custom-theme behavior.
+- **Seven actual browser groups passed**, using independent disposable native
+  and example-product installations. Each snapshot binds **569 source files**,
+  with zero current-source mismatches. The checks open real document/task
+  interfaces, verify no automatic message/resource write, preserve both drafts
+  and search focus after a rejected work change, and await actual seeded task
+  titles in the example installation.
+- The same run verifies unknown-query Enter/Escape behavior, ordinary URLs,
+  prose and multiline messages, channel-scoped drafts, genuine account-session
+  replacement, current member permissions, saved Swedish language, all entries
+  reachable in the 320 px list and no horizontal overflow. Owned example visits
+  are revoked, and temporary API/Vite processes, databases, files and keys are
+  removed.
+- Read-only review corrected two additional UI issues: federated-work
+  eligibility is reverified on a new opening, and rejected explicit-search
+  navigation restores the search input. Selection scrolling depends on the
+  selected entry rather than unrelated conversation rerenders.
+- The existing CI browser job now runs the self-contained slash harness. The
+  feature contract, audit, design system and README are updated; **193 relative
+  links** in the affected documentation resolve.
+
+These checks do not execute a customer's installed app, AI provider or
+federated connection. Their existing external acceptance requirements remain.
+The earlier 33-group demo and 15-group conversation runs below describe their
+own recorded source snapshots; they are not substituted for this increment's
+seven-group proof.
+
+## Work inside the conversation — 2026-10-23
+
+The actual signed-in product and example installation now open native document,
+task and decision work beside their usable conversation. Message-derived work
+can be reopened at its source. The [flow contract](CONVERSATION_WORK.md) describes
+explicit saves, contextual management, native-only routing and current limits.
+
+Executed overlapping scopes for this increment:
+
+- **33 actual demo UI/API groups passed**, with all **558 bound source files**
+  matching the final runtime. Real source-created documents and tasks use the
+  persisted routing index; decisions retain canonical source provenance. Work
+  reopens after channel changes, native Yjs editing and message sending retain
+  the same editor DOM, dirty navigation is guarded, and the retained-draft
+  Swedish 320 px editor remains usable. The original worker, files, portraits,
+  provider boundary, independent visitor and reset checks remain. Actual request
+  pacing keeps the unchanged public limits; **zero HTTP 429 responses**, unexpected
+  external requests, retained credential accesses or browser errors occurred.
+- **474 frontend Node cases passed**, together with TypeScript. These include
+  scoped navigation guards, strict pending-write protection, atomic native and
+  encrypted document creation, exact resource targeting, and AI draft boundaries.
+- **15 normal-product browser groups passed**, with all **555 bound files**
+  unchanged through the run. Existing continuity, account isolation, profile-photo
+  and Swedish 320 px checks remain. New actual flows retain the same editor DOM
+  while sending a message, hard-block pending native writes, and preserve unsent
+  document/task/decision drafts across work, channel, workspace and exact-target
+  navigation. Real task and decision saves persist through their native APIs.
+- **Five built-App handoff groups passed** with **330 source hashes and 480
+  complete build-input hashes** unchanged. Application and trusted-embed builds
+  passed. The exact native product PNG, dimensions, real iframe handoff,
+  English/Swedish, reload and documentation remain checked; expected iframe
+  navigation is inspected and aborted before a sample visit.
+- **136 backend channel/security/routing cases passed** on their final bound
+  source. Eight new real registered-user cases create native rooms and both DM
+  entry points, then share actual documents, tasks and decisions. New native
+  rooms no longer receive an unused legacy envelope. Existing legacy envelopes
+  remain untouched and still reject the native routing API. The routing slice
+  includes fresh membership/DM-block races, unavailable targets, idempotency,
+  authorization, export and retention. A separate **19-case demo suite passed**.
+- Existing native browser suites passed after moving their real entry points:
+  projects/tasks **10**, shared documents **7**, document organization **15**,
+  workflows **6**, activity **3**, Copilot **15**, language **16**, apps **9**,
+  data controls **6**, personal home **7**, native push **7** and calling **11**.
+  Native push/calling use isolated vendor/device fixtures; these results do not
+  establish physical-device or live customer-provider acceptance.
+- The actual Swedish 320 px mobile editor retained a multiline conversation
+  draft and exposed **255 px of document text**, compared with 40 px before the
+  intent-aware readiness scroll. Later composer/comment focus remains respected.
+  The same visibility assertion was retained rather than reduced.
+- The complete existing room browser passed **five checks**, including a held
+  real file response that cannot reveal old private material after channel change.
+- A freshly built standalone SDK archive was checked against all **59 packed
+  file bytes**, exact inventory and canonical file modes; its source digest
+  matched all **23 SDK source files**. The encrypted Connect proof retains its
+  strict exact-package SHA assertion with that verified archive. This artifact
+  check is separate from a complete real-encryption browser run.
+
+The fixtures use disposable accounts, databases, generated keys and owned local
+services. Earlier sections describe their historical source states, rather than
+additional complete runs of this increment. Public deployment and exact-head CI
+are recorded separately; no release or main-branch merge is implied. An unchanged
+seven-group communication proof passed on the final source, as did a diagnostic
+run. One earlier historical-reply focus assertion failed intermittently and was
+not reproduced; no runtime fix for that observation is claimed.
+
+## Shared product room and personal photos — 2026-10-23
+
+**Historical source:** this section predates the inline conversation-work increment above.
+
+The actual product room keeps its conversation and composer mounted beside
+existing channel files, one shared document with its real Yjs excerpt and stack,
+and an unfinished native task. These cards open the normal editors, stacks,
+task and file views. The approved Courtyard example uses actual product records
+and authenticated image bytes. [The demo contract](PRODUCT_DEMO.md) describes
+the same layout, its bounded read-only overview and the public account limits.
+
+Executed overlapping validation scopes for this increment:
+
+- **27 actual product/UI/API browser groups passed**, with all **550 bound
+  runtime/configuration/proof files** matching the final worktree. These cover
+  authentic Courtyard and profile images, exact document/stack/task/file
+  destinations, source navigation, keyboard reading continuity after real
+  material refresh, more than twelve messages, and an eight-line composer with
+  left/right material and focus mode. The existing native message, document,
+  task, workflow/worker, upload, appearance, provider-boundary and visitor/reset
+  checks remain. Swedish at 320 px edits and reopens actual saved document text
+  while retaining the conversation draft and a strict visual source anchor.
+  No unexpected external requests, retained credential accesses, IndexedDB
+  operations, service-worker registrations, page errors or rate-limit failures
+  occurred.
+  The automation waited **six seconds between completed groups**, using the
+  unchanged public demo limits and normal product API.
+- **11 normal-product browser groups passed**, retaining all ten existing
+  continuity, tool-memory, account/workspace, pending-document and Swedish
+  320 px groups. The new group uses the actual account file chooser and canvas
+  crop, then the real profile-photo API. Account, header, message and member
+  portraits display the same authenticated bytes; replacement changes them,
+  and deletion returns the API to 404 with initials in the UI. All **20 bound
+  frontend/backend/proof source hashes** matched at completion; no browser
+  page errors occurred.
+- **Five built-application handoff groups passed**, preserving the real frame,
+  reload, documentation, English/Swedish and 1440/390/320 px checks. The loaded
+  native-product screenshot's button opens the configured product iframe.
+  Application and trusted-embed production builds passed, with **325 source
+  hashes** matching and **76 built-artifact hashes** recorded. Expected iframe
+  navigation was inspected and aborted before creating a sample account;
+  no unexpected external/account requests or page errors occurred.
+- **22 native profile-photo integration cases passed**, including current
+  membership, guest/block restrictions, account deletion during storage I/O,
+  bounded PNG decoding/metadata removal and durable erasure. These are part of
+  **117 final runtime, operations, demo-boundary and avatar cases**. The native
+  worker drained a pending photo erasure and reported its fifteenth operation
+  group through the actual queue/worker contract. **Ten client read
+  cases passed** for pending-request sharing, independent cancellation,
+  account/workspace isolation and late transport completion after invalidation.
+- **Eight material-reader and actual editor/click-guard cases passed**. They
+  cover native/encrypted boundaries, same-channel target validation, stale
+  scope rejection, bounded document/project reading and one-time deep-link
+  consumption that preserves a newly created page. TypeScript also passed.
+- The complete frontend Node run passed **434 cases**.
+- The original **2,335-case backend cohort has passing file-group coverage**:
+  553 + 464 + 667 + 651. The affected 31-file group was rerun exhaustively in
+  four private groups of 154 + 209 + 157 + 131 cases after its worker contract
+  fixes. The final 117 targeted cases above overlap this cohort and include
+  three later regressions; they are not 117 additional distinct cases.
+- All **1,320 relative Markdown file links** across the README and documentation
+  resolved in the final worktree.
+
+The normal-product browser fixture used its own accounts, API/Vite processes,
+database, image files and keys, then removed them. Earlier sections retain the
+results for their original source state; their totals are not additional runs
+of this design increment. Live provider, Matrix, public deployment and physical
+mobile acceptance remain separate scopes.
+
+## Product demo parity — 2026-10-23
+
+**Historical source:** the following 16-group/533-file evidence describes the
+preceding parity increment, before the shared product room validated above.
+
+The public demo now mounts the actual `Chat`, `WorkHub`, editors, providers and
+settings against the normal backend and native integration worker. The separate
+browser-only `Demo*` feature components, reducers and template AI responses were
+removed. Their old unit/55-group showroom proofs below are historical; they are
+not counted as coverage of the new implementation. [Product demo contract](PRODUCT_DEMO.md)
+describes isolated sample accounts, expiry/reset and disabled external services.
+
+- **16 actual UI/API browser groups passed**, with **533 runtime source hashes**
+  stable through the run: native send/edit/reaction/thread, channel CAS,
+  Yjs editing/comments, stack move/Undo/derived discussion/source navigation,
+  task checklist/status, manual workflow → approval → real worker-created task,
+  exact file upload/download, personal appearance, actual disabled Copilot and
+  Microsoft/Google setup guides, visitor/reset isolation and Swedish at 320 px.
+  Retained credential access, IndexedDB calls, service-worker registrations,
+  third-party requests and page errors were all zero in those interactions.
+- **19 new backend core integration cases passed**, plus **34 existing release
+  and configuration regressions**: exact JWT/ActiveSession expiry, separate
+  visits, files, reset/revocation, capacity concurrency and FK-safe cleanup with
+  over100 threaded messages. Ordinary product startup leaves `/demo/session`
+  absent. A separate actual workflow/worker cycle created exactly one task.
+- **93 boundary/worker/operation cases passed**, including default product
+  behavior, native idempotent outbox, a real scheduled-message worker dispatch,
+  changed/expired/revoked actors, body/budget limits, disabled egress and
+  cross-site bootstrap denial. Independent review found a noncanonical
+  `/socket.io/*` dispatch bypass; **three focused actual Engine.IO cases passed**
+  after rejecting suffixes before dispatch while retaining normal handshakes.
+- Client/session/cache tests and TypeScript passed. The actual-module retained
+  pointer regression verifies that sample auth changes do not open or clear
+  standalone IndexedDB; ordinary and trusted-embed behavior is unchanged.
+- The final broad run passed **2,314 backend cases** across four exhaustive file
+  shards (657 + 486 + 658 + 513). The three focused Engine.IO checks above also
+  passed after the final dispatch regression was added. **416 frontend Node
+  cases**, the application/embed/demo builds, **10 normal-product conversation
+  groups**, **five application handoff groups** and **seven website groups**
+  passed. Website/handoff checks cover the frame and documentation; the 16
+  actual product groups above exercise its contents against a real backend.
+- Real product tests also exposed two shared usability defects: the hover-only
+  message toolbar could become unclickable, and a late initial project load could
+  erase a new editor. The shared controls were corrected and exercised through
+  the same demo/product components.
+
+Publication and exact public bytes require their separate deployment evidence.
+These checks do not establish live customer-provider, Matrix or physical mobile
+acceptance. Public samples intentionally use the product's actual disabled or
+unconfigured provider states, with no fake model answers or connected accounts.
+
+## Implementation and documentation audit — 2026-10-23
+
+The [current feature audit](FEATURE_AUDIT.md) maps the original requirements and
+subsequent product decisions to actual UI/API/storage and tests. Its domain
+ledgers distinguish implemented bounded flows, customer configuration/external
+acceptance, local demo examples and missing code. [Self-hosting](SELF_HOSTING.md)
+describes local computer/LAN/VPN installation: accounts belong to that
+installation, with no required central FreeCollab service. The public static
+Railway showroom is a separate delivery.
+
+The audit added real native document stacks, generation/CAS-protected moves and
+Undo, reviewed document relations, message-source references, placement-derived
+stack discussion and read-only selected-page stack AI. It also added revisioned
+native/Matrix channel metadata and fixed stale list rollback, custom presence,
+Socket.IO REST-prefix normalization, roots-only timelines with paged thread
+history, fresh authorization after channel locks, app-AI reviewed source/provider
+binding, future-only recap consent, complete fourteen-group worker diagnostics
+and Unicode/UTF-8 password checks. The anonymous server AI demo was retired.
+New in-app help links the actual SDK and production feed contracts.
+
+Executed independent scopes, with overlapping coverage rather than an additive
+grand total:
+
+- The unchanged `c2762404` baseline passed **2,141 backend cases** across four
+  exhaustive file shards. A preceding sequential run was interrupted and is
+  excluded from that pass claim. Tests used isolated synthetic SQLite, storage,
+  signing/encryption material and private provider fixtures; existing services
+  and operator configuration were not used as fixtures.
+- **27 SDK release checks** passed, including the actual standalone package
+  artifact/declaration checks; tarball and integrity manifest were verified.
+  The real packed SDK browser proof passed **26 checks** across its native
+  modules and React/customer-scoped sessions. No npm publication occurred.
+- **15 real Copilot browser groups** passed, preserving the existing request,
+  source, consent, draft and approval checks. The new group created actual Yjs
+  documents and a native stack, deselected a page, reviewed the selected page
+  and sent only its verified body to a private HTTPS/SSE fixture. Unselected
+  pages/comments/messages were absent and no shared content was written.
+  The report binds 26 current source hashes.
+- **Nine real app-platform browser groups** passed, preserving the previous six
+  and checking source/provider review, explicit approvals and future-only recap
+  cursors. Customer credentials and actual model providers were not contacted.
+- **Seven real channel-metadata browser groups** passed: discover/save/cancel,
+  reload persistence, stale CAS draft retention, member/admin entry and Swedish
+  focus/layout at 320 px. Actual encrypted reader/writer tests separately cover
+  authoritative event and account-generation handling; this native browser
+  harness is not new live Matrix acceptance.
+- **Seven real communication browser groups** passed against the full app,
+  API and Socket.IO. They created 107 messages including 105 thread replies,
+  retained roots and scroll position, paged all replies, isolated drafts and
+  stale responses, opened exact search sources, reviewed parent/reply stack
+  sources without saving, and saved/reloaded/cleared real custom status with
+  acknowledged realtime transport. The report binds 21 current sources.
+- Independent source review found no remaining concrete security defect in the
+  reviewed channel metadata, message references, comment filtering, retention
+  joins and E2EE conversion fences. A separate sweep checked **875 relative
+  audit links**, all resolving. This is internal code review, not independent
+  security certification.
+
+- The final implementation passed **2,238 backend cases** in four exhaustive
+  file shards: 657 + 509 + 601 + 471. Each shard exited successfully; no skipped
+  shard or interrupted run is included. The unchanged baseline is a separate
+  comparison, not additional current-source coverage.
+- **480 frontend Node cases** passed, with zero failures/skips. TypeScript and
+  production application/trusted-embed builds passed. The final static website
+  build and **eleven actual website browser groups** passed, retaining all ten
+  existing groups and adding English/Swedish product help at 1440/390/320 px.
+  Thirteen guide links, installation-local accounts/private-network operation,
+  no required central cloud account, actual SDK/feed/comment examples and paged
+  thread-history examples were checked. All 96 bound source hashes matched.
+- **15 document-organization browser groups** passed with 19 current source
+  hashes. Actual drag/keyboard move, persisted placement, guarded Undo after text
+  editing, concurrent changes, reviewed relations, in-flight comment drafts,
+  derived discussion/source focus/archive filtering, and real main/thread
+  message → review → save → original-source navigation were exercised. Both
+  main and thread drafts survived. Swedish 320 px remained usable.
+
+These are local implementation proofs; publication and actual deployed bytes
+require separate evidence. No customer application/API/database deployment is
+implied by a successful static website build.
+The detailed ledgers describe actual limits: no general AI run/step engine,
+model routing/spending ledger, autonomous semantic pairing or Matrix document
+organization is implied by the implemented flows. Customer OAuth/SSO, actual
+Office, physical mobile behavior, app-store distribution and off-host recovery
+remain separate acceptance work.
+
+## Conversation continuity — 2026-10-22
+
+The demo opens its existing brief and decision in context beside the mounted
+conversation. Mobile returns to the original source with its draft, selection,
+channel and reading position retained, including detours through settings or
+another channel. The agreed next step is also actionable beside the discussion.
+The authenticated client's generic Work action resumes the last selected tool
+within the current account session, workspace and channel. Explicit resource
+links retain precedence; closed tools are unmounted and existing unsaved-change,
+focus and secure-channel eligibility guards remain.
+
+Executed local validation has overlapping scopes:
+
+- **300 frontend Node cases passed**, including six new bounded navigation-memory
+  cases for scope, credential/encryption changes, explicit clearing and eviction.
+  TypeScript and production application/trusted-embed, website and widget builds
+  passed.
+- **Nine actual App/API/SQLite/Vite browser groups passed**: stable conversation
+  DOM/draft/caret/reading position, return focus, channel-specific tool choices,
+  explicit resource navigation, workspace/account/credential isolation, reload
+  reset, real pending-document close/tab guards and Swedish at 320 px.
+- **23 actual demo Chromium groups passed**, retaining all previous 14 and adding
+  nine continuity groups. These cover the same mounted composer, brief/decision
+  drafts, the compact task's shared identity, channel retention, Escape/focus,
+  own-message following and Swedish 320/390 px return positions, including
+  context-to-settings and context-to-channel detours. API/provider isolation,
+  routing, reset, personal appearance and literal user content remain checked.
+  The complete product CI found a scroll-event race: opening material before the
+  queued scroll event could restore an older following position. Navigation now
+  snapshots reading synchronously before changing surfaces. The new regression
+  sets the actual scroll position and clicks the actual brief control in the same
+  JavaScript turn: it fails on the preceding source, passes with the fix and
+  verifies unchanged transcript identity and dimensions, draft and selection.
+  Original keyboard checks and one-pixel reading assertions remain unchanged.
+- The new self-contained downloadable preview passed **28 actual Chromium groups
+  on its exact ZIP-extracted HTML**, served by an isolated loopback HTTP fixture.
+  All previous 27 groups remain, with the same-turn reading regression added.
+  It made no external/API requests or workers and retained no storage entries.
+  A separate supplement installed method counters before app startup: its named
+  interactions made zero observed Storage/IndexedDB/service-worker registration
+  calls, and real operations on an isolated control page verified the Storage
+  and IndexedDB counters. Uninstrumented storage surfaces are outside that scope.
+  The managed browser blocks `file://`, so direct file-URL execution is not
+  claimed by this increment's preview proof.
+- Separate read-only source reviews cleared the bounded tool memory, explicit
+  navigation precedence and unchanged authority/unsaved/focus guards. A discovered
+  mobile detour return-position gap was fixed and included in the browser checks.
+
+All browser fixtures used their own source snapshots, accounts, databases and
+ephemeral keys; their own services and contexts were removed. No live customer
+identity/provider acceptance, new Docker installation, release or Railway
+deployment is claimed by this increment. The published commit's own GitHub Actions
+run remains authoritative for its complete PostgreSQL/product and real-crypto CI.
+
+## Language preference acknowledgement fixture — 2026-10-22
+
+Language selection updates the catalog immediately while its real preference PUT
+is pending. The browser proof could read the old server preference before that
+write completed. It now waits up to ten seconds for the existing saved-status
+message before the same authoritative server GET. Every immediate composer DOM,
+draft, selection, user-content and HTML-language assertion remains before the
+wait. No product behavior changed.
+
+A private gate before the real PUT handler deterministically reproduced the
+original old-value assertion failure. Releasing that same request passed the
+corrected proof; withholding it produced the expected bounded saved-status
+timeout and retained the old server value. Both the complete canonical language
+script and the controlled successful run passed **all 16 groups**, overlapping
+scopes. These include persistence without local cache, stale responses, separate
+account queues, English/Swedish and mobile controls. The final published commit's
+own CI records its complete workflow status.
+
+## In-flight file cancellation fixture — 2026-10-22
+
+The file queue permits cancellation before an upload is dispatched. The browser
+fixture could select that valid state, then assume it had captured two upload
+requests when checking a retry. It now waits for its first actually intercepted
+POST before cancelling and requires exactly two nonempty, identical idempotency
+keys. No product, authorization or delivery behavior changed.
+
+A controlled real-ChannelFiles proof reproduced the old queued-cancel assumption
+and its indexing failure, then verified the corrected in-flight scenario. A
+zero-arrival negative control produced a bounded Playwright timeout. The complete
+canonical file browser script also passed **all seven groups** without private
+code injections: exact downloads, immutable versions, image/PDF previews,
+cancellation/retry, lost-acknowledgement deduplication, search, mobile layout and
+logout cleanup. Separate read-only review checked the actual request gating and
+preserved assertions. The earlier candidate's four backend shards, frontend,
+cryptography and Android/iOS jobs passed; its product workflow stopped at this
+fixture. The final commit's own CI remains the complete workflow record.
+
+## SCIM simultaneous first-load follow-up — 2026-10-22
+
+Opening SCIM settings fetches status and mappings concurrently. Both can create
+the first inactive directory, but the mappings read lacked the workspace lock
+already used by status and the three administrative write paths. The complete
+product workflow on `ac1b3a70fee6bf7fa8cbb8bbf65e8cc38e79b429` exposed a duplicate
+primary-key insert. The mappings read now takes that same lock before get/create;
+authorization, reauthentication, token defaults and commit boundaries are unchanged.
+
+A deterministic regression uses two real HTTP clients and separate SQL sessions.
+It fails on the old application with the actual SQLite uniqueness conflict and
+passes with the one-line fix. Both reads return the same single inactive
+directory; existing credentials, workspace membership and audit state remain
+unchanged. The complete SCIM, workforce-security and workforce-onboarding test
+files passed **46/46 cases**, without skips or failures. The unchanged
+connection-setup browser proof then passed **all 17
+groups**, including SCIM, current-authority/reauthentication/revocation controls,
+English/Swedish and 320/390 px, with no external provider calls. Separate read-only
+review verified the final diff and the before/after/browser evidence.
+
+The application client, website and deployment configuration are unchanged from
+the Open Studio candidate below. Its offline preview therefore uses the same
+reviewed source files. The Docker installation rehearsal below ran that candidate;
+this follow-up changes only SCIM initialization and its regression test. The
+earlier candidate passed all four backend CI shards, frontend, real cryptography
+and Android/iOS compatibility; its product workflow failed at the SCIM race.
+The final published commit's own GitHub Actions run records its complete CI status.
+No release or public deployment is claimed.
+
+## Open Studio first conversation and launch rehearsal — 2026-10-22
+
+This untagged `design/open-studio` increment at
+`ac1b3a70fee6bf7fa8cbb8bbf65e8cc38e79b429` retains the approved open-room
+design and makes its first team conversation explicit. The public demo connects
+a conversation to its same editable brief, a decision and one assigned next step.
+Microsoft and Google cards open their own preparation guide directly. Customer
+credentials and consent remain in each customer's installation.
+
+| Area | Executed evidence |
+| --- | --- |
+| Client | **294 frontend Node cases passed**, including the 15 onboarding and 10 demo route/reducer cases. TypeScript and production application/trusted-embed and independent website builds passed. Four i18n cases passed again after aligning the built English/Swedish installation instructions with Node 24 LTS and the hash-locked development environment. |
+| First conversation | **12 actual two-user browser groups passed**: account entry, accepted workspace invitation without channel access, separate accepted channel invitation, focused composer, bidirectional messages, outsider denials and encrypted-at-rest native storage. **Seven additional independent browser/API groups** cover live channel-admin demotion, issued-link/unsaved-change guards, lost-authority link scrubbing, revoked invitations and outsider access. English, Swedish, keyboard operation and 320 px were exercised. These native channels are server-readable, not end-to-end encrypted. |
+| Public story and isolation | **14 demo browser groups passed** across the application and website entries. An independent run passed **16 production-browser groups**, including the actual English/Swedish installation page in both entries. Checks cover provider destinations/history, the shared brief, decision revisions without duplicate tasks, reset/reload, keyboard use and 320/390 px. The independent website ignored seeded account material and made no account/provider requests or worker/private-content storage operations. The full application's demo retains the application's normal account/mobile startup; its demo content and actions remain local. |
+| Downloadable preview | **22 actual offline Chromium groups**, an additional Swedish 320 px check and separate archive/source review passed. The preview uses the actual demo, styles, fonts and artwork with memory-only example content. Its HTML and ZIP are bound to source hashes; it is not a live account, provider or encryption demonstration. |
+| Fresh self-hosted installation | The real Compose/Docker installation used fresh configuration, PostgreSQL, API, default integration worker and production Nginx frontend. Initializer permissions/refusal to overwrite, first-operator bootstrap/refusal to bootstrap twice, explicit invitations, messages, unauthorized access and hash-checked cross-user file downloads passed. Restart retained accounts, roles, history and file bytes. **Five production-app browser groups and six independent-website browser groups passed** on the final Docker images. A separate disposable Matrix profile passed health, registration, login, authenticated identity and logout; this control-plane check alone is not a cryptographic proof. |
+
+The recorded scopes overlap and must not be added as a unique suite total.
+All fixtures used new accounts, keys and data; the retained pilot's four services
+and start times were preserved. The rehearsal used loopback HTTP and does not
+establish public TLS/WSS, customer Microsoft/Google acceptance, backup service
+readiness or production capacity. The migration runbook now stops all running
+Compose writers before content-key migration and resumes only that prior list.
+
+The backend application source is unchanged by this increment. At its parent
+`8777e015610b6de390a445e17b022494241ee85e`, all four backend CI shards, frontend,
+the product/PostgreSQL browser job and native Android/iOS compatibility passed.
+The real encryption job exposed a Connect test navigation race during correctly
+enforced recipient logout. The scoped test correction retains every API, socket,
+Matrix, signed-out and private-DOM assertion; unrelated refresh timeouts still
+fail. A separate actual Chromium reproduction and three negative controls passed.
+The corrected harness then passed **all 13 actual Connect groups** with two
+organizations, the packed SDK, real embedded Rust-crypto clients and a fresh
+Matrix homeserver, including bidirectional encrypted delivery and recipient/
+connection revocation. All source and built-file bindings remained unchanged.
+The workflow for each final published commit remains the authority for that
+commit's CI status. No release, npm publication or public Railway deployment is
+claimed by this record.
+
 ## 0.13 mobile calls, external calendars and encrypted shared work — 2026-10-22
 
 [PRODUCT_013.md](PRODUCT_013.md) describes the supported features and boundaries.

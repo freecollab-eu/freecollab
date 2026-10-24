@@ -1,0 +1,236 @@
+/* Work opens where the conversation happens, using the product's real editors. */
+.fc-chat { --chat-flow-conversation-share: .525; --chat-flow-conversation-fr: 1.05fr; --chat-flow-work-fr: .95fr; }
+.fc-chat:has(.fc-conversation-work.is-wide) { --chat-flow-conversation-share: .425; --chat-flow-conversation-fr: .85fr; --chat-flow-work-fr: 1.15fr; }
+.fc-chat-room-content:has(> .fc-chat-room-work:not([hidden])) { display: grid; grid-template-columns: minmax(0, var(--chat-flow-conversation-fr)) minmax(0, var(--chat-flow-work-fr)); align-items: start; gap: var(--chat-room-gap); max-width: none; }
+.fc-chat-room-work { min-width: 0; align-self: start; }
+.fc-chat-room-material { min-width: 0; width: 100%; }
+.has-material-left .fc-chat-room-content:has(> .fc-chat-room-work:not([hidden])) { grid-template-columns: minmax(0, var(--chat-flow-work-fr)) minmax(0, var(--chat-flow-conversation-fr)); }
+.has-material-left .fc-chat-room-content > .fc-chat-room-work { grid-column: 1; grid-row: 1; }
+.fc-chat-room-work .fc-chat-shared-material { width: 100%; margin: 0; }
+.is-focus-mode .fc-chat-room-content:has(> .fc-chat-room-work:not([hidden])) { display: block; }
+.is-focus-mode .fc-chat-room-work { position: static; margin-top: 1.5rem; }
+.fc-chat-room-content:has(> .fc-chat-room-work[hidden]) { display: block; max-width: 1060px; }
+
+.fc-conversation-work {
+  container: conversation-work / inline-size;
+  position: relative;
+  min-width: 0;
+  padding: 0;
+  border: 1px solid var(--fc-border);
+  border-radius: var(--fc-radius);
+  background: var(--fc-surface);
+  color: var(--fc-text);
+  box-shadow: 0 6px 24px color-mix(in srgb, var(--fc-text) 3%, transparent);
+  font-family: var(--fc-font);
+  scroll-margin-block: 1rem;
+}
+.fc-conversation-work:focus { outline: none; }
+.fc-conversation-work:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 5px; }
+.fc-conversation-work-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; padding: 1.35rem 1.5rem 1rem; }
+.fc-conversation-work-header > div { min-width: 0; }
+.fc-conversation-work-header .fc-kicker { display: block; color: var(--fc-muted); font-size: .6875rem; letter-spacing: .08em; }
+.fc-conversation-work-header h2 { margin: .45rem 0 0; font-family: var(--fc-heading-font); font-size: clamp(1.5rem, 2.25vw, 2.1rem); font-weight: 400; line-height: 1.15; letter-spacing: -.045em; overflow-wrap: anywhere; }
+.fc-conversation-work-header p { margin: .55rem 0 0; color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.65; }
+.fc-conversation-work-header > button { display: grid; flex-shrink: 0; place-items: center; min-width: 44px; min-height: 44px; margin: -.3rem -.55rem 0 0; border: 0; background: transparent; color: var(--fc-muted); cursor: pointer; }
+.fc-conversation-work-header > button:hover { color: var(--fc-accent); }
+.fc-conversation-work-header > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-conversation-work-source { display: flex; align-items: flex-start; gap: .75rem; min-width: 0; margin: 0 1.5rem; padding: .85rem 0; border-block: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.65; overflow-wrap: anywhere; }
+.fc-conversation-work-source > svg { flex-shrink: 0; margin-top: .15rem; }
+.fc-conversation-work-source > div { flex: 1; min-width: 0; }
+.fc-conversation-work-source p { margin: .2rem 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.fc-conversation-work-source button, .fc-conversation-work-source a { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .35rem 0; border: 0; background: transparent; color: var(--fc-accent); font: inherit; text-align: left; text-underline-offset: .2rem; cursor: pointer; }
+.fc-conversation-work-source button:hover, .fc-conversation-work-source a:hover { text-decoration: underline; }
+.fc-conversation-work-body { min-width: 0; padding: 1.25rem 1.5rem 1.6rem; }
+.fc-conversation-work-body > * { min-width: 0; }
+.fc-conversation-work-body input:not([type="checkbox"]):not([type="radio"]):not([type="color"]),
+.fc-conversation-work-body select, .fc-conversation-work-body textarea { max-width: 100%; }
+.fc-conversation-work-body textarea { scroll-margin-block: 1.5rem; }
+.fc-conversation-work-body .fc-shared-heading,
+.fc-conversation-work-body .fc-project-heading { gap: .75rem; }
+.fc-conversation-work-body .fc-shared-heading h3,
+.fc-conversation-work-body .fc-project-heading h3 { font-size: 1.15rem; font-weight: 450; }
+.fc-conversation-work-body .fc-shared-heading p,
+.fc-conversation-work-body .fc-project-heading p { font-size: .74rem; line-height: 1.7; }
+.fc-conversation-work-body .fc-shared-editor,
+.fc-conversation-work-body .fc-shared-preview { min-height: 20rem; background: color-mix(in srgb, var(--fc-bg) 32%, var(--fc-surface)); }
+.fc-conversation-work-body .fc-shared-title { min-height: 3.5rem; padding: .55rem 0 .85rem; border-radius: 0; border-width: 0 0 1px; background: transparent; font-size: clamp(1.35rem, 4cqi, 2rem) !important; font-weight: 450; letter-spacing: -.035em; line-height: 1.3; }
+.fc-conversation-work-body .fc-shared-title:focus { box-shadow: none; border-bottom-color: var(--fc-accent); }
+.fc-conversation-work-body .fc-shared-editor { padding: 1rem 1.1rem; border-radius: calc(var(--fc-radius) * .65); border-color: var(--fc-border); }
+.fc-conversation-work-body .fc-shared-editor:focus { border-color: var(--fc-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fc-accent) 12%, transparent); }
+.fc-conversation-work-body .fc-project-card-description { max-height: none; overflow: visible; }
+.fc-conversation-work-body .fc-account-actions,
+.fc-conversation-work-body .fc-project-actions { flex-wrap: wrap; }
+.fc-conversation-work-body .fc-button { min-height: 44px; white-space: normal; }
+.fc-conversation-work .fc-collaboration-panel.fc-collaboration-flow { position: static; inset: auto; display: block; width: 100%; min-width: 0; height: auto; max-height: none; border: 0; background: transparent; box-shadow: none; }
+.fc-conversation-work .fc-collaboration-flow > .fc-collaboration-body { overflow: visible; padding: 0; }
+.fc-conversation-work .fc-projects-flow { gap: 1rem; }
+.fc-project-flow-projects { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem 1rem; padding-bottom: .65rem; border-bottom: 1px solid var(--fc-border); }
+.fc-project-flow-projects > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; padding: .4rem 0; color: var(--fc-muted); font-size: var(--fc-caption-size); }
+.fc-project-flow-projects > button[aria-pressed="true"] { color: var(--fc-accent); }
+.fc-project-flow-actions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .7rem; min-width: 0; }
+.fc-project-flow-actions > span { flex: 1; min-width: 0; font-size: .8rem; overflow-wrap: anywhere; }
+.fc-project-flow-actions > button { display: inline-flex; align-items: center; gap: .4rem; min-height: 44px; font-size: var(--fc-caption-size); }
+.fc-project-flow-tasks { display: grid; gap: .55rem; min-width: 0; }
+.fc-project-flow-task { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; min-height: 44px; padding: .85rem 0; border: 0; border-bottom: 1px solid var(--fc-border); background: transparent; color: var(--fc-text); font: inherit; text-align: left; cursor: pointer; }
+.fc-project-flow-task > span { flex: 1; min-width: 0; font-size: .9rem; line-height: 1.5; overflow-wrap: anywhere; }
+.fc-project-flow-task > small { flex-shrink: 0; color: var(--fc-muted); font-size: .65rem; }
+.fc-project-flow-task:hover { color: var(--fc-accent); }
+.fc-project-flow-task:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-conversation-work-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .65rem; padding: .75rem 1.5rem; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.6; }
+.fc-conversation-work-footer button { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-accent); font: inherit; cursor: pointer; }
+
+.fc-shared-documents.is-flow .fc-shared-flow-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; min-width: 0; margin: 0 0 1.15rem; }
+.fc-shared-flow-toolbar > button { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; padding: .4rem 0; border: 0; background: transparent; color: var(--fc-muted); font: inherit; font-size: var(--fc-detail-size); cursor: pointer; }
+.fc-shared-flow-toolbar > button:hover { color: var(--fc-accent); }
+.fc-shared-flow-toolbar .fc-shared-sync { margin-left: auto; font-size: var(--fc-caption-size); }
+.fc-shared-flow-document { width: 100%; max-width: 52rem; min-width: 0; margin-inline: auto; }
+.fc-shared-flow-assistance { min-width: 0; margin-block: .75rem; }
+.fc-document-organization.is-flow { min-width: 0; }
+.fc-document-flow-context { display: grid; gap: .6rem; min-width: 0; margin-bottom: 1rem; padding-bottom: .7rem; border-bottom: 1px solid var(--fc-border); }
+.fc-document-flow-heading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; min-width: 0; margin: 0 0 .8rem; }
+.fc-document-flow-heading h3, .fc-document-flow-heading h4 { margin: 0; font-family: var(--fc-heading-font); font-size: 1.2rem; font-weight: 450; line-height: 1.4; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.fc-document-flow-heading > button { flex-shrink: 0; min-height: 44px; }
+.fc-document-flow-stack { min-width: 0; border-top: 1px solid var(--fc-border); }
+.fc-document-flow-stack > summary { display: flex; align-items: center; gap: .6rem; min-width: 0; min-height: 44px; padding: .75rem 0; color: var(--fc-muted); font-size: var(--fc-detail-size); line-height: 1.5; cursor: pointer; list-style: none; }
+.fc-document-flow-stack > summary::-webkit-details-marker { display: none; }
+.fc-document-flow-stack > summary > svg { flex-shrink: 0; }
+.fc-document-flow-stack > summary > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fc-document-flow-stack > summary > small { margin-left: auto; font-size: var(--fc-caption-size); white-space: nowrap; }
+.fc-document-flow-stack[open] > summary { color: var(--fc-accent); }
+.fc-document-flow-stack > summary:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-document-flow-list { display: grid; gap: .2rem; min-width: 0; margin: 0; padding: 0 0 .5rem; list-style: none; }
+.fc-document-flow-list > li { min-width: 0; }
+.fc-document-flow-list button { display: flex; align-items: center; gap: .75rem; width: 100%; min-width: 0; min-height: 44px; padding: .7rem .75rem; border: 0; border-radius: calc(var(--fc-radius) * .6); background: transparent; color: var(--fc-text); font: inherit; font-size: max(.875rem, calc(var(--fc-body-size) * .95)); line-height: 1.55; text-align: left; cursor: pointer; }
+.fc-document-flow-list button > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.fc-document-flow-list button:hover, .fc-document-flow-list button[aria-current="page"] { color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-document-flow-list button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -2px; }
+
+/* These are actions on the conversation, not another set of application tabs. */
+.fc-chat-flow-actions { position: relative; display: flex; align-items: center; flex-wrap: wrap; gap: .2rem .65rem; min-width: 0; padding: .3rem 0 .4rem; }
+.fc-chat-flow-actions > button,
+.fc-chat-flow-actions > details > summary,
+.fc-chat-flow-actions-more > button { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; min-width: 0; min-height: 44px; padding: .45rem .15rem; border: 0; background: transparent; color: var(--fc-muted); font: inherit; font-size: .72rem; line-height: 1.5; text-align: left; cursor: pointer; }
+.fc-chat-flow-actions > button:hover,
+.fc-chat-flow-actions > button[aria-pressed="true"],
+.fc-chat-flow-actions > button[aria-expanded="true"],
+.fc-chat-flow-actions > details[open] > summary,
+.fc-chat-flow-actions-more > button:hover { color: var(--fc-accent); }
+.fc-chat-flow-actions > button:disabled,
+.fc-chat-flow-actions-more > button:disabled { opacity: .5; cursor: not-allowed; }
+.fc-chat-flow-actions > button:focus-visible,
+.fc-chat-flow-actions > details > summary:focus-visible,
+.fc-chat-flow-actions-more > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+.fc-chat-flow-actions > details { position: relative; }
+.fc-chat-flow-actions > details > summary { list-style: none; }
+.fc-chat-flow-actions > details > summary::-webkit-details-marker { display: none; }
+.fc-chat-flow-actions-more { position: relative; }
+.fc-chat-flow-actions-menu { position: absolute; z-index: 30; top: calc(100% + .4rem); right: 0; display: grid; gap: .1rem; width: min(18rem, calc(100vw - 2rem)); max-height: min(65dvh, 22rem); overflow-y: auto; overscroll-behavior: contain; padding: .5rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); box-shadow: 0 .6rem 2rem color-mix(in srgb, var(--fc-text) 9%, transparent); }
+.fc-chat-composer-area .fc-chat-flow-actions-menu { top: auto; bottom: calc(100% + .4rem); }
+.fc-chat-flow-actions-menu[hidden] { display: none; }
+.fc-chat-flow-actions-menu button { display: flex; align-items: center; gap: .6rem; width: 100%; min-height: 44px; padding: .6rem .7rem; border: 0; border-radius: calc(var(--fc-radius) * .6); background: transparent; color: var(--fc-text); font: inherit; font-size: .78rem; line-height: 1.5; text-align: left; cursor: pointer; }
+.fc-chat-flow-actions-menu button:hover { color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-chat-flow-actions-menu button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -2px; }
+
+.fc-chat-linked-work { display: flex; flex-wrap: wrap; gap: .6rem; min-width: 0; margin-top: .8rem; }
+.fc-chat-linked-work-card { display: flex; align-items: flex-start; gap: .65rem; flex: 1 1 13rem; min-width: 0; max-width: 28rem; min-height: 44px; padding: .8rem .9rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .5); background: var(--fc-surface); color: var(--fc-text); font: inherit; text-align: left; text-decoration: none; cursor: pointer; }
+.fc-chat-linked-work-card > svg { flex-shrink: 0; margin-top: .1rem; color: var(--fc-muted); }
+.fc-chat-linked-work-card > div, .fc-chat-linked-work-card > span { flex: 1; min-width: 0; }
+.fc-chat-linked-work-card small { display: block; color: var(--fc-muted); font-size: .62rem; line-height: 1.6; }
+.fc-chat-linked-work-card strong { display: block; margin-top: .2rem; font-family: var(--fc-heading-font); font-size: .95rem; font-weight: 450; line-height: 1.45; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.fc-chat-linked-work-card p { margin: .4rem 0 0; color: var(--fc-muted); font-size: .7rem; line-height: 1.6; overflow-wrap: anywhere; }
+.fc-chat-linked-work-card:hover { border-color: var(--fc-accent); }
+.fc-chat-linked-work-card:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
+
+/* The visible More control owns these actions. Long action labels must never
+   turn a hover toolbar into an invisible hit target over that same control. */
+.fc-chat-message:not(.has-open-actions) .fc-chat-message-actions { display: none; visibility: hidden; pointer-events: none; }
+.fc-chat-message.has-open-actions .fc-chat-message-actions { position: static; display: flex; align-items: center; justify-content: flex-start; flex-wrap: wrap; gap: .25rem; width: fit-content; max-width: 100%; margin: .65rem 0 0; padding: .3rem; border: 1px solid var(--fc-border); background: var(--fc-surface); opacity: 1; visibility: visible; pointer-events: auto; transform: none; box-shadow: none; }
+.fc-chat-message-actions .fc-chat-text-button { min-height: 44px; max-width: 100%; padding: .4rem .45rem; font-size: .7rem; line-height: 1.5; white-space: normal; text-align: left; }
+.fc-chat-message.has-open-actions .fc-chat-message-actions .fc-icon-button { width: 40px; min-width: 40px; min-height: 44px; }
+
+@container conversation-work (max-width: 620px) {
+  .fc-conversation-work-body .fc-project-board { grid-template-columns: minmax(0, 1fr); }
+  .fc-conversation-work-body .fc-project-editor-grid,
+  .fc-conversation-work-body .fc-workflow-options { grid-template-columns: minmax(0, 1fr); }
+  .fc-conversation-work-body .fc-project-toolbar > label:first-child { flex-basis: 100%; }
+  .fc-conversation-work-body .fc-meeting-list li { align-items: stretch; flex-direction: column; }
+  .fc-conversation-work-body .fc-shared-history li { flex-wrap: wrap; }
+}
+
+@media (min-width: 1000px) {
+  .fc-chat-room-work { position: sticky; top: 1rem; }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-room-work .fc-chat-shared-material { position: static; }
+  .fc-conversation-work { display: flex; flex-direction: column; max-height: max(22rem, calc(100dvh - 18rem)); }
+  .fc-conversation-work-header, .fc-conversation-work-source, .fc-conversation-work-footer { flex-shrink: 0; }
+  .fc-conversation-work-body { min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--fc-border) transparent; }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-timeline-wrap { margin-bottom: calc(-1 * var(--fc-chat-composer-height, 150px)); }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-timeline { scroll-padding-bottom: calc(var(--fc-chat-composer-height, 150px) + 1rem); }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-message-list { padding-bottom: calc(var(--fc-chat-composer-height, 150px) + 1rem); }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-composer-area {
+    position: relative;
+    z-index: 3;
+    width: calc(var(--chat-inline) + (min(100%, 1440px) - var(--chat-inline) - var(--chat-inline) - var(--chat-room-gap)) * var(--chat-flow-conversation-share));
+    max-width: none;
+    margin-left: max(0px, calc((100% - 1440px) / 2));
+    margin-right: 0;
+    padding-right: 0;
+    background: var(--fc-bg);
+    box-shadow: 0 -.6rem 1rem var(--fc-bg);
+  }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-composer-row,
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-composer-footer,
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-composer-area > .fc-contextual-copilot { max-width: none; }
+  .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-latest-wrap {
+    bottom: calc(var(--fc-chat-composer-height, 150px) + .65rem);
+    inset-inline: auto;
+    left: calc(max(0px, (100% - 1440px) / 2) + var(--chat-inline));
+    width: calc((min(100%, 1440px) - var(--chat-inline) - var(--chat-inline) - var(--chat-room-gap)) * var(--chat-flow-conversation-share));
+  }
+  .fc-chat.has-material-left:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-composer-area { margin-left: auto; margin-right: max(0px, calc((100% - 1440px) / 2)); padding-left: 0; padding-right: var(--chat-inline); }
+  .fc-chat.has-material-left:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-latest-wrap { left: auto; right: calc(max(0px, (100% - 1440px) / 2) + var(--chat-inline)); }
+  /* A mounted but hidden material loader must not activate the older file-only
+     room selectors while this channel has no available shared work. */
+  .fc-chat:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-timeline-wrap { margin-bottom: 0; }
+  .fc-chat:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-message-list { padding-bottom: 0; }
+  .fc-chat:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-composer-area { position: relative; z-index: auto; width: 100%; max-width: 1440px; margin-inline: auto; padding-inline: var(--chat-inline); background: transparent; box-shadow: none; }
+  .fc-chat:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-latest-wrap { bottom: .65rem; inset-inline: 1rem; width: auto; }
+}
+
+@media (max-width: 999px) {
+  .fc-chat-room-content:has(> .fc-chat-room-work:not([hidden])) { display: flex; flex-direction: column; gap: 1.25rem; }
+  .fc-chat-room-content > .fc-chat-room-work { position: static; width: 100%; }
+  .fc-conversation-work { max-height: none; }
+  .fc-conversation-work-body { max-height: none; overflow: visible; }
+  .fc-conversation-work-header { padding: 1.15rem 1rem .8rem; }
+  .fc-conversation-work-header h2 { font-size: 1.6rem; }
+  .fc-conversation-work-source { margin-inline: 1rem; }
+  .fc-conversation-work-body { padding: 1rem; }
+  .fc-conversation-work-footer { padding-inline: 1rem; }
+  .fc-chat-linked-work-card { max-width: none; }
+  .fc-chat-flow-actions-more, .fc-chat-flow-actions > details { position: static; }
+}
+
+@media (max-width: 480px) {
+  .fc-chat-flow-actions { gap: .1rem .6rem; }
+  .fc-chat-flow-actions > button, .fc-chat-flow-actions > details > summary, .fc-chat-flow-actions-more > button { font-size: .68rem; }
+  .fc-conversation-work-header { align-items: center; gap: .6rem; padding: .5rem 1rem; }
+  .fc-conversation-work-header > div { display: flex; flex: 1; align-items: baseline; flex-wrap: wrap; gap: .15rem .6rem; }
+  .fc-conversation-work-header .fc-kicker { font-size: .58rem; line-height: 1.5; }
+  .fc-conversation-work-header h2 { margin: 0; font-size: 1.2rem; line-height: 1.3; }
+  .fc-conversation-work-header > button { margin: 0 -.35rem 0 0; }
+  .fc-conversation-work-source { padding-block: .45rem; font-size: .65rem; line-height: 1.55; }
+  .fc-conversation-work-body { padding-top: .55rem; }
+  .fc-shared-documents.is-flow .fc-shared-flow-toolbar { flex-wrap: nowrap; gap: .5rem; margin-bottom: .45rem; }
+  .fc-shared-documents.is-flow .fc-shared-flow-toolbar > button { flex-shrink: 0; }
+  .fc-shared-documents.is-flow .fc-shared-flow-toolbar .fc-shared-sync { flex: 1; min-width: 0; width: auto; margin-left: auto; font-size: .6875rem; line-height: 1.5; text-align: right; }
+  .fc-shared-documents.is-flow .fc-shared-label { margin: .2rem 0 .3rem; }
+  .fc-shared-documents.is-flow .fc-shared-title { min-height: 44px; padding-block: .35rem; line-height: 1.3; }
+  .fc-shared-documents.is-flow .fc-shared-editor-heading { margin-top: .55rem; }
+  .fc-conversation-work-body .fc-shared-editor { min-height: 15rem; padding: .8rem; }
+  .fc-conversation-work-body .fc-input { font-size: 1rem; }
+  .fc-chat-linked-work-card { flex-basis: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fc-conversation-work, .fc-chat-linked-work-card { scroll-behavior: auto; }
+}

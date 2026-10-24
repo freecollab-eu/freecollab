@@ -5,6 +5,7 @@ Uses a copied Vite frontend, temporary SQLite/accounts/keys, real password
 confirmation, and a private fixture-issued customer SSO session. No external
 IdP, provider, public deployment, or shared product runtime is used.
 """
+from ui_navigation import open_chat_tool
 import base64
 from datetime import datetime
 import hashlib
@@ -53,7 +54,7 @@ with Session(engine) as session:
 
 
 def embedding(page):
-    page.get_by_role('button', name='Integrations', exact=True).click()
+    open_chat_tool(page, 'Integrations')
     dialog = page.get_by_role('dialog', name='Integrations', exact=True)
     expect(dialog.get_by_role('button', name='Embedding', exact=True)).to_be_visible()
     dialog.get_by_role('button', name='Embedding', exact=True).click()
@@ -161,14 +162,14 @@ def main():
                     checks['actual_embedding_form_and_copyable_example_fit_320px_without_horizontal_overflow'] = True
                     stage = 'native member cannot see or call embedding administration'
                     member_context = browser.new_context(viewport={'width':1280,'height':960},reduced_motion='reduce'); member_page = member_context.new_page(); member_page.on('pageerror',lambda error:errors.append(type(error).__name__))
-                    p.login(member_page,app_base,member,workspace); member_page.get_by_role('button',name='Integrations',exact=True).click(); member_dialog = member_page.get_by_role('dialog',name='Integrations',exact=True); expect(member_dialog.get_by_text('A few useful connections.',exact=True)).to_be_visible(); expect(member_dialog.get_by_role('button',name='Embedding',exact=True)).to_have_count(0)
+                    p.login(member_page,app_base,member,workspace); open_chat_tool(member_page, 'Integrations'); member_dialog = member_page.get_by_role('dialog',name='Integrations',exact=True); expect(member_dialog.get_by_text('A few useful connections.',exact=True)).to_be_visible(); expect(member_dialog.get_by_role('button',name='Embedding',exact=True)).to_have_count(0)
                     p.rejects(api_base,'GET',apps_path,member,statuses=(403,)); member_context.close()
                     checks['ordinary_workspace_member_has_no_embedding_tab_and_api_denies_admin_read'] = True
                     stage = 'customer scoped owner cannot administer embedding through global native settings'
                     scoped_context = browser.new_context(viewport={'width':1280,'height':960},reduced_motion='reduce')
                     scoped_page = scoped_context.new_page(); scoped_page.on('pageerror',lambda error:errors.append(type(error).__name__))
                     scoped_page.add_init_script('localStorage.setItem("freecollab_token",' + json.dumps(scoped['access_token']) + ');localStorage.setItem("freecollab_user_id",' + json.dumps(owner['user_id']) + ');localStorage.setItem(' + json.dumps('freecollab.workspace:' + owner['user_id']) + ',' + json.dumps(workspace['id']) + ');')
-                    scoped_page.goto(app_base + '/#app',wait_until='domcontentloaded'); expect(scoped_page.locator('.fc-chat')).to_be_visible(timeout=90000); scoped_page.get_by_role('button',name='Integrations',exact=True).click(); scoped_dialog = scoped_page.get_by_role('dialog',name='Integrations',exact=True); expect(scoped_dialog.get_by_text('A few useful connections.',exact=True)).to_be_visible(); expect(scoped_dialog.get_by_role('button',name='Embedding',exact=True)).to_have_count(0)
+                    scoped_page.goto(app_base + '/#app',wait_until='domcontentloaded'); expect(scoped_page.locator('.fc-chat')).to_be_visible(timeout=90000); open_chat_tool(scoped_page, 'Integrations'); scoped_dialog = scoped_page.get_by_role('dialog',name='Integrations',exact=True); expect(scoped_dialog.get_by_text('A few useful connections.',exact=True)).to_be_visible(); expect(scoped_dialog.get_by_role('button',name='Embedding',exact=True)).to_have_count(0)
                     p.rejects(api_base,'GET',apps_path,scoped,statuses=(403,)); scoped_context.close()
                     checks['customer_scoped_owner_has_no_embedding_tab_and_api_denies_native_admin_surface'] = True
                     assert not errors,'Unexpected browser page errors'

@@ -4,6 +4,7 @@ from ..database import get_session
 from ..models.reaction import Reaction
 from ..models.message import Message
 from ..services.auth import get_current_user
+from ..services.request_guard import recheck_actor
 from ..services.access import require_channel_member, lock_channel_writes
 from ..services.workspaces import require_direct_message_writable
 from ..services.chat_notifications import require_native_channel
@@ -37,6 +38,7 @@ async def add_reaction(
         raise HTTPException(404, "Message not found")
     
     lock_channel_writes(session, message.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, message.channel_id, user.id)
     require_direct_message_writable(session, message.channel_id, user.id)
     require_native_channel(session, message.channel_id)
@@ -90,6 +92,7 @@ async def remove_reaction(
     if not message:
         raise HTTPException(404, "Message not found")
     lock_channel_writes(session, message.channel_id)
+    recheck_actor(session, user.id)
     require_channel_member(session, message.channel_id, user.id)
     require_direct_message_writable(session, message.channel_id, user.id)
     require_native_channel(session, message.channel_id)

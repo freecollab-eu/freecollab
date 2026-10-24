@@ -5,6 +5,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/file-exp
 --secure uses explicit Matrix environment or the retained homeserver with new
 private identities. No desktop Microsoft Office binary is available/tested.
 """
+from ui_navigation import open_chat_tool
 import argparse
 import base64
 import importlib.util
@@ -63,7 +64,7 @@ def login(page,app,user,email,workspace):
     page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click()
     page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD)
     page.get_by_role('button',name='Sign In',exact=True).click()
-    page.get_by_role('button',name='Channel files',exact=True).click()
+    open_chat_tool(page, 'Channel files')
     return page.get_by_role('dialog',name='Channel files',exact=True)
 
 

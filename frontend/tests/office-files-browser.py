@@ -4,6 +4,7 @@
 CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/office-files-browser.py
 No Matrix, provider credentials, external services or existing databases are used.
 """
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import io
@@ -94,7 +95,7 @@ def main():
                     page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True).click()
                     page.get_by_label('Email', exact=True).fill(email); page.get_by_label('Password', exact=True).fill(PASSWORD)
                     page.get_by_role('button', name='Sign In', exact=True).click()
-                    page.get_by_role('button', name='Channel files', exact=True).click()
+                    open_chat_tool(page, 'Channel files')
                     panel = page.get_by_role('dialog', name='Channel files', exact=True)
                     chooser = page.get_by_label('Choose a file', exact=True)
                     assert MIME in chooser.get_attribute('accept').split(',')

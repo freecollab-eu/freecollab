@@ -30,7 +30,7 @@ MAX_ADMINS = 5
 class CreateUserRequest(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     email: EmailStr = Field(max_length=320)
-    password: str
+    password: str = Field(min_length=12)
     role: str = "user"
 
     _validate_password = field_validator("password")(validate_password)
@@ -347,6 +347,9 @@ async def delete_message(
     staff = session.get(User, staff.id, populate_existing=True)
     require_staff(staff, session)
     message.deleted = True
+    from ..services.message_references import store_references
+    store_references(session, message, [])
+    message.mentions = '[]'
     message.content = "[Message deleted]"
     message.encrypted = False
     session.add(message)

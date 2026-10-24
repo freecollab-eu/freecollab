@@ -1,0 +1,29 @@
+.fc-discussion-work { min-width: 0; margin-block: .65rem; color: var(--fc-muted); font-family: var(--fc-font); }
+.fc-discussion-work-toggle { display: flex; align-items: center; justify-content: flex-start; gap: .6rem; width: fit-content; max-width: 100%; min-height: 44px; padding: .4rem .55rem; border: 1px solid transparent; border-radius: calc(var(--fc-radius) * .7); background: transparent; color: inherit; font: inherit; font-size: var(--fc-detail-size, .8125rem); line-height: 1.5; text-align: left; cursor: pointer; transition: color .15s, background-color .15s, border-color .15s; }
+.fc-discussion-work-toggle:hover, .fc-discussion-work-toggle[aria-expanded="true"] { border-color: var(--fc-border); background: var(--fc-accent-soft); color: var(--fc-text); }
+.fc-discussion-work-toggle:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-discussion-work-toggle > svg { flex-shrink: 0; transition: transform .15s; }
+.fc-discussion-work-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
+.fc-discussion-work-counts { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem .5rem; min-width: 0; }
+.fc-discussion-work-counts > span { display: inline-flex; align-items: center; gap: .35rem; min-width: 0; overflow-wrap: anywhere; }
+.fc-discussion-work-counts svg { flex-shrink: 0; }
+.fc-discussion-work-separator { color: var(--fc-muted); margin-right: .1rem; }
+.fc-discussion-work-available { width: 100%; color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); }
+.fc-discussion-work-resources { margin-top: .35rem; max-width: 38rem; padding: .35rem 0 .35rem .65rem; border-left: 1px solid var(--fc-border); }
+.fc-discussion-work-resources[hidden] { display: none; }
+.fc-discussion-work .fc-chat-linked-work { display: grid; gap: .35rem; margin: 0; }
+.fc-discussion-work .fc-chat-linked-work-card { width: 100%; min-height: 52px; min-width: 0; margin: 0; padding: .65rem .75rem; background: var(--fc-surface); }
+.fc-discussion-work .fc-chat-linked-work-card > span { min-width: 0; }
+.fc-discussion-work .fc-chat-linked-work-card strong { overflow-wrap: anywhere; }
+.fc-discussion-work-notice { color: var(--fc-muted); font-size: var(--fc-caption-size, .75rem); line-height: 1.6; margin: .5rem .5rem 0; }
+@media (max-width: 480px) {
+  .fc-discussion-work-toggle { padding-inline: .25rem; gap: .35rem; }
+  .fc-discussion-work-counts { gap: .2rem .35rem; }
+  .fc-discussion-work-resources { padding-left: .4rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fc-discussion-work-toggle, .fc-discussion-work-toggle > svg { transition: none; }
+}
+@media (forced-colors: active) {
+  .fc-discussion-work-toggle { border-color: ButtonText; }
+}

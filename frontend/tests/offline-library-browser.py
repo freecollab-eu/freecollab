@@ -5,6 +5,7 @@ Builds the complete production app into an owned temporary directory and runs
 only private API/static services with independent fixture accounts and keys.
 No existing service, browser profile or live push provider is used.
 """
+from ui_navigation import choose_chat_channel, open_chat_tool
 import base64
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -138,7 +139,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 try:
                     stage='explicit opt-in online history and file snapshot'
                     page.goto(app,wait_until='networkidle');page.wait_for_function('navigator.serviceWorker.controller!==null',timeout=30000)
-                    page.get_by_role('navigation',name='Channels',exact=True).get_by_role('button',name='Studio').click()
+                    choose_chat_channel(page, 'Studio')
                     composer=page.get_by_role('textbox',name='Message #Studio',exact=True)
                     composer.fill('Offline history secret A');page.get_by_role('button',name='Send message',exact=True).click()
                     expect(page.get_by_text('Offline history secret A',exact=True)).to_be_visible()
@@ -146,7 +147,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     content=b'Offline attachment confidential bytes A'
                     multipart=(f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="private-reference.txt"\r\nContent-Type: text/plain\r\n\r\n'.encode()+content+f'\r\n--{boundary}--\r\n'.encode())
                     with urlopen(Request(api_base+'/files/channels/shared',data=multipart,headers={'Authorization':'Bearer '+tokens['alice'],'Content-Type':'multipart/form-data; boundary='+boundary}),timeout=20) as response:reference=json.load(response)
-                    page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    open_chat_tool(page, 'Mobile and offline settings')
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Nothing is saved automatically',exact=False)).to_have_count(1)
                     dialog.get_by_role('button',name='Save this channel offline',exact=True).click()
@@ -169,7 +170,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                         failed['requests']+=1;route.abort('failed')
                     context.route('**/api/auth/me',unavailable_authority)
                     with page.expect_event('requestfailed',predicate=lambda request:request.url.endswith('/api/auth/me')):
-                        page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                        open_chat_tool(page, 'Mobile and offline settings')
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     page.wait_for_function("async()=>!(await navigator.locks.query()).held.some(lock=>lock.name==='freecollab-offline-library:alice')")
                     assert failed['requests'] and page.evaluate('navigator.onLine')
@@ -177,13 +178,13 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(dialog.get_by_role('region',name='Saved history for Studio',exact=True)).to_have_count(0)
                     vault=page.evaluate(VAULT);assert {'offline-channel','offline-file'}.issubset({row['kind'] for row in vault['rows']})
                     context.unroute('**/api/auth/me',unavailable_authority)
-                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click();open_chat_tool(page, 'Mobile and offline settings')
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_role('list',name='Saved offline channels',exact=True).get_by_role('button',name='Studio',exact=True)).to_be_visible()
                     results['failed_online_authority_check_hides_content_without_purging_encrypted_copies']=True
                     stage='real service worker offline reload and binary attachment read'
                     set_offline(context,page,network,True);reload_offline(page,network)
-                    page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     dialog.get_by_role('button',name='Studio',exact=True).click()
                     expect(dialog.get_by_role('region',name='Saved history for Studio',exact=True).get_by_text('Offline history secret A',exact=True)).to_be_visible()
                     expect(dialog.get_by_text('Saved copy · access has not been checked while offline.',exact=True)).to_be_visible()
@@ -196,7 +197,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('queued-private.txt',exact=True)).to_be_visible()
                     vault=page.evaluate(VAULT);assert 'attachment-outbox' in {row['kind'] for row in vault['rows']}
                     raw=json.dumps(vault);assert 'Queued binary confidential A' not in raw and 'queued-private.txt' not in raw
-                    reload_offline(page,network);page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    reload_offline(page,network);open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True).get_by_text('queued-private.txt',exact=True)).to_be_visible()
                     results['offline_binary_outbox_survives_actual_reload_without_plaintext_metadata_or_bytes']=True
                     results['both_native_service_worker_reloads_keep_real_offline_network_and_navigator_state']=True
@@ -238,8 +239,8 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert cache_urls and all('/api' not in url and '/socket.io' not in url and 'token' not in url for url in cache_urls)
                     results['private_library_uses_indexeddb_never_authenticated_response_cache']=True
                     page.get_by_role('button',name='Close mobile settings',exact=True).click()
-                    if page.get_by_role('button',name='Sign out',exact=True).is_hidden():page.get_by_role('button',name='Toggle channels',exact=True).click()
-                    page.get_by_role('button',name='Sign out',exact=True).click();page.wait_for_function('localStorage.getItem("freecollab_token")===null')
+                    if page.get_by_role('button',name='Sign out',exact=True).is_hidden():page.get_by_role('button',name='Switch channel',exact=True).click()
+                    open_chat_tool(page, 'Sign out');page.wait_for_function('localStorage.getItem("freecollab_token")===null')
                     deadline=time.monotonic()+10
                     while time.monotonic()<deadline:
                         vault=page.evaluate(VAULT)

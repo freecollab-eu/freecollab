@@ -5,6 +5,7 @@ CHROMIUM_PATH=/usr/bin/chromium backend/.venv/bin/python frontend/tests/appearan
 CHAT_BASE_URL defaults to http://127.0.0.1:3000. Creates two isolated accounts;
 never run this script against a customer database.
 """
+from ui_navigation import close_channels, open_channels, open_chat_tool, reveal_chat_tool
 import json
 import os
 import re
@@ -20,9 +21,9 @@ RUN = uuid.uuid4().hex[:12]
 DEFAULT = {
     'version': 1,
     'mode': 'light',
-    'accent_color': '#36594c',
-    'background_color': '#f6f5f1',
-    'dark_background_color': '#151b18',
+    'accent_color': '#ee593f',
+    'background_color': '#f1eee8',
+    'dark_background_color': '#252321',
     'font_family': 'inter',
     'font_size': 'medium',
     'density': 'comfortable',
@@ -57,6 +58,7 @@ def login(page, user):
                               response.url.endswith('/preferences/appearance')
                               and response.request.method == 'GET'):
         page.get_by_role('button', name='Sign In', exact=True).click()
+    reveal_chat_tool(page, 'Appearance settings')
     expect(page.get_by_role('button', name='Appearance settings', exact=True).first).to_be_visible()
 
 
@@ -78,11 +80,10 @@ def assert_mobile_fit(page, description):
 
 
 def open_appearance(page):
+    open_channels(page)
     button = page.get_by_role('button', name='Appearance settings', exact=True).first
-    if not button.is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
     button.click()
-    dialog = page.get_by_role('dialog')
+    dialog = page.get_by_role('dialog', name='Make space your own.', exact=True)
     expect(dialog).to_be_visible()
     return dialog
 
@@ -160,7 +161,7 @@ with sync_playwright() as p:
         dialog = open_appearance(page)
         dialog.get_by_role('button', name='Clay', exact=True).click()
         dialog.get_by_label('Accent, hexadecimal color', exact=True).fill('#754b68')
-        dialog.get_by_label('Canvas · light, hexadecimal color', exact=True).fill('#f5f1f4')
+        dialog.get_by_label('Light canvas, hexadecimal color', exact=True).fill('#f5f1f4')
         choose(dialog, re.compile('Manrope'), exact=False)
         choose(dialog, 'Large')
         choose(dialog, 'Compact')
@@ -178,6 +179,7 @@ with sync_playwright() as p:
         assert personal['--fc-radius'] != baseline['--fc-radius']
         assert personal['--fc-space'] != baseline['--fc-space']
         page.reload(wait_until='domcontentloaded')
+        reveal_chat_tool(page, 'Appearance settings')
         expect(page.get_by_role('button', name='Appearance settings', exact=True)).to_be_visible()
         assert appearance_snapshot(page) == personal
         assert_theme_contrast(page)
@@ -198,7 +200,7 @@ with sync_playwright() as p:
         choose(dialog, 'Dark')
         assert page.locator('html').get_attribute('data-mode') == 'dark'
         assert_theme_contrast(page)
-        dialog.get_by_label('Canvas · dark, hexadecimal color', exact=True).fill('#000000')
+        dialog.get_by_label('Dark canvas, hexadecimal color', exact=True).fill('#000000')
         dialog.get_by_label('Accent, hexadecimal color', exact=True).fill('#ffffff')
         assert_theme_contrast(page)
         choose(dialog, 'System')
@@ -255,8 +257,9 @@ with sync_playwright() as p:
         personal = appearance_snapshot(page)
         print('PASS: delayed save cannot close a reopened dialog or create a false unsaved state', flush=True)
 
+        close_channels(page)
         page.set_viewport_size({'width': 390, 'height': 844})
-        expect(page.get_by_role('button', name='Toggle channels', exact=True)).to_have_attribute('aria-expanded', 'false')
+        expect(page.get_by_role('button', name='Switch channel', exact=True)).to_have_attribute('aria-expanded', 'false')
         dialog = open_appearance(page)
         assert_mobile_fit(page, 'Appearance panel overflowed mobile viewport')
         choose(dialog, 'Large')
@@ -268,9 +271,10 @@ with sync_playwright() as p:
         print('PASS: mobile entry, full settings controls and custom large-font layout fit390px', flush=True)
 
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        expect(page.locator('.fc-chat-sidebar')).to_have_attribute('aria-hidden', 'false')
+        expect(page.get_by_role('dialog', name='Workspace channels', exact=True)).to_be_visible()
         sibling = context.new_page()
         sibling.goto(BASE, wait_until='domcontentloaded')
+        reveal_chat_tool(sibling, 'Appearance settings')
         expect(sibling.get_by_role('button', name='Appearance settings', exact=True)).to_be_visible()
         assert appearance_snapshot(sibling) == personal
         held_get = []
@@ -283,12 +287,13 @@ with sync_playwright() as p:
         with page.expect_request(lambda request:
                                  request.url.endswith('/preferences/appearance') and request.method == 'GET'):
             page.reload(wait_until='domcontentloaded')
-        page.get_by_role('button', name='Sign out', exact=True).click()
+        open_chat_tool(page, 'Sign out')
         expect(page.get_by_role('navigation').get_by_role('button', name='Open App', exact=True)).to_be_visible()
         expect(sibling.get_by_role('navigation').get_by_role('button', name='Open App', exact=True)).to_be_visible()
         assert appearance_snapshot(page) == baseline
         assert appearance_snapshot(sibling) == baseline
         login(page, bob)
+        reveal_chat_tool(sibling, 'Appearance settings')
         expect(sibling.get_by_role('button', name='Appearance settings', exact=True)).to_be_visible()
         assert appearance_snapshot(page) == baseline
         assert appearance_snapshot(sibling) == baseline
@@ -324,9 +329,10 @@ with sync_playwright() as p:
         with page.expect_request(lambda request:
                                  request.url.split('?')[0].endswith('/api/channels') and request.method == 'GET'):
             page.reload(wait_until='domcontentloaded')
-        sibling.get_by_role('button', name='Sign out', exact=True).click()
+        open_chat_tool(sibling, 'Sign out')
         expect(sibling.get_by_role('navigation').get_by_role('button', name='Open App', exact=True)).to_be_visible()
         login(sibling, alice)
+        reveal_chat_tool(page, 'Appearance settings')
         expect(page.get_by_role('button', name='Appearance settings', exact=True)).to_be_visible()
         assert appearance_snapshot(page) == personal
         try:
@@ -340,6 +346,7 @@ with sync_playwright() as p:
             assert expired_response.status == 401
             assert expired_response.json()['detail'] == 'Old account session expired'
         page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+        reveal_chat_tool(page, 'Appearance settings')
         expect(page.get_by_role('button', name='Appearance settings', exact=True)).to_be_visible()
         assert page.evaluate("localStorage.getItem('freecollab_user_id')") == alice['user_id']
         assert appearance_snapshot(page) == personal, 'Old401 expired the current account session'

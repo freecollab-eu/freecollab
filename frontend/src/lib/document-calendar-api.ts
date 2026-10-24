@@ -1,3 +1,5 @@
+import { validateResourceReferenceTargets } from './resource-reference-targets';
+import type { FieldReferences } from './field-references';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import { validateCalendar, type CalendarFields } from './calendar';
@@ -49,6 +51,10 @@ async function write<T>(channelId: string, kind: ContentKind, fields: T | null, 
   current();
   const encrypted = await secure.handles(channelId);
   current();
+  if (normalized) {
+    const writing = (value: unknown): Record<string, string> => kind === 'documents' ? { title: (value as DocumentFields).title, notes: (value as DocumentFields).notes } : { title: (value as CalendarFields).title, description: (value as CalendarFields).description, location: (value as CalendarFields).location };
+    await validateResourceReferenceTargets(channelId, writing(normalized), (normalized as { field_references?: FieldReferences }).field_references, token, encrypted, previous?.fields ? writing(previous.fields) : undefined, (previous?.fields as { field_references?: FieldReferences } | undefined)?.field_references); current();
+  }
   let body: Record<string, unknown> = { id, expected_revision: previous?.revision || 0, deleted, ...(deleted ? {} : { fields: normalized }) };
   if (encrypted) {
     const event = await secure.sendEvent(channelId, eventType(kind), { id, kind, revision, deleted,

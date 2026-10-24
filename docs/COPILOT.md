@@ -1,18 +1,95 @@
 # Production AI Copilot
 
-Copilot is an opt-in integration, separate from the sample assistant. It has no provider key by default and makes no AI request merely by opening its panel. An installation operator must set `COPILOT_ENABLED=true`, a personal workspace owner must configure a provider with fresh password/MFA, and each member must explicitly opt in to that exact provider configuration. Changes to the destination, key, model or agents invalidate earlier consent.
+Production assistance is an opt-in integration. The public [product demo](PRODUCT_DEMO.md) uses the same components and API with temporary sample accounts, but its AI provider is disabled; it does not fabricate model replies. It has no provider key by default and makes no AI request merely by opening its controls. An installation operator must set `COPILOT_ENABLED=true`, a personal workspace owner must configure a provider with fresh password/MFA, and each member must explicitly opt in to that exact provider configuration. Changes to the destination, key, model or agents invalidate earlier consent.
+
+The earlier anonymous Groq demo endpoints have been retired. `ENABLE_DEMO_AI` is
+an ignored compatibility setting: neither `/demo/chat` nor `/api/demo/chat` becomes
+available when it is true. The product demo has a separate temporary sample backend and no AI provider;
+production inference uses the authenticated, reviewed Copilot or Apps & automation paths.
 
 ## Configure a provider and agents
 
 Open **Workspace tools → AI Copilot → Provider and agent settings**. Enter the complete public HTTPS443 OpenAI-compatible **chat completions** endpoint, model and your API key. For example, `https://api.openai.com/v1/chat/completions` with a compatible model such as `gpt-4o-mini`. Set the desired workspace enable flag and save with the owner's personal password and current authenticator/recovery code if enabled. Existing keys are never returned; leaving the key blank retains the current key only for the same destination endpoint. Changing the endpoint requires a new explicitly supplied key so an existing hidden key cannot be forwarded to another destination. Provider URLs must have no user information, fragments or query credentials. Arbitrary ports, loopback/private addresses and private DNS answers are refused.
 
-This release implements the OpenAI chat-completions protocol with `stream:true`, `max_tokens:2048`, a single choice and optional function tools. A provider must implement that contract. Azure deployment-specific headers and Anthropic's native messages protocol are not claimed to be supported. Use a compatible gateway only when its privacy and retention policy meets your requirements.
+This release implements the OpenAI chat-completions protocol with `stream:true`, `max_tokens:2048`, a single choice and optional function tools. A provider must implement that contract. The streaming parser accepts xAI's documented intermediate `end_turn` marker without treating it as completion: a final `stop` or `tool_calls` and `[DONE]` are still required. Azure deployment-specific headers and Anthropic's native messages protocol are not claimed to be supported. Use a compatible gateway only when its privacy and retention policy meets your requirements.
+
+The connection guide includes **Grok · xAI**, filling `https://api.x.ai/v1/chat/completions` and `grok-4.20-0309-non-reasoning`. The model remains editable. This dated, non-reasoning model is documented by xAI with function calling and fits the existing bounded request contract; choosing a reasoning model does not extend FreeCollab's thirty-second transport deadline or 2,048-token request limit. See xAI's [model documentation](https://docs.x.ai/developers/models/grok-4.20-0309-non-reasoning) and [Chat Completions reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions). An xAI API account/key is required; a Grok chat subscription is separate. Selecting the preset only edits the unsaved draft and clears typed destination credentials. The actual saved xAI hostname/model appear in the same request warnings after configuration and member opt-in. This is another choice for the workspace's single provider, with no automatic provider switching. Compatibility is based on the documented protocol and private synthetic-provider tests, without a live xAI API acceptance test.
 
 Add up to eight named agents with bounded instructions and optional fixed tools. Address one as `@name` or choose it in the composer. The only tools are `context_sources`, which lists the explicitly selected citation identifiers, and `create_task`, which proposes a task. Tools cannot fetch arbitrary context, run code, make arbitrary HTTP calls or execute unapproved writes. Choose context to load authorized native projects, then explicitly select a task destination. The provider receives only that project ID in the fixed tool schema; the task tool is unavailable until a destination is selected and proposals for any other project are rejected. A task proposal requires the user to click **Approve and create task**; current personal workspace administration, native channel administration, source access and project validity are checked again. Approval is transactional and idempotent. Secure channels never receive the native task-creation tool.
 
+## Quick actions and request warnings
+
+**Summarise selection**, **Suggest next steps**, **Draft a reply** and **Propose a task** prepare a grounded instruction in the existing question field. They keep any text already written, keep the selected sources and disclosure choices, and make no provider request. Repeating the same final instruction does not append it twice. If the combined draft would exceed the composer limit, the draft stays unchanged and the panel asks the user to shorten it. Review the draft, then use the existing **Send to provider** action.
+
+**Propose a task** can return a cited text draft when no task tool is available. Real native task creation still requires the configured tool, an explicitly selected authorized project, current grants and the separate **Approve and create task** action. Secure channels do not gain a native task-creation tool.
+
+Before sending, an inline notice shows the saved provider hostname, configured model and selected-source count, and explains prompt/history disclosure, possible provider API charges, the provider's retention terms and the need to review AI output. The warning uses the saved configuration rather than unsaved endpoint edits and never displays an API key or credential-bearing URL. A ChatGPT or other chat subscription is not an API connection; a provider API key and that provider's API account are required. This remains workspace-owner configuration with individual member consent, without separate personal provider accounts or new native provider adapters.
+
+The existing per-request provider disclosure and additional secure-content acknowledgment remain required. Quick actions do not check those boxes, select extra sources, send a prompt or approve a task.
+
+## In-place assistance
+
+Authenticated conversations offer concrete actions beside the relevant content.
+A message's **More message actions** opens **Draft a reply**, **Summarize this
+message** or, when actual native documents are available, **Find related
+documents**. Threads offer **Summarize replies / Draft a reply** for loaded
+sources. **Message options** offers tidy/shorten actions for a nonempty main
+draft, and a nonempty thread draft offers tidy. The channel menu can review a
+recap or possible next steps from loaded conversation sources.
+
+Shared documents offer a reviewed append through their existing synchronized
+editor. Project/task editors use suggestions for the unsaved description. A
+generated answer never posts a message, saves a task or edits a document
+automatically: the relevant **Add reply to draft**, **Replace my draft** or
+**Append to document** action requires a separate click and checks the current
+target again. Appending a document is a synchronized edit, not an unsaved private
+draft.
+
+Related-document comparison lets the person choose actual authorized native
+documents, starting with one. Only the selected document identities and current
+message sources enter source review; source verification resolves their actual
+text before sending. The shared eight-source and text budgets remain enforced,
+without silently trimming verified text. This is deliberate comparison of
+selected sources, not global semantic retrieval or automatic linking.
+
+Opening an action only opens review; it grants no consent and sends or applies
+nothing. Clearing a draft, closing its thread or changing identity invalidates
+that activation. New typing cannot reopen a dismissed review, and an older
+close frame cannot take focus from a newer review or deliberately focused field.
+See [the everyday flow contract](FLOW_FIRST_UX.md).
+
+Each inline request reviews its exact prompt and selected sources before sending, uses the workspace's saved provider and member consent, and requires the same per-request and secure-content acknowledgments. The component rechecks provider revision, current access, selected source text/revisions and target snapshot; changed context invalidates an answer instead of replacing newer work. It creates a separate private conversation only on explicit Send, forwards no central Copilot history and clears that owned request history after completion. Inline suggestions do not expose native write tools or approve proposals. The central Copilot remains available for deliberate longer conversations and separately approved task creation.
+
+Inline review counts the selected context before Send, including citation/kind
+headers and source separators. If it exceeds 24,000 Unicode characters, Send is
+disabled and the user is guided to choose fewer sources. Prepared document text
+and message bodies stay intact; this guard never silently truncates a source.
+
+Native document stacks also offer **Review this stack with AI**. Choose up to eight
+current pages, then review their verified excerpts in the same inline component.
+Summary, reading-order and open-question actions return read-only cited text.
+Only checked pages are sources: unselected pages, grouped comments and saved
+conversation references are not silently disclosed. Stack AI never reorders,
+regroups or edits the native material automatically.
+
+### Direct HTTP requests
+
+`POST /workspaces/{workspace_id}/copilot/conversations/{conversation_id}/turns` requires `expected_config_revision`, a strict positive integer from the provider configuration the user reviewed in `GET /workspaces/{workspace_id}/copilot`. This is separate from the conversation's `expected_revision`. A changed configuration returns HTTP409 before allocating a turn or contacting a provider, including when another tab has already opted in to the new revision. Reload and review the actual recipient/model before retrying; never silently replace the reviewed revision with a newly fetched value.
+
+## Public interactive preview
+
+The public [product demo](PRODUCT_DEMO.md) mounts the same `Chat`, `WorkHub`,
+`ContextualCopilot` and settings components used by an installation. Its real
+API stores temporary example content. AI remains disabled/unconfigured in that
+public environment, so the normal controls show that state and no provider call
+or invented answer is presented. The separate template/extractive demo recipes
+have been retired. A customer installation can explicitly configure its own
+provider and use the reviewed inference flow described here. Native sample
+content and browser interaction do not establish live AI-provider acceptance.
+
 ## Explicit context and citations
 
-Choose **Choose messages, documents and files**, then check only the sources you intend to disclose. Native message content is read only for those selected IDs. Text/JSON files must be UTF-8 and at most 12 KB; immutable file identities and current file availability are checked. Shared documents are reconstructed and verified by the trusted Yjs client, with up to 12,000 document characters bound to the current authorized document version. Each request is limited to eight sources and 24,000 context characters. There is no hidden index, background summarizer, automatic channel history ingestion or provider-initiated read tool.
+Choose **Choose messages, documents and files**, then check only the sources you intend to disclose. Native message content is read only for those selected IDs. The current client sends an `expected_text_sha256` for each reviewed native message; the server compares it with the authorized current text and returns HTTP409 before contacting the provider if it changed. Direct HTTP callers should send the SHA256 of the exact UTF-8 message text they reviewed in this source field. Text/JSON files must be UTF-8 and at most 12 KB; immutable file identities and current file availability are checked. Shared documents are reconstructed and verified by the trusted Yjs client, with up to 12,000 document characters bound to the current authorized document version. Each request is limited to eight sources and 24,000 context characters. There is no hidden index, background summarizer, automatic channel history ingestion or provider-initiated read tool.
 
 Review the provider destination and consent text before sending. The prompt, selected context and bounded visible native AI history are disclosed to that provider. Its region, retention, training and privacy terms apply. Recheck factual answers against the `[S1]` citations. Citation buttons revalidate current permissions and then open the current source; removed or changed sources make old conversation history unavailable until reset. A model answer cannot create a citation outside the selected source set.
 
@@ -34,4 +111,4 @@ The dedicated activity table contains only an opaque actor/workspace ID, fixed a
 
 `cd backend && .venv/bin/python -m pytest tests/test_copilot.py -q` runs a private HTTPS server with an ephemeral CA and synthetic key through the real pinned transport and SSE parser. It covers selected-only context, citations, encrypted private history/reset, real approved/idempotent task creation, truncated streams, post-network revocation, private-channel and scoped configuration denial, secure explicit client relay without stored plaintext, SSRF/query-key rejection and Unicode framing. Production network policy is changed only by exact private-fixture helper replacements; no runtime bypass is exposed.
 
-The Copilot browser proof (`frontend/tests/copilot-browser.py`) uses a frozen frontend snapshot, disposable loopback API/Vite/Chromium services and synthetic accounts. It first displays **AI configuration required** with no key and verifies zero provider calls. It then configures a real private HTTPS/SSE fixture provider with a synthetic key, exercises named agents, opt-in, explicitly selected context and task destination, citations, approval/idempotency and history reset, and verifies saved Swedish preference and a 390px mobile layout. No real AI provider credentials, production data or external provider calls are used.
+The Copilot browser proof (`frontend/tests/copilot-browser.py`) uses a frozen frontend snapshot, disposable loopback API/Vite/Chromium services and synthetic accounts. It first displays **AI configuration required** with no key and verifies zero provider calls. It then configures a real private HTTPS/SSE fixture provider with a synthetic key, exercises named agents, opt-in, explicitly selected context and task destination, citations, approval/idempotency and history reset. Quick-action checks preserve the exact typed draft, selected context and unchecked disclosure without making a provider call, verify the actual recipient/model/source-count and API/privacy warnings, and refuse overflow without truncation. Actual Chat integration checks review a selected message, invalidate an answer when the draft changes, append a reply only on approval, and rewrite only the reviewed unsent draft without native source references. They verify zero message posts, zero unapproved task writes and cleanup of the owned private AI conversations. A real stack group creates verified Yjs pages and a native stack through the UI, deselects a page, and sends only the checked page to the private TLS provider. Unselected pages, grouped comments and conversation text stay out; no document or stack write follows the answer. The proof verifies saved Swedish preference and mobile layouts at 390px and 320px, including 44px quick-action targets, and records source hashes. No real AI provider credentials, production data or external provider calls are used.

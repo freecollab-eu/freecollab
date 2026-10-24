@@ -221,11 +221,37 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
                 add("taskcard" if kind == "task" else "projectboard", [row]); add("projecttaskrevision", revs)
     for doc in _channel_records(session, "shareddocument", channel_ids):
         children = {name: _children(session, name, "document_id", [doc["id"]]) for name in (
-            "shareddocumentupdate", "shareddocumentsnapshot", "shareddocumentcomment")}
+            "shareddocumentupdate", "shareddocumentsnapshot", "shareddocumentcomment", "shareddocumentplacement")}
+        relations = _table("shareddocumentrelation")
+        children["shareddocumentrelation"] = _records(session, relations.name, or_(
+            relations.c.first_document_id == doc["id"], relations.c.second_document_id == doc["id"])) if relations is not None else []
         flattened = [row for rows in children.values() for row in rows]
         if _old(doc, cutoff) and all(_old(item, cutoff) for item in flattened) and _native(flattened):
             add("shareddocument", [doc])
             for name, rows in children.items(): add(name, rows)
+    # An organization change is part of a document's retained history. Old
+    # empty stacks can be erased only after every placement is also eligible.
+    references = _channel_records(session, "shareddocumentstackreference", channel_ids)
+    add("shareddocumentstackreference", [row for row in references if _old(row, cutoff)])
+    # A new saved source keeps the source message and its parent chain reachable.
+    protected_messages = set()
+    for reference in references:
+        if _old(reference, cutoff): continue
+        identifier = reference["message_id"]
+        while identifier in by_id and identifier not in protected_messages:
+            protected_messages.add(identifier)
+            identifier = by_id[identifier].get("parent_id")
+    plan["message"] = [row for row in plan.get("message", []) if row["id"] not in protected_messages]
+    removed_references = set(_ids(plan.get("shareddocumentstackreference", [])))
+    removed_placements = {row["document_id"] for row in plan.get("shareddocumentplacement", [])}
+    placements = _channel_records(session, "shareddocumentplacement", channel_ids)
+    for stack in _channel_records(session, "shareddocumentstack", channel_ids):
+        if (_old(stack, cutoff)
+                and not any(row["stack_id"] == stack["id"] and row["document_id"] not in removed_placements for row in placements)
+                and not any(row["stack_id"] == stack["id"] and row["id"] not in removed_references for row in references)):
+            add("shareddocumentstack", [stack])
+    # Current channel identity is not a historical content item. Preserve its
+    # monotonic revision while the Channel exists (avoids stale-editor ABA).
     for run in _channel_records(session, "workflowrun", channel_ids):
         if run.get("status") in {"completed", "rejected", "cancelled", "timed_out", "failed"} and run.get("finished_at") and run["finished_at"] < cutoff:
             add("workflowrun", [run])
@@ -340,9 +366,12 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
     if mapping is not None and connections and local_ids:
         add("remotesyncitem", _records(session, mapping.name, and_(mapping.c.connection_id.in_(_ids(connections)), mapping.c.local_id.in_(local_ids))))
     # Delete only known dependents; unknown future FK models fail closed below.
-    allowed_dependents = {"reaction", "readreceipt", "messagechange", "threadsubscription", "fileversion", "fileuploadreceipt",
+    # A conversation routing reference is not a hold on either resource. Its
+    # own age or an authorized source/target purge can remove the reference.
+    add("conversationworkreference", [row for row in _channel_records(session, "conversationworkreference", channel_ids) if _old(row, cutoff)])
+    allowed_dependents = {"reaction", "readreceipt", "messagechange", "messagereference", "scheduledmessagereference", "threadsubscription", "fileversion", "fileuploadreceipt",
         "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
-        "shareddocumentcomment", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
+        "shareddocumentcomment", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
         "calendarproviderpublication", "calendarproviderjob", "nativecallsession", "nativecallconsent"}
     expanded = True
     while expanded:
@@ -503,6 +532,9 @@ EXPORT_FIELDS = {
     "externalmeeting": "id channel_id created_by state revision secure calendar_item_id created_at updated_at",
     "channel": "id name type created_at",
     "message": "id channel_id author_id content encrypted parent_id thread_count mentions edited_at deleted created_at",
+    "messagereference": "message_id start end kind target_id",
+    "mentiongroup": "id channel_id name created_by version created_at updated_at",
+    "mentiongroupmember": "group_id user_id",
     "slackimportmessage": "message_id import_id source_channel source_timestamp",
     "slackimportdetail": "message_id encrypted_details",
     "file": "id channel_id uploader_id filename content_type size created_at",
@@ -523,6 +555,12 @@ EXPORT_FIELDS = {
     "shareddocumentupdate": "document_id update_id sequence created_by created_at content_mode matrix_event_id encrypted_payload byte_size",
     "shareddocumentsnapshot": "id document_id covers_sequence created_by created_at content_mode matrix_event_id encrypted_payload",
     "shareddocumentcomment": "id document_id created_by created_at content_mode matrix_event_id encrypted_payload resolved version",
+    "shareddocumentstack": "id channel_id created_by created_at updated_at version generation encrypted_payload",
+    "shareddocumentplacement": "document_id channel_id stack_id version updated_by updated_at",
+    "shareddocumentrelation": "id channel_id first_document_id second_document_id created_by created_at",
+    "shareddocumentstackreference": "id channel_id stack_id message_id created_by created_at",
+    "conversationworkreference": "id channel_id source_message_id resource_kind document_id task_id decision_id created_by created_at",
+    "channelmetadata": "channel_id version content_mode matrix_event_id encrypted_payload created_by updated_by created_at updated_at",
     "workflowdefinition": "id workspace_id channel_id created_by granted_by current_revision enabled created_at updated_at",
     "workflowrevision": "workflow_id revision encrypted_definition created_by created_at",
     "workflowrun": "id workflow_id channel_id workflow_revision event_id event_kind resource_id actor_id status step_index due_at deadline_at attempts created_at updated_at finished_at",
@@ -561,14 +599,14 @@ def export_data(session, job, request):
     records = {"channel": [{"id": row.id, "name": None if row.id in secure_ids else row.name,
                 "type": row.type, "created_at": row.created_at, "content_mode": "matrix" if row.id in secure_ids else "server"} for row in channels]}
     parents = {}
-    for name in ("message", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
+    for name in ("message", "mentiongroup", "file", "filedocument", "decision", "integrationcontent", "projectboard", "taskcard", "shareddocument", "shareddocumentstack", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "channelmetadata", "workflowdefinition", "workflowrun", "meeting", "activityfeedpost", "filecomment", "cloudfilelink", "externalmeeting", "appcard", "channelclip", "sfuroom", "calendarproviderpublication", "calendarproviderjob", "calendarsubscription"):
         rows = _channel_records(session, name, channel_ids)
         if name in {"message", "file", "filedocument", "appcard"}:
             # Matrix messages/media are not represented by native file bytes.
             rows = [row for row in rows if row["channel_id"] not in secure_ids]
         records[name] = rows
         parents[name] = {row["id"]: row["channel_id"] for row in rows if "id" in row}
-    for name, parent, field in (("slackimportmessage", "message", "message_id"), ("slackimportdetail", "message", "message_id"),
+    for name, parent, field in (("messagereference", "message", "message_id"), ("mentiongroupmember", "mentiongroup", "group_id"), ("slackimportmessage", "message", "message_id"), ("slackimportdetail", "message", "message_id"),
         ("fileversion", "filedocument", "document_id"), ("decisionrevision", "decision", "decision_id"),
         ("integrationcontentrevision", "integrationcontent", "item_id"), ("calendarattendee", "integrationcontent", "item_id"), ("shareddocumentupdate", "shareddocument", "document_id"),
         ("shareddocumentsnapshot", "shareddocument", "document_id"), ("shareddocumentcomment", "shareddocument", "document_id"),
@@ -607,6 +645,13 @@ def export_data(session, job, request):
                         kind = "post" if name == "activityfeedrevision" else "comment" if name == "activityfeedcommentrevision" else row["kind"]
                         identifier = row["post_id"] if kind == "post" else row["comment_id"] if kind == "comment" else row["post_id"] + ":" + row["user_id"] + ":" + kind
                         value["fields"] = open_fields(session, channel, kind, identifier, row["revision"], row["encrypted_payload"])
+                    elif name == "channelmetadata":
+                        from ..models.channel_metadata import ChannelMetadata
+                        from .channel_metadata import open_payload
+                        value["fields"] = open_payload(session, ChannelMetadata.model_validate(row))
+                    elif name == "shareddocumentstack":
+                        from .shared_documents import open_payload
+                        value["fields"] = open_payload(session, channel, "stack", row["id"], row["generation"], row["encrypted_payload"])
                     elif name.startswith("shareddocument"):
                         from .shared_documents import open_payload
                         kind = {"shareddocumentupdate": "update", "shareddocumentsnapshot": "snapshot", "shareddocumentcomment": "comment"}[name]
@@ -616,6 +661,7 @@ def export_data(session, job, request):
                         value["fields"] = open_payload(session, channel, "clip", row["id"], row["id"], row["encrypted_payload"])
                     else:
                         value["fields"] = json.loads(decrypt_message(row["encrypted_payload"], channel))
+            if name == "channelmetadata": value.pop("encrypted_payload", None)
             if name == "shareddocument":
                 value.pop("summary_encrypted_payload", None)
                 if channel not in secure_ids and row.get("summary_encrypted_payload"):

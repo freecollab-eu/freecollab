@@ -5,6 +5,7 @@ Reuses the existing customer proof's TLS/provider/process helpers. No root previ
 service or real provider is modified. Its disposable API alone allows the exact
 synthetic HTTPS fixture origins; production retains public-address pinning.
 """
+from ui_navigation import open_chat_tool
 import base64
 import importlib.util
 import json
@@ -175,7 +176,7 @@ def main():
                     assert p.api(api_base, "GET", "/secure/status", worker)["requires_encryption_unlock"] is False
                     assert not worker_page.evaluate("() => sessionStorage.getItem('freecollab_pending_workforce_invite')")
                     p.no_saved_secrets(worker_page, [invitation_token, providers[0].client_secret])
-                    worker_page.get_by_role("button", name="Account settings", exact=True).click()
+                    open_chat_tool(worker_page, 'Account settings')
                     expect(worker_page.get_by_role("region", name="Organization-managed account", exact=True)).to_be_visible()
                     assert worker_page.evaluate("() => document.documentElement.scrollWidth <= innerWidth + 1")
                     with sqlite3.connect(database) as connection:

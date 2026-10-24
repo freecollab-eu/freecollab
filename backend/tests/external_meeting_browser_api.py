@@ -9,6 +9,8 @@ from app.database import engine, init_db
 from app.models.user import User
 from app.models.channel import Channel, ChannelMember
 from app.models.workspace import Workspace, WorkspaceMember, WorkspaceChannel
+# Typed message references register a foreign key to the scheduling table.
+from app.models.chat_productivity import ScheduledMessage
 from app.services.auth import create_token, hash_password
 from tests.external_meeting_fixture import ProviderFixture
 import uvicorn

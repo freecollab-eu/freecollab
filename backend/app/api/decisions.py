@@ -5,7 +5,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from nacl.exceptions import CryptoError
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import ConfigDict, Field, StringConstraints, model_validator
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
 
@@ -17,12 +17,13 @@ from ..services.workspaces import require_direct_message_writable
 from ..services.auth import get_current_user
 from ..services.crypto import encrypt_message, decrypt_message
 from ..services.chat_notifications import require_native_channel
+from ..services.field_references import ReferencedFields, normalize_field_references, require_field_reference_targets
 
 router = APIRouter(tags=["decisions"])
 Reference = Annotated[str, StringConstraints(min_length=1, max_length=1024)]
 
 
-class DecisionContent(BaseModel):
+class DecisionContent(ReferencedFields):
     model_config = ConfigDict(extra="forbid")
     title: str | None = Field(default=None, min_length=1, max_length=200)
     content: str | None = Field(default=None, min_length=1, max_length=20000)
@@ -31,6 +32,16 @@ class DecisionContent(BaseModel):
     decision_date: date | None = None
     source_message_id: Reference | None = None
     matrix_event_id: Reference | None = None
+
+    def reference_texts(self):
+        return {key: getattr(self, key) for key in ("title", "content") if isinstance(getattr(self, key), str)}
+
+    @model_validator(mode="before")
+    @classmethod
+    def opaque_references_only(cls, value):
+        if isinstance(value, dict) and value.get("matrix_event_id") is not None and value.get("field_references") is not None:
+            raise ValueError("Encrypted decisions accept only an opaque event reference")
+        return value
 
     @model_validator(mode="after")
     def content_mode(self):
@@ -54,7 +65,7 @@ def decision_record(session, decision_id: str, user_id: str):
     return decision, member
 
 
-def validate_content(session, channel_id: str, data: DecisionContent, user_id: str):
+def validate_content(session, channel_id: str, data: DecisionContent, user_id: str, *, previous=None):
     from ..services.matrix_bridge import is_secure_channel
     secure = is_secure_channel(session, channel_id)
     if data.matrix_event_id is not None:
@@ -65,6 +76,7 @@ def validate_content(session, channel_id: str, data: DecisionContent, user_id: s
         return
     if secure:
         raise HTTPException(409, "This channel requires an encrypted decision event")
+    require_field_reference_targets(session, channel_id, user_id, data.model_dump(mode="json"), previous=previous)
     from ..services.enterprise_governance import enforce_native_document
     enforce_native_document(session, channel_id, user_id, data.model_dump(mode="json", exclude={"matrix_event_id"}))
     if data.responsible_user_id:
@@ -91,7 +103,7 @@ def new_revision(decision: Decision, data: DecisionContent, number: int, actor_i
     )
 
 
-def revision_data(session, decision: Decision, revision: DecisionRevision):
+def revision_data(session, decision: Decision, revision: DecisionRevision, *, source_roots=None):
     result = {"id": decision.id, "channel_id": decision.channel_id, "created_by": decision.created_by,
               "created_at": decision.created_at, "revision": revision.revision,
               "revision_id": revision.id, "revised_by": revision.created_by, "revised_at": revision.created_at,
@@ -105,6 +117,15 @@ def revision_data(session, decision: Decision, revision: DecisionRevision):
         except (CryptoError, ValueError, TypeError, AttributeError):
             raise HTTPException(409, "Stored decision could not be decrypted") from None
         result.update({key: payload.get(key) for key in ("title", "content", "status", "responsible_user_id", "decision_date", "source_message_id")})
+        try:
+            references = normalize_field_references({key: result[key] for key in ("title", "content")}, payload.get("field_references"))
+        except ValueError:
+            raise HTTPException(409, "Stored decision references could not be verified") from None
+        if references:
+            result["field_references"] = references
+        from ..services.message_discussion import native_discussion_root
+        result['discussion_message_id'] = native_discussion_root(
+            session, decision.channel_id, result.get('source_message_id'), cache=source_roots)
     return result
 
 
@@ -113,10 +134,11 @@ def get_decisions(channel_id: str, user=Depends(get_current_user), session=Depen
     require_channel_member(session, channel_id, user.id)
     decisions = session.exec(select(Decision).where(Decision.channel_id == channel_id).order_by(Decision.created_at.desc())).all()
     result = []
+    source_roots = {}
     for decision in decisions:
         latest = session.exec(select(DecisionRevision).where(DecisionRevision.decision_id == decision.id).order_by(DecisionRevision.revision.desc()).limit(1)).first()
         if latest:
-            result.append(revision_data(session, decision, latest))
+            result.append(revision_data(session, decision, latest, source_roots=source_roots))
     return result
 
 
@@ -132,7 +154,8 @@ def create_decision(channel_id: str, data: DecisionContent, user=Depends(get_cur
     session.flush()
     session.add(revision)
     from ..services.webhooks import enqueue_channel_event
-    enqueue_channel_event(session, channel_id, "decision.created", decision.id)
+    enqueue_channel_event(session, channel_id, "decision.created", decision.id,
+                          workflow_metadata=None if data.matrix_event_id else {"status": data.status or "proposed"})
     session.commit()
     return revision_data(session, decision, revision)
 
@@ -161,15 +184,17 @@ def revise_decision(decision_id: str, data: ReviseDecision, user=Depends(get_cur
     require_direct_message_writable(session, decision.channel_id, user.id)
     if decision.created_by != user.id and member.role != "admin":
         raise HTTPException(403, "Only the author or channel administrator can revise this decision")
-    validate_content(session, decision.channel_id, data, user.id)
     latest = session.exec(select(DecisionRevision).where(DecisionRevision.decision_id == decision.id).order_by(DecisionRevision.revision.desc()).limit(1)).first()
     if not latest or latest.revision != data.expected_revision:
         raise HTTPException(409, "Decision has changed; reload its current revision")
+    previous = revision_data(session, decision, latest) if latest.content_mode == "server" and data.field_references else None
+    validate_content(session, decision.channel_id, data, user.id, previous=previous)
     revision = new_revision(decision, data, latest.revision + 1, user.id)
     session.add(revision)
     try:
         from ..services.webhooks import enqueue_channel_event
-        enqueue_channel_event(session, decision.channel_id, "decision.updated", revision.id)
+        enqueue_channel_event(session, decision.channel_id, "decision.updated", revision.id,
+                              workflow_metadata=None if data.matrix_event_id else {"status": data.status or "proposed"})
         session.commit()
     except IntegrityError:
         session.rollback()

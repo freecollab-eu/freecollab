@@ -5,6 +5,7 @@ Builds the complete production app into an owned temporary directory and runs
 only private API/static services with independent fixture accounts and keys.
 No existing service, browser profile or live push provider is used.
 """
+from ui_navigation import choose_chat_channel, open_chat_tool, reveal_chat_tool
 import base64
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -138,15 +139,16 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 try:
                     stage='production app and native service worker installation'
                     page.goto(app,wait_until='networkidle');page.wait_for_function('navigator.serviceWorker.controller!==null',timeout=30000)
+                    reveal_chat_tool(page, 'Mobile and offline settings')
                     expect(page.get_by_role('button',name='Mobile and offline settings',exact=True)).to_be_visible()
-                    page.get_by_role('navigation',name='Channels',exact=True).get_by_role('button',name='Studio').click()
+                    choose_chat_channel(page, 'Studio')
                     composer=page.get_by_role('textbox',name='Message #Studio',exact=True);expect(composer).to_be_visible()
                     assert page.evaluate('document.querySelector("link[rel=manifest]").href.endsWith("/manifest.webmanifest")')
                     results['complete_production_app_native_service_worker_control']=True
                     stage='native encrypted vault and offline queue'
                     set_offline(context,page,network,True);composer.fill('Offline queued message private A');page.get_by_role('button',name='Send message',exact=True).click()
                     expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible()
-                    composer.fill('Saved draft private A');page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    composer.fill('Saved draft private A');open_chat_tool(page, 'Mobile and offline settings')
                     expect(page.get_by_role('dialog',name='Mobile and offline',exact=True).get_by_text('Saved draft private A',exact=True)).to_be_visible()
                     page.get_by_role('button',name='Close mobile settings',exact=True).click()
                     vault=page.evaluate(VAULT)
@@ -156,7 +158,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     raw=json.dumps(vault);assert all(value not in raw for value in ['Saved draft private A','Offline queued message private A',tokens['alice']])
                     assert count()==0;results['native_indexeddb_nonextractable_aes_gcm_no_plaintext_or_bearer']=True
                     stage='actual offline navigation and private draft library'
-                    reload_offline(page,network);page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    reload_offline(page,network);open_chat_tool(page, 'Mobile and offline settings')
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Saved draft private A',exact=True)).to_be_visible()
                     expect(dialog.get_by_text('Offline queued message private A',exact=True)).to_be_visible()
@@ -179,10 +181,10 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(dialog.get_by_text('No messages are waiting on this device.',exact=True)).to_be_visible()
                     results['reconnect_checks_live_identity_and_membership_before_exactly_once_native_send']=True
                     page.get_by_role('button',name='Close mobile settings',exact=True).click();page.reload(wait_until='networkidle')
-                    page.get_by_role('navigation',name='Channels',exact=True).get_by_role('button',name='Studio').click();composer=page.get_by_role('textbox',name='Message #Studio',exact=True)
+                    choose_chat_channel(page, 'Studio');composer=page.get_by_role('textbox',name='Message #Studio',exact=True)
                     stage='restored draft cannot overwrite newer composer typing'
                     composer.fill('Draft before restoration race')
-                    page.get_by_role('button',name='Mobile and offline settings',exact=True).click()
+                    open_chat_tool(page, 'Mobile and offline settings')
                     expect(page.get_by_role('dialog',name='Mobile and offline',exact=True).get_by_text('Draft before restoration race',exact=True)).to_be_visible()
                     page.get_by_role('button',name='Close mobile settings',exact=True).click()
                     page.evaluate("""()=>{
@@ -206,20 +208,20 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible();assert count()==2
                     context.unroute('**/api/mobile/offline/channels/shared/messages',lose_ack)
                     set_offline(context,page,network,True);set_offline(context,page,network,False)
-                    page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('No messages are waiting on this device.',exact=True)).to_be_visible();assert count()==2
                     results['lost_ack_retry_reuses_durable_client_receipt_without_duplicate']=True
                     stage='membership removed while offline stops reconnect send'
                     page.get_by_role('button',name='Close mobile settings',exact=True).click();set_offline(context,page,network,True)
                     composer.fill('Removed membership must never send');page.get_by_role('button',name='Send message',exact=True).click();expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible()
                     with sqlite3.connect(private/'proof.db') as db:db.execute("DELETE FROM channelmember WHERE channel_id='shared' AND user_id='alice'");db.commit()
-                    set_offline(context,page,network,False);page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    set_offline(context,page,network,False);open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Needs review',exact=True)).to_be_visible();assert count()==2
                     results['removed_membership_requires_review_and_cannot_auto_send']=True
                     stage='logout purge and two-account cross-tab isolation'
                     peer=context.new_page();peer.goto(app,wait_until='domcontentloaded');peer.wait_for_function('navigator.serviceWorker.controller!==null')
-                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Toggle channels',exact=True).click() if page.get_by_role('button',name='Sign out',exact=True).is_hidden() else None
-                    page.get_by_role('button',name='Sign out',exact=True).click()
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Switch channel',exact=True).click() if page.get_by_role('button',name='Sign out',exact=True).is_hidden() else None
+                    open_chat_tool(page, 'Sign out')
                     page.wait_for_function('localStorage.getItem("freecollab_token")===null')
                     deadline=time.monotonic()+10
                     while time.monotonic()<deadline:
@@ -228,7 +230,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                         page.wait_for_timeout(100)
                     assert not vault['keys'] and not vault['rows']
                     page.evaluate('''tokens=>{localStorage.setItem('freecollab_token',tokens.bob);localStorage.setItem('freecollab_user_id','bob');window.dispatchEvent(new Event('freecollab:auth-changed'))}''',tokens)
-                    page.reload(wait_until='networkidle');page.get_by_role('button',name='Mobile and offline settings',exact=True).click();dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    page.reload(wait_until='networkidle');open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('No private drafts are saved on this device.',exact=True)).to_be_visible();expect(dialog.get_by_text('No messages are waiting on this device.',exact=True)).to_be_visible()
                     assert 'Edited offline private A' not in page.content() and 'Removed membership must never send' not in page.content()
                     peer.wait_for_timeout(500);assert 'Edited offline private A' not in peer.content()

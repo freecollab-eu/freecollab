@@ -229,6 +229,7 @@ jobs:
           python frontend/tests/conversation-flow-browser.py
           BACKEND_PYTHON=python python frontend/tests/slash-commands-browser.py
           BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
+          BACKEND_PYTHON=python python frontend/tests/thread-commands-browser.py
           python frontend/tests/work-surface-layout-browser.py
           BACKEND_PYTHON=python python frontend/tests/workspace-modes-browser.py
           BACKEND_PYTHON=python python frontend/tests/flow-first-browser.py

@@ -107,6 +107,13 @@ interface ConversationReadingSnapshot extends ConversationReadingPosition {
   introduction?: boolean;
 }
 
+type ComposerSurface = 'main' | 'thread';
+interface ComposerPalette {
+  channelId: string; workspaceId: string; token: string;
+  surface: ComposerSurface; threadId?: string;
+  mode: 'typed' | 'browse'; query: string;
+}
+
 interface ChatProps {
   onLogout: (warning?: string) => void;
   onAdmin?: () => void;
@@ -170,7 +177,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [flowNotice, setFlowNotice] = useState('');
   const [workHubSource, setWorkHubSource] = useState<{ message: Message; token: string; workspaceId: string } | null>(null);
   const flowConversationMoved = useRef(false);
-  const workHubOrigin = useRef<{ element: HTMLElement | null; top: number; workspaceId: string; channelId: string; token: string } | null>(null);
+  const workHubOrigin = useRef<{ element: HTMLElement | null; top: number; workspaceId: string; channelId: string; token: string; thread?: { parentId: string; actorId: string | null; request: number } } | null>(null);
   const initialTools = useRef({ token: api.getAccessToken(), work: initialWorkHubTab, integration: initialIntegrationTab, applied: false });
   const [stackMessageEntry, setStackMessageEntry] = useState<{ workspaceId: string; channelId: string; messageId: string; token: string } | null>(null);
   const stackSourceRequest = useRef(0);
@@ -258,22 +265,28 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [unreadCounts, setUnreadCounts] = useState<Record<string, number>>({});
   const [showNotifications, setShowNotifications] = useState(false);
   const [commandOpen, setCommandOpen] = useState(false);
-  const [slashPalette, setSlashPalette] = useState<{ channelId: string; workspaceId: string; token: string; mode: 'typed' | 'browse'; query: string } | null>(null);
+  const [slashPalette, setSlashPalette] = useState<ComposerPalette | null>(null);
   const [slashSelected, setSlashSelected] = useState<SlashAction | null>(null);
   const [commandError, setCommandError] = useState('');
   const [slashSharedWork, setSlashSharedWork] = useState<{ channelId: string; workspaceId: string; token: string } | null>(null);
   const [slashStaff, setSlashStaff] = useState<{ token: string; allowed: boolean } | null>(null);
   const slashId = useId();
   const slashRootRef = useRef<HTMLDivElement>(null), slashLauncherRef = useRef<HTMLButtonElement>(null);
-  const slashVisible = !!slashPalette && !sending && slashPalette.channelId === activeChannel?.id &&
-    slashPalette.workspaceId === workspace?.id && slashPalette.token === api.getAccessToken();
+  const threadSlashRootRef = useRef<HTMLDivElement>(null), threadSlashLauncherRef = useRef<HTMLButtonElement>(null);
+  const slashVisible = !!slashPalette && (slashPalette.surface === 'thread' || !sending) && slashPalette.channelId === activeChannel?.id &&
+    slashPalette.workspaceId === workspace?.id && slashPalette.token === api.getAccessToken() &&
+    (slashPalette.surface === 'thread' ? slashPalette.threadId === threadMessage?.id && !threadMessage?.deleted && !threadMessage?.locked : !threadMessage);
+  const mainSlashVisible = slashVisible && slashPalette?.surface === 'main';
+  const threadSlashVisible = slashVisible && slashPalette?.surface === 'thread';
+  const slashText = slashPalette?.surface === 'thread' ? threadReplyContent : newMessage;
+  const slashReferences = slashPalette?.surface === 'thread' ? threadReferences : draftReferences;
   const slashContext: SlashContext = { hasChannel: !!activeChannel, secure: !!activeChannel?.secure, channelType: activeChannel?.type,
     embedded: !!embeddedChannelId, nativeSession, workspaceRole: workspace?.role, hasWorkspace: !!workspace,
     hasAdmin: !!onAdmin && !!slashStaff?.allowed && slashStaff.token === api.getAccessToken(),
     sharedWork: !!slashSharedWork && slashSharedWork.channelId === activeChannel?.id && slashSharedWork.workspaceId === workspace?.id && slashSharedWork.token === api.getAccessToken() };
-  const rawCommand = slashVisible && slashPalette.mode === 'typed' ? parseComposerCommand(newMessage, slashContext) : null;
+  const rawCommand = slashVisible && slashPalette.mode === 'typed' ? parseComposerCommand(slashText, slashContext) : null;
   const parsedCommand = rawCommand?.command && ['task', 'decision', 'groups'].includes(rawCommand.command.id)
-    ? parseComposerCommand(prepareCommandPeople(newMessage, draftReferences).text, slashContext) : rawCommand;
+    ? parseComposerCommand(prepareCommandPeople(slashText, slashReferences).text, slashContext) : rawCommand;
   // Once arguments belong to an exact command, a newly revealed menu under
   // the pointer must not switch that command after selecting an @ reference.
   const slashCommands = slashVisible ? rawCommand?.command && rawCommand.arguments?.trim()
@@ -377,14 +390,20 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useModalFocus(presenceDialog, () => setPresenceOpen(false), presenceOpen);
   const mainReferencePicker = useComposerReferences({ channelId: activeChannel?.id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
     text: newMessage, references: draftReferences, input: inputRef, disabled: sending,
-    onInsert: (text, references) => { setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
+    onInsert: (text, references) => { if (workHubOrigin.current?.thread) flowConversationMoved.current = true; setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
   const threadReferencePicker = useComposerReferences({ channelId: threadMessage?.channel_id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
-    text: threadReplyContent, references: threadReferences, input: threadInputRef,
-    onInsert: (text, references) => updateThreadDraft(text, references) });
+    text: threadReplyContent, references: threadReferences, input: threadInputRef, contextId: threadMessage?.id,
+    onInsert: (text, references) => {
+      if (threadMessageRef.current?.id !== threadMessage?.id) return;
+      updateThreadDraft(text, references); updateCommandPalette(text, 'thread');
+    } });
   const editReferencePicker = useComposerReferences({ channelId: editingMessage ? activeChannel?.id : undefined, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
     text: editContent, references: editReferences, input: editInputRef,
     onInsert: (text, references) => { setEditContent(text); setEditReferences(references); } });
   useEffect(() => { setSlashPalette(null); setSlashSharedWork(null); }, [activeChannel?.id, workspace?.id, workHubIdentity.credential]);
+  useEffect(() => {
+    setSlashPalette(previous => previous?.surface === 'thread' ? previous.threadId === threadMessage?.id ? previous : null : threadMessage ? null : previous);
+  }, [threadMessage?.id]);
   useEffect(() => {
     const clear = () => { setSlashPalette(null); setSlashSharedWork(null); };
     window.addEventListener('freecollab:auth-changed', clear);
@@ -394,12 +413,14 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (!slashVisible) return;
     const outside = (event: Event) => {
       const target = event.target as Node;
-      if (!slashRootRef.current?.contains(target) && !slashLauncherRef.current?.contains(target)) setSlashPalette(null);
+      const root = slashPalette?.surface === 'thread' ? threadSlashRootRef.current : slashRootRef.current;
+      const launcher = slashPalette?.surface === 'thread' ? threadSlashLauncherRef.current : slashLauncherRef.current;
+      if (!root?.contains(target) && !launcher?.contains(target)) setSlashPalette(null);
     };
     document.addEventListener('pointerdown', outside, true);
     document.addEventListener('focusin', outside);
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('focusin', outside); };
-  }, [slashVisible]);
+  }, [slashVisible, slashPalette?.surface]);
   useEffect(() => {
     if (!slashVisible || !activeChannel?.secure || !workspace || !slashPalette) return;
     setSlashSharedWork(null);
@@ -1394,7 +1415,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     // A slash query is navigation, never a message. Escape restores literal sending.
-    if (composingRef.current || mainReferencePicker.open || slashVisible && slashPalette?.mode === 'typed') return;
+    if (composingRef.current || mainReferencePicker.open || mainSlashVisible && slashPalette?.mode === 'typed') return;
     if (!newMessage.trim() || !activeChannel || sending) return;
     const channelId = activeChannel.id;
     setSending(true); setActionError('');
@@ -1464,7 +1485,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const handleThreadReply = async () => {
-    if (!threadReplyContent.trim() || !threadMessage || composingRef.current || threadReferencePicker.open) return;
+    if (!threadReplyContent.trim() || !threadMessage || composingRef.current || threadReferencePicker.open || threadSlashVisible && slashPalette?.mode === 'typed') return;
     try {
       const parentId = threadMessage.id, token = api.getAccessToken();
       const content = threadReplyContent;
@@ -1491,6 +1512,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const { startTyping, stopTyping } = useTypingEmitter(activeChannel?.id || '');
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (workHubOrigin.current?.thread) flowConversationMoved.current = true;
     const value = e.target.value;
     const references = reconcileReferences(newMessage, value, draftReferences, mainBeforeEdit.current);
     mainBeforeEdit.current = undefined;
@@ -1509,12 +1531,14 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   };
 
-  function updateCommandPalette(value: string) {
+  function updateCommandPalette(value: string, surface: ComposerSurface = 'main') {
     setCommandError('');
     const token = api.getAccessToken();
     if (isComposerCommandDraft(value, slashContext) && activeChannel && workspace && token && !composingRef.current) {
       if (!slashVisible) setSlashSharedWork(null);
-      setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, mode: 'typed', query: value });
+      const threadId = surface === 'thread' ? threadMessageRef.current?.id : undefined;
+      if (surface === 'thread' && !threadId) return;
+      setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, surface, threadId, mode: 'typed', query: value });
       setSlashSelected(null);
     } else setSlashPalette(null);
   }
@@ -1543,6 +1567,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       threadReferencePicker.close();
     } else {
       if ((draftsRef.current[channel.id] ?? '') !== before) return false;
+      if (workHubOrigin.current?.thread) flowConversationMoved.current = true;
       assistLive.current = { ...live, draft: after };
       setNewMessage(current => stillCurrent() && current === before ? after : current);
       persistDraft(channel.id, after, !!channel.secure);
@@ -1744,9 +1769,18 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       followingLatestRef.current = false; clearTimeout(followTimeoutRef.current);
     }
     setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
+    const returningThread = origin?.thread && origin.thread.request === threadRequest.current && origin.thread.actorId === api.getCurrentUserId() && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current
+      ? messagesRef.current.find(message => message.id === origin.thread!.parentId && message.channel_id === channelId && !message.deleted && !message.locked) : undefined;
+    if (returningThread) void loadThread(returningThread);
+    const returningRequest = threadRequest.current;
     requestAnimationFrame(() => {
       if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
+      if (returningThread && (threadRequest.current !== returningRequest || threadMessageRef.current?.id !== returningThread.id)) return;
       if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
+      if (returningThread) {
+        if (threadRequest.current === returningRequest && threadMessageRef.current?.id === returningThread.id) threadInputRef.current?.focus({ preventScroll: true });
+        handleTimelineScroll(); return;
+      }
       const fallback = timelineRef.current?.closest('.fc-chat')?.querySelector<HTMLElement>('[data-conversation-work-return]');
       if (flowConversationMoved.current) inputRef.current?.focus({ preventScroll: true });
       else if (origin?.element?.isConnected) origin.element.focus({ preventScroll: true });
@@ -1906,39 +1940,50 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const closeSlashCommands = () => {
+    const surface = slashPalette?.surface;
     setSlashPalette(null);
-    inputRef.current?.focus({ preventScroll: true });
+    (surface === 'thread' ? threadInputRef.current : inputRef.current)?.focus({ preventScroll: true });
   };
 
-  const browseSlashCommands = () => {
+  const browseSlashCommands = (surface: ComposerSurface = 'main') => {
     const token = api.getAccessToken();
-    if (!token || !activeChannel || !workspace || sending) return;
-    mainReferencePicker.close(); setSlashSelected(null); setCommandError('');
+    if (!token || !activeChannel || !workspace || surface === 'main' && sending) return;
+    (surface === 'thread' ? threadReferencePicker : mainReferencePicker).close(); setSlashSelected(null); setCommandError('');
     if (!slashVisible) setSlashSharedWork(null);
-    setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, mode: 'browse', query: '' });
+    const threadId = surface === 'thread' ? threadMessageRef.current?.id : undefined;
+    if (surface === 'thread' && !threadId) return;
+    setSlashPalette({ channelId: activeChannel.id, workspaceId: workspace.id, token, surface, threadId, mode: 'browse', query: '' });
   };
 
-  const beginReference = () => {
-    const input = inputRef.current;
-    if (!input || !activeChannel || sending || !api.getAccessToken()) return;
-    const start = input.selectionStart, end = input.selectionEnd;
-    const marker = start && !/\s/.test(newMessage[start - 1]) ? ' @' : '@';
-    const text = newMessage.slice(0, start) + marker + newMessage.slice(end);
+  const beginReference = (surface: ComposerSurface = 'main') => {
+    const input = surface === 'thread' ? threadInputRef.current : inputRef.current;
+    const before = surface === 'thread' ? threadReplyContent : newMessage;
+    const beforeReferences = surface === 'thread' ? threadReferences : draftReferences;
+    if (!input || !activeChannel || surface === 'main' && sending || !api.getAccessToken()) return;
+    if (surface === 'main' && workHubOrigin.current?.thread) flowConversationMoved.current = true;
+    const start = input.selectionStart ?? before.length, end = input.selectionEnd ?? start;
+    const marker = start && !/\s/.test(before[start - 1]) ? ' @' : '@';
+    const text = before.slice(0, start) + marker + before.slice(end);
     if (text.length > 10000) return;
-    const references = reconcileReferences(newMessage, text, draftReferences, { start, end });
+    const references = reconcileReferences(before, text, beforeReferences, { start, end });
     const caret = start + marker.length;
-    setNewMessage(text); assistLive.current.draft = text;
-    persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text);
-    mainReferencePicker.update(text, caret, references, true);
-    requestAnimationFrame(() => { if (inputRef.current === input && input.value === text) { input.focus({ preventScroll: true }); input.setSelectionRange(caret, caret); } });
+    if (surface === 'thread') updateThreadDraft(text, references);
+    else { setNewMessage(text); assistLive.current.draft = text; persistDraft(activeChannel.id, text, !!activeChannel.secure, references); }
+    updateCommandPalette(text, surface);
+    (surface === 'thread' ? threadReferencePicker : mainReferencePicker).update(text, caret, references, true);
+    requestAnimationFrame(() => { if ((surface === 'thread' ? threadInputRef.current : inputRef.current) === input && input.value === text) { input.focus({ preventScroll: true }); input.setSelectionRange(caret, caret); } });
   };
 
   const selectSlashCommand = (command: SlashCommand) => {
     const entry = slashPalette;
     if (!slashVisible || !entry || entry.token !== api.getAccessToken() || !activeChannel || !workspace || activeChannelRef.current !== entry.channelId ||
       workspaceRef.current !== entry.workspaceId || !getSlashCommands(slashContext).some(item => item.id === command.id)) return;
-    const people = prepareCommandPeople(newMessage, draftReferences);
-    const parsed = entry.mode === 'typed' ? parseComposerCommand(['task', 'decision', 'groups'].includes(command.id) ? people.text : newMessage, slashContext, command.id) : null;
+    const threadParent = entry.surface === 'thread' ? threadMessageRef.current : null;
+    if (entry.surface === 'thread' && (!threadParent || threadParent.id !== entry.threadId || threadParent.channel_id !== entry.channelId || threadParent.deleted || threadParent.locked)) return;
+    const text = entry.surface === 'thread' ? threadReplyContent : newMessage;
+    const references = entry.surface === 'thread' ? threadReferences : draftReferences;
+    const people = prepareCommandPeople(text, references);
+    const parsed = entry.mode === 'typed' ? parseComposerCommand(['task', 'decision', 'groups'].includes(command.id) ? people.text : text, slashContext, command.id) : null;
     if (parsed && (parsed.status !== 'ready' || !parsed.intent)) { setCommandError(parsed.error || parsed.usage || t('Choose a command and complete its arguments.')); return; }
     if (entry.mode === 'typed' && ['task', 'decision'].includes(command.id) && people.personIds.length > 1) {
       setCommandError(t('Choose one person to own this work. Other people can be mentioned in its context.')); return;
@@ -1956,12 +2001,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const draftKey = crypto.randomUUID();
     // Remember a lasting return target before the picker itself unmounts.
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    (entry.mode === 'browse' ? slashLauncherRef.current : inputRef.current)?.focus({ preventScroll: true });
+    (entry.surface === 'thread' ? entry.mode === 'browse' ? threadSlashLauncherRef.current : threadInputRef.current : entry.mode === 'browse' ? slashLauncherRef.current : inputRef.current)?.focus({ preventScroll: true });
     let opened = true;
     switch (command.id) {
-      case 'document': opened = openRoomWork('documents', {}, undefined, intent?.kind === 'document' ? { key: draftKey, title: intent.title, text: intent.text } : undefined); break;
-      case 'task': opened = openRoomWork('tasks', {}, undefined, intent?.kind === 'task' ? { key: draftKey, title: intent.title, text: intent.text, assigneeUserId: people.personIds[0] } : undefined); break;
-      case 'decision': opened = openConversationDecision(undefined, undefined, 'decisions', intent?.kind === 'decision' ? { key: draftKey, title: intent.title, content: intent.content, responsibleUserId: people.personIds[0] } : undefined); break;
+      case 'document': opened = openRoomWork('documents', {}, intent?.kind === 'document' ? threadParent || undefined : undefined, intent?.kind === 'document' ? { key: draftKey, title: intent.title, text: intent.text } : undefined); break;
+      case 'task': opened = openRoomWork('tasks', {}, intent?.kind === 'task' ? threadParent || undefined : undefined, intent?.kind === 'task' ? { key: draftKey, title: intent.title, text: intent.text, assigneeUserId: people.personIds[0] } : undefined); break;
+      case 'decision': opened = openConversationDecision(intent?.kind === 'decision' ? threadParent || undefined : undefined, undefined, 'decisions', intent?.kind === 'decision' ? { key: draftKey, title: intent.title, content: intent.content, responsibleUserId: people.personIds[0] } : undefined); break;
       case 'groups': opened = openGroups(intent?.kind === 'groups' ? { key: draftKey, name: intent.name, memberIds: people.personIds } : undefined); break;
       case 'meetings': opened = openRoomWork('meetings'); break;
       case 'activity': opened = openRoomWork('feed'); break;
@@ -1975,11 +2020,11 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       case 'pins': opened = openConversationDecision(undefined, undefined, 'pins'); break;
       case 'bookmarks': opened = openConversationDecision(undefined, undefined, 'bookmarks'); break;
       case 'notification-settings': opened = openConversationDecision(undefined, undefined, 'notifications'); break;
-      case 'files': case 'members': setThreadMessage(null); setToolPanel(command.id); break;
+      case 'files': case 'members': if (!threadParent) setThreadMessage(null); setToolPanel(command.id); break;
       case 'channel': setToolPanel(null); setChannelDetailsOpen(true); break;
       case 'search': setHistoryInitialQuery(intent?.kind === 'search' ? intent.query : ''); setHistoryOpen(true); break;
       case 'mobile': setMobileOpen(true); break;
-      case 'schedule': setProductivity({ draft: entry.mode === 'typed' ? '' : newMessage, mentions: entry.mode === 'typed' ? [] : selectedMentions, references: entry.mode === 'typed' ? [] : draftReferences }); break;
+      case 'schedule': setProductivity(threadParent ? { message: threadParent } : { draft: entry.mode === 'typed' ? '' : newMessage, mentions: entry.mode === 'typed' ? [] : selectedMentions, references: entry.mode === 'typed' ? [] : draftReferences }); break;
       case 'focus': setFocusMode(value => !value); break;
       case 'appearance': openAppearance(); break;
       case 'account': openAccount(); break;
@@ -1999,15 +2044,17 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     // A rejected navigation must keep both the command and the current editor.
     if (entry.token !== api.getAccessToken() || activeChannelRef.current !== entry.channelId || workspaceRef.current !== entry.workspaceId) return;
     if (!opened) { if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); return; }
-    if (entry.mode === 'typed' && newMessage === entry.query) {
-      setNewMessage(''); assistLive.current.draft = '';
-      persistDraft(entry.channelId, '', !!activeChannel.secure, []); stopTyping();
+    const inlineWork = ['document', 'task', 'decision', 'groups', 'meetings', 'activity', 'workflows', 'cloud', 'external-meetings', 'apps', 'copilot', 'data', 'shared-work', 'pins', 'bookmarks', 'notification-settings'].includes(command.id);
+    if (threadParent && inlineWork && workHubOrigin.current) workHubOrigin.current.thread = { parentId: threadParent.id, actorId: api.getCurrentUserId(), request: threadRequest.current };
+    if (entry.mode === 'typed' && text === entry.query) {
+      if (threadParent) updateThreadDraft('', []);
+      else { setNewMessage(''); assistLive.current.draft = ''; persistDraft(entry.channelId, '', !!activeChannel.secure, []); stopTyping(); }
     }
     setSlashPalette(null);
   };
 
-  const handleSlashKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>) => {
-    if (!slashVisible || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return false;
+  const handleSlashKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement | HTMLInputElement>, surface: ComposerSurface = 'main') => {
+    if (!slashVisible || slashPalette?.surface !== surface || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return false;
     if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeSlashCommands(); return true; }
     if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) {
       event.preventDefault();
@@ -2023,6 +2070,15 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (event.key === 'Tab') setSlashPalette(null);
     return false;
   };
+
+  function renderSlashCommands() {
+    if (!slashVisible || !slashPalette) return null;
+    return <SlashCommands id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={index => setSlashSelected(slashCommands[index]?.id || null)}
+      onSelect={selectSlashCommand} onClose={closeSlashCommands} query={parsedCommand?.query ?? slashPalette.query}
+      usage={parsedCommand?.usage} argumentPreview={parsedCommand?.arguments} error={commandError || parsedCommand?.error}
+      onQueryChange={slashPalette.mode === 'browse' ? query => { setSlashPalette(previous => previous ? { ...previous, query } : null); setSlashSelected(null); } : undefined}
+      onKeyDown={event => handleSlashKeyDown(event, slashPalette.surface)} />;
+  }
 
   const handleComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
@@ -2316,11 +2372,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           {mobileNotice && <p role="status" className="fc-chat-muted">{mobileNotice}</p>}
           <div ref={slashRootRef} className="fc-chat-composer-row">
             {mainReferencePicker.open && <MentionReferences id={mainReferencePicker.id} candidates={mainReferencePicker.candidates} activeIndex={mainReferencePicker.activeIndex} onActiveIndex={mainReferencePicker.setActiveIndex} onSelect={mainReferencePicker.choose} onClose={() => { mainReferencePicker.close(); inputRef.current?.focus({ preventScroll: true }); }} query={mainReferencePicker.query?.query || ''} loading={mainReferencePicker.loading} error={mainReferencePicker.error} onManageGroups={() => openGroups()} />}
-            {slashVisible && !mainReferencePicker.open && <SlashCommands id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={index => setSlashSelected(slashCommands[index]?.id || null)}
-              onSelect={selectSlashCommand} onClose={closeSlashCommands} query={parsedCommand?.query ?? slashPalette.query}
-              usage={parsedCommand?.usage} argumentPreview={parsedCommand?.arguments} error={commandError || parsedCommand?.error}
-              onQueryChange={slashPalette.mode === 'browse' ? query => { setSlashPalette(previous => previous ? { ...previous, query } : null); setSlashSelected(null); } : undefined}
-              onKeyDown={handleSlashKeyDown} />}
+            {mainSlashVisible && !mainReferencePicker.open && renderSlashCommands()}
             <form onSubmit={handleSendMessage} className="fc-chat-composer">
               <button type="button" className="fc-icon-button fc-chat-attach" aria-label={t('Add or open shared files')} title={t('Channel files')} onClick={() => { setThreadMessage(null); setToolPanel('files'); }}><Paperclip size={21} /></button>
               <textarea ref={inputRef} value={newMessage} onChange={handleInputChange} onKeyDown={handleComposerKeyDown}
@@ -2329,17 +2381,17 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                 onClick={event => { if (!composingRef.current) mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
                 onKeyUp={event => { if (['ArrowLeft', 'ArrowRight'].includes(event.key) && !composingRef.current) mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }} onCompositionStart={() => { composingRef.current = true; setSlashPalette(null); mainReferencePicker.close(); }} onCompositionEnd={event => { composingRef.current = false; mainReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart, draftReferenceCache.current[activeChannel.id] || [], true); updateCommandPalette(event.currentTarget.value); }} rows={1} data-modal-return-focus maxLength={10000}
                 aria-label={t("Message #{value0}", { value0: String(activeChannel.name || 'channel') })} aria-describedby="message-composer-hint"
-                role={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? 'combobox' : undefined} aria-autocomplete={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? 'list' : undefined}
-                aria-expanded={mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed' ? true : undefined} aria-controls={mainReferencePicker.open ? mainReferencePicker.id : slashVisible && slashPalette.mode === 'typed' ? slashId : undefined}
-                aria-activedescendant={mainReferencePicker.open ? mainReferencePicker.candidates[mainReferencePicker.activeIndex] ? referenceOptionId(mainReferencePicker.id, mainReferencePicker.candidates[mainReferencePicker.activeIndex]) : undefined : slashVisible && slashPalette.mode === 'typed' && slashCommands[slashActiveIndex] ? `${slashId}-${slashCommands[slashActiveIndex].id}` : undefined}
+                role={mainReferencePicker.open || mainSlashVisible && slashPalette.mode === 'typed' ? 'combobox' : undefined} aria-autocomplete={mainReferencePicker.open || mainSlashVisible && slashPalette.mode === 'typed' ? 'list' : undefined}
+                aria-expanded={mainReferencePicker.open || mainSlashVisible && slashPalette.mode === 'typed' ? true : undefined} aria-controls={mainReferencePicker.open ? mainReferencePicker.id : mainSlashVisible && slashPalette.mode === 'typed' ? slashId : undefined}
+                aria-activedescendant={mainReferencePicker.open ? mainReferencePicker.candidates[mainReferencePicker.activeIndex] ? referenceOptionId(mainReferencePicker.id, mainReferencePicker.candidates[mainReferencePicker.activeIndex]) : undefined : mainSlashVisible && slashPalette.mode === 'typed' && slashCommands[slashActiveIndex] ? `${slashId}-${slashCommands[slashActiveIndex].id}` : undefined}
                 placeholder={t('Write, / or @')} />
-              <button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending || mainReferencePicker.open || slashVisible && slashPalette.mode === 'typed'} className="fc-button fc-button-primary" title={sending ? t('Sending…') : t('Send message')}><span>{sending ? t("Sending…") : t("Send")}</span><Send size={19} /></button>
+              <button type="submit" aria-label={t("Send message")} disabled={!newMessage.trim() || sending || mainReferencePicker.open || mainSlashVisible && slashPalette.mode === 'typed'} className="fc-button fc-button-primary" title={sending ? t('Sending…') : t('Send message')}><span>{sending ? t("Sending…") : t("Send")}</span><Send size={19} /></button>
             </form>
 
           </div>
           <div className="fc-chat-composer-footer">
-            <button ref={slashLauncherRef} type="button" className="fc-chat-text-button fc-chat-slash-trigger" aria-label={t('Show all features')} aria-haspopup="listbox" aria-expanded={slashVisible} aria-controls={slashVisible ? slashId : undefined} disabled={sending} title={t('Type / to find a feature')} onClick={browseSlashCommands}><span aria-hidden="true">/</span><span>{t('All features')}</span></button>
-            <button type="button" className="fc-chat-text-button" aria-label={t('Mention or reference')} title={t('Mention or reference')} disabled={sending} onClick={beginReference}>@</button>
+            <button ref={slashLauncherRef} type="button" className="fc-chat-text-button fc-chat-slash-trigger" aria-label={t('Show all features')} aria-haspopup="listbox" aria-expanded={mainSlashVisible} aria-controls={mainSlashVisible ? slashId : undefined} disabled={sending} title={t('Type / to find a feature')} onClick={() => browseSlashCommands('main')}><span aria-hidden="true">/</span><span>{t('All features')}</span></button>
+            <button type="button" className="fc-chat-text-button" aria-label={t('Mention or reference')} title={t('Mention or reference')} disabled={sending} onClick={() => beginReference('main')}>@</button>
             <div ref={composerMenuRef} className="fc-chat-composer-options" onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setComposerMenuScope(null); }}>
               <button ref={composerMenuTrigger} type="button" className="fc-icon-button" disabled={sending} aria-label={t('Message options')} title={t('Message options')} aria-haspopup="menu" aria-expanded={composerMenuOpen} aria-controls={composerMenuOpen ? composerMenuId : undefined} onClick={() => setComposerMenuScope(composerMenuOpen ? null : flowScope)} onKeyDown={event => { if (event.key === 'ArrowDown') { event.preventDefault(); setComposerMenuScope(flowScope); requestAnimationFrame(() => composerMenuRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]')?.focus()); } }}><MoreHorizontal size={19} /></button>
               {composerMenuOpen && <div id={composerMenuId} className="fc-flow-menu fc-chat-composer-menu" role="menu" aria-label={t('Message options')} onKeyDown={event => menuKeyDown(event, () => setComposerMenuScope(null), composerMenuTrigger.current)}>
@@ -2369,7 +2421,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
         {!threadMessage.deleted && !threadMessage.locked && threadMessage.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${threadMessage.channel_id}:${threadMessage.id}`} channelId={threadMessage.channel_id} messageId={threadMessage.id} secure={!!activeChannel?.secure} />}
         <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}<div className="fc-flow-thread-actions"><button type="button" className="fc-chat-text-button" data-message-assist={threadMessage.id} onClick={() => openAssist('thread', 'summary', threadMessage.id)}><Sparkles size={16} />{t('Summarize replies')}</button><button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread', 'reply', threadMessage.id)}>{t('Draft a reply')}</button></div>{workReferences.error && workReferences.supported && <p className="fc-chat-muted" role="status">{workReferences.error} <button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></p>}<DiscussionWorkSummary rows={discussionWork.get(threadMessage.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} label={t('Work in this discussion')} />{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{threadReplyContent.trim() && <button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread-draft', 'tidy')}><Sparkles size={16} />{t('Tidy my draft')}</button>}{renderDraftAssist('thread')}</div>
-        <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); if (!composingRef.current && !threadReferencePicker.open) void handleThreadReply(); }}>
+        <div ref={threadSlashRootRef} className="fc-chat-thread-composer-area">
+        <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); void handleThreadReply(); }}>
+          {threadSlashVisible && !threadReferencePicker.open && renderSlashCommands()}
           {threadReferencePicker.open && <MentionReferences id={threadReferencePicker.id} candidates={threadReferencePicker.candidates} activeIndex={threadReferencePicker.activeIndex}
             onActiveIndex={threadReferencePicker.setActiveIndex} onSelect={threadReferencePicker.choose} onClose={() => { threadReferencePicker.close(); threadInputRef.current?.focus({ preventScroll: true }); }}
             query={threadReferencePicker.query?.query || ''} loading={threadReferencePicker.loading} error={threadReferencePicker.error} />}
@@ -2380,7 +2434,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
               const references = reconcileReferences(threadReplyContent, text, threadReferences, threadBeforeEdit.current);
               threadBeforeEdit.current = undefined;
               updateThreadDraft(text, references);
-              if (!composingRef.current) threadReferencePicker.update(text, event.currentTarget.selectionStart ?? text.length, references, true);
+              if (!composingRef.current) { threadReferencePicker.update(text, event.currentTarget.selectionStart ?? text.length, references, true); updateCommandPalette(text, 'thread'); }
             }}
             onSelect={event => { if (!composingRef.current) threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences); }}
             onClick={event => { if (!composingRef.current) threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences); }}
@@ -2388,16 +2442,21 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
             onKeyDown={event => {
               if (event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
               if (threadReferencePicker.handleKeyDown(event)) return;
+              if (handleSlashKeyDown(event, 'thread')) return;
               if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleThreadReply(); }
             }}
-            onCompositionStart={() => { composingRef.current = true; threadReferencePicker.close(); }}
-            onCompositionEnd={event => { composingRef.current = false; threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences, true); }}
-            maxLength={10000} aria-label={t("Reply in thread")} placeholder={t("Reply...")} className="fc-input"
-            role={threadReferencePicker.open ? 'combobox' : undefined} aria-autocomplete={threadReferencePicker.open ? 'list' : undefined}
-            aria-expanded={threadReferencePicker.open ? true : undefined} aria-controls={threadReferencePicker.open ? threadReferencePicker.id : undefined}
-            aria-activedescendant={threadReferencePicker.open && threadReferencePicker.candidates[threadReferencePicker.activeIndex] ? referenceOptionId(threadReferencePicker.id, threadReferencePicker.candidates[threadReferencePicker.activeIndex]) : undefined} />
-          <button type="submit" disabled={!threadReplyContent.trim() || threadReferencePicker.open} aria-label={t("Send reply")} className="fc-icon-button fc-button-primary"><Send size={17} /></button>
+            onCompositionStart={() => { composingRef.current = true; setSlashPalette(null); threadReferencePicker.close(); }}
+            onCompositionEnd={event => { composingRef.current = false; threadReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart ?? 0, threadReferences, true); updateCommandPalette(event.currentTarget.value, 'thread'); }}
+            maxLength={10000} aria-label={t("Reply in thread")} placeholder={t('Write, / or @')} className="fc-input"
+            role={threadReferencePicker.open || threadSlashVisible && slashPalette.mode === 'typed' ? 'combobox' : undefined} aria-autocomplete={threadReferencePicker.open || threadSlashVisible && slashPalette.mode === 'typed' ? 'list' : undefined}
+            aria-expanded={threadReferencePicker.open || threadSlashVisible && slashPalette.mode === 'typed' ? true : undefined} aria-controls={threadReferencePicker.open ? threadReferencePicker.id : threadSlashVisible && slashPalette.mode === 'typed' ? slashId : undefined}
+            aria-activedescendant={threadReferencePicker.open ? threadReferencePicker.candidates[threadReferencePicker.activeIndex] ? referenceOptionId(threadReferencePicker.id, threadReferencePicker.candidates[threadReferencePicker.activeIndex]) : undefined : threadSlashVisible && slashPalette.mode === 'typed' && slashCommands[slashActiveIndex] ? `${slashId}-${slashCommands[slashActiveIndex].id}` : undefined} />
+          <button type="submit" disabled={!threadReplyContent.trim() || threadReferencePicker.open || threadSlashVisible && slashPalette.mode === 'typed'} aria-label={t("Send reply")} className="fc-icon-button fc-button-primary"><Send size={17} /></button>
         </form>
+        <div className="fc-chat-thread-composer-tools">
+          <button ref={threadSlashLauncherRef} type="button" className="fc-chat-text-button fc-chat-slash-trigger" aria-label={t('Show all features')} aria-haspopup="listbox" aria-expanded={threadSlashVisible} aria-controls={threadSlashVisible ? slashId : undefined} onClick={() => browseSlashCommands('thread')}><span aria-hidden="true">/</span><span>{t('All features')}</span></button>
+          <button type="button" className="fc-chat-text-button" aria-label={t('Mention or reference')} onClick={() => beginReference('thread')}>@</button>
+        </div></div>
       </aside>}
 
       {historyOpen && <HistorySearchPanel initialQuery={historyInitialQuery} channels={channels} onClose={() => setHistoryOpen(false)} onMessage={openHistoryMessage} />}

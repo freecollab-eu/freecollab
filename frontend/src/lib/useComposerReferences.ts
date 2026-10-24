@@ -8,6 +8,8 @@ interface Options {
   channelId?: string;
   workspaceId?: string;
   secure?: boolean;
+  /** Distinguishes draft contexts such as threads within the same channel. */
+  contextId?: string;
   text: string;
   references: MessageReference[];
   input: RefObject<HTMLInputElement | HTMLTextAreaElement>;
@@ -19,7 +21,7 @@ interface Options {
 export function useComposerReferences(options: Options) {
   const id = useId();
   const token = api.getAccessToken();
-  const scope = JSON.stringify([api.getCurrentUserId(), token, options.workspaceId, options.channelId, !!options.secure]);
+  const scope = JSON.stringify([api.getCurrentUserId(), token, options.workspaceId, options.channelId, !!options.secure, options.contextId]);
   const [selection, setSelection] = useState<{ scope: string; text: string; query: ReferenceQuery } | null>(null);
   const [response, setResponse] = useState<{ key: string; candidates: ReferenceCandidate[]; error: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);

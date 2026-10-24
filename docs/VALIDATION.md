@@ -1,5 +1,41 @@
 # FreeCollab validation record
 
+## Commands in thread reply fields — 2026-10-24
+
+A Swedish mobile screenshot exposed a missing composer integration. The exact
+previous commit `d44aae3` was reproduced in a disposable native thread: `/docs`
+showed no palette, left Send enabled and was persisted as a literal reply on
+Enter. The correction uses one surface-scoped command parser and palette for
+both main messages and thread replies, with guarded send paths and normal
+permission checks. Bare commands browse existing work; argument commands open
+review drafts. Explicit work Close can restore the originating live thread.
+Main activity, a newer thread or a changed identity invalidates older returns.
+Thread scheduling opens a parent reminder and never schedules the reply as a
+channel message.
+
+Validation:
+
+- All 600 frontend Node tests passed, plus TypeScript and production application
+  and embedded builds.
+- Eleven actual native/demo browser groups passed, with 596 copied source hashes
+  per fixture and zero drift. They cover `/docs` keyboard and touch selection,
+  exact thread return, independent main/thread drafts, thread `@` task assignee
+  and explicit save with canonical parent link, ordinary referenced replies,
+  Escape/literal opt-out, direct submit protection, declined dirty navigation,
+  superseding main `@` activity, identity/thread/channel changes and Swedish
+  390/320/short-viewport bounds. The owned demo visit was revoked with HTTP 204.
+- All 18 existing main-command/reference browser groups also passed unchanged
+  against the same runtime: 590 wrapper hashes and 595 actual native/demo source
+  hashes per fixture, with zero drift and normal fixture cleanup.
+- Seven real-hook scope tests passed. The unchanged old hook fails exactly the
+  three stale-thread response/selection/focus cases; optional thread context
+  now prevents reuse across identical drafts in the same channel.
+
+The new browser regression is wired into Product CI. The prior complete
+`d44aae3` workflow passed frontend, all four backend shards, real-client
+cryptography/recovery and the full product browser workflow before this fix.
+
+
 ## Recent-read history pagination fixture — 2026-10-24
 
 The 122-root history proof now records and verifies a genuine recent own receipt

@@ -82,3 +82,10 @@
   .fc-slash-commands-footer { padding-inline: .75rem; }
   .fc-chat-composer-footer:has(> .fc-chat-slash-trigger) { column-gap: .75rem; }
 }
+/* A thread owns the same picker, anchored above its reply field. */
+.fc-chat-thread-composer-area { position: relative; flex: 0 0 auto; min-width: 0; border-top: 1px solid var(--fc-border); padding-bottom: env(safe-area-inset-bottom, 0px); }
+.fc-chat-thread-composer-area .fc-chat-thread-composer { position: relative; min-width: 0; padding-bottom: .25rem; border-top: 0; }
+.fc-chat-thread-composer-tools { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: 0 1.5rem .5rem; }
+.fc-chat-thread-composer-tools > button { min-width: 44px; min-height: 44px; }
+.fc-chat-thread-composer-tools .fc-chat-slash-trigger { display: inline-flex; align-items: center; gap: .4rem; }
+.fc-chat-thread-composer-area .fc-chat-thread-composer > input { font-size: max(1rem, var(--fc-body-size)); }

@@ -1,22 +1,45 @@
 # Commands and drafts in the conversation
 
-Type `/` at the beginning of the message composer to see every available command
+Type `/` at the beginning of the main message or thread reply composer to see every available command
 in that conversation. Continue typing to filter by a command, name or intent,
 in English or Swedish. Built-in commands can also take arguments to prepare
 real document, task, decision and group drafts, or a history search. The list
 shows the command format, your argument preview and any validation error.
 Arrow keys choose a result, Enter opens its reviewed draft or existing controls,
-and Escape closes the list. Shift+Enter inserts a new line in the command.
+and Escape closes the list. Shift+Enter inserts a new line in the main composer.
 
 The **/ All features** button opens the same list with its own search field.
 This keeps an existing message draft unchanged. Both entry points are part of
 the normal product `Chat`, including the example installation. Choosing a
 feature from this separate browser does not reinterpret or erase that message.
 
+## Commands in a thread
+
+The thread reply field uses the same feature list, parser and permission checks
+as the main composer. Type `/docs` to open the document list, or use **/ All
+features** to browse without replacing an unsent reply. The `@` shortcut and
+suggestions work in both fields. Keyboard and touch choose the same controls.
+An active typed command cannot be sent by Enter, the send button or form submit;
+Escape explicitly dismisses the list and permits sending literal slash text.
+
+Opening inline work remembers the exact thread and returns to its reply field
+on Close, while keeping main and thread drafts independent. A successfully
+chosen typed command consumes only its originating command. New thread, account,
+workspace or deliberate main-composer activity invalidates an older return.
+Document/task arguments open reviewed drafts with the parent as context; saving
+remains explicit. Bare commands open their ordinary lists. Thread `/schedule`
+opens a reminder for its parent message, because scheduled delivery currently
+supports channel messages rather than thread replies.
+
+`@` searches and queued caret restoration include the thread identity in their
+scope. Identical text in another thread cannot reuse a previous search result,
+selection or deferred focus callback.
+
 ## Write a command
 
 | Example | Result after Enter |
 | --- | --- |
+| `/docs` | Existing documents and stacks, without creating or posting anything |
 | `/uppgift Granska budget` | Task editor with **Granska budget** as its title |
 | `/task "Review budget" Compare the revised estimate.` | Task editor with a title and description |
 | `/dokument "Mötesanteckningar" Deltagare och nästa steg.` | Document editor with a title and starting content |

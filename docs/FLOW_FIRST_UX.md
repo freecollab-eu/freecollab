@@ -18,6 +18,12 @@ stationary pointer. Actual mouse movement changes the hovered row; selection
 still requires an explicit action. Available entries follow current account and
 workspace permissions, including owner-only data controls.
 
+Both the main composer and thread reply field expose `/` and `@`. Commands use
+one permission-aware parser and open ordinary lists or explicit reviewed drafts.
+Inline work returns to its originating live thread; another thread, account or
+deliberate main-composer action supersedes that return. Thread commands never
+silently schedule a reply as a channel message. See [commands](SLASH_COMMANDS.md).
+
 ## Reading and entry
 
 Read-receipt writes are serialized per channel for the current account and coalesce queued positions. A slower older request cannot overwrite this interface's newer reading position.

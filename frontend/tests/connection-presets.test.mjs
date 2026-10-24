@@ -45,8 +45,8 @@ function componentHarness(file, exportName, props, dependencies) {
     useCallback(callback, deps) { const n = index++; if (!slots[n] || changed(slots[n].deps, deps)) slots[n] = { callback, deps }; return slots[n].callback; },
     useEffect(callback, deps) { const n = index++; if (!slots[n] || changed(slots[n].deps, deps)) effects.push(() => { slots[n]?.cleanup?.(); slots[n] = { deps, cleanup: callback() }; }); },
   };
-  const jsx = (type, props) => ({ type, props: props || {} });
-  const fn = compile(file, { react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' }, 'lucide-react': new Proxy({}, { get: (_, name) => name }), '../i18n': { t: value => value, useI18n: () => ({ t: value => value }) }, '../lib/connection-presets': presets, '../lib/copilot-intents': intents, ...dependencies })[exportName];
+  const jsx = (type, props) => type === 'collaboration-input' ? { type: props.as || 'textarea', props: { ...props, onChange: event => props.onValueChange(event.target.value, props.references || []) } } : ({ type, props: props || {} });
+  const fn = compile(file, { react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' }, 'lucide-react': new Proxy({}, { get: (_, name) => name }), '../i18n': { t: value => value, useI18n: () => ({ t: value => value }) }, '../lib/connection-presets': presets, '../lib/copilot-intents': intents, './ScopedCollaborationInput': { ScopedCollaborationInput: 'collaboration-input' }, ...dependencies })[exportName];
   async function settle() { for (let cycle = 0; cycle < 30; cycle++) { if (pending) { pending = false; index = 0; tree = fn(props); for (const effect of effects.splice(0)) effect(); } for (let microtask = 0; microtask < 8; microtask++) await Promise.resolve(); if (!pending && !effects.length) { await Promise.resolve(); if (!pending) return; } } throw new Error('Fixture did not settle'); }
   const nodes = () => { const result = []; function visit(node) { if (Array.isArray(node)) node.forEach(visit); else if (node && typeof node === 'object' && node.props) { result.push(node); visit(node.props.children); } } visit(tree); return result; };
   const field = label => { const node = nodes().find(node => node.type === 'label' && (Array.isArray(node.props.children) ? node.props.children[0] : node.props.children) === label); assert.ok(node, 'Missing label ' + label); return node.props.children.find(child => child?.type === 'input' || child?.type === 'select' || child?.type === 'textarea'); };
@@ -213,7 +213,9 @@ test('quick AI actions retain the typed draft and selected secure source without
   assert.equal(copilotCheckbox(h, 'I explicitly disclose selected decrypted content').props.checked, true);
   assert.equal(copilotCheckbox(h, 'Chosen secure source').props.checked, true);
   assert.equal(copilotButton(h, 'Send to provider').props.disabled, false); assert.equal(sent.length, 0); assert.equal(created, 0);
-  copilotButton(h, 'Send to provider').props.onClick(); await h.settle();
+  const question = h.field('Your question'); assert.equal(question.props.allowReferences, false); assert.equal(question.props.submissionScope, copilotButton(h, 'Send to provider').props['data-collaboration-submit']);
+  question.props.onPaletteActiveChange(true); copilotButton(h, 'Send to provider').props.onClick(); await h.settle(); assert.equal(sent.length, 0); assert.equal(created, 0);
+  question.props.onPaletteActiveChange(false); copilotButton(h, 'Send to provider').props.onClick(); await h.settle();
   assert.equal(sent.length, 1); assert.equal(created, 1); assert.equal(sent[0].workspace, 'workspace');
   assert.equal(sent[0].payload.disclose_to_provider, true); assert.equal(sent[0].payload.disclose_decrypted_content, true);
   assert.equal(sent[0].payload.sources.length, 1); assert.equal(sent[0].payload.sources[0].id, 'selected');

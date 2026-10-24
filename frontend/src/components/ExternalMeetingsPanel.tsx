@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { ScopedCollaborationInput as CollaborationInput } from './ScopedCollaborationInput';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { CalendarPlus, Copy, ExternalLink, Loader2, RefreshCw, ShieldCheck, Unplug, Video, X } from 'lucide-react';
 import { useI18n } from '../i18n';
 import { api } from '../lib/api';
@@ -19,6 +20,7 @@ export function ExternalMeetingsPanel(props: Props) {
 }
 function ExternalMeetingsPanelContent({ workspaceId, channelId, isAdmin = false, onCalendarChanged, initialProvider, setupMode = false, onGuardChange, onDirtyChange }: Props) {
   const { t, locale } = useI18n();
+  const writingInstanceId = useId();
   const freshApplication = () => freshMeetingApplication(initialProvider, !!initialProvider);
   const baseline = useRef(JSON.stringify(freshApplication()));
   const [data, setData] = useState<ExternalMeetingList>({ enabled: false, connections: [], meetings: [] });
@@ -118,7 +120,7 @@ function ExternalMeetingsPanelContent({ workspaceId, channelId, isAdmin = false,
     {!data.enabled && !loading && <p className="fc-account-muted">{t('An operator must enable external meeting providers before any provider is contacted.')}</p>}
     {data.enabled && !setupMode && <form className="fc-external-meeting-form" onSubmit={event => void schedule(event)} aria-label={t('Schedule external meeting')}>
       <label>{t('Meeting provider')}<select aria-label={t('Meeting provider')} className="fc-input" value={selected} disabled={!!busy} required onChange={event => { setSelected(event.target.value); pending.current = null; }}><option value="">{t('Choose a tested customer connection')}</option>{choices.map(row => <option key={row.id} value={row.id}>{providerNames[row.provider]} · {row.name}</option>)}</select></label>
-      <label>{t('Meeting title')}<input className="fc-input" value={fields.title} maxLength={200} required disabled={!!busy} onChange={event => setFields({ ...fields, title: event.target.value })} /></label>
+      <label>{t('Meeting title')}<CollaborationInput as="input" allowReferences={false} channelId={channelId || ""} contextId={`${writingInstanceId}:${workspaceId}:${channelId || "none"}:external-meeting:title`} className="fc-input" value={fields.title} maxLength={200} required disabled={!!busy} onValueChange={value => setFields(previous => ({ ...previous, title: value }))} /></label>
       <div className="fc-external-meeting-dates"><label>{t('Starts')}<input className="fc-input" type="datetime-local" value={fields.starts_at} required disabled={!!busy} onChange={event => setFields({ ...fields, starts_at: event.target.value })} /></label><label>{t('Ends')}<input className="fc-input" type="datetime-local" value={fields.ends_at} required disabled={!!busy} onChange={event => setFields({ ...fields, ends_at: event.target.value })} /></label></div>
       <label>{t('Time zone')}<input className="fc-input" value={fields.timezone} required maxLength={100} disabled={!!busy} onChange={event => setFields({ ...fields, timezone: event.target.value })} /></label>
       <label className="fc-external-meeting-check"><input type="checkbox" checked={disclosure} disabled={!!busy} onChange={event => setDisclosure(event.target.checked)} /><span>{t('I choose to disclose this meeting title, time and connected account to the selected provider. No participant invitations will be sent.')}</span></label>

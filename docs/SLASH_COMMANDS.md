@@ -13,6 +13,16 @@ This keeps an existing message draft unchanged. Both entry points are part of
 the normal product `Chat`, including the example installation. Choosing a
 feature from this separate browser does not reinterpret or erase that message.
 
+## Commands in work fields
+
+Document and other collaboration writing fields use the same command registry.
+In a longer work field, type a command on its own line at the caret. Accepted
+commands consume only that line's command span; unrelated writing and selected
+references remain. New work opens alongside retained work. Each card keeps its
+own editor, draft and close guard; real channel/workspace navigation checks all
+cards. See [concurrent collaboration](UNIVERSAL_COLLABORATION.md) for field,
+encryption and federation boundaries.
+
 ## Commands in a thread
 
 The thread reply field uses the same feature list, parser and permission checks
@@ -147,9 +157,10 @@ descriptions follow the selected interface language.
 - Opening an entry does not send a message, save a new resource, run an
   installed app or approve external data sharing. Normal explicit review and
   save/approval controls remain.
-- A typed slash query is removed only after its selected entry opens. If a
-  pending write or an unsaved-work warning rejects navigation, both the
-  existing work and the composer query remain.
+- A typed slash query is removed only after its selected entry opens. Opening
+  another retained work card preserves the source instead of discarding it.
+  If a real close or channel/workspace navigation is rejected, existing work
+  and the query remain.
 - Enter with no matching command sends nothing. Escape keeps the literal text;
   a subsequent ordinary send can send it as a message. `//` and slashes in
   ordinary prose or URLs do not open the command list. Recognized commands can

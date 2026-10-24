@@ -1,10 +1,11 @@
 import { t } from '../i18n/core';
 import { getSlashCommands, type SlashAction, type SlashCommand, type SlashContext } from './slash-commands';
-import { normalizeMessageReferences, type MessageReference } from './message-references';
+import { normalizeMessageReferences, validateMessageReferences, type MessageReference } from './message-references';
+import type { FieldReferences } from './field-references';
 
 /** A reviewed native draft, never an instruction to create a record. */
-export interface ComposerWorkDraft { key: string; title: string; text: string; assigneeUserId?: string }
-export interface ComposerDecisionDraft { key: string; title: string; content: string; responsibleUserId?: string }
+export interface ComposerWorkDraft { key: string; title: string; text: string; assigneeUserId?: string; field_references?: FieldReferences }
+export interface ComposerDecisionDraft { key: string; title: string; content: string; responsibleUserId?: string; field_references?: FieldReferences }
 
 export type ComposerCommandIntent =
   | { kind: 'document' | 'task'; title: string; text: string }
@@ -33,6 +34,78 @@ export function prepareCommandPeople(value: string, references: MessageReference
     if (reference.end <= text.length && !text.slice(reference.end).trim()) text = text.slice(0, reference.start).trimEnd();
   }
   return { text, personIds };
+}
+
+interface SourceText { text: string; positions: number[] }
+const sliceSource = (source: SourceText, start: number, end = source.text.length): SourceText => ({ text: source.text.slice(start, end), positions: source.positions.slice(start, end) });
+function trimSource(source: SourceText, end = false): SourceText {
+  const start = source.text.length - source.text.trimStart().length;
+  return sliceSource(source, start, end ? source.text.trimEnd().length : source.text.length);
+}
+
+/**
+ * Transfer chosen identities through the command grammar, using source offsets
+ * rather than matching names. A failed transfer must keep the caller's text.
+ */
+export function prepareComposerDraftReferences(value: string, references: MessageReference[], intent: ComposerCommandIntent | undefined): FieldReferences | undefined {
+  if (!intent || !['document', 'task', 'decision'].includes(intent.kind) || !references.length) return undefined;
+  const refs = validateMessageReferences(value, references);
+  const prepared = intent.kind === 'document' ? value : prepareCommandPeople(value, refs).text;
+  const match = /^\/[ \t]*([^\s]*)([\s\S]*)$/.exec(prepared);
+  const fail = () => new Error(t('The selected references could not be carried into this draft. Your source text is unchanged.'));
+  if (!match) throw fail();
+  let start = prepared.length - match[2].length;
+  start += /^[ \t]+/.exec(prepared.slice(start))?.[0].length || 0;
+  start += /^\r?\n/.exec(prepared.slice(start))?.[0].length || 0;
+  let argument: SourceText = { text: '', positions: [] };
+  for (let index = start; index < prepared.length; index++) {
+    argument.text += prepared[index] === '\r' ? '\n' : prepared[index];
+    argument.positions.push(index);
+    if (prepared[index] === '\r' && prepared[index + 1] === '\n') index++;
+  }
+  argument = trimSource(argument);
+  let title: SourceText, body: SourceText;
+  if (argument.text.startsWith('"')) {
+    title = { text: '', positions: [] };
+    let end = -1;
+    for (let index = 1; index < argument.text.length; index++) {
+      const character = argument.text[index];
+      if (character === '\\' && ['"', '\\'].includes(argument.text[index + 1])) index++;
+      else if (character === '"') { end = index; break; }
+      title.text += argument.text[index]; title.positions.push(argument.positions[index]);
+    }
+    if (end < 0 || argument.text[end + 1] && !/\s/.test(argument.text[end + 1])) throw fail();
+    title = trimSource(title, true);
+    body = sliceSource(argument, end + 1);
+    body = sliceSource(body, /^[ \t]*(?:\n)?/.exec(body.text)![0].length);
+  } else {
+    const newline = argument.text.indexOf('\n');
+    title = trimSource(sliceSource(argument, 0, newline < 0 ? argument.text.length : newline), true);
+    body = newline < 0 ? { text: '', positions: [] } : sliceSource(argument, newline + 1);
+  }
+  if (intent.kind !== 'document' && intent.kind !== 'task' && intent.kind !== 'decision') throw fail();
+  const content = intent.kind === 'decision' ? intent.content : intent.text;
+  if (title.text !== intent.title || (intent.kind === 'decision' ? body.text || title.text : body.text) !== content) throw fail();
+  if (intent.kind === 'decision' && !body.text) body = title;
+  const bodyKey = intent.kind === 'task' ? 'description' : intent.kind === 'document' ? 'body' : 'content';
+  const result: FieldReferences = {};
+  let count = 0;
+  for (const ref of refs) {
+    if (ref.end > prepared.length) { if (ref.kind === 'person') continue; throw fail(); }
+    let transferred = false;
+    for (const [key, field] of [['title', title], [bodyKey, body]] as [string, SourceText][]) {
+      const offset = field.positions.indexOf(ref.start), length = ref.end - ref.start;
+      if (offset < 0 || field.text.slice(offset, offset + length) !== value.slice(ref.start, ref.end)
+        || !field.positions.slice(offset, offset + length).every((position, index) => position === ref.start + index)
+        || field.positions.length < offset + length) continue;
+      const moved = { ...ref, start: offset, end: offset + length };
+      try { validateMessageReferences(field.text, [moved]); } catch { throw fail(); }
+      (result[key] ||= []).push(moved); transferred = true;
+      if (++count > 50) throw fail();
+    }
+    if (!transferred) throw fail();
+  }
+  return count ? result : undefined;
 }
 
 const aliases: Partial<Record<SlashAction, readonly string[]>> = {

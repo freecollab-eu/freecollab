@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { fieldReferences, messageReferences } from './load-field-references.mjs';
 
 // Exercise the actual native panel event handlers and lifecycle with controlled
 // API promises. Browser proofs separately verify real DOM/focus and APIs.
@@ -24,9 +25,10 @@ function label(node) {
   return label(node.props?.children);
 }
 function fixture(kind, props = {}) {
-  const state = { token: 'session', projects: [project], tasks: [task, { ...task, id: 'other', fields: { ...taskFields, title: 'Another task' } }], decisions: [decision], calls: [], pending: [], saved: [], selected: [], confirmed: [], confirm: false, closes: 0, opened: [], portals: 0, modalActive: null, wait: null, guards: [], views: [] };
+  const state = { token: 'session', projects: [project], tasks: [task, { ...task, id: 'other', fields: { ...taskFields, title: 'Another task' } }], decisions: [decision], calls: [], pending: [], saved: [], selected: [], confirmed: [], confirm: false, closes: 0, opened: [], portals: 0, modalActive: null, wait: null, guards: [], views: [], feedPosts: [{ id: 'post', created_by: 'actor', revision: 1, revised_at: '2026-10-24T10:00:00Z', fields: { title: 'A native update', body: 'Discuss the plan', poll: null } }], comments: [] };
   const hooks = []; let cursor = 0, dirty = true, tree, effects = [], component;
   const react = {
+    useId() { const index = cursor++; if (!hooks[index]) hooks[index] = { id: "fixture-" + index }; return hooks[index].id; },
     useState(initial) { const index = cursor++; if (!hooks[index]) hooks[index] = { value: typeof initial === 'function' ? initial() : initial }; return [hooks[index].value, value => { const next = typeof value === 'function' ? value(hooks[index].value) : value; if (!Object.is(next, hooks[index].value)) { hooks[index].value = next; dirty = true; } }]; },
     useRef(initial) { const index = cursor++; if (!hooks[index]) hooks[index] = { current: initial }; return hooks[index]; },
     useEffect(callback, dependencies) { const index = cursor++, previous = hooks[index]; if (!previous || !dependencies || dependencies.some((value, i) => !Object.is(value, previous.dependencies?.[i]))) { hooks[index] = { dependencies, cleanup: previous?.cleanup }; effects.push(() => { hooks[index].cleanup?.(); hooks[index].cleanup = callback(); }); } },
@@ -48,23 +50,34 @@ function fixture(kind, props = {}) {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx, Fragment: 'fragment' },
     'react-dom': { createPortal: value => { state.portals++; return value; } },
     'lucide-react': new Proxy({}, { get: (_, name) => String(name) }),
-    '../i18n': { t: value => value, useI18n() {}, currentLocale: () => 'en' },
+    '../i18n': { t: value => value, useI18n: () => ({ t: value => value, locale: 'en' }), currentLocale: () => 'en' },
     '../lib/api': { api },
+    '../lib/collaboration-context': { useCollaborationContext: () => props.surfaceId ? { surfaceId: props.surfaceId } : null },
+    '../lib/field-references': fieldReferences, '../lib/message-references': messageReferences,
+    './CollaborationInput': { CollaborationInput: 'collaboration-input' }, './FieldReferenceText': { FieldReferenceText: 'field-reference-text' }, './ReferencedMessage': { ReferencedMessage: 'referenced-message' },
     '../lib/project-tasks-api': { projectTasksApi: { projects: async () => state.projects, tasks: async () => state.tasks, saveTask, history: async () => [task], saveProject: async (_, fields) => ({ ...project, fields }) } },
     '../lib/collaboration-api': { collaborationApi: { bookmarks: async () => { state.views.push('bookmarks'); return [{ channel_id: 'room', item_id: 'saved', kind: 'message', available: true, created_at: '2026-10-23T10:00:00Z', message: { id: 'message', content: 'Saved native message' } }]; }, pins: async () => { state.views.push('pins'); return []; }, settings: async () => { state.views.push('notifications'); return { level: 'mentions', email_digest: 'none' }; }, decisions: async () => state.decisions, revisions: async () => [decision], createDecision: (_, fields) => saveDecision(undefined, fields), reviseDecision: saveDecision } },
+    './EnterpriseControls': { EnterpriseAlerts: 'enterprise-alerts', NativeConfirmation: 'native-confirmation' },
+    './ScopedCollaborationInput': { ScopedCollaborationInput: 'collaboration-input' },
+    '../lib/account-api': { accountApi: {} },
+    '../lib/workflows-api': { workflowsApi: { definitions: async () => ({ enabled: true, can_manage: false, secure_channel: false, definitions: [] }), runs: async () => [{ id: 'run', workflow_name: 'Review', event_kind: 'manual', step_index: 0, step_count: 1, status: 'waiting', created_at: '2026-10-24T10:00:00Z', may_vote: true, votes: [] }], vote: async (_, __, run, choice, note, references) => { state.calls.push({ kind: 'approval', run: run.id, choice, note, references: plain(references) }); } } },
+    '../lib/activity-feed-api': { activityFeedApi: { identifier: () => 'new-feed-id', posts: async () => ({ items: state.feedPosts, next_before_id: null, following: [] }), detail: async () => ({ post: state.feedPosts[0], comments: state.comments, votes: [], reactions: [] }), savePost: async (_, fields) => { state.calls.push({ kind: 'feed', fields: plain(fields) }); }, saveComment: async (_, __, fields) => { state.calls.push({ kind: 'comment', fields: plain(fields) }); } } },
     '../lib/files-api': { listChannelFiles: async () => [], downloadChannelFile: async () => new Blob() },
     '../lib/conversation-navigation': { registerConversationNavigationGuard: (owner, canLeave) => { const guard = { owner, canLeave }; state.guards.push(guard); return () => state.guards.splice(state.guards.indexOf(guard), 1); } },
     '../lib/useModalFocus': { useModalFocus: (_, __, active = true) => { state.modalActive = active; } },
     './ContextualCopilot': { ContextualCopilot: 'copilot' }, './VersionProofs': { VersionProofs: 'proofs' },
     '../lib/chat-productivity': { chatProductivity: {} },
   };
+  const writingGuard = {};
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/useScopedWritingGuard.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports: writingGuard, require: name => name === 'react' ? react : name === '../i18n' ? dependencies['../i18n'] : dependencies['../lib/' + name.slice(2)], window: { confirm: text => { state.confirmed.push(text); return state.confirm; } } });
+  dependencies['../lib/useScopedWritingGuard'] = writingGuard;
   const exported = {};
   const source = readFileSync(new URL(`../src/components/${kind}.tsx`, import.meta.url), 'utf8');
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
     exports: exported, require: name => dependencies[name] || {},
-    window: { addEventListener() {}, removeEventListener() {}, confirm: text => { state.confirmed.push(text); return state.confirm; }, setTimeout },
+    window: { addEventListener() {}, removeEventListener() {}, confirm: text => { state.confirmed.push(text); return state.confirm; }, setTimeout, setInterval: () => 1, clearInterval() {} },
     requestAnimationFrame: callback => { callback(); return 1; }, cancelAnimationFrame() {}, CSS: { escape: value => value },
-    crypto: { randomUUID: () => 'new-task' }, Date, Set, Map, AbortController, URL,
+    crypto: { randomUUID: () => 'new-task' }, Date, Set, Map, AbortController, URL, structuredClone,
     document: { body: {} },
   });
   component = exported[kind];
@@ -74,7 +87,7 @@ function fixture(kind, props = {}) {
   function one(predicate) { const matches = nodes(tree, predicate); assert.equal(matches.length, 1, `Expected one control, found ${matches.length}`); return matches[0]; }
   const button = name => one(node => node.type === 'button' && (node.props['aria-label'] || label(node)) === name);
   const input = id => one(node => node.props.id === id);
-  const edit = (id, value) => { input(id).props.onChange({ target: { value } }); render(); };
+  const edit = (id, value) => { const field = input(id); if (field.props.onValueChange) field.props.onValueChange(value, []); else field.props.onChange({ target: { value } }); render(); };
   render();
   return { state, settle, render, one, button, input, edit, get tree() { return tree; }, unmount() { for (const hook of hooks) hook.cleanup?.(); } };
 }
@@ -241,4 +254,72 @@ test('flow saved-items entry respects its native view and exposes pinned/setting
   f.button('Pinned').props.onClick(); await f.settle(); assert.equal(f.state.views.at(-1), 'pins');
   f.button('Notifications').props.onClick(); await f.settle(); assert.equal(f.state.views.at(-1), 'notifications');
   assert.equal(nodes(f.tree, node => node.type === 'form').length, 1);
+});
+
+
+test('task and decision editing retain actual reference IDs without publishing until explicit submit', async () => {
+  const reference = { kind: 'document', id: 'actual-plan', start: 0, end: 5 };
+  for (const kind of ['ProjectTasksPanel', 'CollaborationPanel']) {
+    const task = kind === 'ProjectTasksPanel', f = fixture(kind, task ? { initialProjectId: 'project', focusTaskId: 'task' } : { focusDecisionId: 'decision' });
+    await f.settle(); f.button(task ? 'Edit' : 'Revise').props.onClick(); f.render();
+    const input = f.input(task ? 'project-item-description' : 'decision-content');
+    input.props.onValueChange('@Plan review', [reference]); f.render();
+    assert.equal(f.state.calls.length, 0);
+    assert.deepEqual(plain(f.input(task ? 'project-item-description' : 'decision-content').props.references), [reference]);
+    await f.one(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); await f.settle();
+    assert.deepEqual(f.state.calls[0].fields.field_references, { [task ? 'description' : 'content']: [reference] });
+  }
+});
+
+test('activity post and comment fields persist actual references and keep drafts until their own explicit save', async () => {
+  const f = fixture('ActivityFeedPanel'); await f.settle();
+  f.button('Write an update').props.onClick(); f.render();
+  const reference = { kind: 'person', id: 'actual-person', start: 0, end: 4 };
+  f.input('feed-title').props.onValueChange('Next steps', []); f.input('feed-body').props.onValueChange('@Ada review', [reference]); f.render();
+  assert.equal(f.state.calls.length, 0);
+  f.one(node => node.type === 'form' && node.props['aria-label'] === 'Activity editor').props.onSubmit({ preventDefault() {} }); await f.settle();
+  assert.deepEqual(f.state.calls[0].fields.field_references, { body: [reference] });
+  f.button('Open discussion').props.onClick(); await f.settle();
+  f.input('feed-comment').props.onValueChange('@Ada agreed', [reference]); f.render();
+  assert.equal(f.state.calls.length, 1);
+  f.one(node => node.type === 'form' && node.props['aria-label'] === 'Activity comment editor').props.onSubmit({ preventDefault() {} }); await f.settle();
+  assert.deepEqual(f.state.calls[1].fields.field_references, { body: [reference] });
+});
+
+test('additional decision instance has unique field IDs and a local guarded close controller', async () => {
+  const closeController = { current: null }, f = fixture('CollaborationPanel', { instanceId: 'second', surfaceId: 'card-two', focusDecisionId: 'decision', closeController }); await f.settle();
+  f.button('Revise').props.onClick(); f.render();
+  assert.equal(f.state.guards[0].owner.surfaceId, 'card-two');
+  f.input('second-decision-content').props.onValueChange('Unsaved card two', []); f.render();
+  closeController.current(); assert.equal(f.state.closes, 0);
+  f.state.confirm = true; closeController.current(); assert.equal(f.state.closes, 1);
+  f.unmount(); assert.equal(closeController.current, null);
+});
+
+test('workflow approval notes bind their real selected IDs and an open menu blocks the owning Approve/Reject action', async () => {
+  const f = fixture('WorkflowsPanel', { instanceId: 'second' }); await f.settle();
+  const reference = { kind: 'document', id: 'actual-plan', start: 0, end: 5 };
+  f.input('second-workflow-note-run').props.onValueChange('@Plan review', [reference]); f.render();
+  const input = f.input('second-workflow-note-run'), approve = f.button('Approve'), reject = f.button('Reject');
+  assert.equal(input.props.submissionScope, approve.props['data-collaboration-submit']); assert.equal(input.props.submissionScope, reject.props['data-collaboration-submit']);
+  input.props.onPaletteActiveChange(true); approve.props.onClick(); reject.props.onClick(); await f.settle(); assert.equal(f.state.calls.length, 0); assert.equal(f.input('second-workflow-note-run').props.value, '@Plan review');
+  input.props.onPaletteActiveChange(false); f.button('Approve').props.onClick(); await f.settle(); assert.equal(f.state.calls.length, 1); assert.deepEqual(f.state.calls[0].references, { note: [reference] });
+});
+
+
+test('command-created task and decision editors retain exact selected reference IDs through their explicit native save', async () => {
+  const title = '@Plan next', body = 'Ask @Ada', titleRefs = [{ kind: 'document', id: 'actual-plan', start: 0, end: 5 }], bodyRefs = [{ kind: 'person', id: 'actual-ada', start: 4, end: 8 }];
+  for (const kind of ['ProjectTasksPanel', 'CollaborationPanel']) {
+    const task = kind === 'ProjectTasksPanel', fields = { title: titleRefs, [task ? 'description' : 'content']: bodyRefs };
+    const draft = { key: 'command-references', title, [task ? 'text' : 'content']: body, field_references: fields };
+    const f = fixture(kind, { initialDraft: draft, ...(task ? { initialProjectId: 'project' } : {}) }); await f.settle();
+    assert.equal(f.state.calls.length, 0); assert.deepEqual(plain(f.input(task ? 'project-item-title' : 'decision-title').props.references), titleRefs); assert.deepEqual(plain(f.input(task ? 'project-item-description' : 'decision-content').props.references), bodyRefs);
+    await f.one(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); await f.settle(); assert.deepEqual(f.state.calls[0].fields.field_references, fields);
+  }
+});
+test('malformed command reference metadata cannot be silently adopted or inferred from matching labels', async () => {
+  for (const kind of ['ProjectTasksPanel', 'CollaborationPanel']) {
+    const task = kind === 'ProjectTasksPanel', f = fixture(kind, { initialDraft: { key: 'invalid-bindings', title: '@Plan', [task ? 'text' : 'content']: 'Context', field_references: { title: [{ kind: 'document', id: 'forged', start: 0, end: 99 }] } }, ...(task ? { initialProjectId: 'project' } : {}) }); await f.settle();
+    assert.equal(nodes(f.tree, node => node.props.id === (task ? 'project-item-title' : 'decision-title')).length, 0); assert.equal(f.state.calls.length, 0);
+  }
 });

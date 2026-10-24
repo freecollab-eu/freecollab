@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { fieldReferences, resourceReferenceTargets } from './load-field-references.mjs';
 
 function load(name, dependencies = {}) {
   const source = readFileSync(new URL(`../src/lib/${name}.ts`, import.meta.url), 'utf8');
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
   const exports = {};
-  vm.runInNewContext(compiled, { exports, require: name => dependencies[name], TextEncoder, URL, URLSearchParams, Intl, Date, crypto: { randomUUID: () => 'new-draft' } });
+  vm.runInNewContext(compiled, { exports, require: name => name === './field-references' ? fieldReferences : dependencies[name], TextEncoder, URL, URLSearchParams, Intl, Date, crypto: { randomUUID: () => 'new-draft' } });
   return exports;
 }
 const calendar = load('calendar'), documents = load('document-links');
@@ -91,18 +92,19 @@ test('document providers accept real links and reject spoofed hosts and URL cred
 
 function apiFixture(options = {}) {
   let token = 'alice-token', wire;
+  const resolutions = [];
   const fields = { title: 'Secret document', provider: 'nextcloud', url: 'https://cloud.example.com/s/secret', notes: 'Secret note' };
-  const record = { id: 'new-draft', channel_id: 'room', kind: 'documents', created_by: 'alice', revised_by: 'alice', revision: 1, deleted: false, content_mode: 'matrix', matrix_event_id: '$encrypted' };
+  const record = { id: 'new-draft', channel_id: 'room', kind: options.kind || 'documents', created_by: 'alice', revised_by: 'alice', revision: 1, deleted: false, content_mode: 'matrix', matrix_event_id: '$encrypted' };
   let payload;
   const secure = {
-    async handles() { if (options.switchDuringHandles) token = 'bob-token'; return true; },
+    async handles() { if (options.switchDuringHandles) token = 'bob-token'; return !options.native; },
     async sendEvent(channel, type, content) { payload = { channel, type, content }; return { event_id: '$encrypted' }; },
-    async getDecryptedEvent() { return { getContent: () => ({ ...payload?.content, ...(options.contentOverride || {}) }), getRoomId: () => options.foreignRoom ? '!other' : '!room', getType: () => 'eu.freecollab.integration.documents', getSender: () => options.foreignSender ? '@fc_alice:evil.example' : '@fc_alice:freecollab.test', isRedacted: () => false }; },
+    async getDecryptedEvent() { return { getContent: () => ({ ...payload?.content, ...(options.contentOverride || {}) }), getRoomId: () => options.foreignRoom ? '!other' : '!room', getType: () => 'eu.freecollab.integration.' + (options.kind || 'documents'), getSender: () => options.foreignSender ? '@fc_alice:evil.example' : '@fc_alice:freecollab.test', isRedacted: () => false }; },
     async roomFor() { return { roomId: '!room', c: { getUserId: () => '@fc_alice:freecollab.test' } }; },
   };
-  const api = { getAccessToken: () => token, async request(path, init) { wire = { path, body: JSON.parse(init.body) }; return record; } };
-  const { documentCalendarApi } = load('document-calendar-api', { './api': { api }, './secure-client': { getSecureMessaging: async () => secure }, './document-links': documents, './calendar': calendar });
-  return { fields, api: documentCalendarApi, wire: () => wire, payload: () => payload };
+  const api = { getAccessToken: () => token, async request(path, init) { wire = { path, body: JSON.parse(init.body) }; return options.native ? { ...record, content_mode: 'server', matrix_event_id: null, fields: wire.body.fields } : record; } };
+  const { documentCalendarApi } = load('document-calendar-api', { './resource-reference-targets': resourceReferenceTargets(api, async (_, refs) => { resolutions.push(plain(refs)); return refs.map(ref => ({ ...ref, available: !options.unavailable })); }), './api': { api }, './secure-client': { getSecureMessaging: async () => secure }, './document-links': documents, './calendar': calendar });
+  return { fields, api: documentCalendarApi, wire: () => wire, payload: () => payload, resolutions };
 }
 
 test('secure document API sends title and URL only inside the encrypted event, server receives an opaque reference', async () => {
@@ -158,4 +160,28 @@ test('bounded RRULE and EXDATE import and expanded ICS export preserve actual oc
   const restored = calendar.importCalendar(calendar.exportCalendar([{ id: 'series', fields }]));
   assert.equal(restored.length, 2); assert.deepEqual(plain(restored.map(row => row.starts_at)), ['2026-10-23T07:00:00.000Z', '2026-10-25T08:00:00.000Z']);
   assert.notEqual(restored[0].external_uid, restored[1].external_uid);
+});
+
+const actualReference = (id = 'actual-document', start = 2, end = 7) => ({ kind: 'document', id, start, end });
+for (const native of [true, false]) test(`calendar and linked-document field metadata round-trips ${native ? 'natively' : 'inside the encrypted event'}`, async () => {
+  for (const kind of ['calendar', 'documents']) {
+    const f = apiFixture({ native, kind });
+    const fields = kind === 'calendar' ? event({ title: '  @Plan  ', description: '@Ada review', field_references: { title: [actualReference()] } }) : { ...f.fields, title: '  @Plan  ', notes: '@Ada review', field_references: { title: [actualReference()] } };
+    const saved = kind === 'calendar' ? await f.api.saveEvent('room', fields) : await f.api.saveDocument('room', fields);
+    assert.equal(saved.fields.title, '  @Plan  '); assert.deepEqual(plain(saved.fields.field_references), fields.field_references);
+    assert.equal(f.resolutions.length, 1);
+    if (!native) { assert.equal(f.wire().body.fields, undefined); assert.equal(f.wire().body.field_references, undefined); assert.deepEqual(plain(f.payload().content.fields.field_references), fields.field_references); }
+  }
+});
+test('new unavailable resource bindings cannot send an integration event or native revision', async () => {
+  const f = apiFixture({ unavailable: true });
+  await assert.rejects(f.api.saveDocument('room', { ...f.fields, title: '  @Plan  ', field_references: { title: [actualReference()] } }), /no longer available/);
+  assert.equal(f.payload(), undefined); assert.equal(f.wire(), undefined);
+});
+test('calendar occurrence overrides drop only changed inherited bindings, and ICS carries readable labels only', () => {
+  const fields = event({ title: '@Plan', description: '@Ada', recurrence: { frequency: 'daily', interval: 1, count: 2 }, field_references: { title: [actualReference('actual-document', 0, 5)], description: [{ kind: 'person', id: 'actual-person', start: 0, end: 4 }] }, exceptions: [{ original_start: '2026-10-25T00:30:00Z', cancelled: false, title: 'Other agenda' }] });
+  const rows = calendar.expandCalendarOccurrences(fields, '2026-10-24T00:00:00Z', '2026-10-28T00:00:00Z');
+  assert.equal(rows[0].field_references.title, undefined); assert.equal(rows[0].field_references.description[0].id, 'actual-person'); assert.equal(rows[1].field_references.title[0].id, 'actual-document');
+  const ics = calendar.exportCalendar([{ id: 'one', fields }]); assert.ok(!ics.includes('actual-person') && !ics.includes('field_references'));
+  const restored = calendar.importCalendar(ics); assert.ok(restored.every(row => row.field_references === undefined));
 });

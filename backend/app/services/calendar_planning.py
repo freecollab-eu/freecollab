@@ -82,7 +82,11 @@ def validate_exceptions(fields):
         seen.add(identity)
         if not item.cancelled:
             base = fields.model_dump(exclude={"recurrence", "exceptions"})
-            base.update(item.model_dump(exclude={"original_start", "cancelled"}, exclude_none=True))
+            overrides = item.model_dump(exclude={"original_start", "cancelled"}, exclude_none=True)
+            if base.get("field_references"):
+                base["field_references"] = {name: refs for name, refs in base["field_references"].items()
+                                            if name not in overrides or overrides[name] == base.get(name)}
+            base.update(overrides)
             normalized = CalendarFields.model_validate(base)
             if item.starts_at is not None:
                 item.starts_at, item.ends_at = normalized.starts_at, normalized.ends_at
@@ -105,7 +109,13 @@ def expand_occurrences(fields, start: datetime, end: datetime, limit: int = 366)
         payload = {**base, "starts_at": occurrence_start.isoformat() if fields.all_day else iso(occurrence_start),
                    "ends_at": occurrence_end.isoformat() if fields.all_day else iso(occurrence_end)}
         if override:
-            payload.update(override.model_dump(exclude={"original_start", "cancelled"}, exclude_none=True))
+            overrides = override.model_dump(exclude={"original_start", "cancelled"}, exclude_none=True)
+            if payload.get("field_references"):
+                payload["field_references"] = {name: refs for name, refs in payload["field_references"].items()
+                                               if name not in overrides or overrides[name] == payload.get(name)}
+                if not payload["field_references"]:
+                    payload.pop("field_references")
+            payload.update(overrides)
         begins = datetime.combine(date.fromisoformat(payload["starts_at"]), time(), zone) if fields.all_day else instant(payload["starts_at"])
         ends = datetime.combine(date.fromisoformat(payload["ends_at"]), time(), zone) if fields.all_day else instant(payload["ends_at"])
         if begins < end and ends > start:

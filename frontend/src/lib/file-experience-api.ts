@@ -1,8 +1,10 @@
+import { validateFieldReferences, type FieldReferences } from './field-references';
+import { validateResourceReferenceTargets } from './resource-reference-targets';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import { listFileVersions, type ManagedFile } from './files-api';
 
-export interface FileCommentRecord { id: string; document_id: string; file_id: string; created_by: string; created_at: string; text: string }
+export interface FileCommentRecord { field_references?: FieldReferences; id: string; document_id: string; file_id: string; created_by: string; created_at: string; text: string }
 export interface OfficeSession { id: string; path: string; handler: 'ms-word' | 'ms-excel' | 'ms-powerpoint'; expires_at: string }
 const base = (file: ManagedFile) => '/channels/' + encodeURIComponent(file.channel_id) + '/file-experience/' + encodeURIComponent(file.id);
 const current = (owner: string | null) => { if (!owner || owner !== api.getAccessToken()) throw new Error('The signed-in account changed.'); };
@@ -44,20 +46,22 @@ export const fileExperienceApi = {
           || payload.document_id !== verified.document_id || target.getSender() !== '@fc_' + verified.document_owner_id + ':' + domain)
         throw new Error('The comment refers to a different encrypted file.');
       result.push({ id: event.getId()!, document_id: verified.document_id!, file_id: content.file_event_id,
-        created_by: content.owner_id, created_at: new Date(event.getTs()).toISOString(), text: content.text });
+        created_by: content.owner_id, created_at: new Date(event.getTs()).toISOString(), text: content.text, ...(content.field_references ? { field_references: validateFieldReferences({ text: content.text }, content.field_references) } : {}) });
     }
     current(owner); return result.slice(-100);
   },
-  async comment(file: ManagedFile, text: string, identifier = crypto.randomUUID()) {
-    const owner = api.getAccessToken(), normalized = text.trim(); current(owner);
+  async comment(file: ManagedFile, text: string, identifier = crypto.randomUUID(), references?: FieldReferences) {
+    const field_references = validateFieldReferences({ text }, references);
+    const owner = api.getAccessToken(), normalized = field_references?.text?.length ? text : text.trim(); current(owner);
     if (!normalized || normalized.length > 2000) throw new Error('Write a comment of at most 2,000 characters.');
     const context = await secureContext(file, owner); current(owner);
+    await validateResourceReferenceTargets(file.channel_id, { text: normalized }, field_references, owner, !!context); current(owner);
     if (context) {
       const { secure, verified } = context;
       await secure.sendEvent(file.channel_id, COMMENT, { id: identifier, document_id: verified.document_id,
-        file_event_id: verified.id, owner_id: api.getCurrentUserId(), text: normalized }, 'file-comment-' + identifier);
+        file_event_id: verified.id, owner_id: api.getCurrentUserId(), text: normalized, ...(field_references ? { field_references } : {}) }, 'file-comment-' + identifier);
       current(owner);
-    } else { await api.request(base(file) + '/comments', { method: 'POST', body: JSON.stringify({ id: identifier, text: normalized }) }); current(owner); }
+    } else { await api.request(base(file) + '/comments', { method: 'POST', body: JSON.stringify({ id: identifier, text: normalized, ...(field_references ? { field_references } : {}) }) }); current(owner); }
   },
   async office(file: ManagedFile, password: string, code?: string) {
     const owner = api.getAccessToken(); current(owner);

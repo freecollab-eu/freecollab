@@ -1,5 +1,80 @@
 # FreeCollab validation record
 
+## Commands, references and concurrent collaboration — 2026-10-24
+
+The [shared collaboration contract](UNIVERSAL_COLLABORATION.md) is implemented
+in the product writing fields. Commands and selected references now work in
+documents, comments, tasks, decisions and other supported editors. New work
+retains existing drafts and Yjs sessions. Explicit modal continuation keeps
+file previews, calendar forms, nested file/member views and private mobile
+drafts mounted while related work is used. Real close and navigation retain
+their appropriate local or all-work guards.
+
+The previous `5d5b391` source was reproduced in a disposable native installation:
+document `/task` and `@` had no picker, and opening another feature from an
+unsaved document asked to discard it. Actual tests also exposed sticky work
+overlap, offscreen modal palettes, stale reader callbacks, lost command-draft
+reference IDs, reading-position/focus races and split-surrogate Yjs corruption.
+These are fixed in the current candidate; diagnostic and intermediate attempts
+are retained separately from accepted final evidence.
+
+Validation of the frozen runtime:
+
+- **712 frontend Node tests** and application/embedded production builds passed.
+  All 445 recorded build/unit inputs remained identical throughout the checks.
+- **235 focused backend regressions** passed across document comments, projects,
+  feeds, calendar/provider integration, files, clips and workflows. The 11
+  recorded backend input hashes still match the final source. Separate
+  document-organization reference checks passed as well; no schema migration
+  is required.
+- **34 actual product checks** passed in four disposable native, demo,
+  modal-writer and security-transition fixtures. All 612 copied source hashes
+  matched the same final checkout at completion. The run executed **102 real
+  command handlers**, 34 each from document text, task description and a
+  document comment, without publishing a target resource merely by opening it.
+- That run independently checked six reference kinds, exact selected-ID transfer
+  into slash-created task/decision/document records, real saves and READ links,
+  disconnected two-peer Unicode edits, anchored references, named revision
+  restoration and reload. Actual role/member/token revocation and delayed READ
+  cancellation passed. Swedish 390/320/short-viewport touch, Escape and IME
+  checks also passed. There were no HTTP 429 responses.
+- All six modal cases used actual pointer access and strict same-node,
+  draft/caret/focus assertions: file and calendar commands, a posted file-comment
+  READ link, nested Files/Members return, non-destructive ancestor close and a
+  private mobile draft opening a document. No force clicks or hidden-field
+  substitutes were used. The four fixtures and their eight owned API/Vite
+  processes stopped; the owned example visit was deleted.
+- Focused real React/browser checks passed for shared input (**9**), retained
+  workbench (**10**), modal continuation (**4**), reader lifetimes (**13**) and
+  existing layout/focus behavior (**8**). The older reader reproduced a late
+  navigation after unmount; the current implementation rejects it, including
+  after a host's second await and newer deliberate input.
+- The complete **33-group Product workflow**, **17-group Copilot** and
+  **7-group slash** regressions passed on the final runtime with unchanged
+  wrapper source graphs. The Product workflow's copied/current-source equality
+  check passed too. Conversation (**15**), workspace modes (**17**), shared
+  documents (**8**), threads (**11**), commands/references (**18**) and language
+  (**18**) also passed on their recorded earlier candidates. The later nested
+  modal focus receipt is covered separately by the final modal/product tests;
+  earlier results are not relabeled as whole-final-source acceptance.
+- **55 document/federation regressions** passed after reproducing actual Yjs
+  high-surrogate corruption before the fix. Text replacement now respects full
+  Unicode scalar boundaries, preserving reference anchors and reloads.
+
+The security-transition browser witness uses a real empty native channel and
+an owned unavailable loopback Matrix endpoint: enable durably enters preparing
+then returns 503; authoritative channel refresh purges old native draft DOM,
+and a later native write returns 409. It uses no forged Matrix response or
+database mutation. This is not real Matrix acceptance. Component fixtures with
+controlled promises are explicitly separate from native persistence evidence;
+short viewports are not a physical mobile-keyboard claim.
+
+The new five browser proofs are included in Product CI with narrowly scoped
+JSON/image artifacts. Federation retains its verified Matrix participant picker;
+general peer `@` spans remain outside protocol v1. AI prompts and provider-bound
+titles do not acquire automatic source disclosure. Work-field references are
+links; autosaved document edits do not emit chat mention notifications.
+
 ## Commands in thread reply fields — 2026-10-24
 
 A Swedish mobile screenshot exposed a missing composer integration. The exact

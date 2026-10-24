@@ -9,15 +9,15 @@ import ts from 'typescript';
 function fixture(component = 'SharedDocumentsPanel') {
   const source = readFileSync(new URL('../src/components/' + component + '.tsx', import.meta.url), 'utf8');
   const tree = ts.createSourceFile(component + '.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const wanted = new Set(['publishPending', 'clearPending', 'canLeavePendingDocument', 'mayChangeDocument', 'run', 'revealReadyDocument', 'focusReadyDocument', 'focusSourceComment', 'openOrganizedDocument', 'changeDocumentView', 'restoreDocumentViewFocus']);
-  const functions = [], inputs = {}; let registration;
+  const wanted = new Set(['addComment', 'publishPending', 'clearPending', 'canLeavePendingDocument', 'mayChangeDocument', 'run', 'revealReadyDocument', 'focusReadyDocument', 'focusSourceComment', 'openOrganizedDocument', 'changeDocumentView', 'restoreDocumentViewFocus']);
+  const functions = [], inputs = {}, valueInputs = new Set(); let registration;
   function visit(node) {
     if (ts.isFunctionDeclaration(node) && wanted.has(node.name?.text)) functions.push(node.getText(tree));
     if (ts.isCallExpression(node) && node.expression.getText(tree) === 'useEffect' && node.arguments[0]?.getText(tree).includes('registerConversationNavigationGuard')) registration = node.arguments[0].getText(tree);
-    if (ts.isJsxAttribute(node) && node.name.getText(tree) === 'onChange' && ts.isJsxExpression(node.initializer) && node.initializer.expression) {
+    if (ts.isJsxAttribute(node) && ['onChange', 'onValueChange'].includes(node.name.getText(tree)) && ts.isJsxExpression(node.initializer) && node.initializer.expression) {
       const text = node.initializer.expression.getText(tree);
       for (const name of ['setComment', 'setSnapshotName', 'setNewTitle', 'setNewBody', 'setTitle', 'setRenameTitle', 'setRelatedId', 'setSourceStack']) {
-        if (text.includes(name + '(')) inputs[name] = text;
+        if (text.includes(name + '(')) { inputs[name] = text; if (node.name.getText(tree) === 'onValueChange') valueInputs.add(name); }
       }
     }
     ts.forEachChild(node, visit);
@@ -32,7 +32,7 @@ function fixture(component = 'SharedDocumentsPanel') {
     api: { getAccessToken: () => state.credential, getCurrentUserId: () => state.userId }, current: request => request === context.generation.current && context.owner.current === state.credential,
     window: { confirm: () => { state.confirmed++; return state.confirm; }, matchMedia: () => ({ matches: false }) }, t: value => value, describe: failure => failure.message, message: failure => failure.message,
     setError: value => state.errors.push(value), setNotice: () => {}, setBusy: () => {},
-    newTitle: '', newBody: '', commentDraft: { current: '' }, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio', previewRef: { current: false }, readingPage: { current: null },
+    newTitle: '', newBody: '', surfaceId: 'primary', fieldId: name => name, setNewTitleReferences() {}, setNewBodyReferences() {}, setCommentReferences() {}, commentReferenceDraft: { current: [] }, commentDraft: { current: '' }, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio', previewRef: { current: false }, readingPage: { current: null },
   };
   const navigation = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/conversation-navigation.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
@@ -41,7 +41,7 @@ function fixture(component = 'SharedDocumentsPanel') {
   context.registerConversationNavigationGuard = navigation.registerConversationNavigationGuard;
   for (const name of Object.keys(inputs)) context[name] = value => { assert.equal(state.pending, true, 'dirty callback must precede scheduled React state'); state.values[name] = value; };
   const exports = functions.map(text => 'exports.' + text.match(/function (\w+)/)[1] + '=' + text.match(/function (\w+)/)[1] + ';').join('\n');
-  const callbacks = Object.entries(inputs).map(([name, text]) => 'exports.' + name + '=' + text + ';').join('\n');
+  const callbacks = Object.entries(inputs).map(([name, text]) => 'exports.' + name + '=' + (valueInputs.has(name) ? '(event, references = []) => (' + text + ')(event.target.value, references)' : text) + ';').join('\n');
   const compiled = ts.transpileModule(functions.join('\n') + '\n' + exports + '\n' + callbacks + (registration ? '\nexports.mountGuard=' + registration : ''), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   vm.runInNewContext(compiled, context);
   return { ...context.exports, context, state, navigation };
@@ -263,4 +263,41 @@ test('view restoration respects changed text, workspace, authority and archived 
   f.context.selected.archived = false; f.state.credential = 'replacement'; f.changeDocumentView(false);
   assert.equal(f.context.previewRef.current, true, 'old authority cannot enter editing');
   assert.equal(f.writes(), 0);
+});
+
+test('document guards protect only their retained surface on a local close and all surfaces on channel navigation', () => {
+  const primary = fixture(), sibling = fixture();
+  primary.navigation.setConversationNavigationWorkspace('studio');
+  sibling.context.surfaceId = 'parallel-document';
+  sibling.context.registerConversationNavigationGuard = primary.navigation.registerConversationNavigationGuard;
+  const removePrimary = primary.mountGuard(), removeSibling = sibling.mountGuard();
+  try {
+    sibling.publishPending('yjs', true);
+    assert.equal(primary.navigation.mayLeaveConversationWork('primary'), true);
+    assert.equal(primary.navigation.mayLeaveConversationWork('parallel-document'), false);
+    assert.equal(primary.navigation.mayLeaveConversationWork(), false);
+  } finally { removePrimary(); removeSibling(); }
+});
+
+test('actual document input callbacks retain selected IDs and a same-label replacement survives an earlier comment save', async () => {
+  const f = fixture(), chosen = [{ kind: 'person', id: 'chosen-peer', start: 4, end: 9 }];
+  f.context.setNewBodyReferences = value => { f.state.values.newBodyReferences = value; };
+  f.context.setCommentReferences = value => { f.state.values.commentReferences = value; };
+  f.setNewBody({ target: { value: 'Ask @Peer' } }, chosen);
+  assert.deepEqual(f.state.values.newBodyReferences, chosen);
+  f.setComment({ target: { value: 'Ask @Peer' } }, chosen);
+  assert.deepEqual(f.context.commentReferenceDraft.current, chosen);
+  let release, written, clears = 0;
+  Object.assign(f.context, {
+    selected: { id: 'doc' }, selectedId: { current: 'doc' }, channelId: 'channel', comment: 'Ask @Peer', commentReferences: chosen,
+    sharedDocumentsApi: { comment: async (...args) => { written = args; await new Promise(resolve => release = resolve); } },
+    loadComments: async () => {}, setComment: () => clears++,
+  });
+  const saving = f.addComment({ preventDefault() {} });
+  const replacement = [{ ...chosen[0], id: 'other-peer' }];
+  f.context.commentReferenceDraft.current = replacement;
+  release(); await saving;
+  assert.deepEqual(written, ['channel', 'doc', 'Ask @Peer', chosen]);
+  assert.equal(clears, 0, 'a newer selection with identical visible text is still unsaved work');
+  assert.equal(f.state.pending, true);
 });

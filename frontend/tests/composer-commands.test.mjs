@@ -15,12 +15,79 @@ const i18n = load('../src/i18n/core.ts');
 i18n.registerCatalog('sv', load('../src/i18n/composer-commands.sv.ts').default);
 const slash = load('../src/lib/slash-commands.ts', { '../i18n/core': i18n });
 const references = load('../src/lib/message-references.ts');
-const { parseComposerCommand, getComposerCommandQuery, isComposerCommandDraft, composerCommandUsage, prepareCommandPeople } = load('../src/lib/composer-commands.ts', {
+const { parseComposerCommand, getComposerCommandQuery, isComposerCommandDraft, composerCommandUsage, prepareCommandPeople, prepareComposerDraftReferences } = load('../src/lib/composer-commands.ts', {
   '../i18n/core': i18n, './slash-commands': slash, './message-references': references,
 });
 const context = { hasChannel: true, hasWorkspace: true, secure: false, channelType: 'group', embedded: false, nativeSession: true, workspaceRole: 'owner', hasAdmin: false };
 const parse = (value, selectedAction, changes = {}) => parseComposerCommand(value, { ...context, ...changes }, selectedAction);
 const plain = value => JSON.parse(JSON.stringify(value));
+
+function picked(value, label, id, kind = 'document', from = 0) {
+  const start = value.indexOf(label, from);
+  assert.ok(start >= 0);
+  return { kind, id, start, end: start + label.length };
+}
+
+test('command draft transfer distinguishes identical labels by their selected source spans', () => {
+  const value = '/task "Review @Brief" Compare @Brief with @Brief';
+  const a = picked(value, '@Brief', 'title-document'), b = picked(value, '@Brief', 'first-context-document', 'document', a.end), c = picked(value, '@Brief', 'second-context-task', 'task', b.end);
+  const result = prepareComposerDraftReferences(value, [a, b, c], parse(value).intent);
+  assert.deepEqual(plain(result), { title: [{ kind: 'document', id: 'title-document', start: 7, end: 13 }], description: [
+    { kind: 'document', id: 'first-context-document', start: 8, end: 14 }, { kind: 'task', id: 'second-context-task', start: 20, end: 26 },
+  ] });
+});
+
+test('draft transfer retains UTF-16 IDs through escaped title syntax, CRLF and trimming', () => {
+  const value = '/dokument  "  Quote \\"yes\\" 🧭 @Brief  "\r\n  Related @Brief\r\n@File';
+  const a = picked(value, '@Brief', 'title-doc'), b = picked(value, '@Brief', 'body-doc', 'document', a.end), c = picked(value, '@File', 'file-object', 'file');
+  const intent = parse(value).intent;
+  assert.equal(intent.title, 'Quote "yes" 🧭 @Brief');
+  assert.equal(intent.text, '  Related @Brief\n@File');
+  const result = prepareComposerDraftReferences(value, [a, b, c], intent);
+  for (const [key, text] of [['title', intent.title], ['body', intent.text]]) for (const ref of result[key]) {
+    assert.equal(text.slice(ref.start, ref.end), ref.kind === 'file' ? '@File' : '@Brief');
+    assert.equal(text.charCodeAt(ref.start - 1), key === 'title' ? 32 : ref.kind === 'file' ? 10 : 32);
+  }
+  assert.deepEqual(Object.values(result).flat().map(ref => ref.id), ['title-doc', 'body-doc', 'file-object']);
+});
+
+test('trailing selected owner is assigned separately while context identities remain bound', () => {
+  const value = '/task "Review @Brief" Ask @Ada about @Brief @Sam';
+  const a = picked(value, '@Brief', 'title-doc'), b = picked(value, '@Ada', 'ada', 'person'), c = picked(value, '@Brief', 'context-doc', 'document', a.end), d = picked(value, '@Sam', 'sam', 'person');
+  const prepared = prepareCommandPeople(value, [a, b, c, d]);
+  const result = prepareComposerDraftReferences(value, [a, b, c, d], parse(prepared.text).intent);
+  assert.deepEqual(Object.values(result).flat().map(ref => ref.id), ['title-doc', 'ada', 'context-doc']);
+  assert.deepEqual(plain(prepared.personIds), ['ada', 'sam']);
+  assert.equal(result.description[0].start, 4);
+});
+
+test('document commands preserve trailing person links instead of treating them as assignees', () => {
+  const value = '/document "Notes" Ask @Ada', ref = picked(value, '@Ada', 'ada', 'person');
+  assert.deepEqual(plain(prepareComposerDraftReferences(value, [ref], parse(value).intent)), {
+    body: [{ kind: 'person', id: 'ada', start: 4, end: 8 }],
+  });
+});
+
+test('decision title fallback binds both real fields to the same selected identity', () => {
+  const value = '/beslut Granska @Brief', ref = picked(value, '@Brief', 'actual-doc');
+  const result = prepareComposerDraftReferences(value, [ref], parse(value).intent);
+  assert.deepEqual(plain(result.title), [{ kind: 'document', id: 'actual-doc', start: 8, end: 14 }]);
+  assert.deepEqual(plain(result.content), plain(result.title));
+});
+
+test('reference transfer rejects stale intents and transformed labels without consuming caller text', () => {
+  const value = '/task Granska @Brief', ref = picked(value, '@Brief', 'actual-doc');
+  assert.throws(() => prepareComposerDraftReferences(value, [ref], { kind: 'task', title: 'Something else', text: '' }));
+  const escaped = '/document "Review @A\\\\B"', transformed = picked(escaped, '@A\\\\B', 'actual-doc');
+  assert.throws(() => prepareComposerDraftReferences(escaped, [transformed], parse(escaped).intent));
+  assert.throws(() => prepareComposerDraftReferences(value, [{ ...ref, start: ref.start - 1 }], parse(value).intent));
+  assert.equal(value, '/task Granska @Brief');
+});
+
+test('ordinary command drafts stay compatible and non-resource commands add no field metadata', () => {
+  assert.equal(prepareComposerDraftReferences('/task Review', [], parse('/task Review').intent), undefined);
+  assert.equal(prepareComposerDraftReferences('/status', [], parse('/status').intent), undefined);
+});
 
 test('ordinary prose, URLs and literal // remain outside command handling', () => {
   for (const value of ['', 'A / task', 'https://freecollab.eu/', '//literal', ' /task title']) {

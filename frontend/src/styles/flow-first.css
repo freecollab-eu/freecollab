@@ -18,7 +18,7 @@
 .fc-chat-channel-introduction p { margin: 0; color: var(--fc-muted); font-size: var(--fc-body-size); line-height: 1.7; overflow-wrap: anywhere; }
 .fc-flow-first .fc-chat-channel-introduction > .fc-icon-button { flex-shrink: 0; border-color: transparent; }
 .fc-flow-first .fc-chat-timeline-inner { padding-top: 1.25rem; }
-.fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work[hidden]) { max-width: 58rem; margin-inline: auto; }
+.fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column[hidden]) { max-width: 58rem; margin-inline: auto; }
 .fc-flow-first .fc-chat-message-list { min-width: 0; padding: 0; }
 .fc-flow-first .fc-chat-message { gap: .9rem; margin: 0; padding: .8rem 0 1rem; }
 .fc-flow-first .fc-chat-message-content { max-width: 100%; margin-top: .4rem; font-family: var(--fc-font); font-size: var(--fc-message-size); font-weight: 400; line-height: 1.7; letter-spacing: normal; }
@@ -53,8 +53,8 @@
 .fc-flow-related-documents label > span { min-width: 0; overflow-wrap: anywhere; }
 .fc-flow-first > .fc-chat-main > .fc-contextual-copilot { padding-inline: var(--chat-inline); }
 @media (min-width: 1000px) {
-  .fc-flow-first:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-composer-area { max-width: 66rem; padding-inline: var(--chat-inline); }
-  .fc-flow-first:has(.fc-chat-room-work[hidden]):not(.is-focus-mode) .fc-chat-composer-row { max-width: none; }
+  .fc-flow-first:has(.fc-chat-room-work-column[hidden]):not(.is-focus-mode) .fc-chat-composer-area { max-width: 66rem; padding-inline: var(--chat-inline); }
+  .fc-flow-first:has(.fc-chat-room-work-column[hidden]):not(.is-focus-mode) .fc-chat-composer-row { max-width: none; }
 }
 @media (max-width: 700px) {
   .fc-flow-first .fc-chat-topbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .4rem .75rem; padding: .55rem 1rem .65rem; }
@@ -82,4 +82,17 @@
 @media (forced-colors: active) {
   .fc-flow-menu, .fc-chat-channel-introduction { border-color: CanvasText; }
   .fc-flow-unread-marker::before, .fc-flow-unread-marker::after { background: Highlight; }
+}
+
+/* Retained work cards share the room column while each keeps its own view. */
+.fc-flow-first .fc-chat-room-work-column { display: grid; align-content: start; gap: 1rem; min-width: 0; width: 100%; }
+.fc-flow-first .fc-chat-room-work-column[hidden] { display: none; }
+.fc-flow-first .fc-chat-room-work-column > .fc-chat-room-work { min-width: 0; width: 100%; }
+.fc-flow-first .fc-chat-room-work-column > .fc-chat-room-work[hidden] { display: none; }
+.fc-flow-first .fc-chat-room-work-column:has(> .fc-collaboration-workbench) > .fc-chat-room-work:not([data-workspace-mode="expanded"]) { position: static; top: auto; }
+.fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column:not([hidden])) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); align-items: start; gap: var(--chat-room-gap); max-width: none; }
+.fc-flow-first.has-material-left .fc-chat-room-content:has(> .fc-chat-room-work-column:not([hidden])) > .fc-chat-message-list { grid-column: 2; grid-row: 1; }
+.fc-flow-first.is-focus-mode .fc-chat-room-content:has(> .fc-chat-room-work-column:not([hidden])) { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 999px) {
+  .fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column:not([hidden])) { display: flex; flex-direction: column; gap: 1rem; }
 }

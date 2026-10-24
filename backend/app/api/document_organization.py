@@ -17,6 +17,7 @@ from ..models.document_organization import SharedDocumentStack, SharedDocumentPl
 from ..services.auth import get_current_user, security
 from ..services import shared_documents as service
 from ..services.chat_notifications import require_native_channel
+from ..services.field_references import normalize_field_references
 
 MAX_STACKS = 30
 MAX_RELATIONS = 200
@@ -127,8 +128,13 @@ def organization(channel_id: str, archived: bool = False, user=Depends(get_curre
     for row in comments[:100]:
         if row.content_mode != 'server': raise HTTPException(409, 'Document comment encryption changed; reload before organizing')
         fields = service.open_payload(session, channel_id, 'comment', row.document_id, row.id, row.encrypted_payload)
+        try:
+            comment_references = normalize_field_references({'text': fields['text']}, {'text': fields.get('references', [])}).get('text')
+        except (KeyError, ValueError, TypeError):
+            raise HTTPException(409, 'Stored document comment references could not be verified') from None
         stack_comments.append({'id': row.id, 'channel_id': channel_id, 'document_id': row.document_id, 'stack_id': by_document.get(row.document_id),
-            'text': fields['text'], 'created_by': row.created_by, 'created_at': row.created_at, 'resolved': row.resolved, 'version': row.version})
+            'text': fields['text'], 'created_by': row.created_by, 'created_at': row.created_at, 'resolved': row.resolved, 'version': row.version,
+            **({'references': comment_references} if comment_references else {})})
     return {'documents': [service.metadata(row, session) for row in documents], 'stacks': [stack_record(session, row) for row in stacks],
         'stack_comments': stack_comments, 'comments_incomplete': len(comments) > 100,
         'message_references': [reference_record(session, row, user.id) for row in references],

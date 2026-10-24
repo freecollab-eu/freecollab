@@ -1,4 +1,12 @@
-# Personer, grupper och material direkt i samtalet
+# Personer, grupper och material där arbetet finns
+
+Dokument, uppgifter, flöden, beslut och deras kommentarer använder nu samma
+explicit valda `@`-identiteter som chatten. Delade dokument behåller referenser
+med relativa Yjs-positioner; andra arbetsfält använder metadata i sitt
+befintliga krypterade innehåll. Läsning kontrollerar aktuell åtkomst.
+Se [samtidigt samarbete](UNIVERSAL_COLLABORATION.md) för fältens kontrakt,
+begränsningarna för federation och skillnaden mellan en länk och en levererad
+chatnotis.
 
 Skriv `@` där markören står i meddelandet och välj en person, en kanalgrupp,
 ett dokument, en uppgift, en fil eller det aktuella samtalet. Valet infogar ett

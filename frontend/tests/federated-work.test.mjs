@@ -6,6 +6,7 @@ import vm from 'node:vm';
 import ts from 'typescript';
 import * as Y from 'yjs';
 import * as cryptoApi from 'matrix-js-sdk/lib/crypto-api/index.js';
+import { fieldReferences } from './load-field-references.mjs';
 
 function compile(path, dependencies = {}) {
   const output = ts.transpileModule(readFileSync(new URL(path, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
@@ -13,7 +14,7 @@ function compile(path, dependencies = {}) {
   vm.runInNewContext(output, { exports, Date, Intl, TextEncoder, TextDecoder, Uint8Array, btoa, atob, crypto: webcrypto, require: name => { assert.ok(name in dependencies, name); return dependencies[name]; } });
   return exports;
 }
-const calendar = compile('../src/lib/calendar.ts');
+const calendar = compile('../src/lib/calendar.ts', { './field-references': fieldReferences });
 const model = compile('../src/lib/federated-work-model.ts', { './calendar': calendar });
 const document = compile('../src/lib/federated-work-document.ts', { yjs: Y });
 const trust = compile('../src/lib/federated-work-trust.ts', { 'matrix-js-sdk/lib/crypto-api': cryptoApi });
@@ -47,6 +48,7 @@ test('shared calendar reuses DST-aware finite recurrence and exceptions while ex
   assert.equal(occurrences[1].starts_at, '2026-11-06T09:00:00.000Z');
   assert.throws(() => model.validateSharedFields('calendar', { ...fields, external_uid: 'provider@example.com' }));
   assert.throws(() => model.validateSharedFields('calendar', { ...fields, attendees: ['private@example.com'] }));
+  assert.throws(() => model.validateSharedFields('calendar', { ...fields, field_references: { title: [{ kind: 'person', id: 'local-native-identity', start: 0, end: 4 }] } }));
 });
 
 test('resource creation is pinned to the actual encrypted sender namespace and connection', async () => {
@@ -129,4 +131,26 @@ test('bounded document parser rejects custom structures, rich embeds and oversiz
   assert.throws(() => document.validateWorkDocument(doc), /structure/); doc.destroy();
   const rich = new Y.Doc(); rich.getText('title').insert(0, 'Rich'); rich.getText('body').insert(0, 'Bold', { bold: true }); assert.throws(() => document.validateWorkDocument(rich), /plain text/); rich.destroy();
   assert.throws(() => edit(start, 'Shared document', 'x'.repeat(50001)), /size/);
+});
+
+test('federated Yjs text replacement never splits shared high or low surrogate boundaries', () => {
+  const doc = new Y.Doc();
+  try {
+    doc.getText('body').insert(0, '🧭 Plan');
+    let prefix = '';
+    for (const character of 'Peer prefix 🪵\n') {
+      prefix += character;
+      document.replaceWorkText(doc, 'body', prefix + '🧭 Plan');
+      assert.equal(doc.getText('body').toString(), prefix + '🧭 Plan');
+    }
+    const before = String.fromCodePoint(0x1f600) + ' title', after = String.fromCodePoint(0x1fa00) + ' title';
+    document.replaceWorkText(doc, 'title', before); document.replaceWorkText(doc, 'title', after);
+    assert.equal(doc.getText('title').toString(), after);
+    const reloaded = new Y.Doc();
+    try {
+      Y.applyUpdate(reloaded, Y.encodeStateAsUpdate(doc)); document.validateWorkDocument(reloaded);
+      assert.equal(reloaded.getText('body').toString(), prefix + '🧭 Plan');
+      assert.equal(reloaded.getText('title').toString(), after);
+    } finally { reloaded.destroy(); }
+  } finally { doc.destroy(); }
 });

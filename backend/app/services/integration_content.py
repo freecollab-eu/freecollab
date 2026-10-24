@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, model_serializer, model_validator
 from typing import Literal
+from .field_references import ReferencedFields, preserve_referenced_text
 
 
 def document_url(provider: str, value: str) -> str:
@@ -55,23 +56,30 @@ def document_url(provider: str, value: str) -> str:
     return urlunsplit(("https", host, parsed.path, "", ""))
 
 
-class DocumentFields(BaseModel):
+class DocumentFields(ReferencedFields):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
     provider: Literal["nextcloud", "google_drive", "sharepoint"]
     url: str = Field(min_length=1, max_length=4096)
     notes: str = Field(default="", max_length=4000)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        return preserve_referenced_text(value, ("title",))
+
+    def reference_texts(self):
+        return {"title": self.title, "notes": self.notes}
+
     @model_validator(mode="after")
     def validate_fields(self):
-        self.title = self.title.strip()
-        if not self.title:
+        if not self.title.strip():
             raise ValueError("A document needs a title")
         self.url = document_url(self.provider, self.url)
         return self
 
 
-class CalendarFields(BaseModel):
+class CalendarFields(ReferencedFields):
     model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=10000)
@@ -85,11 +93,21 @@ class CalendarFields(BaseModel):
     recurrence: "CalendarRecurrence | None" = None
     exceptions: list["CalendarException"] = Field(default_factory=list, max_length=100)
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        return preserve_referenced_text(value, ("title",))
+
+    def reference_texts(self):
+        return {"title": self.title, "description": self.description, "location": self.location}
+
     @model_serializer(mode="wrap")
     def preserve_single_event_shape(self, handler):
         # Existing sync fingerprints must not change merely on upgrade. Keep
         # the released standalone payload shape when no new feature is used.
         result = handler(self)
+        if not self.field_references:
+            result.pop("field_references", None)
         if self.recurrence is None:
             result.pop("recurrence", None)
         if not self.exceptions:
@@ -98,8 +116,7 @@ class CalendarFields(BaseModel):
 
     @model_validator(mode="after")
     def validate_fields(self):
-        self.title = self.title.strip()
-        if not self.title:
+        if not self.title.strip():
             raise ValueError("An event needs a title")
         if self.external_uid is not None and (not self.external_uid or any(ord(c) < 33 or ord(c) == 127 for c in self.external_uid)):
             raise ValueError("Invalid calendar UID")

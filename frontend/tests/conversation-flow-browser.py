@@ -6,7 +6,7 @@ SQLite database supplies two accounts, two workspaces and independent native
 channels. The optional document gate holds the real update request before its
 production handler; no API response, document state or navigation state is mocked.
 """
-from ui_navigation import choose_chat_channel, close_channels, activate_chat_feature
+from ui_navigation import choose_chat_channel, close_channels, activate_chat_feature, capture_work_card, close_work_card, work_surface, work_resume_button
 import base64
 import hashlib
 import json
@@ -94,7 +94,7 @@ def work(page):
     button = page.get_by_role('button', name=WORK)
     button.evaluate('(node)=>{window.flowExpectedReturn=node}')
     button.click()
-    dialog = page.get_by_role('region', name=DIALOG)
+    dialog = capture_work_card(page).get_by_role('region', name=DIALOG)
     expect(dialog).to_be_visible()
     expect(dialog.get_by_role('tablist')).to_have_count(0)
     expect(dialog.get_by_role('combobox', name='Workspace tool', exact=True)).to_have_count(0)
@@ -109,21 +109,30 @@ def selected(dialog, value):
 
 
 def select(dialog, value):
+    """Observe both clean catalogs, then explicitly close the old fixture view."""
     page = dialog.page
+    original = dialog.element_handle()
+    original_card = capture_work_card(page, dialog)
     feature_id = {'tasks': 'task', 'documents': 'document', 'meetings': 'meetings', 'feed': 'activity', 'workflows': 'workflows', 'cloud': 'cloud'}[value]
     target = activate_chat_feature(page, feature_id)
     target.evaluate('(node)=>{window.flowExpectedReturn=node}')
-    selected(dialog, value)
+    sibling = capture_work_card(page).get_by_role('region', name=DIALOG)
+    selected(sibling, value)
+    assert original_card.get_attribute('data-collaboration-work-id') != capture_work_card(page, sibling).get_attribute('data-collaboration-work-id')
+    assert dialog.evaluate('(node,old)=>node===old&&old.isConnected', original), 'A new feature replaced the previous live work card'
+    close_work_card(page, dialog)
+    expect(sibling).to_be_visible()
+    work_surface(page, sibling).focus()
+    return sibling
 
 
-def guarded_feature(page, feature_id):
-    """A rejected / choice keeps its real picker, editor and draft intact."""
-    activate_chat_feature(page, feature_id, expect_closed=False)
-    picker = page.locator('.fc-slash-commands')
-    expect(picker).to_be_visible()
-    expect(picker.get_by_role('combobox')).to_be_focused()
-    picker.get_by_role('combobox').press('Escape')
-    expect(picker).to_have_count(0)
+def open_sibling(page, feature_id):
+    """A sibling opens normally while existing dirty or busy work stays mounted."""
+    activate_chat_feature(page, feature_id)
+    expect(page.locator('.fc-slash-commands')).to_have_count(0)
+    sibling = capture_work_card(page).get_by_role('region', name=DIALOG)
+    expect(sibling).to_be_visible()
+    return sibling
 
 
 def leave(page, dialog, button=None):
@@ -275,7 +284,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
                     page.locator('.fc-chat').evaluate('(node)=>{window.flowShell=node}')
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     assert page.locator('.fc-chat').evaluate('(node)=>node===window.flowShell'), 'Changing work remounted the conversation shell'
                     composer.focus()
                     expect(composer).to_be_focused()
@@ -293,7 +302,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     choose_chat_channel(page, 'Design')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'feed')
+                    dialog = select(dialog, 'feed')
                     leave(page, dialog, button)
                     choose_chat_channel(page, 'Courtyard')
                     dialog, button = work(page)
@@ -308,7 +317,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     stage = 'explicit resource navigation overrides a remembered generic tool'
                     channel = native(base, sessions['alpha']['access_token'], '/channels/design')
                     page.evaluate('(channel)=>window.dispatchEvent(new CustomEvent("freecollab:open-search-source",{detail:{channel_id:channel.id,kind:"document",id:"navigation-intent"}}))', channel)
-                    dialog = page.get_by_role('region', name=DIALOG)
+                    dialog = capture_work_card(page).get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     leave(page, dialog)
                     checks['explicit_production_resource_navigation_overrides_remembered_generic_view'] = True
@@ -318,7 +327,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     choose_chat_channel(page, 'Design')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     leave(page, dialog, button)
                     checks['reload_starts_default_view_instead_of_persisting_tool_memory'] = True
 
@@ -327,13 +336,13 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     choose_chat_channel(page, 'Research')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'feed')
+                    dialog = select(dialog, 'feed')
                     leave(page, dialog, button)
                     switch_workspace(page, 'Nord Studio')
                     choose_chat_channel(page, 'Courtyard')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     leave(page, dialog, button)
                     checks['workspace_changes_drop_old_tool_memory'] = True
 
@@ -342,13 +351,13 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     choose_chat_channel(page, 'Courtyard')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     leave(page, dialog, button)
                     page.evaluate('window.switchFlowAccount("beta")')
                     choose_chat_channel(page, 'Courtyard')
                     dialog, button = work(page)
                     selected(dialog, 'tasks')
-                    select(dialog, 'feed')
+                    dialog = select(dialog, 'feed')
                     leave(page, dialog, button)
                     page.evaluate('window.switchFlowAccount("alpha2")')
                     choose_chat_channel(page, 'Courtyard')
@@ -357,7 +366,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     checks['same_user_new_credential_and_account_roundtrip_start_without_old_memory'] = True
 
                     stage = 'actual unsynchronized document guards both return and tool changes'
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     dialog.get_by_role('button', name='New shared document', exact=True).click()
                     dialog.get_by_label('Document title', exact=True).fill('Material choices')
                     with page.expect_response(lambda response: response.request.method == 'POST' and response.url.endswith('/shared-documents')) as created:
@@ -383,10 +392,13 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     expect(dialog).to_be_visible()
                     expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
                     dialog.evaluate('(node)=>{window.flowGuardedWork=node}')
-                    guarded_feature(page, 'task')
+                    task_sibling = open_sibling(page, 'task')
+                    selected(task_sibling, 'tasks')
                     assert not confirmations
                     selected(dialog, 'documents')
                     assert dialog.evaluate('(node)=>node===window.flowGuardedWork')
+                    close_work_card(page, task_sibling)
+                    assert not confirmations
                     choose_chat_channel(page, 'Design')
                     assert not confirmations
                     close_channels(page)
@@ -395,11 +407,18 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     assert not confirmations
                     expect(page.locator('.fc-workspace-switch-trigger')).to_contain_text('Nord Studio')
                     page.evaluate('(id)=>window.dispatchEvent(new CustomEvent("freecollab:open-decision",{detail:{channel_id:"shared",decision_id:id}}))', decision['id'])
+                    decision_target = page.locator('[id$="decision-' + decision['id'] + '"]')
+                    expect(decision_target).to_be_visible()
+                    decision_sibling = capture_work_card(page, decision_target)
+                    expect(decision_sibling.locator('[id$="decision-' + decision['id'] + '"]')).to_be_visible()
+                    assert decision_sibling.get_attribute('data-collaboration-work-id') != capture_work_card(page, dialog).get_attribute('data-collaboration-work-id')
+                    assert not confirmations
+                    close_work_card(page, decision_sibling)
                     assert not confirmations
                     selected(dialog, 'documents')
                     expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
                     assert dialog.evaluate('(node)=>node===window.flowGuardedWork')
-                    checks['pending_native_document_blocks_channel_workspace_and_exact_decision_target'] = True
+                    checks['pending_native_document_guards_true_navigation_but_retains_task_and_exact_decision_siblings'] = True
 
                     stage = 'conversation remains usable while a real document update is pending'
                     body.evaluate('(node)=>{window.flowPendingEditor=node}')
@@ -428,23 +447,30 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     draft_confirmations = []
                     def decline_document_draft(value):
                         draft_confirmations.append(value.message); value.dismiss()
-                    page.once('dialog', decline_document_draft)
+                    page.on('dialog', decline_document_draft)
                     dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     expect(comment_draft).to_have_value('Keep this unsent native document comment.')
-                    page.once('dialog', decline_document_draft)
-                    guarded_feature(page, 'task')
-                    assert len(draft_confirmations) == 2 and all('Changes have not saved' in value for value in draft_confirmations)
+                    comment_editor = comment_draft.element_handle()
+                    task_sibling = open_sibling(page, 'task')
+                    selected(task_sibling, 'tasks')
+                    # Recall follows the last used catalog while older drafts stay live.
+                    last_catalog_kind = task_sibling.get_attribute('data-work-kind')
+                    assert len(draft_confirmations) == 1 and all('Changes have not saved' in value for value in draft_confirmations)
                     expect(comment_draft).to_have_value('Keep this unsent native document comment.')
+                    assert comment_draft.evaluate('(node,old)=>node===old&&old.isConnected', comment_editor)
+                    close_work_card(page, task_sibling)
+                    assert len(draft_confirmations) == 1
+                    page.remove_listener('dialog', decline_document_draft)
                     comment_draft.fill('')
                     leave(page, dialog)
                     dialog, button = work(page)
-                    selected(dialog, 'documents')
+                    selected(dialog, last_catalog_kind)
                     leave(page, dialog, button)
-                    checks['real_document_pending_update_blocks_return_and_work_change_then_synchronizes'] = True
+                    checks['real_document_pending_update_and_comment_survive_siblings_with_own_close_guard_then_sync'] = True
 
                     stage = 'unsaved native task guards close work target channel and workspace'
                     dialog, button = work(page)
-                    select(dialog, 'tasks')
+                    dialog = select(dialog, 'tasks')
                     dialog.get_by_role('button', name='New task', exact=True).click()
                     task_form = dialog.get_by_role('form', name='New task', exact=True)
                     task_form.get_by_label('Task title', exact=True).fill('Choose the courtyard material')
@@ -454,16 +480,20 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     def decline_task(value):
                         task_confirmations.append(value.message)
                         value.dismiss()
-                    page.once('dialog', decline_task)
+                    page.on('dialog', decline_task)
                     dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
-                    page.once('dialog', decline_task)
-                    guarded_feature(page, 'document')
-                    page.once('dialog', decline_task)
+                    document_sibling = open_sibling(page, 'document')
+                    selected(document_sibling, 'documents')
+                    assert len(task_confirmations) == 1
+                    expect(task_form.get_by_label('Task title', exact=True)).to_have_value('Choose the courtyard material')
+                    assert task_form.evaluate('(node)=>node===window.flowTaskEditor')
+                    close_work_card(page, document_sibling)
+                    assert len(task_confirmations) == 1
                     choose_chat_channel(page, 'Design')
                     close_channels(page)
-                    page.once('dialog', decline_task)
                     switch_workspace(page, 'Research Studio')
-                    assert len(task_confirmations) == 4 and all('Changes have not saved' in value for value in task_confirmations)
+                    assert len(task_confirmations) == 3 and all('Changes have not saved' in value for value in task_confirmations)
+                    page.remove_listener('dialog', decline_task)
                     expect(task_form.get_by_label('Task title', exact=True)).to_have_value('Choose the courtyard material')
                     assert task_form.evaluate('(node)=>node===window.flowTaskEditor')
                     expect(page.locator('.fc-workspace-switch-trigger')).to_contain_text('Nord Studio')
@@ -476,11 +506,11 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     actual_tasks = native(base, sessions['alpha2']['access_token'], '/channels/shared/projects/flow-project/tasks')['items']
                     assert any(row['id'] == saved_task['id'] and row['fields']['title'] == 'Choose the courtyard material' for row in actual_tasks)
                     leave(page, dialog)
-                    checks['real_task_draft_blocks_close_target_channel_workspace_then_saves_native_record'] = True
+                    checks['real_task_draft_survives_sibling_and_guards_own_close_channel_workspace_then_saves_native_record'] = True
 
                     stage = 'unsaved native decision guards work target channel and workspace'
                     activate_chat_feature(page, 'decision')
-                    notebook = page.get_by_role('region', name='Decisions in this conversation', exact=True)
+                    notebook = capture_work_card(page).get_by_role('region', name='Decisions in this conversation', exact=True)
                     expect(notebook).to_be_visible()
                     expect(notebook.get_by_role('tablist')).to_have_count(0)
                     notebook.get_by_role('button', name='Record a decision', exact=True).click()
@@ -492,14 +522,18 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     def decline_decision(value):
                         decision_confirmations.append(value.message)
                         value.dismiss()
-                    page.once('dialog', decline_decision)
-                    guarded_feature(page, 'task')
-                    page.once('dialog', decline_decision)
+                    page.on('dialog', decline_decision)
+                    task_sibling = open_sibling(page, 'task')
+                    assert not decision_confirmations
+                    expect(decision_title).to_have_value('Use local materials')
+                    assert decision_title.evaluate('(node)=>node===window.flowDecisionEditor')
+                    close_work_card(page, task_sibling)
+                    assert not decision_confirmations
                     choose_chat_channel(page, 'Design')
                     close_channels(page)
-                    page.once('dialog', decline_decision)
                     switch_workspace(page, 'Research Studio')
-                    assert len(decision_confirmations) == 3
+                    assert len(decision_confirmations) == 2
+                    page.remove_listener('dialog', decline_decision)
                     expect(decision_title).to_have_value('Use local materials')
                     assert decision_title.evaluate('(node)=>node===window.flowDecisionEditor')
                     composer.fill('My conversation draft stays editable beside the decision.')
@@ -515,9 +549,9 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     notebook.focus(); notebook.press('Escape')
                     expect(notebook).to_have_count(0)
                     expect(composer).to_have_value('My conversation draft stays editable beside the decision.')
-                    checks['real_decision_draft_blocks_target_channel_workspace_then_saves_with_live_composer'] = True
+                    checks['real_decision_draft_retains_sibling_and_guards_channel_workspace_then_saves_with_live_composer'] = True
                     dialog, button = work(page)
-                    select(dialog, 'documents')
+                    dialog = select(dialog, 'documents')
                     leave(page, dialog, button)
 
                     stage = 'normal account uploads replaces and removes an actual profile photo'
@@ -586,15 +620,17 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     choose_chat_channel(page, 'Courtyard')
                     button = activate_chat_feature(page, 'document', keyboard=True)
                     button.evaluate('(node)=>{window.flowExpectedReturn=node}')
-                    dialog = page.get_by_role('region', name=DIALOG)
+                    dialog = capture_work_card(page).get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     expect(dialog.get_by_role('button', name='Tillbaka till samtalet', exact=True)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     assert dialog.evaluate('(node)=>node.scrollWidth<=node.clientWidth')
                     retained = dialog.element_handle()
+                    retained_card = capture_work_card(page, dialog)
                     dialog.get_by_role('button', name='Tillbaka till samtalet', exact=True).click()
-                    expect(page.locator('.fc-conversation-workspace')).to_have_attribute('data-workspace-mode', 'minimized')
-                    resume = page.get_by_role('button', name='Fortsätt arbeta', exact=True)
+                    expect(work_surface(page, retained_card)).to_have_attribute('data-workspace-mode', 'minimized')
+                    resume = work_resume_button(page, retained_card)
+                    expect(resume).to_have_accessible_name('Fortsätt arbeta')
                     resume.focus(); resume.press('Enter')
                     expect(dialog).to_be_visible()
                     assert dialog.evaluate('(node,previous)=>node===previous&&previous.isConnected', retained)
@@ -605,7 +641,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     assert page.evaluate('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn')
                     button = activate_chat_feature(page, 'document', keyboard=True)
                     button.evaluate('(node)=>{window.flowExpectedReturn=node}')
-                    dialog = page.get_by_role('region', name=DIALOG)
+                    dialog = capture_work_card(page).get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     leave(page, dialog, button)
                     checks['swedish_320px_resume_return_escape_and_focus_without_overflow'] = True

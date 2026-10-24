@@ -1,8 +1,8 @@
 # Work inside the conversation
 
 The signed-in product and public example installation use the same `Chat` and
-native editors. Documents, tasks and decisions open in the conversation's work
-area. Split view keeps the message list and composer available without a tool
+native editors. Documents, tasks and decisions open in retained work areas.
+Several areas can coexist with independent drafts and sessions. Split view keeps the message list and composer available without a tool
 tab strip. The same editor can fill the application viewport or be minimized
 without unmounting. On narrow screens, split work follows the conversation in
 one column. See [workspace modes](WORKSPACE_MODES.md).
@@ -14,6 +14,10 @@ one column. See [workspace modes](WORKSPACE_MODES.md).
   Swedish; arrows and Enter open a feature, Escape keeps the draft. The button
   searches separately without replacing an existing message. See
   [commands, permissions and safe draft behavior](SLASH_COMMANDS.md).
+- Use the same `/` and `@` controls in collaboration writing fields. A command
+  in a document can open a task without closing the document. Chosen identities
+  follow the text into reviewed drafts and remain typed links after saving.
+  See [the field and concurrency contract](UNIVERSAL_COLLABORATION.md).
 - The composer keeps attachments, writing and sending primary. **Message
   options** holds scheduling, focus and relevant draft assistance. Documents,
   tasks, decisions, meetings, activity, workflows, cloud files and other
@@ -50,8 +54,9 @@ uploaded profile photos follow the normal account settings.
 Layout changes alone call no leave guard and perform no save or server mutation,
 even while a write is pending. Pending document synchronization and native
 writes still block actual close or navigation away. Unsent drafts require one
-discard decision. Minimized work retains its guards when changing the target,
-channel or workspace. Revealing the source within the same conversation keeps
+discard decision. Opening another retained area preserves that work. Closing
+one area checks its own guards; changing channel or workspace checks them all.
+Minimized work retains its guards. Revealing the source within the same conversation keeps
 the editor and does not discard its draft. Escape in expanded work restores
 split view first; nested popups handle Escape first. Layout/focus state resets
 on reload or a changed account, credential, workspace, channel, encryption or

@@ -1,5 +1,7 @@
+import { validateFieldReferences, type FieldReferences } from './field-references';
 /** Local RFC 5545 interoperability. Content is never sent to a calendar provider automatically. */
 export interface CalendarFields {
+  field_references?: FieldReferences;
   title: string;
   description: string;
   location: string;
@@ -29,7 +31,9 @@ function validInstant(value: string): boolean {
 export function validateCalendar(value: unknown): CalendarFields {
   if (!value || typeof value !== 'object') throw new Error('Invalid calendar content.');
   const v = value as Record<string, unknown>;
-  const title = text(v.title, 200, 'event title').trim();
+  const rawTitle = text(v.title, 200, 'event title');
+  const field_references = validateFieldReferences({ title: rawTitle, description: v.description as string, location: v.location as string }, v.field_references);
+  const title = field_references?.title?.length ? rawTitle : rawTitle.trim();
   const description = text(v.description, 10000, 'event description'), location = text(v.location, 1000, 'event location');
   const starts_at = text(v.starts_at, 64, 'event start'), ends_at = text(v.ends_at, 64, 'event end');
   const timezone = text(v.timezone, 100, 'event time zone');
@@ -44,7 +48,7 @@ export function validateCalendar(value: unknown): CalendarFields {
   if (reminder_minutes !== null && (!Number.isInteger(reminder_minutes) || Number(reminder_minutes) < 0 || Number(reminder_minutes) > 10080)) throw new Error('Invalid calendar reminder.');
   const external_uid = v.external_uid;
   if (external_uid !== null && (typeof external_uid !== 'string' || !external_uid || external_uid.length > 255 || /[\x00-\x20\x7f]/.test(external_uid))) throw new Error('Invalid calendar UID.');
-  const result: CalendarFields = { title, description, location, starts_at: v.all_day ? starts_at : new Date(starts_at).toISOString(),
+  const result: CalendarFields = { ...(field_references ? { field_references } : {}), title, description, location, starts_at: v.all_day ? starts_at : new Date(starts_at).toISOString(),
     ends_at: v.all_day ? ends_at : new Date(ends_at).toISOString(), all_day: v.all_day, timezone,
     reminder_minutes: reminder_minutes as number | null, external_uid: external_uid as string | null };
   if (v.recurrence !== undefined && v.recurrence !== null) {
@@ -68,7 +72,9 @@ export function validateCalendar(value: unknown): CalendarFields {
         return { original_start, cancelled: true };
       }
       if ((item.starts_at === undefined) !== (item.ends_at === undefined)) throw new Error('An occurrence override needs both start and end.');
-      const normalized = validateCalendar({ ...result, recurrence: undefined, exceptions: undefined, ...item });
+      const override = { ...result, recurrence: undefined, exceptions: undefined, ...item };
+      override.field_references = result.field_references ? Object.fromEntries(Object.entries(result.field_references).filter(([key]) => result[key as 'title' | 'description' | 'location'] === override[key as 'title' | 'description' | 'location'])) : undefined;
+      const normalized = validateCalendar(override);
       return { original_start, cancelled: false, ...(item.starts_at !== undefined ? { starts_at: normalized.starts_at, ends_at: normalized.ends_at } : {}), ...(item.title !== undefined ? { title: normalized.title } : {}), ...(item.location !== undefined ? { location: normalized.location } : {}), ...(item.description !== undefined ? { description: normalized.description } : {}) };
     });
   }
@@ -293,6 +299,10 @@ export function expandCalendarOccurrences(value: CalendarFields, starts: string 
     const item = overrides.get(row.original_start);
     if (item?.cancelled) return [];
     const result = item ? { ...row, ...item } : row;
+    if (item && row.field_references) {
+      const retained = Object.fromEntries(Object.entries(row.field_references).filter(([key]) => row[key as 'title' | 'description' | 'location'] === result[key as 'title' | 'description' | 'location']));
+      if (Object.keys(retained).length) result.field_references = retained; else delete result.field_references;
+    }
     const a = result.all_day ? Date.parse(zonedInstant(result.starts_at + 'T00:00', result.timezone)) : Date.parse(result.starts_at);
     const b = result.all_day ? Date.parse(zonedInstant(result.ends_at + 'T00:00', result.timezone)) : Date.parse(result.ends_at);
     return a < end && b > start ? [result] : [];

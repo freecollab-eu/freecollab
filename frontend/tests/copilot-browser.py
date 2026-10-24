@@ -20,7 +20,7 @@ import tempfile
 import threading
 import traceback
 from playwright.sync_api import expect,sync_playwright
-from ui_navigation import open_conversation_work, open_chat_tool
+from ui_navigation import open_conversation_work, open_chat_tool, close_work_card
 ROOT=Path(__file__).resolve().parents[2]
 PYTHON=os.getenv('BACKEND_PYTHON') or (str(ROOT/'backend/.venv/bin/python') if (ROOT/'backend/.venv/bin/python').is_file() else sys.executable)
 spec=importlib.util.spec_from_file_location('copilot_proof_helpers',Path(__file__).with_name('remote-sync-browser.py'))
@@ -98,8 +98,8 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 stage='honest no-key production panel'
                 page.goto(app,wait_until='domcontentloaded',timeout=90000);page.evaluate('([k,v])=>localStorage.setItem(k,v)',['freecollab.workspace:'+owner['user_id'],workspace['id']])
                 page.get_by_role('navigation').get_by_role('button',name='Open App',exact=True).click();page.get_by_label('Email',exact=True).fill(email);page.get_by_label('Password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Sign In',exact=True).click()
-                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);open_conversation_work(page,'copilot')
-                panel=page.get_by_role('region',name='AI Copilot',exact=True)
+                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000);work_area=open_conversation_work(page,'copilot')
+                panel=work_area.get_by_role('region',name='AI Copilot',exact=True)
                 expect(panel.get_by_text('AI configuration required',exact=True)).to_be_visible();assert not requests
                 results['honest_configuration_required_no_provider_calls_without_key']=True
                 stage='native owner config encrypted key named agent and explicit opt-in'
@@ -167,7 +167,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 results['private_history_reset_retains_approved_shared_task']=True
                 stage='in-place message AI has reviewed context and no automatic provider request'
                 inline_writes_start=len(writes)
-                page.get_by_role('button',name='Close this work',exact=True).click()
+                close_work_card(page,work_area)
                 composer=page.locator('.fc-chat-composer textarea');original_draft='My own wording stays.';composer.fill(original_draft)
                 article=page.locator('article.fc-chat-message').filter(has=page.locator('.fc-chat-message-content').filter(has_text=selected))
                 expect(article).to_have_count(1);article.get_by_role('button',name='More message actions',exact=True).click()
@@ -233,9 +233,9 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
                     assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1
                 results['inline_composer_sends_only_reviewed_draft_and_explicitly_replaces_without_posting']=True
-                open_conversation_work(page,'documents')
+                document_area=open_conversation_work(page,'documents')
                 stage='actual native stack review sends only its explicitly chosen verified Yjs page to private HTTPS'
-                documents=page.get_by_role('region',name='Shared documents',exact=True)
+                documents=document_area.get_by_role('region',name='Shared documents',exact=True)
                 stack_body='EXPLICIT VERIFIED STACK PAGE CONTENT';omitted_stack_body='OMITTED STACK PAGE MUST NEVER REACH AI';omitted_comment='STACK COMMENT IS NOT AN AI SOURCE'
                 for title,body in [('Chosen stack page',stack_body),('Omitted stack page',omitted_stack_body)]:
                     documents.get_by_role('button',name='New shared document',exact=True).click();documents.get_by_label('Document title',exact=True).fill(title);documents.get_by_role('button',name='Create document',exact=True).click()
@@ -272,9 +272,9 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert connection.execute('SELECT count(*) FROM copilotconversation').fetchone()[0]==0
                     assert connection.execute('SELECT count(*) FROM taskcard').fetchone()[0]==1 and connection.execute('SELECT count(*) FROM message').fetchone()[0]==2
                 results['actual_stack_ai_uses_only_selected_verified_page_not_unselected_pages_comments_or_native_writes']=True
-                open_conversation_work(page,'copilot')
+                work_area=open_conversation_work(page,'copilot')
                 stage='Grok connection preset edits the draft only and clears typed destination credentials'
-                page.get_by_role('button',name='Close this work',exact=True).click();open_chat_tool(page,'Integrations')
+                close_work_card(page,work_area);expect(document_area).to_be_visible();open_chat_tool(page,'Integrations')
                 integrations=page.get_by_role('dialog',name='Integrations',exact=True)
                 integrations.get_by_role('button',name='Connection setup',exact=True).click()
                 setup=integrations.locator('.fc-connection-setup');expect(setup).to_have_attribute('aria-busy','false')
@@ -296,13 +296,13 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.get_by_label('Model',exact=True).fill('fixture-chat')
                 expect(setup.get_by_role('button',name='Discard changes and return to preparation',exact=True)).to_have_count(0)
                 integrations.get_by_role('button',name='Close integrations',exact=True).click()
-                open_conversation_work(page,'copilot')
+                work_area=open_conversation_work(page,'copilot')
                 results['grok_preset_only_edits_draft_clears_secrets_without_save_or_xai_calls']=True
                 stage='saved Swedish language and responsive panel'
                 helpers.api(base,'PUT','/preferences/language',owner,{'locale':'sv'});page.reload(wait_until='domcontentloaded')
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=60000)
-                open_conversation_work(page,'copilot',locale='sv')
-                panel=page.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
+                work_area=open_conversation_work(page,'copilot',locale='sv')
+                panel=work_area.get_by_role('region',name='AI-assistent',exact=True);expect(panel.get_by_role('heading',name='Ett genomtänkt extra par ögon.',exact=True)).to_be_visible()
                 expect(panel.get_by_role('group',name='Snabbval',exact=True)).to_be_visible();expect(panel.get_by_role('complementary',name='Innan du skickar till AI',exact=True)).to_contain_text('fixture-chat')
                 REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.parent/'copilot-desktop-sv.png'))
                 page.set_viewport_size({'width':390,'height':844});assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth');page.screenshot(path=str(REPORT.parent/'copilot-mobile-sv.png'))
@@ -311,7 +311,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     button=panel.get_by_role('button',name=label,exact=True);expect(button).to_be_visible();assert button.bounding_box()['height']>=44
                 results['saved_swedish_account_preference_and_mobile_without_overflow']=True
                 stage='configured contextual draft review stays usable at Swedish320 without an automatic request'
-                page.locator('.fc-conversation-work-header [data-work-close]').click()
+                close_work_card(page,work_area)
                 mobile_draft='Ett eget utkast som ska granskas innan något skickas.'
                 composer=page.locator('.fc-chat-composer textarea');composer.fill(mobile_draft)
                 provider_calls=len(requests)

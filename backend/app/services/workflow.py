@@ -23,6 +23,7 @@ from ..models.workspace import WorkspaceChannel
 from ..models.workflow import (WorkflowActivity, WorkflowDefinition, WorkflowNotice,
                               WorkflowRevision, WorkflowRun, WorkflowVote)
 from .access import lock_channel_writes, require_channel_member
+from .field_references import normalize_field_references
 from .auth import active_user_for_token
 from .crypto import decrypt_message, encrypt_message
 from .sso_scope import require_unrestricted
@@ -459,6 +460,38 @@ def run_pending(session, limit=10, *, now=None):
     return processed
 
 
+VOTE_REFERENCE_PREFIX = "field-references-v1:"
+
+
+def native_vote_fields(vote, run):
+    """Read legacy raw notes and context-bound referenced notes without guessing."""
+    if not vote.encrypted_note:
+        return {"note": None}
+    try:
+        if not vote.encrypted_note.startswith(VOTE_REFERENCE_PREFIX):
+            return {"note": decrypt_message(vote.encrypted_note, "workflow-vote:" + run.id)}
+        payload = json.loads(decrypt_message(vote.encrypted_note[len(VOTE_REFERENCE_PREFIX):], "workflow-vote:" + run.id))
+        if (payload["version"], payload["run_id"], payload["step_index"], payload["user_id"]) != (1, run.id, vote.step_index, vote.user_id):
+            raise ValueError("Vote context mismatch")
+        note = payload["note"]
+        if not isinstance(note, str) or len(note) > 2000:
+            raise ValueError("Invalid approval note")
+        refs = normalize_field_references({"note": note}, payload.get("field_references"))
+        return {"note": note, **({"field_references": refs} if refs else {})}
+    except (CryptoError, ValueError, TypeError, KeyError, AttributeError):
+        raise HTTPException(409, "Stored approval note could not be verified") from None
+
+
+def seal_vote_note(run, actor_id, note, references):
+    if not note:
+        return None
+    if not references:
+        return encrypt_message(note, "workflow-vote:" + run.id)
+    payload = {"version": 1, "run_id": run.id, "step_index": run.step_index,
+               "user_id": actor_id, "note": note, "field_references": references}
+    return VOTE_REFERENCE_PREFIX + encrypt_message(json.dumps(payload, separators=(",", ":")), "workflow-vote:" + run.id)
+
+
 def run_data(session, run, *, viewer_id=None):
     definition = session.get(WorkflowDefinition, run.workflow_id)
     fields = definition_fields(session, definition, run.workflow_revision)
@@ -476,7 +509,6 @@ def run_data(session, run, *, viewer_id=None):
         "finished_at": run.finished_at, "may_vote": may_vote,
         "votes": [{"user_id": v.user_id, "step_index": v.step_index, "choice": v.choice, "created_at": v.created_at,
                    "matrix_event_id": v.matrix_event_id,
-                   "note": decrypt_message(v.encrypted_note, "workflow-vote:" + run.id)
-                       if v.encrypted_note and not secure_channel(session, run.channel_id) else None,
+                   **(native_vote_fields(v, run) if not secure_channel(session, run.channel_id) else {"note": None}),
                    "resolution_error": "An older native note is unavailable in this encrypted channel"
                        if v.encrypted_note and secure_channel(session, run.channel_id) else None} for v in votes]}

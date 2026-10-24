@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, reveal_message_actions, activate_chat_feature, saved_document_reading, edit_saved_document, reveal_discussion_work, show_channel_introduction
+from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, reveal_message_actions, activate_chat_feature, saved_document_reading, edit_saved_document, reveal_discussion_work, show_channel_introduction, capture_work_card, close_work_card
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('PRODUCT_DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/conversation-flow-20261023/product-demo-browser.json')))
@@ -60,7 +60,7 @@ CLOSE_FLOW = re.compile(r'^(Close this work|Stäng arbetet)$')
 
 
 def flow_region(page):
-    return page.get_by_role('region',name=FLOW_NAME,exact=True)
+    return capture_work_card(page).get_by_role('region',name=FLOW_NAME,exact=True)
 
 
 def live_conversation(page, region):
@@ -802,35 +802,47 @@ def main():
                     assert recorded_decision.value.ok; source_decision = recorded_decision.value.json()
                     assert source_decision['source_message_id'] == message['id']
                     decisions_flow.get_by_role('button',name='Source',exact=True).click(); expect(decisions_flow).to_be_visible(); expect(source_article).to_be_focused()
-                    page.get_by_role('button',name='Close this work',exact=True).click()
+                    close_work_card(page)
                     reveal_discussion_work(source_article)
                     decision_card = source_article.locator('.fc-chat-linked-work button').filter(has=page.get_by_text('A decision from our conversation',exact=True))
                     expect(decision_card).to_be_visible(); decision_card.click()
                     decisions_flow = page.get_by_role('region',name='Decisions in this conversation',exact=True)
-                    expect(decisions_flow.locator('#decision-' + source_decision['id'])).to_be_visible()
+                    expect(decisions_flow.locator('[id$="decision-' + source_decision['id'] + '"]')).to_be_visible()
                     canonical_decisions = request(base,'GET','/channels/' + channel + '/decisions',token)
                     assert any(row['id'] == source_decision['id'] and row['source_message_id'] == message['id'] for row in canonical_decisions)
-                    page.get_by_role('button',name='Close this work',exact=True).click()
+                    close_work_card(page)
                     passed('source_decision_persists_canonical_provenance_and_native_conversation_card')
 
                     stage = 'dirty native task refuses target and channel changes until explicit accepted navigation'
                     task_card.click(); panel = flow_region(page); panel.get_by_role('button',name='Edit',exact=True).click()
                     dirty_form = panel.get_by_role('form',name='Edit task',exact=True); dirty_form.get_by_label('Description',exact=True).fill('An unsaved task draft to keep.')
                     dirty_form.evaluate('node=>{window.__guardedTaskEditor=node}')
-                    page.once('dialog',lambda dialog:dialog.dismiss())
-                    activate_chat_feature(page,'document',expect_closed=False)
+                    task_dialogs=[]
+                    def keep_task_draft(dialog):task_dialogs.append(dialog.message);dialog.dismiss()
+                    page.on('dialog',keep_task_draft)
+                    panel.get_by_role('button',name='Close this work',exact=True).click()
+                    assert len(task_dialogs)==1,'Its own close must protect the unsaved Task editor'
+                    activate_chat_feature(page,'document')
+                    document_sibling=flow_region(page)
+                    assert capture_work_card(page,document_sibling).get_attribute('data-collaboration-work-id')!=capture_work_card(page,panel).get_attribute('data-collaboration-work-id')
+                    expect(document_sibling).to_have_attribute('data-work-kind','documents')
                     expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.'); assert dirty_form.evaluate('node=>node===window.__guardedTaskEditor')
-                    expect(page.locator('.fc-slash-commands')).to_be_visible(); page.locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
+                    assert len(task_dialogs)==1,'Opening a Document sibling must not discard the Task draft'
+                    expect(page.locator('.fc-slash-commands')).to_have_count(0)
+                    close_work_card(page,document_sibling)
+                    assert len(task_dialogs)==1,'Closing the clean Document must not invoke the Task guard'
+                    expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.')
+                    page.remove_listener('dialog',keep_task_draft)
                     page.once('dialog',lambda dialog:dialog.dismiss()); choose_chat_channel(page,other['name']); close_channels(page)
                     expect(page.locator('#chat-channel-name')).to_have_text(selected['name']); expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.')
                     live_conversation(page,panel)
                     page.once('dialog',lambda dialog:dialog.accept()); choose_chat_channel(page,other['name'])
-                    expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(flow_region(page)).to_have_count(0)
+                    expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(page.get_by_role('region',name=FLOW_NAME,exact=True)).to_have_count(0)
                     choose_chat_channel(page,selected['name']); reveal_discussion_work(source_article); task_card.click(); panel = flow_region(page)
                     expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text(text + ' Revised.')
                     assert panel.get_by_role('form',name='Edit task',exact=True).count() == 0
                     panel.get_by_role('button',name='Close this work',exact=True).click()
-                    passed('dirty_task_target_and_channel_navigation_decline_preserves_editor_accept_leaves_without_publishing')
+                    passed('dirty_task_retains_document_sibling_and_own_close_channel_guard_accept_leaves_without_publishing')
 
                     stage = 'real saved appearance and truthful unconfigured AI'
                     open_chat_tool(page,'Appearance settings'); appearance = page.get_by_role('dialog',name='Make space your own.',exact=True); appearance.get_by_role('radio',name='Dark',exact=True).check(); appearance.get_by_role('button',name='Save changes',exact=True).click(); expect(appearance).to_have_count(0)
@@ -892,14 +904,14 @@ def main():
                     sv_anchor = click_with_reading_anchor(swedish,sv_card.locator('.fc-chat-material-footer button'))
                     sv_inline = flow_region(swedish)
                     edit_saved_document(sv_inline, title=sv_seed['title'])
-                    expect(sv_inline.locator('#shared-document-title')).to_have_value(sv_seed['title'])
+                    expect(sv_inline.locator('[id$="shared-document-title"]')).to_have_value(sv_seed['title'])
                     sv_body = sv_inline.get_by_label('Dokumenttext',exact=True); expect(sv_body).to_be_editable()
-                    swedish.wait_for_function("""() => {
-                      const editor=document.querySelector('#shared-document-body'), timeline=document.querySelector('.fc-chat-timeline'), composer=document.querySelector('.fc-chat-composer-area');
-                      if (!editor || !timeline || !composer) return false;
+                    swedish.wait_for_function("""editor => {
+                      const timeline=document.querySelector('.fc-chat-timeline'), composer=document.querySelector('.fc-chat-composer-area');
+                      if (!editor?.isConnected || !timeline || !composer) return false;
                       const box=editor.getBoundingClientRect();
                       return Math.min(box.bottom,composer.getBoundingClientRect().top)-Math.max(box.top,timeline.getBoundingClientRect().top)>=120;
-                    }""")
+                    }""",arg=sv_body.element_handle())
                     saved_body = sv_body.input_value() + '\n\nEn liten anteckning från mobilvyn.'
                     sv_body.fill(saved_body); expect(sv_inline.locator('.fc-shared-sync')).to_have_text('Alla ändringar är synkroniserade')
                     live_conversation(swedish,sv_inline)

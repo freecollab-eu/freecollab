@@ -20,24 +20,50 @@ from .auth import active_user_for_token
 from .chat_notifications import require_native_channel
 from .crypto import decrypt_message, encrypt_message
 from .matrix_bridge import is_secure_channel, validate_secure_event
+from .field_references import ReferencedFields, preserve_referenced_text, require_field_reference_targets
 
 
-class ProjectFields(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+class ProjectFields(ReferencedFields):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=160)
     description: str = Field(default="", max_length=4000)
     color: Literal["sage", "blue", "sand", "rose"] = "sage"
 
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        result = preserve_referenced_text(value, ("title", "description"))
+        if isinstance(result, dict) and isinstance(result.get("color"), str):
+            result["color"] = result["color"].strip()
+        return result
+
+    def reference_texts(self):
+        return {"title": self.title, "description": self.description}
+
+    @field_validator("title")
+    @classmethod
+    def visible_title(cls, value):
+        if not value.strip():
+            raise ValueError("Write a project title")
+        return value
+
 
 class ChecklistItem(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid")
     id: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9_-]+$")
     title: str = Field(min_length=1, max_length=200)
     done: bool = False
 
+    @field_validator("title")
+    @classmethod
+    def visible_title(cls, value):
+        if not value.strip():
+            raise ValueError("Write a checklist title")
+        return value
 
-class TaskFields(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+class TaskFields(ReferencedFields):
+    model_config = ConfigDict(extra="forbid")
     title: str = Field(min_length=1, max_length=200)
     description: str = Field(default="", max_length=12000)
     status: Literal["todo", "doing", "done"] = "todo"
@@ -47,6 +73,30 @@ class TaskFields(BaseModel):
     checklist: list[ChecklistItem] = Field(default_factory=list, max_length=40)
     file_ids: list[str] = Field(default_factory=list, max_length=20)
     decision_ids: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        result = preserve_referenced_text(value, ("title", "description"), checklist=True)
+        if isinstance(result, dict):
+            for name in ("status", "priority", "assignee_user_id"):
+                if isinstance(result.get(name), str):
+                    result[name] = result[name].strip()
+            for name in ("file_ids", "decision_ids"):
+                if isinstance(result.get(name), list):
+                    result[name] = [item.strip() if isinstance(item, str) else item for item in result[name]]
+        return result
+
+    def reference_texts(self):
+        return {"title": self.title, "description": self.description,
+                **{"checklist:" + item.id: item.title for item in self.checklist}}
+
+    @field_validator("title")
+    @classmethod
+    def visible_title(cls, value):
+        if not value.strip():
+            raise ValueError("Write a task title")
+        return value
 
     @field_validator("file_ids", "decision_ids")
     @classmethod
@@ -120,6 +170,14 @@ def validate_snapshot(session, kind, channel_id, data, actor_id):
             if not decision or decision.channel_id != channel_id:
                 raise HTTPException(400, "Linked decisions must belong to this channel")
     payload = fields.model_dump(mode="json")
+    previous = None
+    if data.expected_revision and payload.get("field_references"):
+        item = session.get(ProjectBoard if kind == "project" else TaskCard, data.id)
+        if item and item.channel_id == channel_id and item.revision == data.expected_revision:
+            old = revision_for(session, kind, item.id, item.revision)
+            if old and old.content_mode == "server":
+                previous = serialize(session, kind, item, old).get("fields")
+    require_field_reference_targets(session, channel_id, actor_id, payload, previous=previous)
     from .enterprise_governance import enforce_native_document
     enforce_native_document(session, channel_id, actor_id, payload)
     return payload

@@ -19,6 +19,7 @@ function fixture({ prepare } = {}) {
   };
   const changed = (left, right) => !left || left.length !== right.length || left.some((value, n) => !Object.is(value, right[n]));
   const hooks = {
+    useId: () => "app-ai-fixture",
     useState(initial) { const n = index++; if (!(n in slots)) slots[n] = initial; return [slots[n], value => { const next = typeof value === 'function' ? value(slots[n]) : value; if (!Object.is(next, slots[n])) { slots[n] = next; pending = true; } }]; },
     useRef(initial) { const n = index++; return slots[n] ||= { current: initial }; },
     useEffect(callback, deps) { const n = index++; if (!slots[n] || changed(slots[n].deps, deps)) effects.push(() => { slots[n]?.cleanup?.(); slots[n] = { deps, cleanup: callback() }; }); },
@@ -26,6 +27,7 @@ function fixture({ prepare } = {}) {
   const jsx = (type, props) => ({ type, props: props || {} });
   const dependencies = {
     react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, key) => key }), '../lib/api': { api },
+    './ScopedCollaborationInput': { ScopedCollaborationInput: 'collaboration-input' },
     '../lib/app-platform-api': { appPlatformApi }, '../i18n': { t: translate, useI18n: () => ({}) }, '../lib/copilot-intents': { copilotProviderHost: value => new URL(value).hostname },
     '../lib/copilot-api': { copilotApi: { status: async () => plain(status) }, prepareCopilotSource: async choice => {
       calls.push({ kind: 'prepare', choice: plain(choice) });
@@ -40,7 +42,7 @@ function fixture({ prepare } = {}) {
   async function settle() { let idle = 0; for (let cycle = 0; cycle < 40; cycle++) { if (pending) { pending = false; index = 0; tree = exports.ChannelApps(props); effects.splice(0).forEach(effect => effect()); } for (let tick = 0; tick < 20; tick++) await Promise.resolve(); if (!pending && !effects.length) { if (++idle === 3) return; } else idle = 0; } throw new Error('Hooks did not settle'); }
   async function click(label) { const button = visit().find(node => node.type === 'button' && text(node).trim() === label); assert.ok(button, label); assert.ok(!button.props.disabled, 'Disabled ' + label); button.props.onClick(); await settle(); }
   async function change(label, value, type = 'input') { const row = visit().find(node => node.type === 'label' && text(node).includes(label)); assert.ok(row, label); const input = (Array.isArray(row.props.children) ? row.props.children : [row.props.children]).find(node => node?.type === type); assert.ok(input, label); input.props.onChange({ target: { checked: value, value } }); await settle(); }
-  return { calls, exports, settle, click, change, text: () => text(tree), changeActor() { token = 'different-actor'; }, async openAI() { await settle(); await click('AI drafts & recaps'); }, async chooseSource() { await click('Choose native message context'); await change('Reviewed native source:', true); }, setProps(next) { props = { ...props, ...next }; pending = true; } };
+  return { calls, exports, settle, click, change, promptInput: () => visit().find(node => node.props.contextId?.endsWith(':app-ai:prompt')), button: label => visit().find(node => node.type === 'button' && text(node).trim() === label), text: () => text(tree), changeActor() { token = 'different-actor'; }, async openAI() { await settle(); await click('AI drafts & recaps'); }, async chooseSource() { await click('Choose native message context'); await change('Reviewed native source:', true); }, setProps(next) { props = { ...props, ...next }; pending = true; } };
 }
 
 test('app AI reviews the entire selected text and actual API warning without contacting a provider', async () => {
@@ -84,4 +86,12 @@ test('review validation rejects missing, ambiguous, foreign, deleted, duplicate 
   assert.throws(() => choose([source], ['selected', 'selected'], 'channel'));
   assert.throws(() => choose([{ ...source, content: 'x'.repeat(24000) }], ['selected'], 'channel'));
   const bounded = { ...source, content: 'x'.repeat(23995) }; assert.equal(choose([bounded], ['selected'], 'channel')[0].content.length, 23995);
+});
+
+test('AI instruction commands keep the private prompt and cannot trigger an external request from the open menu', async () => {
+  const h = fixture(); await h.openAI(); await h.chooseSource(); await h.change('Send these instructions', true);
+  const input = h.promptInput(); assert.equal(input.props.allowReferences, false); assert.equal(input.props.submissionScope, h.button('Generate private draft').props['data-collaboration-submit']);
+  input.props.onValueChange('/docs', []); await h.settle(); await h.change('Send these instructions', true);
+  h.promptInput().props.onPaletteActiveChange(true); await h.click('Generate private draft'); assert.equal(h.calls.length, 0); assert.equal(h.promptInput().props.value, '/docs');
+  h.promptInput().props.onPaletteActiveChange(false); await h.change('Send these instructions', true); await h.click('Generate private draft'); assert.equal(h.calls.filter(call => call.kind === 'generate').length, 1);
 });

@@ -1,4 +1,8 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useScopedWritingGuard, type WritingLeaveController } from '../lib/useScopedWritingGuard';
+import { ScopedCollaborationInput as CollaborationInput } from './ScopedCollaborationInput';
+import { FieldReferenceText } from './FieldReferenceText';
+import type { MessageReference } from '../lib/message-references';
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import { Check, ExternalLink, MessageSquare, RefreshCw, X } from 'lucide-react';
 import { api } from '../lib/api';
 import type { ManagedFile } from '../lib/files-api';
@@ -7,8 +11,11 @@ import { OOXML_TYPES } from '../lib/file-preview';
 import { useI18n } from '../i18n';
 import '../styles/file-experience.css';
 
-export function FileExperiencePanel({ file, onVersionSaved }: { file: ManagedFile; onVersionSaved?: () => void }) {
+export function FileExperiencePanel({ file, onVersionSaved, leaveController }: { leaveController?: WritingLeaveController; file: ManagedFile; onVersionSaved?: () => void }) {
   const { t, locale } = useI18n();
+  const writingInstanceId = useId();
+  const commentFieldId = `file-comment-${file.id}-${writingInstanceId}`;
+  const [draftReferences, setDraftReferences] = useState<MessageReference[]>([]);
   const [comments, setComments] = useState<FileCommentRecord[]>([]), [draft, setDraft] = useState(''), [members, setMembers] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [showOffice, setShowOffice] = useState(false), [password, setPassword] = useState(''), [code, setCode] = useState(''), [office, setOffice] = useState<OfficeSession | null>(null);
@@ -17,6 +24,7 @@ export function FileExperiencePanel({ file, onVersionSaved }: { file: ManagedFil
   const describe = (failure: unknown) => failure instanceof Error ? failure.message : 'This file action could not be completed.';
   const canOffice = !file.encrypted && !file.secure_locator && OOXML_TYPES.has(file.content_type) && (file.document_owner_id || file.uploader_id) === api.getCurrentUserId();
   const date = (value: string) => new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value + (/(?:Z|[+-]\d\d:\d\d)$/.test(value) ? '' : 'Z')));
+  useScopedWritingGuard(file.channel_id, !!draft.trim(), !!busy, { leaveController });
   async function refresh(request = generation.current) {
     try { const rows = await fileExperienceApi.comments(file); if (valid(request)) setComments(rows); }
     catch (failure) { if (valid(request)) setError(describe(failure)); }
@@ -24,16 +32,16 @@ export function FileExperiencePanel({ file, onVersionSaved }: { file: ManagedFil
   }
   useEffect(() => {
     const request = ++generation.current; owner.current = api.getAccessToken();
-    setComments([]); setDraft(''); setError(''); setNotice(''); setPassword(''); setCode(''); setOffice(null); setShowOffice(false); setBusy(''); setLoading(true); identifier.current = crypto.randomUUID();
+    setComments([]); setDraft(''); setDraftReferences([]); setError(''); setNotice(''); setPassword(''); setCode(''); setOffice(null); setShowOffice(false); setBusy(''); setLoading(true); identifier.current = crypto.randomUUID();
     void refresh(request);
     void api.getChannelMembers(file.channel_id).then(rows => { if (valid(request)) setMembers(Object.fromEntries(rows.map(row => [row.user_id, row.name]))); }).catch(() => undefined);
     let fetching = false;
     const timer = window.setInterval(() => { if (!fetching && valid(request)) { fetching = true; void refresh(request).finally(() => { fetching = false; }); } }, 5000);
-    const purge = () => { ++generation.current; setComments([]); setDraft(''); setPassword(''); setCode(''); setOffice(null); setError(''); setNotice(''); setBusy(''); };
+    const purge = () => { ++generation.current; setComments([]); setDraft(''); setDraftReferences([]); setPassword(''); setCode(''); setOffice(null); setError(''); setNotice(''); setBusy(''); };
     window.addEventListener('freecollab:auth-changed', purge);
     return () => { ++generation.current; clearInterval(timer); window.removeEventListener('freecollab:auth-changed', purge); };
   }, [file.id, file.channel_id]);
-  useEffect(() => { if (error) alert.current?.focus(); }, [error]);
+  useEffect(() => { const node = alert.current; if (error && node?.isConnected && !node.closest("[hidden], [inert]") && node.getClientRects().length) node.focus(); }, [error]);
   async function run(key: string, action: (request: number) => Promise<void>) {
     if (busy) return; const request = generation.current; setBusy(key); setError(''); setNotice('');
     try { await action(request); } catch (failure) { if (valid(request)) setError(describe(failure)); }
@@ -41,8 +49,8 @@ export function FileExperiencePanel({ file, onVersionSaved }: { file: ManagedFil
   }
   function comment(event: FormEvent) {
     event.preventDefault(); void run('comment', async request => {
-      await fileExperienceApi.comment(file, draft, identifier.current); if (!valid(request)) return;
-      identifier.current = crypto.randomUUID(); setDraft(''); setNotice('Comment posted.'); await refresh(request);
+      await fileExperienceApi.comment(file, draft, identifier.current, draftReferences.length ? { text: draftReferences } : undefined); if (!valid(request)) return;
+      identifier.current = crypto.randomUUID(); setDraft(''); setDraftReferences([]); setNotice('Comment posted.'); await refresh(request);
     });
   }
   function openOffice(event: FormEvent) {
@@ -63,8 +71,8 @@ export function FileExperiencePanel({ file, onVersionSaved }: { file: ManagedFil
     </section>}
     {file.encrypted && OOXML_TYPES.has(file.content_type) && <p className="fc-file-preview-note">{t('Encrypted Office files remain encrypted. Download to open locally; automatic desktop saveback is available only for standard channel files.')}</p>}
     <section className="fc-file-discussion" aria-label={t('File comments')}><header><h3><MessageSquare size={17} />{t('File comments')}</h3><button type="button" className="fc-icon-button" aria-label={t('Refresh file comments')} onClick={() => void refresh()}><RefreshCw size={15} /></button></header><p>{t('Comments follow this document across versions. Each comment keeps its author and the version it refers to.')}</p>
-      {loading ? <p role="status">{t('Loading comments…')}</p> : comments.length ? <ol>{comments.map(row => <li key={row.id}><div><strong>{members[row.created_by] || t('Channel member')}</strong><time dateTime={row.created_at}>{date(row.created_at)}</time></div><p>{row.text}</p>{row.file_id !== file.id && <small>{t('On another version of this document')}</small>}</li>)}</ol> : <p>{t('Start a conversation about this file.')}</p>}
-      <form onSubmit={comment}><label htmlFor={'file-comment-' + file.id}>{t('Add a file comment')}</label><textarea id={'file-comment-' + file.id} className="fc-input" rows={3} maxLength={2000} value={draft} disabled={busy === 'comment'} onChange={event => { setDraft(event.target.value); identifier.current = crypto.randomUUID(); }} /><button type="submit" className="fc-button" disabled={!!busy || !draft.trim()}><MessageSquare size={14} />{busy === 'comment' ? t('Posting…') : t('Post comment')}</button></form>
+      {loading ? <p role="status">{t('Loading comments…')}</p> : comments.length ? <ol>{comments.map(row => <li key={row.id}><div><strong>{members[row.created_by] || t('Channel member')}</strong><time dateTime={row.created_at}>{date(row.created_at)}</time></div><p><FieldReferenceText value={row.text} references={row.field_references?.text} channelId={file.channel_id} /></p>{row.file_id !== file.id && <small>{t('On another version of this document')}</small>}</li>)}</ol> : <p>{t('Start a conversation about this file.')}</p>}
+      <form onSubmit={comment}><label htmlFor={commentFieldId}>{t('Add a file comment')}</label><CollaborationInput as="textarea" toolbar channelId={file.channel_id} contextId={`${writingInstanceId}:${file.channel_id}:file:${file.document_id || file.id}:comment:${file.id}`} references={draftReferences} id={commentFieldId} className="fc-input" rows={3} maxLength={2000} value={draft} disabled={busy === 'comment'} onValueChange={(value, refs) => { setDraft(value); setDraftReferences(refs); identifier.current = crypto.randomUUID(); }} /><button type="submit" className="fc-button" disabled={!!busy || !draft.trim()}><MessageSquare size={14} />{busy === 'comment' ? t('Posting…') : t('Post comment')}</button></form>
     </section>
   </section>;
 }

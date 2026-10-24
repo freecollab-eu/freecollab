@@ -15,6 +15,9 @@ interface Options {
   input: RefObject<HTMLInputElement | HTMLTextAreaElement>;
   onInsert: (text: string, references: MessageReference[]) => void;
   disabled?: boolean;
+  maxLength?: number;
+  /** Explicit owner Save controls may need to retain the picker until activation. */
+  keepOpenFor?: (target: Node) => boolean;
 }
 
 /** Suggestions belong to one input, caret and authenticated conversation. */
@@ -62,6 +65,7 @@ export function useComposerReferences(options: Options) {
     if (!open) return;
     const outside = (event: Event) => {
       const target = event.target as Node;
+      if (live.current.keepOpenFor?.(target)) return;
       if (target !== live.current.input.current && !document.getElementById(id)?.closest('section')?.contains(target)) setSelection(null);
     };
     document.addEventListener('pointerdown', outside, true);
@@ -89,7 +93,7 @@ export function useComposerReferences(options: Options) {
     const before = live.current;
     if (before.text !== selection.text) return;
     const result = insertReference(before.text, before.references, query, candidate);
-    if (result.text.length > 10000) return;
+    if (result.text.length > (before.maxLength ?? 10000)) return;
     before.onInsert(result.text, result.references);
     setSelection(null);
     requestAnimationFrame(() => {

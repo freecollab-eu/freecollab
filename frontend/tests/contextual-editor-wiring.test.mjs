@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+import { fieldReferences, messageReferences } from './load-field-references.mjs';
 
 const plain = value => JSON.parse(JSON.stringify(value));
 const translate = (source, values = {}) => source.replace(/\{(\w+)\}/g, (all, key) => Object.hasOwn(values, key) ? String(values[key]) : all);
@@ -40,6 +41,7 @@ function componentFixture(name, states) {
       return [state.states[index], value => enqueue(index, value)];
     },
     useRef(initial) { const index = hooks.useRef[refIndex++]; assert.ok(index); return state.refs[index] ?? (state.refs[index] = { current: initial }); },
+    useId: () => 'editor-test-instance',
     useEffect() {},
     useLayoutEffect() {},
   };
@@ -49,7 +51,10 @@ function componentFixture(name, states) {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx },
     '../i18n': { t: translate, useI18n: () => ({ t: translate }), currentLocale: () => 'en' },
     'lucide-react': new Proxy({}, { get: (_, key) => () => key }),
-    '../lib/api': { api }, './ContextualCopilot': { ContextualCopilot: Copilot },
+    '../lib/api': { api },
+    '../lib/collaboration-context': { useCollaborationContext: () => null },
+    '../lib/field-references': fieldReferences, '../lib/message-references': messageReferences,
+    './CollaborationInput': { CollaborationInput: 'collaboration-input' }, './FieldReferenceText': { FieldReferenceText: 'field-reference-text' }, './ReferencedMessage': { ReferencedMessage: 'referenced-message' }, './ContextualCopilot': { ContextualCopilot: Copilot },
     '../lib/shared-documents-api': {}, '../lib/collaboration-api': {}, '../lib/files-api': {},
     '../lib/project-tasks-api': { projectTasksApi: { saveTask: unexpected, saveProject: unexpected } },
   };
@@ -175,8 +180,8 @@ for (const field of ['title', 'description', 'status', 'priority', 'assignee_use
 
 test('the actual description input preserves its queued user text against an earlier AI callback', () => {
   const fixture = editorFixture();
-  const input = fixture.elements(node => node.type === 'textarea' && node.props.id === 'project-item-description')[0];
-  input.props.onChange({ target: { value: 'My newer wording' } });
+  const input = fixture.elements(node => node.props.id === 'project-item-description')[0];
+  input.props.onValueChange('My newer wording', []);
   fixture.props.onApply('Earlier AI wording', fixture.props.contextKey);
   fixture.flush();
   assert.equal(fixture.state.states.editor.fields.description, 'My newer wording');

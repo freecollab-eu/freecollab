@@ -22,7 +22,7 @@ import tempfile
 import time
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import activate_chat_feature
+from ui_navigation import activate_chat_feature, capture_work_card, conversation_work_region, close_work_card
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('document_proof_helpers', Path(__file__).with_name('remote-sync-browser.py'))
@@ -364,11 +364,31 @@ def main():
                         expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
                         expect(panel.get_by_text(re.compile('edit[s]? waiting to sync'))).to_be_visible()
                         expect(panel.get_by_role('button', name='Retry synchronization', exact=True)).to_be_visible()
-                    activate_chat_feature(pages[0], 'task', expect_closed=False)
+                    first_editor = first.get_by_label('Document text', exact=True).element_handle()
+                    second_editor = second.get_by_label('Document text', exact=True).element_handle()
+                    queued_before = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    sibling_writes, sibling_dialogs = [], []
+                    def record_sibling_write(request):
+                        if request.method in ('POST', 'PUT', 'PATCH', 'DELETE') and any(part in request.url for part in ('/projects', '/messages/channels/', '/mobile/offline/channels/', '/threads/messages/')): sibling_writes.append(request.url)
+                    def reject_sibling_discard(dialog):
+                        sibling_dialogs.append(dialog.message); dialog.dismiss()
+                    pages[0].on('request', record_sibling_write)
+                    pages[0].on('dialog', reject_sibling_discard)
+                    activate_chat_feature(pages[0], 'task')
+                    sibling = conversation_work_region(pages[0], kind='tasks')
+                    assert capture_work_card(pages[0], sibling).get_attribute('data-collaboration-work-id') != capture_work_card(pages[0], first).get_attribute('data-collaboration-work-id')
                     expect(first).to_have_attribute('data-work-kind', 'documents')
                     expect(first.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Alice concurrent note.\n')
-                    pages[0].locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
-                    results['offline_editing_and_unsynced_navigation_guard'] = True
+                    expect(second.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Bob concurrent note.\n')
+                    assert first.get_by_label('Document text', exact=True).evaluate('(node,original)=>node===original&&original.isConnected', first_editor)
+                    assert second.get_by_label('Document text', exact=True).evaluate('(node,original)=>node===original&&original.isConnected', second_editor)
+                    close_work_card(pages[0], sibling)
+                    assert not sibling_dialogs, 'Opening and closing a clean sibling must retain both queued document editors'
+                    assert not sibling_writes, 'Opening a sibling must not create native tasks or deliver messages'
+                    assert helpers.api(base, 'GET', endpoint + '/updates', alice) == queued_before, 'Opening a sibling must not flush either real offline document edit'
+                    pages[0].remove_listener('request', record_sibling_write)
+                    pages[0].remove_listener('dialog', reject_sibling_discard)
+                    results['offline_editing_and_queued_yjs_survive_independent_sibling_work'] = True
                     for context in reversed(contexts): context.set_offline(False)
                     for panel in [first, second]:
                         editor = panel.get_by_label('Document text', exact=True)

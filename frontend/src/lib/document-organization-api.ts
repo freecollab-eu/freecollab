@@ -1,13 +1,14 @@
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import type { SharedDocumentRecord } from './shared-documents-api';
+import { validateMessageReferences, type MessageReference } from './message-references';
 
 export interface DocumentStack { id: string; channel_id: string; title: string; created_by: string; created_at: string; updated_at: string; version: number; generation: string }
 export interface DocumentPlacement { document_id: string; channel_id: string; stack_id: string | null; version: number; updated_by: string; updated_at: string }
 export interface DocumentRelation { id: string; channel_id: string; first_document_id: string; second_document_id: string; created_by: string; created_at: string }
 export interface StackMessageReference { id: string; channel_id: string; stack_id: string; message_id: string; created_by: string; created_at: string; available: boolean; excerpt: string | null; author_id?: string; source_edited_at?: string | null }
 export interface StackMessagePreview { id: string; channel_id: string; text: string; author_id: string; created_at: string; edited_at: string | null; expected_text_sha256: string }
-export interface StackDocumentComment { id: string; channel_id: string; document_id: string; stack_id: string | null; text: string; created_by: string; created_at: string; resolved: boolean; version: number }
+export interface StackDocumentComment { id: string; channel_id: string; document_id: string; stack_id: string | null; text: string; references?: MessageReference[]; created_by: string; created_at: string; resolved: boolean; version: number }
 export interface DocumentOrganization { documents: SharedDocumentRecord[]; supported: boolean; stacks: DocumentStack[]; placements: DocumentPlacement[]; relations: DocumentRelation[]; message_references: StackMessageReference[]; stack_comments: StackDocumentComment[]; comments_incomplete: boolean }
 export interface DocumentMoveUndo { documentId: string; fromStackId: string | null; toStackId: string | null; expectedVersion: number; fromStackGeneration: string | null }
 const path = (channel: string) => '/channels/' + encodeURIComponent(channel) + '/shared-document-organization';
@@ -27,7 +28,16 @@ export const documentOrganizationApi = {
     const owner = api.getAccessToken();
     if (!await native(channel, owner)) return { documents: [], supported: false, stacks: [], placements: [], relations: [], message_references: [], stack_comments: [], comments_incomplete: false };
     const result = await api.request<Omit<DocumentOrganization, 'supported'>>(path(channel) + (archived ? '?archived=true' : '')); unchanged(owner);
-    return { ...result, supported: true };
+    if (!Array.isArray(result.stack_comments)) throw Error('Document comments could not be verified.');
+    const stack_comments = result.stack_comments.map(row => {
+      if (!row || row.channel_id !== channel || typeof row.text !== 'string' || !row.text || row.text.length > 4000)
+        throw Error('Document comments could not be verified.');
+      const references = validateMessageReferences(row.text, row.references ?? []);
+      const value = { ...row };
+      if (references.length) value.references = references; else delete value.references;
+      return value;
+    });
+    return { ...result, stack_comments, supported: true };
   },
   async previewMessage(channel: string, id: string): Promise<StackMessagePreview> {
     const owner = api.getAccessToken();

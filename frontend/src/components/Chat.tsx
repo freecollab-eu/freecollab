@@ -49,13 +49,17 @@ import { useAppearance } from '../appearance/AppearanceProvider';
 import { CommandPalette, type CommandAction } from './CommandPalette';
 import { SlashCommands } from './SlashCommands';
 import { getSlashCommands, type SlashCommand, type SlashContext, type SlashAction } from '../lib/slash-commands';
-import { parseComposerCommand, isComposerCommandDraft, prepareCommandPeople, type ComposerWorkDraft, type ComposerDecisionDraft } from '../lib/composer-commands';
+import { parseComposerCommand, isComposerCommandDraft, prepareCommandPeople, prepareComposerDraftReferences, type ComposerWorkDraft, type ComposerDecisionDraft, type ComposerCommandIntent } from '../lib/composer-commands';
 import { useComposerReferences } from '../lib/useComposerReferences';
 import { normalizeMessageReferences, reconcileReferences, referenceOptionId, type MessageReference, type ReferenceEdit, type ResolvedReference } from '../lib/message-references';
 import { MentionReferences } from './MentionReferences';
 import { ReferencedMessage } from './ReferencedMessage';
 import { ReferenceGroupsPanel } from './ReferenceGroupsPanel';
 import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
+import { CollaborationWorkbench, type CollaborationWorkbenchEntry, type CollaborationWorkbenchEntryContext } from './CollaborationWorkbench';
+import { CollaborationProvider, type CollaborationModalRegistration, type CollaborationOrigin } from '../lib/collaboration-context';
+import { CollaborationInput } from './CollaborationInput';
+import { ModalContinuationProvider, useCollaborationModal } from '../lib/useCollaborationModal';
 import { useWorkSurfaceLayout } from '../lib/useWorkSurfaceLayout';
 import { FilePreview } from './FilePreview';
 import { getVerifiedSecureFileReference } from '../lib/secure/files';
@@ -90,7 +94,7 @@ import '../styles/thread-history.css';
 import { MobileSettings, MobileStatus } from './MobileSettings';
 import { mobileDrafts, mobileOutbox } from '../mobile';
 import { offlineLibrary } from '../mobile/library';
-import { useModalFocus } from '../lib/useModalFocus';
+import { getModalFocusRestoration, useModalFocus } from '../lib/useModalFocus';
 import { ChatSharedMaterial } from './ChatSharedMaterial';
 import { Avatar } from './Avatar';
 import { ContextualCopilot, type ContextualCopilotActivation } from './ContextualCopilot';
@@ -99,6 +103,13 @@ import '../styles/chat.css';
 import '../styles/conversation-work.css';
 import '../styles/work-surface.css';
 import '../styles/flow-first.css';
+
+function MobileCollaborationDialog({ channel, onClose }: { channel?: Channel; onClose: () => void }) {
+  const root = useRef<HTMLDivElement>(null);
+  const modal = useCollaborationModal(root, t('Mobile and offline'), 'mobile');
+  useModalFocus(root, onClose, true, { suspended: modal.parked });
+  return <ModalContinuationProvider modalId={modal.modalId}><div className="fc-overlay" hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined}><div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('Mobile and offline')} className="fc-dialog" style={{ maxWidth: 720, maxHeight: '90dvh', overflowY: 'auto' }}><button type="button" className="fc-icon-button" aria-label={t('Close mobile settings')} onClick={onClose}><X size={20} /></button><MobileSettings channel={channel} /></div></div></ModalContinuationProvider>;
+}
 
 interface ConversationReadingSnapshot extends ConversationReadingPosition {
   anchorMessageId?: string;
@@ -113,6 +124,37 @@ interface ComposerPalette {
   surface: ComposerSurface; threadId?: string;
   mode: 'typed' | 'browse'; query: string;
 }
+
+type ConversationNotebookTab = 'pins' | 'bookmarks' | 'decisions' | 'notifications';
+interface ConversationModalReturn {
+  id: string; scope: string; title: string; element: HTMLElement; origin?: CollaborationOrigin;
+  chain: Array<Pick<CollaborationModalRegistration, 'id' | 'parentId' | 'root' | 'resourceKey'>>;
+}
+interface ConversationWorkReturn {
+  element: HTMLElement | null; top: number; workspaceId: string; channelId: string; token: string;
+  readingIntent: number;
+  modal?: ConversationModalReturn;
+  thread?: { parentId: string; actorId: string | null; request: number };
+}
+interface RetainedConversationWork extends CollaborationWorkbenchEntry {
+  variant: 'hub' | 'notebook' | 'groups';
+  tab?: WorkHubTab;
+  notebookTab?: ConversationNotebookTab;
+  target?: { documentId?: string; stackId?: string; taskId?: string; projectId?: string };
+  resource?: ConversationResourceSelection | null;
+  sourceId?: string;
+  workDraft?: ComposerWorkDraft;
+  decisionDraft?: ComposerDecisionDraft;
+  groupDraft?: { key: string; name: string; memberIds?: string[] };
+  groupId?: string;
+  decisionId?: string;
+  stackMessageId?: string;
+  origin?: CollaborationOrigin;
+  conversationReturn: ConversationWorkReturn;
+  returnIntent: number;
+}
+
+const workTabTitles: Record<WorkHubTab, string> = { documents: 'Documents & stacks', tasks: 'Tasks', meetings: 'Meetings', feed: 'Channel activity', copilot: 'AI settings', cloud: 'Cloud files', 'external-meetings': 'Meeting services', workflows: 'Workflows', apps: 'Apps & automation', data: 'Data & retention', mobile: 'Mobile & offline', 'shared-work': 'Shared work' };
 
 interface ChatProps {
   onLogout: (warning?: string) => void;
@@ -153,6 +195,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [createError, setCreateError] = useState('');
   const [connection, setConnection] = useState('Connecting…');
   const [toolPanel, setToolPanel] = useState<'members' | 'files' | null>(null);
+  const [heldToolPanels, setHeldToolPanels] = useState<Array<'members' | 'files'>>([]);
+  const modalTargetReturns = useRef(new Map<string, ConversationModalReturn>());
   const [channelDetailsOpen, setChannelDetailsOpen] = useState(false);
   const [collaborationTab, setCollaborationTab] = useState<'pins' | 'bookmarks' | 'decisions' | 'notifications' | null>(null);
   const [focusDecisionId, setFocusDecisionId] = useState<string | undefined>();
@@ -177,7 +221,25 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [flowNotice, setFlowNotice] = useState('');
   const [workHubSource, setWorkHubSource] = useState<{ message: Message; token: string; workspaceId: string } | null>(null);
   const flowConversationMoved = useRef(false);
-  const workHubOrigin = useRef<{ element: HTMLElement | null; top: number; workspaceId: string; channelId: string; token: string; thread?: { parentId: string; actorId: string | null; request: number } } | null>(null);
+  const workHubOrigin = useRef<ConversationWorkReturn | null>(null);
+  const [retainedWork, setRetainedWork] = useState<RetainedConversationWork[]>([]);
+  const retainedWorkRef = useRef(retainedWork); retainedWorkRef.current = retainedWork;
+  const [activeRetainedWork, setActiveRetainedWork] = useState<string | null>(null);
+  const [retainedActivation, setRetainedActivation] = useState(0);
+  const retainedLayouts = useRef(new Map<string, ConversationWorkLayoutActions>());
+  const retainedCloseControllers = useRef(new Map<string, { current: (() => void) | null }>());
+  const primaryCloseController = useRef<(() => void) | null>(null);
+  const primaryResource = useRef<ConversationResourceSelection | null | undefined>(undefined);
+  const primaryCollaborationOrigin = useRef<{ origin: CollaborationOrigin; intent: number } | null>(null);
+  const flowIntent = useRef(0), readingIntent = useRef(0), workReturnFrame = useRef(0), workReturnRequest = useRef(0);
+  const modalReturnIntentCleanup = useRef<(() => void) | null>(null);
+  const pendingWorkCaller = useRef<{ origin?: CollaborationOrigin; thread?: ConversationWorkReturn['thread']; modal?: ConversationModalReturn } | null>(null);
+  const modalRegistry = useRef(new Map<string, CollaborationModalRegistration>());
+  const [parkedModals, setParkedModals] = useState<ConversationModalReturn[]>([]);
+  const parkedModalsRef = useRef(parkedModals); parkedModalsRef.current = parkedModals;
+  const sameRoomWork = useRef<{ hub?: (tab: WorkHubTab, target?: { documentId?: string; stackId?: string; taskId?: string; projectId?: string }) => boolean; notebook?: (decisionId: string) => boolean; revoke?: () => void }>({});
+  const lastOpenedWork = useRef<string | null>(null);
+  const markFlowMoved = (reading = true) => { flowConversationMoved.current = true; if (reading) ++readingIntent.current; ++flowIntent.current; ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current); };
   const initialTools = useRef({ token: api.getAccessToken(), work: initialWorkHubTab, integration: initialIntegrationTab, applied: false });
   const [stackMessageEntry, setStackMessageEntry] = useState<{ workspaceId: string; channelId: string; messageId: string; token: string } | null>(null);
   const stackSourceRequest = useRef(0);
@@ -186,6 +248,32 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   if (!workHubViews.current) workHubViews.current = createWorkHubViewMemory();
   const workHubIdentity = { userId: api.getCurrentUserId(), credential: api.getAccessToken() };
   const flowScope = JSON.stringify([workHubIdentity.userId, workHubIdentity.credential, workspace?.id, activeChannel?.id, !!activeChannel?.secure]);
+  const liveFlowScope = useRef(flowScope); liveFlowScope.current = flowScope;
+  const primaryAuthority = useRef(flowScope);
+  const primaryAuthorityCurrent = primaryAuthority.current === flowScope;
+  const scopedRetainedWork = retainedWork.filter(entry => entry.scope === flowScope);
+  useLayoutEffect(() => {
+    primaryAuthority.current = flowScope;
+    ++referenceOpenRequest.current; setReferencedFile(null);
+    modalRegistry.current.clear(); modalTargetReturns.current.clear(); parkedModalsRef.current = []; setParkedModals([]);
+    setIntegrationsOpen(false); setChannelDetailsOpen(false); setMobileOpen(false); setToolPanel(null); setHeldToolPanels([]);
+    ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    retainedWorkRef.current = []; setRetainedWork([]); retainedLayouts.current.clear(); retainedCloseControllers.current.clear(); setActiveRetainedWork(null); primaryResource.current = null; primaryCollaborationOrigin.current = null;
+    workHubOrigin.current = null; primaryCloseController.current = null;
+    setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setWorkHubSource(null);
+    setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setGroupCommandDraft(undefined); setDecisionSource(undefined); setStackMessageEntry(null);
+  }, [flowScope]);
+  useEffect(() => {
+    const revoke = () => {
+      ++workReturnRequest.current; ++flowIntent.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+      retainedWorkRef.current = []; setRetainedWork([]); retainedLayouts.current.clear(); retainedCloseControllers.current.clear(); setActiveRetainedWork(null);
+      workHubOrigin.current = null; primaryCloseController.current = null;
+      modalRegistry.current.clear(); modalTargetReturns.current.clear(); parkedModalsRef.current = []; setParkedModals([]);
+      setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false);
+    };
+    window.addEventListener('freecollab:auth-changed', revoke);
+    return () => { ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current); window.removeEventListener('freecollab:auth-changed', revoke); };
+  }, []);
   const [introductionScope, setIntroductionScope] = useState<string | null>(null);
   const introductionOpen = introductionScope === flowScope;
   const [channelMenuScope, setChannelMenuScope] = useState<string | null>(null);
@@ -232,6 +320,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [messageActionsOpen, setMessageActionsOpen] = useState<string | null>(null);
   const [editingMessage, setEditingMessage] = useState<string | null>(null);
   const [editContent, setEditContent] = useState('');
+  const [editPaletteActive, setEditPaletteActive] = useState(false);
+  const editPaletteActiveRef = useRef(false);
   const [editReferences, setEditReferences] = useState<MessageReference[]>([]);
   const [threadMessage, setThreadMessage] = useState<Message | null>(null);
   const [threadReplies, setThreadReplies] = useState<Message[]>([]);
@@ -299,12 +389,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [groupCommandDraft, setGroupCommandDraft] = useState<{ key: string; name: string; memberIds?: string[] } | undefined>();
   const [referenceGroupId, setReferenceGroupId] = useState<string | undefined>();
   const [referenceMemberId, setReferenceMemberId] = useState<string | undefined>();
-  const [referencedFile, setReferencedFile] = useState<{ file: ManagedFile; token: string; workspaceId: string } | null>(null);
+  const [referencedFiles, setReferencedFiles] = useState<Array<{ file: ManagedFile; token: string; workspaceId: string; scope: string; modal?: ConversationModalReturn }>>([]);
+  const setReferencedFile = (view: { file: ManagedFile; token: string; workspaceId: string; scope: string; modal?: ConversationModalReturn } | null) => setReferencedFiles(previous => view
+    ? previous.some(row => row.scope === view.scope && row.file.id === view.file.id) ? previous : [...previous, view] : []);
+  const referenceOpenRequest = useRef(0);
   const [pendingMessages, setPendingMessages] = useState(0);
   const [atLatest, setAtLatest] = useState(true);
   const [highlightedMessage, setHighlightedMessage] = useState<string | null>(null);
 
   const channelsRequestRef = useRef(0);
+  const memberRefreshRequest = useRef(0);
   const channelSnapshotsRef = useRef(channels); channelSnapshotsRef.current = channels;
   const workspaceRef = useRef(workspace?.id); workspaceRef.current = workspace?.id;
   const channelsWorkspaceRef = useRef<string | null>(null);
@@ -343,14 +437,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const draftVersions = useRef<Record<string, number>>({});
   const mainBeforeEdit = useRef<ReferenceEdit>();
   const threadBeforeEdit = useRef<ReferenceEdit>();
-  const editBeforeEdit = useRef<ReferenceEdit>();
   const editLive = useRef({ id: editingMessage, text: editContent, references: editReferences });
   editLive.current = { id: editingMessage, text: editContent, references: editReferences };
   const threadRepliesRef = useRef(threadReplies); threadRepliesRef.current = threadReplies;
   const assistLive = useRef({ workspaceId: workspace?.id, channel: activeChannel, draft: newMessage, thread: threadMessage, threadDraft: threadReplyContent, locale: currentLocale(), token: api.getAccessToken() });
   assistLive.current = { workspaceId: workspace?.id, channel: activeChannel, draft: newMessage, thread: threadMessage, threadDraft: threadReplyContent, locale: currentLocale(), token: api.getAccessToken() };
   const draftWrites = useRef(new Map<string, Promise<void>>());
-  const mobileDialogRef = useRef<HTMLDivElement>(null);
   const mobileToolsRef = useRef<HTMLDivElement>(null);
   const mobileToolsTrigger = useRef<HTMLButtonElement>(null);
   const channelDialogRef = useRef<HTMLDivElement>(null);
@@ -371,35 +463,34 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const threadInputRef = useRef<HTMLInputElement>(null);
   const editInputRef = useRef<HTMLTextAreaElement>(null);
   const createDialogRef = useRef<HTMLDivElement>(null);
+  const createMutation = useRef(false);
   const threadDialogRef = useRef<HTMLElement>(null);
-  const hasActiveWork = !!activeChannel && !!workspace && (workHubOpen || !!collaborationTab || groupsOpen);
+  const hasActiveWork = primaryAuthorityCurrent && !!activeChannel && !!workspace && (workHubOpen || !!collaborationTab || groupsOpen);
+  const hasAnyWork = hasActiveWork || scopedRetainedWork.length > 0;
   const workLayoutScope = JSON.stringify([api.getCurrentUserId(), api.getAccessToken(), workspace?.id, activeChannel?.id, !!activeChannel?.secure,
     workHubOpen, workHubInitialTab, workHubDocument?.documentId, workHubDocument?.stackId, workHubTask?.taskId, workHubTask?.projectId,
     workHubSource?.message.id, workHubCommandDraft?.key, collaborationTab, focusDecisionId, decisionSource?.id, decisionCommandDraft?.key,
     groupsOpen, referenceGroupId, groupCommandDraft?.key]);
   const workLayout = useWorkSurfaceLayout({ workRef: workAreaRef, timelineRef, composerRef: inputRef, scope: workLayoutScope, enabled: hasActiveWork });
-  const layoutActions: ConversationWorkLayoutActions = { expanded: workLayout.mode === 'expanded', onToggleExpanded: workLayout.toggleExpanded,
+  const restoreRetainedModals = () => { for (const layout of retainedLayouts.current.values()) if (layout.expanded) { layout.onBeforeViewChange?.(); layout.onToggleExpanded(); } };
+  const layoutActions: ConversationWorkLayoutActions = { expanded: workLayout.mode === 'expanded', onToggleExpanded: () => { restoreRetainedModals(); workLayout.toggleExpanded(); },
     onMinimize: workLayout.minimize, onBeforeViewChange: workLayout.beforeViewChange, workAreaId };
   useModalFocus(workAreaRef, workLayout.toggleExpanded, workLayout.mode === 'expanded', {
     preserveInsideFocus: true, restoreFocus: false, escapePhase: 'bubble',
   });
   useModalFocus(channelDialogRef, () => setSidebarOpen(false), sidebarOpen);
-  useModalFocus(mobileDialogRef, () => setMobileOpen(false), mobileOpen);
   useModalFocus(createDialogRef, () => setShowNewChannel(false), showNewChannel);
   useModalFocus(threadDialogRef, () => setThreadMessage(null), !!threadMessage, { escapePhase: 'bubble' });
   useModalFocus(presenceDialog, () => setPresenceOpen(false), presenceOpen);
   const mainReferencePicker = useComposerReferences({ channelId: activeChannel?.id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
     text: newMessage, references: draftReferences, input: inputRef, disabled: sending,
-    onInsert: (text, references) => { if (workHubOrigin.current?.thread) flowConversationMoved.current = true; setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
+    onInsert: (text, references) => { markFlowMoved(false); setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
   const threadReferencePicker = useComposerReferences({ channelId: threadMessage?.channel_id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
     text: threadReplyContent, references: threadReferences, input: threadInputRef, contextId: threadMessage?.id,
     onInsert: (text, references) => {
       if (threadMessageRef.current?.id !== threadMessage?.id) return;
       updateThreadDraft(text, references); updateCommandPalette(text, 'thread');
     } });
-  const editReferencePicker = useComposerReferences({ channelId: editingMessage ? activeChannel?.id : undefined, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
-    text: editContent, references: editReferences, input: editInputRef,
-    onInsert: (text, references) => { setEditContent(text); setEditReferences(references); } });
   useEffect(() => { setSlashPalette(null); setSlashSharedWork(null); }, [activeChannel?.id, workspace?.id, workHubIdentity.credential]);
   useEffect(() => {
     setSlashPalette(previous => previous?.surface === 'thread' ? previous.threadId === threadMessage?.id ? previous : null : threadMessage ? null : previous);
@@ -422,9 +513,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     return () => { document.removeEventListener('pointerdown', outside, true); document.removeEventListener('focusin', outside); };
   }, [slashVisible, slashPalette?.surface]);
   useEffect(() => {
-    if (!slashVisible || !activeChannel?.secure || !workspace || !slashPalette) return;
+    if ((!slashVisible && !hasAnyWork) || !activeChannel?.secure || !workspace) return;
     setSlashSharedWork(null);
-    const { channelId, workspaceId, token } = slashPalette;
+    const channelId = activeChannel.id, workspaceId = workspace.id, token = api.getAccessToken();
+    if (!token) return;
     const abort = new AbortController(); let live = true;
     const timer = window.setTimeout(() => abort.abort(), 10000);
     void api.request<{ protocol: string; channel_id: string; connection_id: string }>(`/connect/federation/channels/${encodeURIComponent(channelId)}/work-context`, { signal: abort.signal }).then(context => {
@@ -432,7 +524,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         context.protocol === 'freecollab-federated-work/1' && context.channel_id === channelId && /^[a-f0-9]{32}$/.test(context.connection_id)) setSlashSharedWork({ channelId, workspaceId, token });
     }).catch(() => {}).finally(() => clearTimeout(timer));
     return () => { live = false; clearTimeout(timer); abort.abort(); };
-  }, [slashVisible, activeChannel?.id, activeChannel?.secure, workspace?.id, workHubIdentity.credential]);
+  }, [slashVisible, hasAnyWork, activeChannel?.id, activeChannel?.secure, workspace?.id, workHubIdentity.credential]);
   useEffect(() => {
     if (threadMessage) { threadDrafts.current.set(threadMessage.id, threadReplyContent); threadReferenceDrafts.current.set(threadMessage.id, threadReferences); }
   }, [threadMessage?.id, threadReplyContent, threadReferences]);
@@ -532,6 +624,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const openTools = (event: Event) => {
       const detail = (event as CustomEvent<{channel: Channel; tab: WorkHubTab}>).detail;
       if (!detail?.channel || detail.channel.workspace_id !== workspaceRef.current || embeddedChannelId && detail.channel.id !== embeddedChannelId || !['feed', 'workflows', 'cloud'].includes(detail.tab)) return;
+      if (detail.channel.id === activeChannelRef.current) { sameRoomWork.current.hub?.(detail.tab); return; }
       if (!mayLeaveConversationWork() || !selectChannel(detail.channel, true)) return;
       setWorkHubSource(null); setCollaborationTab(null); setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab(detail.tab); setWorkHubOpen(true);
     };
@@ -546,6 +639,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const openDecision = (event: Event) => {
       const detail = (event as CustomEvent<{channel_id:string;decision_id:string}>).detail;
       const channel = channels.find(item => item.id === detail?.channel_id);
+      if (channel && channel.id === activeChannelRef.current) { setHistoryOpen(false); sameRoomWork.current.notebook?.(detail.decision_id); return; }
       if (!channel || !mayLeaveConversationWork() || !selectChannel(channel, true)) return;
       setWorkHubOpen(false); setWorkHubSource(null); setWorkHubDocument(null); setWorkHubTask(null);
       setHistoryOpen(false); setDecisionSource(undefined); setFocusDecisionId(detail.decision_id); setCollaborationTab('decisions');
@@ -559,6 +653,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       const detail=(event as CustomEvent<{channel_id:string;kind:string;id:string;parent_id?:string}>).detail;
       const channel=channels.find(item=>item.id===detail?.channel_id);
       if(!channel||embeddedChannelId&&channel.id!==embeddedChannelId)return;
+      if (channel.id === activeChannelRef.current) {
+        setHistoryOpen(false);
+        if (['file', 'file-content'].includes(detail.kind)) { setToolPanel('files'); return; }
+        const tab: Record<string, WorkHubTab> = { document: 'documents', task: 'tasks', project: 'tasks', feed: 'feed' };
+        if (tab[detail.kind]) sameRoomWork.current.hub?.(tab[detail.kind], detail.kind === 'document' ? { documentId: detail.id } : detail.kind === 'task' ? { taskId: detail.id, projectId: detail.parent_id } : detail.kind === 'project' ? { projectId: detail.id } : {});
+        return;
+      }
       if (!mayLeaveConversationWork() || !selectChannel(channel, true)) return;
       setWorkHubSource(null); setCollaborationTab(null); setHistoryOpen(false);
       if(['file','file-content'].includes(detail.kind)){setToolPanel('files');return;}
@@ -605,9 +706,11 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const channel = channels.find(row => row.id === target.channel_id);
     pendingPersonalSource.current = null;
     if (!channel) { setActionError('This source is no longer available in your current workspace.'); return; }
-    if (!mayLeaveConversationWork() || !selectChannel(channel, true)) return;
+    const sameChannel = activeChannelRef.current === channel.id;
+    if (!sameChannel && (!mayLeaveConversationWork() || !selectChannel(channel, true))) return;
+    if (sameChannel && (target.kind === 'task' || target.kind === 'meeting')) { sameRoomWork.current.hub?.(target.kind === 'task' ? 'tasks' : 'meetings', target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : {}); return; }
     if (target.kind === 'message' && target.item_id) { pendingJumpRef.current = { id: target.item_id, channel_id: channel.id, author_id: '', content: '', encrypted: !!channel.secure, created_at: '' }; entryChoiceRef.current = null; ++entryNavigationRef.current; }
-    setWorkHubSource(null); setCollaborationTab(null);
+    if (!sameChannel) { setWorkHubSource(null); setCollaborationTab(null); }
     if (target.kind === 'message' && activeChannelRef.current === channel.id) void loadMessages(channel.id);
     if (target.kind === 'task' || target.kind === 'meeting') { setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubTask(target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : null); setWorkHubInitialTab(target.kind === 'task' ? 'tasks' : 'meetings'); setWorkHubOpen(true); }
     if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: channel.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
@@ -647,6 +750,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           if(failure.status===400){nativeSyncRef.current=null;void loadMessages(channelId);}
           else if([401,403,404,409].includes(failure.status)){
             nativeSyncRef.current=null;setMessages([]);setThreadMessage(null);setThreadReplies([]);setMessageError(failure.message);
+            if ([401,403,404].includes(failure.status)) sameRoomWork.current.revoke?.();
             if(failure.status!==401)void loadChannels();
           }
         }
@@ -1194,11 +1298,25 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const refreshMemberNames = async (channelId: string) => {
+    const token = api.getAccessToken(), actor = api.getCurrentUserId(), workspaceId = workspaceRef.current, scope = liveFlowScope.current, request = ++memberRefreshRequest.current;
+    const current = () => !!token && !!actor && token === api.getAccessToken() && actor === api.getCurrentUserId()
+      && channelId === activeChannelRef.current && workspaceId === workspaceRef.current && scope === liveFlowScope.current && request === memberRefreshRequest.current;
+    if (!current()) return;
     try {
       const members = await api.getChannelMembers(channelId);
-      if (activeChannelRef.current !== channelId) return;
+      if (!current()) return;
       setMemberNames(Object.fromEntries(members.map((member) => [member.user_id, member.name])));
-    } catch { /* Message history remains usable while member metadata is unavailable. */ }
+      const membership = members.find(member => member.user_id === actor);
+      if (membership) {
+        const role = membership.role === 'admin' ? 'admin' as const : 'member' as const;
+        setActiveChannel(previous => current() && previous?.id === channelId ? { ...previous, role } : previous);
+        setChannels(previous => current() ? previous.map(channel => channel.id === channelId ? { ...channel, role } : channel) : previous);
+      }
+    } catch (failure) {
+      if (current() && failure instanceof APIError && [401, 403, 404].includes(failure.status)) {
+        sameRoomWork.current.revoke?.(); setMemberNames({}); setMessages([]); setThreadMessage(null); setThreadReplies([]); setReferencedFile(null); setActiveChannel(null); void loadChannels();
+      }
+    }
   };
 
   const loadMessages = async (channelId: string) => {
@@ -1319,9 +1437,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const openHistoryMessage = (message: Message) => {
     const channel = channels.find(item => item.id === message.channel_id);
     if (!channel) return;
-    if (!mayLeaveConversationWork()) return;
+    if (activeChannelRef.current !== channel.id && !mayLeaveConversationWork()) return;
     pendingJumpRef.current = message; entryChoiceRef.current = null; ++entryNavigationRef.current;
-    setHistoryOpen(false); setCollaborationTab(null);
+    setHistoryOpen(false); markFlowMoved(); restoreRetainedModals(); if (workLayout.mode === 'expanded') workLayout.toggleExpanded();
     if (activeChannelRef.current === channel.id) void loadMessages(channel.id); else if (!selectChannel(channel, true)) pendingJumpRef.current = null;
   };
 
@@ -1348,8 +1466,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     setUnreadCounts(counts);
   };
 
-  const loadThread = async (message: Message, focusReplyId?: string) => {
+  const loadThread = async (message: Message, focusReplyId?: string, restoringWork = false) => {
     if (message.channel_id !== activeChannelRef.current || message.deleted || message.locked) return;
+    if (!restoringWork) markFlowMoved();
     const token = api.getAccessToken(), request = ++threadRequest.current;
     const current = () => token === api.getAccessToken() && threadRequest.current === request && threadMessageRef.current?.id === message.id && activeChannelRef.current === message.channel_id;
     setThreadMessage(message);
@@ -1462,7 +1581,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const handleEditMessage = async (messageId: string) => {
-    if (!editContent.trim() || composingRef.current || editReferencePicker.open) return;
+    if (!editContent.trim() || composingRef.current || editPaletteActiveRef.current) return;
     const token = api.getAccessToken(), channelId = activeChannelRef.current;
     const content = editContent, references = normalizeMessageReferences(content, editReferences);
     try {
@@ -1512,7 +1631,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const { startTyping, stopTyping } = useTypingEmitter(activeChannel?.id || '');
 
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (workHubOrigin.current?.thread) flowConversationMoved.current = true;
+    markFlowMoved(false);
     const value = e.target.value;
     const references = reconcileReferences(newMessage, value, draftReferences, mainBeforeEdit.current);
     mainBeforeEdit.current = undefined;
@@ -1567,7 +1686,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       threadReferencePicker.close();
     } else {
       if ((draftsRef.current[channel.id] ?? '') !== before) return false;
-      if (workHubOrigin.current?.thread) flowConversationMoved.current = true;
+      markFlowMoved(false);
       assistLive.current = { ...live, draft: after };
       setNewMessage(current => stillCurrent() && current === before ? after : current);
       persistDraft(channel.id, after, !!channel.secure);
@@ -1591,8 +1710,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const activationKey = ++assistSequence.current;
     setAssistEntry({ scope: flowScope, target, messageId: sourceId, activation: { actionId, key: activationKey } });
     if (actionId === 'related-documents' && messageId) setRelatedDocumentSelection({ scope: flowScope, messageId, ids: workReferences.documents[0] ? [workReferences.documents[0].id] : [] });
-    if (target === 'main') {
-      flowConversationMoved.current = true; roomOverviewRef.current = true;
+    if (target === 'main' || target === 'main-draft' || target === 'conversation') {
+      markFlowMoved(); roomOverviewRef.current = true;
       followingLatestRef.current = false; clearTimeout(followTimeoutRef.current);
     }
     const requestedScope = flowScope;
@@ -1683,33 +1802,47 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   function toggleIntroduction() {
     setChannelMenuScope(null);
     const show = !introductionOpen; setIntroductionScope(show ? flowScope : null);
-    if (show) { flowConversationMoved.current = true; requestAnimationFrame(showConversationStart); }
+    if (show) { markFlowMoved(); requestAnimationFrame(showConversationStart); }
     channelMenuTrigger.current?.focus({ preventScroll: true });
   }
 
   const handleCreateChannel = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (embeddedChannelId || !newChannelName.trim() || creating) return;
-    setCreating(true); setCreateError('');
+    if (embeddedChannelId || !newChannelName.trim() || creating || createMutation.current) return;
+    const token = api.getAccessToken(), actor = api.getCurrentUserId(), workspaceId = workspace?.id, originChannelId = activeChannelRef.current, dialog = createDialogRef.current, sourceScope = flowScope;
+    if (!token || !actor || !workspaceId || !dialog || !mayLeaveConversationWork()) return;
+    const current = () => token === api.getAccessToken() && actor === api.getCurrentUserId() && workspaceId === workspaceRef.current
+      && sourceScope === liveFlowScope.current && originChannelId === activeChannelRef.current && createDialogRef.current === dialog && dialog.isConnected;
+    if (!current()) return;
+    const title = newChannelName, encrypted = secureAvailable && createSecure;
+    createMutation.current = true; setCreating(true); setCreateError('');
     try {
-      const title = newChannelName;
-      const channel = await api.createChannel(secureAvailable && createSecure ? 'Encrypted channel' : title, 'group', [], workspace?.id);
-      if (secureAvailable && createSecure) {
+      const channel = await api.createChannel(encrypted ? 'Encrypted channel' : title, 'group', [], workspaceId);
+      if (!current()) return;
+      if (channel.workspace_id !== workspaceId) throw new Error('The new channel belongs to another workspace.');
+      if (encrypted) {
         const secure = await getSecureMessaging();
+        if (!current()) return;
         const binding = await secure.enableChannel(channel.id, title);
+        if (!current()) return;
         channel.secure = true; channel.matrix_room_id = binding.room_id || undefined; channel.name = title;
       }
       setChannels((prev) => [...prev, channel]);
-      setActiveChannel(channel);
+      if (!selectChannel(channel, true)) return;
       setNewChannelName('');
       setShowNewChannel(false);
       setSidebarOpen(false);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : 'Could not create channel. Please try again.');
-    } finally { setCreating(false); }
+      if (current()) setCreateError(err instanceof Error ? err.message : 'Could not create channel. Please try again.');
+    } finally { createMutation.current = false; setCreating(false); }
   };
 
   const resetConversationWork = () => {
+    ++referenceOpenRequest.current;
+    modalRegistry.current.clear(); modalTargetReturns.current.clear(); parkedModalsRef.current = []; setParkedModals([]); setReferencedFile(null);
+    setIntegrationsOpen(false); setChannelDetailsOpen(false); setMobileOpen(false); setToolPanel(null); setHeldToolPanels([]);
+    publishRetainedWork([]); retainedLayouts.current.clear(); setActiveRetainedWork(null); ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    primaryResource.current = null; primaryCollaborationOrigin.current = null;
     workLayout.reset(); setWorkSurfaceResourceTitle('');
     setWorkHubOpen(false); setWorkHubDocument(null); setWorkHubTask(null); setWorkHubSource(null);
     setCollaborationTab(null); setDecisionSource(undefined); setFocusDecisionId(undefined);
@@ -1740,28 +1873,262 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     openRoomWork(workHubViews.current?.recall({ ...workHubIdentity, workspaceId: workspace.id, channelId: activeChannel.id, secure: !!activeChannel.secure }) ?? 'documents');
   };
 
+  const workScopeCurrent = (scope: string) => scope === liveFlowScope.current && workHubIdentity.userId === api.getCurrentUserId()
+    && workHubIdentity.credential === api.getAccessToken() && !!activeChannel && activeChannel.id === activeChannelRef.current && !!workspace && workspace.id === workspaceRef.current;
+  const modalReturnCurrent = (value: ConversationModalReturn) => workScopeCurrent(value.scope)
+    && value.chain.every(saved => { const modal = modalRegistry.current.get(saved.id); return !!modal && modal.root === saved.root && modal.parentId === saved.parentId && modal.resourceKey === saved.resourceKey && modal.isCurrent(); });
+  const captureModalReturn = (element: HTMLElement | null, origin?: CollaborationOrigin): ConversationModalReturn | undefined => {
+    if (!element || !workScopeCurrent(flowScope)) return;
+    const matches = [...modalRegistry.current.values()].filter(modal => modal.isCurrent() && modal.root.contains(element));
+    const source = matches.find(modal => !matches.some(other => other !== modal && modal.root.contains(other.root))) || matches[0];
+    if (!source) return;
+    const chain: ConversationModalReturn['chain'] = [], seen = new Set<string>();
+    let modal: CollaborationModalRegistration | undefined = source;
+    while (modal) {
+      if (seen.has(modal.id) || !modal.isCurrent()) throw new Error(t('This feature could not be opened. Your text is unchanged.'));
+      seen.add(modal.id); chain.push({ id: modal.id, root: modal.root, parentId: modal.parentId, resourceKey: modal.resourceKey });
+      if (!modal.parentId) break;
+      modal = modalRegistry.current.get(modal.parentId);
+      if (!modal) throw new Error(t('This feature could not be opened. Your text is unchanged.'));
+    }
+    return { id: crypto.randomUUID(), scope: flowScope, title: source.title, element, origin, chain };
+  };
+  const publishParkedModals = (values: ConversationModalReturn[]) => { parkedModalsRef.current = values; setParkedModals(values); };
+  const parkModalReturn = (value?: ConversationModalReturn) => {
+    if (!value || !modalReturnCurrent(value)) return;
+    // A local preview may live inside Tools. Keep that exact parent instance
+    // even when a later conversation action changes the foreground tools tab.
+    for (const modal of value.chain) {
+      const resource = modalRegistry.current.get(modal.id)?.resourceKey;
+      const tab = resource === `tools:${activeChannel?.id}:files` ? 'files' : resource === `tools:${activeChannel?.id}:members` ? 'members' : undefined;
+      if (tab) setHeldToolPanels(previous => previous.includes(tab) ? previous : [...previous, tab]);
+      modalRegistry.current.get(modal.id)?.park();
+    }
+    publishParkedModals([...parkedModalsRef.current.filter(previous => previous.chain[0]?.id !== value.chain[0]?.id && modalReturnCurrent(previous)), value]);
+  };
+  const resumeModalReturn = (value?: ConversationModalReturn, expectedFocus: Element | null = document.activeElement) => {
+    if (!value || !modalReturnCurrent(value)) return false;
+    const focusRestoration = getModalFocusRestoration().sequence;
+    const closingModal = expectedFocus?.closest?.('[aria-modal="true"]');
+    restoreRetainedModals(); if (workLayout.mode === 'expanded') workLayout.toggleExpanded();
+    for (const modal of [...value.chain].reverse()) modalRegistry.current.get(modal.id)?.resume();
+    publishParkedModals(parkedModalsRef.current.filter(previous => previous.chain[0]?.id !== value.chain[0]?.id));
+    const request = ++workReturnRequest.current, intent = flowIntent.current;
+    modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    let interacted = false;
+    const stop = () => { interacted = true; dispose(); };
+    const onKey = (event: KeyboardEvent) => { if (!['Shift', 'Control', 'Alt', 'Meta'].includes(event.key)) stop(); };
+    const dispose = () => {
+      document.removeEventListener('pointerdown', stop, true); document.removeEventListener('keydown', onKey, true);
+      if (modalReturnIntentCleanup.current === dispose) modalReturnIntentCleanup.current = null;
+    };
+    modalReturnIntentCleanup.current = dispose;
+    document.addEventListener('pointerdown', stop, true); document.addEventListener('keydown', onKey, true);
+    workReturnFrame.current = requestAnimationFrame(() => {
+      dispose();
+      if (interacted || request !== workReturnRequest.current || intent !== flowIntent.current || !modalReturnCurrent(value)) return;
+      const target = value.origin?.isCurrent() ? value.origin.input : value.element;
+      // The closing target's focus trap may first restore the source dialog's
+      // close button. That programmatic handoff belongs to this return; a newer
+      // pointer/key action above always wins over the saved field and caret.
+      const restoredDialog = modalRegistry.current.get(value.chain[0].id)?.root;
+      const handoff = getModalFocusRestoration();
+      const automaticHandoff = !!closingModal && handoff.sequence > focusRestoration && handoff.modal === closingModal && handoff.target === document.activeElement;
+      if ((!mayRestoreWorkFocus(expectedFocus, target, undefined, restoredDialog) && !automaticHandoff) || !target.isConnected || target.closest('[hidden], [inert]') || !target.getClientRects().length) return;
+      if (value.origin?.isCurrent()) value.origin.restore(); else target.focus({ preventScroll: true });
+    });
+    return true;
+  };
+  const registerCollaborationModal = (modal: CollaborationModalRegistration) => {
+    modalRegistry.current.set(modal.id, modal);
+    return () => {
+      if (modalRegistry.current.get(modal.id) !== modal) return;
+      modalRegistry.current.delete(modal.id);
+      // A locale/title update re-registers the same live root in this commit.
+      // Retain its parked drafts; actual removal or resource replacement fails closed.
+      queueMicrotask(() => {
+        const replacement = modalRegistry.current.get(modal.id);
+        if (replacement?.root === modal.root && replacement.resourceKey === modal.resourceKey && replacement.parentId === modal.parentId) return;
+        const contains = (value: ConversationModalReturn) => value.chain.some(saved => saved.id === modal.id && saved.root === modal.root);
+        if (parkedModalsRef.current.some(contains)) publishParkedModals(parkedModalsRef.current.filter(value => !contains(value)));
+      });
+    };
+  };
+  const activateModalTarget = (resourceKey: string, source?: ConversationModalReturn) => {
+    const target = [...modalRegistry.current.values()].find(modal => modal.resourceKey === resourceKey && modal.isCurrent());
+    if (!source) {
+      if (target) {
+        const parked = parkedModalsRef.current.find(value => value.chain[0].id === target.id)
+          || parkedModalsRef.current.find(value => modalReturnCurrent(value) && value.chain.some(modal => modal.id === target.id));
+        if (parked?.chain[0].id === target.id) resumeModalReturn(parked);
+        else if (parked) activateModalTarget(resourceKey, parked);
+        else target.resume();
+      }
+      return;
+    }
+    if (target?.id === source.chain[0].id) return;
+    modalTargetReturns.current.set(resourceKey, source);
+    const ancestor = target ? source.chain.findIndex(modal => modal.id === target.id) : -1;
+    if (ancestor >= 0) {
+      // The target already owns the source (for example Files → its preview).
+      // Keep that parent mounted and reveal it while only its descendants park.
+      for (const saved of source.chain.slice(0, ancestor)) modalRegistry.current.get(saved.id)?.park();
+      for (const saved of source.chain.slice(ancestor).reverse()) modalRegistry.current.get(saved.id)?.resume();
+      publishParkedModals([...parkedModalsRef.current.filter(value => value.chain[0].id !== source.chain[0].id && modalReturnCurrent(value)), source]);
+      return;
+    }
+    parkModalReturn(source);
+    if (target) {
+      const parked = parkedModalsRef.current.find(value => value.chain[0].id === target.id);
+      if (parked) resumeModalReturn(parked); else target.resume();
+    }
+  };
+  const resumeTargetModal = (resourceKey: string) => {
+    const source = modalTargetReturns.current.get(resourceKey);
+    modalTargetReturns.current.delete(resourceKey);
+    if (!source || !modalReturnCurrent(source)) return false;
+    const target = [...modalRegistry.current.values()].find(modal => modal.resourceKey === resourceKey && modal.isCurrent());
+    const sourceOwnsTarget = !!target && source.chain.some(modal => modal.id === target.id);
+    resumeModalReturn(source);
+    return sourceOwnsTarget;
+  };
+  const retainToolSource = (source: ConversationModalReturn | undefined, target: 'files' | 'members') => {
+    if (!source) return;
+    const original = source.chain.map(saved => modalRegistry.current.get(saved.id)?.resourceKey)
+      .find(key => key === `tools:${activeChannel?.id}:files` || key === `tools:${activeChannel?.id}:members`);
+    const tab = original?.endsWith(':files') ? 'files' : original?.endsWith(':members') ? 'members' : undefined;
+    if (tab && tab !== target) setHeldToolPanels(previous => previous.includes(tab) ? previous : [...previous, tab]);
+  };
+  const closeToolPanel = (tab: 'files' | 'members') => {
+    if (resumeTargetModal(`tools:${activeChannel?.id}:${tab}`)) return;
+    setHeldToolPanels(previous => previous.filter(value => value !== tab));
+    setToolPanel(previous => previous === tab ? null : previous); setMaterialRefresh(value => value + 1);
+  };
+  const capturedWorkReturn = (): ConversationWorkReturn => {
+    const parent = threadMessageRef.current;
+    const liveThread = !pendingWorkCaller.current?.origin && parent && threadDialogRef.current?.contains(document.activeElement)
+      ? { parentId: parent.id, actorId: api.getCurrentUserId(), request: threadRequest.current } : undefined;
+    return { element: pendingWorkCaller.current?.origin?.input || (document.activeElement instanceof HTMLElement ? document.activeElement : null),
+      top: timelineRef.current?.scrollTop || 0, readingIntent: readingIntent.current, token: api.getAccessToken()!, workspaceId: workspace!.id, channelId: activeChannel!.id,
+      thread: pendingWorkCaller.current?.thread || liveThread, modal: pendingWorkCaller.current?.modal };
+  };
+  const publishRetainedWork = (next: RetainedConversationWork[]) => { retainedWorkRef.current = next; setRetainedWork(next); };
+  const revealRetainedWork = (id: string) => {
+    if (workLayout.mode === 'expanded') workLayout.toggleExpanded();
+    setActiveRetainedWork(id); setRetainedActivation(value => value + 1);
+  };
+  const revealPrimaryWork = () => {
+    const expectedFocus = document.activeElement;
+    restoreRetainedModals(); setActiveRetainedWork('primary');
+    if (workLayout.mode === 'minimized') workLayout.resume();
+    const scope = flowScope, request = ++workReturnRequest.current;
+    modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    workReturnFrame.current = requestAnimationFrame(() => {
+      const region = workAreaRef.current;
+      if (!workScopeCurrent(scope) || request !== workReturnRequest.current || !region?.isConnected || region.closest('[hidden], [inert]') || !region.getClientRects().length || !mayRestoreWorkFocus(expectedFocus, region, 'primary')) return;
+      region.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'auto' });
+      if (!region.contains(document.activeElement)) region.focus({ preventScroll: true });
+    });
+  };
+  const mayRestoreWorkFocus = (expected: Element | null, desired?: HTMLElement | null, surfaceId?: string, restoredDialog?: HTMLElement | null) => {
+    const active = document.activeElement;
+    if (active === expected || active === document.body || active === desired) return true;
+    const region = surfaceId === 'primary' ? workAreaRef.current : surfaceId ? document.getElementById(retainedLayouts.current.get(surfaceId)?.workAreaId || '') : null;
+    return active === region || !!restoredDialog?.contains(active);
+  };
+  const openRetainedWork = (draft: Omit<RetainedConversationWork, 'id' | 'scope' | 'returnFocus' | 'origin' | 'conversationReturn' | 'returnIntent'>) => {
+    if (!workScopeCurrent(flowScope)) return false;
+    ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    const matches = (entry: RetainedConversationWork) => entry.scope === flowScope && entry.variant === draft.variant &&
+      (draft.target?.documentId ? entry.resource === undefined ? entry.target?.documentId === draft.target.documentId : entry.resource?.kind === 'document' && entry.resource.id === draft.target.documentId
+        : draft.target?.taskId ? entry.resource === undefined ? entry.target?.taskId === draft.target.taskId : entry.resource?.kind === 'task' && entry.resource.id === draft.target.taskId
+        : draft.decisionId ? entry.decisionId === draft.decisionId || entry.resource?.kind === 'decision' && entry.resource.id === draft.decisionId
+        : draft.groupId ? entry.groupId === draft.groupId
+        : draft.target?.stackId ? entry.target?.stackId === draft.target.stackId : false);
+    const previous = retainedWorkRef.current.find(matches);
+    const origin = pendingWorkCaller.current?.origin;
+    const conversationReturn = capturedWorkReturn();
+    if (previous) {
+      if (origin || conversationReturn.thread) publishRetainedWork(retainedWorkRef.current.map(entry => entry.id === previous.id
+        ? { ...entry, origin, returnFocus: conversationReturn.element, conversationReturn, returnIntent: flowIntent.current } : entry));
+      lastOpenedWork.current = previous.id; revealRetainedWork(previous.id); if (!pendingWorkCaller.current?.modal) setToolPanel(null); setThreadMessage(null); return true;
+    }
+    const id = 'work-' + crypto.randomUUID();
+    const entry: RetainedConversationWork = { ...draft, id, scope: flowScope, origin, returnFocus: conversationReturn.element, conversationReturn, returnIntent: flowIntent.current };
+    publishRetainedWork([...retainedWorkRef.current.filter(row => row.scope === flowScope), entry]);
+    lastOpenedWork.current = id; revealRetainedWork(id); setFlowNotice(''); if (!pendingWorkCaller.current?.modal) setToolPanel(null); setThreadMessage(null);
+    return true;
+  };
+  const removeRetainedWork = (entry: RetainedConversationWork) => {
+    if (!workScopeCurrent(entry.scope) || !retainedWorkRef.current.some(row => row.id === entry.id && row.scope === entry.scope)) return;
+    const expectedFocus = document.activeElement;
+    publishRetainedWork(retainedWorkRef.current.filter(row => row.id !== entry.id)); retainedLayouts.current.delete(entry.id); retainedCloseControllers.current.delete(entry.id);
+    setMaterialRefresh(value => value + 1);
+    const request = ++workReturnRequest.current, scope = entry.scope, expectedIntent = entry.returnIntent;
+    modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    if (resumeModalReturn(entry.conversationReturn.modal, expectedFocus)) return;
+    const stillCurrent = () => workScopeCurrent(scope) && request === workReturnRequest.current;
+    const focusCurrent = () => stillCurrent() && expectedIntent === flowIntent.current;
+    if (!stillCurrent()) return;
+    const sourceSurface = entry.origin?.surfaceId;
+    if (entry.origin) {
+      if (!focusCurrent() || !entry.origin.isCurrent()) return;
+      if (sourceSurface === 'primary' && hasActiveWork) { restoreRetainedModals(); if (workLayout.mode === 'minimized') workLayout.resume(); setActiveRetainedWork('primary'); }
+      else if (sourceSurface && retainedWorkRef.current.some(row => row.id === sourceSurface && row.scope === scope)) revealRetainedWork(sourceSurface);
+      workReturnFrame.current = requestAnimationFrame(() => { if (focusCurrent() && entry.origin?.isCurrent() && mayRestoreWorkFocus(expectedFocus, entry.origin.input, sourceSurface)) entry.origin.restore(); });
+      return;
+    }
+    const origin = entry.conversationReturn;
+    if (origin.readingIntent === readingIntent.current) { roomOverviewRef.current = true; followingLatestRef.current = false; clearTimeout(followTimeoutRef.current); }
+    const returningThread = focusCurrent() && origin.thread && origin.thread.actorId === api.getCurrentUserId() && origin.thread.request === threadRequest.current
+      ? messagesRef.current.find(message => message.id === origin.thread!.parentId && message.channel_id === origin.channelId && !message.deleted && !message.locked) : undefined;
+    if (returningThread) void loadThread(returningThread, undefined, true);
+    const threadVersion = threadRequest.current;
+    workReturnFrame.current = requestAnimationFrame(() => {
+      if (!stillCurrent() || returningThread && (threadVersion !== threadRequest.current || threadMessageRef.current?.id !== returningThread.id)) return;
+      if (origin.readingIntent === readingIntent.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
+      if (!focusCurrent() || !mayRestoreWorkFocus(expectedFocus, returningThread ? threadInputRef.current : origin.element, undefined, returningThread ? threadDialogRef.current : null)) return;
+      const target = returningThread ? threadInputRef.current : origin.element;
+      if (target?.isConnected && !target.closest('[hidden], [inert]') && target.getClientRects().length) target.focus({ preventScroll: true });
+    });
+  };
+
   const openRoomWork = (tab: WorkHubTab, target: { documentId?: string; stackId?: string; taskId?: string; projectId?: string } = {}, source?: Message, commandDraft?: ComposerWorkDraft) => {
-    if (!mayLeaveConversationWork()) return false;
     const token = api.getAccessToken();
     if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id ||
         (activeChannel.workspace_id && activeChannel.workspace_id !== workspace.id) || workHubIdentity.credential !== token || workHubIdentity.userId !== api.getCurrentUserId()) return false;
+    ++workReturnRequest.current; modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
+    if (workHubOpen && ((target.documentId && (primaryResource.current === undefined ? target.documentId === workHubDocument?.documentId : primaryResource.current?.kind === 'document' && target.documentId === primaryResource.current.id))
+      || (target.taskId && (primaryResource.current === undefined ? target.taskId === workHubTask?.taskId : primaryResource.current?.kind === 'task' && target.taskId === primaryResource.current.id))
+      || (target.stackId && target.stackId === workHubDocument?.stackId))) {
+      lastOpenedWork.current = 'primary'; revealPrimaryWork();
+      if (pendingWorkCaller.current?.origin) primaryCollaborationOrigin.current = { origin: pendingWorkCaller.current.origin, intent: flowIntent.current };
+      if (pendingWorkCaller.current) workHubOrigin.current = capturedWorkReturn();
+      setThreadMessage(null); return true;
+    }
+    if (hasActiveWork || retainedWorkRef.current.some(entry => entry.scope === flowScope) || pendingWorkCaller.current?.origin) {
+      return openRetainedWork({ variant: 'hub', kind: tab, tab, target, title: commandDraft?.title || t(workTabTitles[tab]), workDraft: commandDraft,
+        sourceId: source?.channel_id === activeChannel.id && !source.deleted && !source.locked ? source.id : undefined });
+    }
+    lastOpenedWork.current = 'primary'; setActiveRetainedWork('primary'); primaryResource.current = undefined; primaryCollaborationOrigin.current = null;
     workLayout.reset(); setWorkSurfaceResourceTitle('');
     roomOverviewRef.current = false; flowConversationMoved.current = false;
     setWorkHubSource(source && source.channel_id === activeChannel.id && !source.deleted && !source.locked ? { message: source, token, workspaceId: workspace.id } : null);
     setCollaborationTab(null); setGroupsOpen(false); setDecisionCommandDraft(null); setWorkHubCommandDraft(commandDraft || null); setFlowNotice('');
-    workHubOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-      top: timelineRef.current?.scrollTop || 0, token, workspaceId: workspace.id, channelId: activeChannel.id };
+    workHubOrigin.current = capturedWorkReturn();
     setWorkHubDocument(tab === 'documents' ? { documentId: target.documentId, stackId: target.stackId, token, workspaceId: workspace.id, channelId: activeChannel.id } : null);
     setWorkHubTask(tab === 'tasks' ? { taskId: target.taskId, projectId: target.projectId } : null);
-    setStackMessageEntry(null); setWorkHubInitialTab(tab); setWorkHubOpen(true); setToolPanel(null); setThreadMessage(null);
+    setStackMessageEntry(null); setWorkHubInitialTab(tab); setWorkHubOpen(true); if (!pendingWorkCaller.current?.modal) setToolPanel(null); setThreadMessage(null);
     return true;
   };
 
   const closeWorkHub = () => {
+    const expectedFocus = document.activeElement;
+    const closeRequest = ++workReturnRequest.current, closeIntent = flowIntent.current, closeActor = api.getCurrentUserId(); modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
     workLayout.reset(); setWorkSurfaceResourceTitle('');
     const origin = workHubOrigin.current; workHubOrigin.current = null;
     const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
-    if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current) {
+    if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && origin.readingIntent === readingIntent.current) {
       // Returning to a source is a reading choice. A restored position can be
       // within the near-bottom threshold without choosing to follow latest.
       // Composer resize callbacks must not replace it with the bottom edge.
@@ -1769,21 +2136,36 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       followingLatestRef.current = false; clearTimeout(followTimeoutRef.current);
     }
     setWorkHubOpen(false); setCollaborationTab(null); setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setDecisionSource(undefined); setStackMessageEntry(null); setWorkHubDocument(null); setWorkHubSource(null); setMaterialRefresh(value => value + 1);
+    primaryResource.current = null;
+    const collaborationReturn = primaryCollaborationOrigin.current; primaryCollaborationOrigin.current = null;
+    if (resumeModalReturn(origin?.modal, expectedFocus)) return;
+    if (collaborationReturn) {
+      const request = ++workReturnRequest.current, scope = flowScope;
+      if (collaborationReturn.intent !== flowIntent.current || !collaborationReturn.origin.isCurrent()) return;
+      const sourceId = collaborationReturn.origin.surfaceId;
+      if (sourceId && retainedWorkRef.current.some(entry => entry.id === sourceId && entry.scope === scope)) revealRetainedWork(sourceId);
+      workReturnFrame.current = requestAnimationFrame(() => {
+        if (workScopeCurrent(scope) && request === workReturnRequest.current && collaborationReturn.intent === flowIntent.current && collaborationReturn.origin.isCurrent()
+          && mayRestoreWorkFocus(expectedFocus, collaborationReturn.origin.input, sourceId)) collaborationReturn.origin.restore();
+      });
+      return;
+    }
     const returningThread = origin?.thread && origin.thread.request === threadRequest.current && origin.thread.actorId === api.getCurrentUserId() && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current
       ? messagesRef.current.find(message => message.id === origin.thread!.parentId && message.channel_id === channelId && !message.deleted && !message.locked) : undefined;
-    if (returningThread) void loadThread(returningThread);
+    if (returningThread) void loadThread(returningThread, undefined, true);
     const returningRequest = threadRequest.current;
-    requestAnimationFrame(() => {
-      if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
+    workReturnFrame.current = requestAnimationFrame(() => {
+      if (closeRequest !== workReturnRequest.current || closeIntent !== flowIntent.current || closeActor !== api.getCurrentUserId() || token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
       if (returningThread && (threadRequest.current !== returningRequest || threadMessageRef.current?.id !== returningThread.id)) return;
-      if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && !flowConversationMoved.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
+      if (origin && origin.token === token && origin.workspaceId === workspaceId && origin.channelId === channelId && origin.readingIntent === readingIntent.current && timelineRef.current) timelineRef.current.scrollTop = origin.top;
+      if (!mayRestoreWorkFocus(expectedFocus, returningThread ? threadInputRef.current : flowConversationMoved.current ? inputRef.current : origin?.element, undefined, returningThread ? threadDialogRef.current : null)) return;
       if (returningThread) {
         if (threadRequest.current === returningRequest && threadMessageRef.current?.id === returningThread.id) threadInputRef.current?.focus({ preventScroll: true });
         handleTimelineScroll(); return;
       }
       const fallback = timelineRef.current?.closest('.fc-chat')?.querySelector<HTMLElement>('[data-conversation-work-return]');
       if (flowConversationMoved.current) inputRef.current?.focus({ preventScroll: true });
-      else if (origin?.element?.isConnected) origin.element.focus({ preventScroll: true });
+      else if (origin?.element?.isConnected && !origin.element.closest('[hidden], [inert]') && origin.element.getClientRects().length) origin.element.focus({ preventScroll: true });
       else (slashLauncherRef.current || fallback || inputRef.current)?.focus({ preventScroll: true });
       handleTimelineScroll();
     });
@@ -1792,7 +2174,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const revealFlowSource = async (messageId: string) => {
     const channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken(), request = ++stackSourceRequest.current;
     if (!channelId || !workspaceId || !token || activeChannelRef.current !== channelId || workspaceRef.current !== workspaceId) return;
-    flowConversationMoved.current = true; workLayout.reset();
+    markFlowMoved(); restoreRetainedModals(); workLayout.reset();
     const element = document.getElementById('message-' + messageId);
     const navigation = ++entryNavigationRef.current;
     entryChoiceRef.current = null; pendingJumpRef.current = null;
@@ -1816,8 +2198,8 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
   const activeWorkSource = workHubSource?.token === api.getAccessToken() && workHubSource.workspaceId === workspace?.id && workHubSource.message.channel_id === activeChannel?.id
     ? messages.find(row => row.id === workHubSource.message.id && !row.deleted && !row.locked) || null : null;
-  const attachConversationWork = async (resource: ConversationResourceSelection) => {
-    const source = activeWorkSource, channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken();
+  const attachConversationWork = async (resource: ConversationResourceSelection, sourceOverride?: Message | null) => {
+    const source = sourceOverride === undefined ? activeWorkSource : sourceOverride, channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken();
     if (!source || !channelId || !workspaceId || !token) return;
     if (!activeChannel || !allowsChannelMaterial(activeChannel, workspaceId)) { setFlowNotice(t('This work stays encrypted. Message links are not yet available in encrypted conversations.')); return; }
     try {
@@ -1828,13 +2210,25 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
   };
   const openConversationDecision = (source?: Message, decisionId?: string, tab: 'decisions' | 'pins' | 'bookmarks' | 'notifications' = 'decisions', commandDraft?: ComposerDecisionDraft) => {
-    if (!activeChannel || !workspace || !mayLeaveConversationWork()) return false;
+    if (!activeChannel || !workspace || !workScopeCurrent(flowScope)) return false;
+    if (decisionId && collaborationTab === 'decisions' && (decisionId === focusDecisionId || primaryResource.current?.kind === 'decision' && primaryResource.current.id === decisionId)) {
+      revealPrimaryWork(); lastOpenedWork.current = 'primary';
+      if (pendingWorkCaller.current?.origin) primaryCollaborationOrigin.current = { origin: pendingWorkCaller.current.origin, intent: flowIntent.current };
+      if (pendingWorkCaller.current) workHubOrigin.current = capturedWorkReturn();
+      setThreadMessage(null); return true;
+    }
+    if (hasActiveWork || retainedWorkRef.current.some(entry => entry.scope === flowScope) || pendingWorkCaller.current?.origin) {
+      return openRetainedWork({ variant: 'notebook', kind: tab, notebookTab: tab, decisionId, decisionDraft: commandDraft,
+        title: commandDraft?.title || t(tab === 'decisions' ? 'Decisions' : 'Saved items and decisions'),
+        sourceId: source?.channel_id === activeChannel.id && !source.deleted && !source.locked ? source.id : undefined });
+    }
+    lastOpenedWork.current = 'primary'; setActiveRetainedWork('primary'); primaryCollaborationOrigin.current = null;
     workLayout.reset(); setWorkSurfaceResourceTitle('');
-    workHubOrigin.current = {element: document.activeElement instanceof HTMLElement ? document.activeElement : null, top: timelineRef.current?.scrollTop || 0, token: api.getAccessToken()!, workspaceId: workspace.id, channelId: activeChannel.id};
+    workHubOrigin.current = capturedWorkReturn();
     flowConversationMoved.current = false;
     setWorkHubOpen(false); setGroupsOpen(false); setWorkHubCommandDraft(null); setDecisionCommandDraft(commandDraft || null); setWorkHubDocument(null); setWorkHubTask(null); setFlowNotice('');
     setDecisionSource(source?.channel_id === activeChannel.id && !source.deleted && !source.locked ? source : undefined);
-    setFocusDecisionId(decisionId || undefined); setCollaborationTab(tab); setToolPanel(null); setThreadMessage(null);
+    setFocusDecisionId(decisionId || undefined); setCollaborationTab(tab); if (!pendingWorkCaller.current?.modal) setToolPanel(null); setThreadMessage(null);
     return true;
   };
   const openReferencedWork = async (row: ResolvedConversationWork) => {
@@ -1856,13 +2250,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const saveMessageInStack = (message: Message) => {
-    if (!mayLeaveConversationWork()) return;
     const token = api.getAccessToken();
     if (!token || !workspace || !activeChannel || activeChannel.secure || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id
         || workHubIdentity.credential !== token || message.channel_id !== activeChannel.id || message.deleted || message.locked) return;
+    if (hasAnyWork) {
+      openRetainedWork({ variant: 'hub', kind: 'documents', tab: 'documents', title: t('Documents & stacks'), stackMessageId: message.id }); setMessageActionsOpen(null); return;
+    }
+    lastOpenedWork.current = 'primary'; setActiveRetainedWork('primary');
     setStackMessageEntry({ workspaceId: workspace.id, channelId: activeChannel.id, messageId: message.id, token });
     setWorkHubSource(null); setCollaborationTab(null);
-    setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab('documents'); setWorkHubOpen(true); setToolPanel(null); setMessageActionsOpen(null); setThreadMessage(null);
+    setWorkHubTask(null); setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubInitialTab('documents'); setWorkHubOpen(true); if (!pendingWorkCaller.current?.modal) setToolPanel(null); setMessageActionsOpen(null); setThreadMessage(null);
   };
 
   const renderThreadStackAction = (message: Message) => activeChannel && !activeChannel.secure && !message.deleted && !message.locked
@@ -1905,37 +2302,73 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   const openGroups = (draft?: { key: string; name: string; memberIds?: string[] }, groupId?: string) => {
     const token = api.getAccessToken();
-    if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id || !mayLeaveConversationWork()) return false;
+    if (!token || !activeChannel || !workspace || activeChannelRef.current !== activeChannel.id || workspaceRef.current !== workspace.id || !workScopeCurrent(flowScope)) return false;
+    if (groupId && groupsOpen && referenceGroupId === groupId) {
+      revealPrimaryWork(); lastOpenedWork.current = 'primary';
+      if (pendingWorkCaller.current?.origin) primaryCollaborationOrigin.current = { origin: pendingWorkCaller.current.origin, intent: flowIntent.current };
+      if (pendingWorkCaller.current) workHubOrigin.current = capturedWorkReturn();
+      setThreadMessage(null); return true;
+    }
+    if (hasActiveWork || retainedWorkRef.current.some(entry => entry.scope === flowScope) || pendingWorkCaller.current?.origin) {
+      return openRetainedWork({ variant: 'groups', kind: 'groups', groupId, groupDraft: draft, title: draft?.name || t('Groups in this conversation') });
+    }
+    lastOpenedWork.current = 'primary'; setActiveRetainedWork('primary'); primaryCollaborationOrigin.current = null;
     workLayout.reset(); setWorkSurfaceResourceTitle('');
-    workHubOrigin.current = { element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
-      top: timelineRef.current?.scrollTop || 0, token, workspaceId: workspace.id, channelId: activeChannel.id };
+    workHubOrigin.current = capturedWorkReturn();
     flowConversationMoved.current = false;
     setWorkHubOpen(false); setCollaborationTab(null); setWorkHubCommandDraft(null); setDecisionCommandDraft(null); setWorkHubSource(null);
-    setGroupCommandDraft(draft); setReferenceGroupId(groupId); setGroupsOpen(true); setThreadMessage(null); setToolPanel(null);
+    setGroupCommandDraft(draft); setReferenceGroupId(groupId); setGroupsOpen(true); setThreadMessage(null); if (!pendingWorkCaller.current?.modal) setToolPanel(null);
     return true;
   };
 
-  const openMessageReference = async (reference: ResolvedReference) => {
-    const token = api.getAccessToken(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
+  const openMessageReference = async (reference: ResolvedReference, origin?: CollaborationOrigin, sourceCurrent?: () => boolean, sourceElement?: HTMLElement) => {
+    const token = api.getAccessToken(), actor = api.getCurrentUserId(), channelId = activeChannelRef.current, workspaceId = workspaceRef.current;
     if (!token || !channelId || !workspaceId || !activeChannel || activeChannel.id !== channelId || !reference.available || reference.channel_id !== channelId) return;
-    if (reference.kind === 'document') { openRoomWork('documents', { documentId: reference.id }); return; }
-    if (reference.kind === 'task') { openRoomWork('tasks', { taskId: reference.id, projectId: reference.project_id }); return; }
-    if (reference.kind === 'group') { openGroups(undefined, reference.id); return; }
-    if (reference.kind === 'channel') { setChannelDetailsOpen(true); return; }
-    if (reference.kind === 'person') { setReferenceMemberId(reference.id); setThreadMessage(null); setToolPanel('members'); return; }
+    if (origin && (!origin.isCurrent() || origin.actorId !== actor || origin.token !== token || origin.workspaceId !== workspaceId || origin.channelId !== channelId || origin.secure !== !!activeChannel.secure)) return;
+    if (sourceCurrent && !sourceCurrent()) return;
+    const modal = captureModalReturn(sourceElement || origin?.input || (document.activeElement instanceof HTMLElement ? document.activeElement : null), origin);
+    const request = ++referenceOpenRequest.current, scope = flowScope, intent = flowIntent.current, workRequest = workReturnRequest.current;
+    const current = () => request === referenceOpenRequest.current && scope === liveFlowScope.current && intent === flowIntent.current
+      && workRequest === workReturnRequest.current
+      && token === api.getAccessToken() && actor === api.getCurrentUserId() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current
+      && (!origin || origin.isCurrent()) && (!sourceCurrent || sourceCurrent()) && (!modal || modalReturnCurrent(modal));
+    if (['document', 'task', 'group'].includes(reference.kind)) {
+      pendingWorkCaller.current = { origin, modal };
+      try {
+        const opened = reference.kind === 'document' ? openRoomWork('documents', { documentId: reference.id })
+          : reference.kind === 'task' ? openRoomWork('tasks', { taskId: reference.id, projectId: reference.project_id }) : openGroups(undefined, reference.id);
+        if (opened) parkModalReturn(modal);
+      } finally { pendingWorkCaller.current = null; }
+      return;
+    }
+    restoreRetainedModals(); if (workLayout.mode === 'expanded') workLayout.toggleExpanded();
+    if (reference.kind === 'channel') { setChannelDetailsOpen(true); activateModalTarget(`channel:${channelId}`, modal); return; }
+    if (reference.kind === 'person') { retainToolSource(modal, 'members'); setReferenceMemberId(reference.id); setThreadMessage(null); setToolPanel('members'); activateModalTarget(`tools:${channelId}:members`, modal); return; }
     try {
       const files = await listChannelFiles(channelId);
+      if (!current()) return;
       let file = files.find(row => row.id === reference.id);
-      if (!file && activeChannel.secure) file = await getVerifiedSecureFileReference(channelId, reference.id);
+      if (!file && activeChannel.secure) { file = await getVerifiedSecureFileReference(channelId, reference.id); if (!current()) return; }
       if (!file && !activeChannel.secure) {
         const versions = await api.request<ManagedFile[]>('/files/' + encodeURIComponent(reference.id) + '/versions');
+        if (!current()) return;
         file = versions.find(row => row.id === reference.id && row.channel_id === channelId);
       }
-      if (token !== api.getAccessToken() || channelId !== activeChannelRef.current || workspaceId !== workspaceRef.current) return;
+      if (!current()) return;
       if (!file || file.channel_id !== channelId) throw new Error(t('This referenced file is no longer available.'));
-      setReferencedFile({ file, token, workspaceId });
+      const existingModal = [...modalRegistry.current.values()].find(modal => modal.isCurrent() && modal.resourceKey === `file:${channelId}:${file.id}`);
+      if (existingModal) {
+        const sourceModal = modal;
+        if (sourceModal?.chain[0].id !== existingModal.id) parkModalReturn(sourceModal);
+        const parked = parkedModalsRef.current.find(value => value.chain[0].id === existingModal.id);
+        const returnTo = parked || captureModalReturn(existingModal.root);
+        if (returnTo) resumeModalReturn(returnTo); else existingModal.resume();
+        return;
+      }
+      setReferencedFile({ file, token, workspaceId, scope, modal });
+      parkModalReturn(modal);
     } catch (failure) {
-      if (token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current) setActionError(failure instanceof Error ? failure.message : t('This referenced file is no longer available.'));
+      if (current()) setActionError(failure instanceof Error ? failure.message : t('This referenced file is no longer available.'));
     }
   };
 
@@ -1960,7 +2393,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const before = surface === 'thread' ? threadReplyContent : newMessage;
     const beforeReferences = surface === 'thread' ? threadReferences : draftReferences;
     if (!input || !activeChannel || surface === 'main' && sending || !api.getAccessToken()) return;
-    if (surface === 'main' && workHubOrigin.current?.thread) flowConversationMoved.current = true;
+    if (surface === 'main') markFlowMoved(false);
     const start = input.selectionStart ?? before.length, end = input.selectionEnd ?? start;
     const marker = start && !/\s/.test(before[start - 1]) ? ' @' : '@';
     const text = before.slice(0, start) + marker + before.slice(end);
@@ -1973,6 +2406,89 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     (surface === 'thread' ? threadReferencePicker : mainReferencePicker).update(text, caret, references, true);
     requestAnimationFrame(() => { if ((surface === 'thread' ? threadInputRef.current : inputRef.current) === input && input.value === text) { input.focus({ preventScroll: true }); input.setSelectionRange(caret, caret); } });
   };
+
+  const dispatchCollaborationCommand = (command: SlashCommand, intent: ComposerCommandIntent | undefined, personIds: string[], options: { origin?: CollaborationOrigin; threadParent?: Message | null; mode?: 'typed' | 'browse'; commandText?: string; commandReferences?: MessageReference[] } = {}) => {
+    if (!activeChannel || !workspace || !workScopeCurrent(flowScope) || !getSlashCommands(slashContext).some(item => item.id === command.id)) return false;
+    const { origin, threadParent = null, mode = 'browse' } = options;
+    if (origin && (!origin.isCurrent() || origin.workspaceId !== workspace.id || origin.channelId !== activeChannel.id || origin.actorId !== api.getCurrentUserId() || origin.token !== api.getAccessToken() || origin.secure !== !!activeChannel.secure)) return false;
+    if (intent?.kind === 'groups' && (!['owner', 'admin'].includes(activeChannel.role || '') || intent.memberText.trim())) return false;
+    if (['task', 'decision'].includes(command.id) && (personIds.length > 1 || personIds.length && intent?.kind === 'open')) return false;
+    const range = origin?.commandRange;
+    const commandText = origin ? range?.text || '' : options.commandText || '';
+    const commandReferences = origin && range ? normalizeMessageReferences(origin.value, origin.references)
+      .filter(reference => reference.start >= range.start && reference.end <= range.end)
+      .map(reference => ({ ...reference, start: reference.start - range.start, end: reference.end - range.start })) : options.commandReferences || [];
+    let fieldReferences: ReturnType<typeof prepareComposerDraftReferences>;
+    try { fieldReferences = intent ? prepareComposerDraftReferences(commandText, commandReferences, intent) : undefined; }
+    catch (failure) { if (origin) throw failure; setCommandError(failure instanceof Error ? failure.message : t('This feature could not be opened. Your text is unchanged.')); return false; }
+    ++referenceOpenRequest.current;
+    const people = { personIds }, draftKey = crypto.randomUUID();
+    lastOpenedWork.current = null;
+    const inlineWork = ['document', 'task', 'decision', 'groups', 'meetings', 'activity', 'workflows', 'cloud', 'external-meetings', 'apps', 'copilot', 'data', 'shared-work', 'pins', 'bookmarks', 'notification-settings'].includes(command.id);
+    const modal = command.id !== 'focus' && origin ? captureModalReturn(origin.input, origin) : undefined;
+    const targetKey = command.id === 'files' || command.id === 'members' ? `tools:${activeChannel.id}:${command.id}`
+      : command.id === 'channel' ? `channel:${activeChannel.id}` : command.id === 'integrations' ? `integrations:${workspace.id}` : command.id === 'mobile' ? 'mobile' : undefined;
+    pendingWorkCaller.current = { origin, modal, thread: threadParent ? { parentId: threadParent.id, actorId: api.getCurrentUserId(), request: threadRequest.current } : undefined };
+    if (!inlineWork && command.id !== 'focus') { restoreRetainedModals(); if (workLayout.mode === 'expanded') workLayout.toggleExpanded(); }
+    try {
+    let opened = true;
+    switch (command.id) {
+      case 'document': opened = openRoomWork('documents', {}, intent?.kind === 'document' ? threadParent || undefined : undefined, intent?.kind === 'document' ? { key: draftKey, title: intent.title, text: intent.text, field_references: fieldReferences } : undefined); break;
+      case 'task': opened = openRoomWork('tasks', {}, intent?.kind === 'task' ? threadParent || undefined : undefined, intent?.kind === 'task' ? { key: draftKey, title: intent.title, text: intent.text, assigneeUserId: people.personIds[0], field_references: fieldReferences } : undefined); break;
+      case 'decision': opened = openConversationDecision(intent?.kind === 'decision' ? threadParent || undefined : undefined, undefined, 'decisions', intent?.kind === 'decision' ? { key: draftKey, title: intent.title, content: intent.content, responsibleUserId: people.personIds[0], field_references: fieldReferences } : undefined); break;
+      case 'groups': opened = openGroups(intent?.kind === 'groups' ? { key: draftKey, name: intent.name, memberIds: people.personIds } : undefined); break;
+      case 'meetings': opened = openRoomWork('meetings'); break;
+      case 'activity': opened = openRoomWork('feed'); break;
+      case 'workflows': opened = openRoomWork('workflows'); break;
+      case 'cloud': opened = openRoomWork('cloud'); break;
+      case 'external-meetings': opened = openRoomWork('external-meetings'); break;
+      case 'apps': opened = openRoomWork('apps'); break;
+      case 'copilot': opened = openRoomWork('copilot'); break;
+      case 'data': opened = openRoomWork('data'); break;
+      case 'shared-work': opened = openRoomWork('shared-work'); break;
+      case 'pins': opened = openConversationDecision(undefined, undefined, 'pins'); break;
+      case 'bookmarks': opened = openConversationDecision(undefined, undefined, 'bookmarks'); break;
+      case 'notification-settings': opened = openConversationDecision(undefined, undefined, 'notifications'); break;
+      case 'files': case 'members': retainToolSource(modal, command.id); if (!threadParent) setThreadMessage(null); setToolPanel(command.id); break;
+      case 'channel': if (!modal) setToolPanel(null); setChannelDetailsOpen(true); break;
+      case 'search': setHistoryInitialQuery(intent?.kind === 'search' ? intent.query : ''); setHistoryOpen(true); break;
+      case 'mobile': setMobileOpen(true); break;
+      case 'schedule': setProductivity(threadParent ? { message: threadParent } : origin || mode === 'typed' ? {} : { draft: newMessage, mentions: selectedMentions, references: draftReferences }); break;
+      case 'focus': { const layout = origin?.surfaceId === 'primary' ? layoutActions : origin?.surfaceId ? retainedLayouts.current.get(origin.surfaceId) : undefined; if (layout) { layout.onBeforeViewChange?.(); layout.onToggleExpanded(); } else setFocusMode(value => !value); break; }
+      case 'appearance': openAppearance(); break;
+      case 'account': openAccount(); break;
+      case 'my-day': setMyDayOpen(true); break;
+      case 'integrations': if (!modal) setIntegrationEntry(null); setIntegrationsOpen(true); break;
+      case 'direct-message': openDirectMessages(); break;
+      case 'new-channel': setCreateError(''); setShowNewChannel(true); break;
+      case 'channels': setSidebarOpen(true); break;
+      case 'secure-settings': openSecureSettings(activeChannel.secure ? activeChannel.id : undefined); break;
+      case 'status': setPresenceOpen(true); break;
+      case 'notifications': setShowNotifications(true); break;
+      case 'get-started': setLaunchOpen(true); break;
+      case 'feedback': setFeedbackOpen(true); break;
+      case 'admin': if (!mayLeaveConversationWork()) opened = false; else onAdmin?.(); break;
+      default: { const exhaustive: never = command.id; void exhaustive; opened = false; }
+    }
+      const accepted = opened && workScopeCurrent(flowScope);
+      if (accepted && targetKey) activateModalTarget(targetKey, modal);
+      else if (accepted && modal) parkModalReturn(modal);
+      return accepted;
+    } finally { pendingWorkCaller.current = null; }
+  };
+  sameRoomWork.current = { hub: openRoomWork, notebook: decisionId => openConversationDecision(undefined, decisionId), revoke: resetConversationWork };
+  const collaborationValue = (surfaceId: string) => ({ surfaceId, workspaceId: workspace?.id, channelId: activeChannel?.id, secure: !!activeChannel?.secure,
+    commandContext: slashContext,
+    onRegisterModal: registerCollaborationModal,
+    onCommand: (command: SlashCommand, intent: ComposerCommandIntent, origin: CollaborationOrigin) => dispatchCollaborationCommand(command, intent, origin.personIds, { origin }),
+    onOpenReference: (reference: ResolvedReference, origin?: CollaborationOrigin, sourceCurrent?: () => boolean, sourceElement?: HTMLElement) => {
+      const current = () => workScopeCurrent(flowScope) && (!sourceCurrent || sourceCurrent())
+        && (surfaceId !== 'primary' || !!primaryCloseController.current && primaryAuthority.current === flowScope)
+        && (surfaceId === 'primary' || surfaceId === 'conversation' || retainedWorkRef.current.some(entry => entry.id === surfaceId && entry.scope === flowScope));
+      if (!current()) return;
+      return openMessageReference(reference, origin, current, sourceElement);
+    },
+  });
 
   const selectSlashCommand = (command: SlashCommand) => {
     const entry = slashPalette;
@@ -1998,54 +2514,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       setCommandError(t('A channel administrator can create and change groups.')); return;
     }
     const intent = parsed?.intent;
-    const draftKey = crypto.randomUUID();
     // Remember a lasting return target before the picker itself unmounts.
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (entry.surface === 'thread' ? entry.mode === 'browse' ? threadSlashLauncherRef.current : threadInputRef.current : entry.mode === 'browse' ? slashLauncherRef.current : inputRef.current)?.focus({ preventScroll: true });
-    let opened = true;
-    switch (command.id) {
-      case 'document': opened = openRoomWork('documents', {}, intent?.kind === 'document' ? threadParent || undefined : undefined, intent?.kind === 'document' ? { key: draftKey, title: intent.title, text: intent.text } : undefined); break;
-      case 'task': opened = openRoomWork('tasks', {}, intent?.kind === 'task' ? threadParent || undefined : undefined, intent?.kind === 'task' ? { key: draftKey, title: intent.title, text: intent.text, assigneeUserId: people.personIds[0] } : undefined); break;
-      case 'decision': opened = openConversationDecision(intent?.kind === 'decision' ? threadParent || undefined : undefined, undefined, 'decisions', intent?.kind === 'decision' ? { key: draftKey, title: intent.title, content: intent.content, responsibleUserId: people.personIds[0] } : undefined); break;
-      case 'groups': opened = openGroups(intent?.kind === 'groups' ? { key: draftKey, name: intent.name, memberIds: people.personIds } : undefined); break;
-      case 'meetings': opened = openRoomWork('meetings'); break;
-      case 'activity': opened = openRoomWork('feed'); break;
-      case 'workflows': opened = openRoomWork('workflows'); break;
-      case 'cloud': opened = openRoomWork('cloud'); break;
-      case 'external-meetings': opened = openRoomWork('external-meetings'); break;
-      case 'apps': opened = openRoomWork('apps'); break;
-      case 'copilot': opened = openRoomWork('copilot'); break;
-      case 'data': opened = openRoomWork('data'); break;
-      case 'shared-work': opened = openRoomWork('shared-work'); break;
-      case 'pins': opened = openConversationDecision(undefined, undefined, 'pins'); break;
-      case 'bookmarks': opened = openConversationDecision(undefined, undefined, 'bookmarks'); break;
-      case 'notification-settings': opened = openConversationDecision(undefined, undefined, 'notifications'); break;
-      case 'files': case 'members': if (!threadParent) setThreadMessage(null); setToolPanel(command.id); break;
-      case 'channel': setToolPanel(null); setChannelDetailsOpen(true); break;
-      case 'search': setHistoryInitialQuery(intent?.kind === 'search' ? intent.query : ''); setHistoryOpen(true); break;
-      case 'mobile': setMobileOpen(true); break;
-      case 'schedule': setProductivity(threadParent ? { message: threadParent } : { draft: entry.mode === 'typed' ? '' : newMessage, mentions: entry.mode === 'typed' ? [] : selectedMentions, references: entry.mode === 'typed' ? [] : draftReferences }); break;
-      case 'focus': setFocusMode(value => !value); break;
-      case 'appearance': openAppearance(); break;
-      case 'account': openAccount(); break;
-      case 'my-day': setMyDayOpen(true); break;
-      case 'integrations': setIntegrationEntry(null); setIntegrationsOpen(true); break;
-      case 'direct-message': openDirectMessages(); break;
-      case 'new-channel': setCreateError(''); setShowNewChannel(true); break;
-      case 'channels': setSidebarOpen(true); break;
-      case 'secure-settings': openSecureSettings(activeChannel.secure ? activeChannel.id : undefined); break;
-      case 'status': setPresenceOpen(true); break;
-      case 'notifications': setShowNotifications(true); break;
-      case 'get-started': setLaunchOpen(true); break;
-      case 'feedback': setFeedbackOpen(true); break;
-      case 'admin': if (!mayLeaveConversationWork()) opened = false; else onAdmin?.(); break;
-      default: { const exhaustive: never = command.id; void exhaustive; opened = false; }
-    }
+    const opened = dispatchCollaborationCommand(command, intent, people.personIds, { threadParent, mode: entry.mode, commandText: entry.mode === 'typed' ? text : '', commandReferences: entry.mode === 'typed' ? references : [] });
     // A rejected navigation must keep both the command and the current editor.
     if (entry.token !== api.getAccessToken() || activeChannelRef.current !== entry.channelId || workspaceRef.current !== entry.workspaceId) return;
     if (!opened) { if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true }); return; }
-    const inlineWork = ['document', 'task', 'decision', 'groups', 'meetings', 'activity', 'workflows', 'cloud', 'external-meetings', 'apps', 'copilot', 'data', 'shared-work', 'pins', 'bookmarks', 'notification-settings'].includes(command.id);
-    if (threadParent && inlineWork && workHubOrigin.current) workHubOrigin.current.thread = { parentId: threadParent.id, actorId: api.getCurrentUserId(), request: threadRequest.current };
     if (entry.mode === 'typed' && text === entry.query) {
       if (threadParent) updateThreadDraft('', []);
       else { setNewMessage(''); assistLive.current.draft = ''; persistDraft(entry.channelId, '', !!activeChannel.secure, []); stopTyping(); }
@@ -2086,7 +2561,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     if (handleSlashKeyDown(event)) return;
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || event.keyCode === 229 || composingRef.current) return;
     event.preventDefault();
-    flowConversationMoved.current = true;
+    markFlowMoved();
     event.currentTarget.form?.requestSubmit();
   };
 
@@ -2124,14 +2599,54 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     );
   }
 
-  const conversationWork = workHubOpen && workspace && activeChannel ? <WorkHub presentation="flow" layoutActions={layoutActions} onActiveResourceChange={resource => { if (activeChannelRef.current === activeChannel.id && workspaceRef.current === workspace.id && workHubIdentity.credential === api.getAccessToken()) setWorkSurfaceResourceTitle(resource?.title || ''); }} sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}:${workHubCommandDraft?.key || ""}` } initialCommandDraft={workHubCommandDraft || undefined} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
-  const conversationNotebook = activeChannel && collaborationTab ? <CollaborationPanel presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}:${decisionCommandDraft?.key || ''}`} initialDraft={decisionCommandDraft || undefined} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
-  const conversationGroups = groupsOpen && activeChannel && workspace ? <ReferenceGroupsPanel layoutActions={layoutActions} key={`${workspace.id}:${activeChannel.id}:${groupCommandDraft?.key || ""}:${referenceGroupId || ""}`} channelId={activeChannel.id} workspaceId={workspace.id} canManage={["owner", "admin"].includes(activeChannel.role || "")} initialDraft={groupCommandDraft} initialGroupId={referenceGroupId} onClose={closeWorkHub} onChanged={() => setMaterialRefresh(value => value + 1)} /> : null;
-  const workSurfaceTitle = workHubOpen ? workSurfaceResourceTitle || workHubCommandDraft?.title || t(({ documents: 'Documents & stacks', tasks: 'Tasks', meetings: 'Meetings', feed: 'Channel activity', copilot: 'AI settings', cloud: 'Cloud files', 'external-meetings': 'Meeting services', workflows: 'Workflows', apps: 'Apps & automation', data: 'Data & retention', mobile: 'Mobile & offline', 'shared-work': 'Shared work' } as Record<WorkHubTab, string>)[workHubInitialTab])
+  const renderRetainedWork = (entry: RetainedConversationWork, context: CollaborationWorkbenchEntryContext) => {
+    if (!activeChannel || !workspace || !workScopeCurrent(entry.scope)) return null;
+    const current = () => workScopeCurrent(entry.scope) && retainedWorkRef.current.some(row => row.id === entry.id && row.scope === entry.scope);
+    const source = entry.sourceId ? [...messagesRef.current, ...threadRepliesRef.current, ...(threadMessageRef.current ? [threadMessageRef.current] : [])]
+      .find(message => message.id === entry.sourceId && message.channel_id === activeChannel.id && !message.deleted && !message.locked) || null : null;
+    const guardedClose = () => { if (current()) removeRetainedWork(entry); };
+    let closeController = retainedCloseControllers.current.get(entry.id);
+    if (!closeController) { closeController = { current: null }; retainedCloseControllers.current.set(entry.id, closeController); }
+    const cardLayout: ConversationWorkLayoutActions = { ...context.layoutActions, onToggleExpanded: () => {
+      if (!current()) return;
+      if (!context.layoutActions.expanded && workLayout.mode === 'expanded') workLayout.toggleExpanded();
+      context.layoutActions.onToggleExpanded();
+    } };
+    retainedLayouts.current.set(entry.id, cardLayout);
+    const setResource = (resource: ConversationResourceSelection | null) => {
+      if (!current()) return;
+      const before = retainedWorkRef.current.find(row => row.id === entry.id);
+      if (!before || before.resource !== undefined && JSON.stringify(before.resource) === JSON.stringify(resource)) return;
+      publishRetainedWork(retainedWorkRef.current.map(row => row.id === entry.id ? { ...row, resource, title: resource?.title || row.title } : row));
+    };
+    return <CollaborationProvider value={collaborationValue(entry.id)}>
+      {entry.variant === 'hub' ? <WorkHub instanceId={context.scopeId} closeController={closeController} presentation="flow" layoutActions={cardLayout}
+        workspaceId={workspace.id} channel={activeChannel} initialTab={entry.tab} initialCommandDraft={entry.workDraft}
+        initialDocumentId={entry.target?.documentId} initialStackId={entry.target?.stackId} initialProjectId={entry.target?.projectId} focusTaskId={entry.target?.taskId}
+        sourceMessage={source} onRevealSource={source ? () => { if (current()) void revealFlowSource(source.id); } : undefined}
+        onActiveResourceChange={setResource} onResourceSaved={resource => { if (current()) void attachConversationWork(resource, source); }}
+        dataAdmin={workspace.role === 'owner'} integrationAdmin={['owner', 'admin'].includes(workspace.role)} onTabChange={tab => { if (current()) rememberWorkHubTab(tab); }}
+        pendingStackMessageId={entry.stackMessageId} onStackMessageSaved={() => { if (current()) publishRetainedWork(retainedWorkRef.current.map(row => row.id === entry.id ? { ...row, stackMessageId: undefined } : row)); }}
+        onRevealMessage={id => { if (current()) void revealFlowSource(id); }} onClose={guardedClose} />
+      : entry.variant === 'groups' ? <ReferenceGroupsPanel instanceId={context.scopeId} closeController={closeController} layoutActions={cardLayout}
+        channelId={activeChannel.id} workspaceId={workspace.id} canManage={['owner', 'admin'].includes(activeChannel.role || '')}
+        initialDraft={entry.groupDraft} initialGroupId={entry.groupId} onClose={guardedClose} onChanged={() => { if (current()) setMaterialRefresh(value => value + 1); }} />
+      : <div className="fc-conversation-work" data-work-kind={entry.notebookTab}><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(entry.notebookTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div>
+          <ConversationWorkControls layout={cardLayout} onClose={() => closeController?.current?.()} /></header><div className="fc-conversation-work-body">
+          <CollaborationPanel instanceId={context.scopeId} closeController={closeController} presentation="flow" workspaceId={workspace.id} channel={activeChannel} tab={entry.notebookTab || 'decisions'}
+            initialDraft={entry.decisionDraft} focusDecisionId={entry.decisionId} sourceMessage={source} onClose={guardedClose}
+            onDecisionSaved={decision => { if (current()) { setResource({ kind: 'decision', id: decision.id, title: decision.title }); setMaterialRefresh(value => value + 1); } }} onOpenMessage={(channelId, id) => { if (current() && channelId === activeChannel.id) void revealFlowSource(id); }} />
+        </div></div>}
+    </CollaborationProvider>;
+  };
+  const conversationWork = hasActiveWork && workHubOpen && workspace && activeChannel ? <WorkHub closeController={primaryCloseController} presentation="flow" layoutActions={layoutActions} onActiveResourceChange={resource => { primaryResource.current = resource; if (activeChannelRef.current === activeChannel.id && workspaceRef.current === workspace.id && workHubIdentity.credential === api.getAccessToken()) setWorkSurfaceResourceTitle(resource?.title || ''); }} sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}:${workHubCommandDraft?.key || ""}` } initialCommandDraft={workHubCommandDraft || undefined} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
+  const conversationNotebook = hasActiveWork && activeChannel && collaborationTab ? <CollaborationPanel closeController={primaryCloseController} presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}:${decisionCommandDraft?.key || ''}`} initialDraft={decisionCommandDraft || undefined} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
+  const conversationGroups = hasActiveWork && groupsOpen && activeChannel && workspace ? <ReferenceGroupsPanel closeController={primaryCloseController} layoutActions={layoutActions} key={`${workspace.id}:${activeChannel.id}:${groupCommandDraft?.key || ""}:${referenceGroupId || ""}`} channelId={activeChannel.id} workspaceId={workspace.id} canManage={["owner", "admin"].includes(activeChannel.role || "")} initialDraft={groupCommandDraft} initialGroupId={referenceGroupId} onClose={closeWorkHub} onChanged={() => setMaterialRefresh(value => value + 1)} /> : null;
+  const workSurfaceTitle = workHubOpen ? workSurfaceResourceTitle || workHubCommandDraft?.title || t(workTabTitles[workHubInitialTab])
     : groupsOpen ? groupCommandDraft?.name || t('Groups in this conversation')
     : decisionCommandDraft?.title || t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions');
   return (
-    <div key="chat-shell" className={`fc-chat fc-flow-first ${introductionOpen ? 'has-channel-introduction' : ''} ${focusMode ? 'is-focus-mode' : ''} ${spaciousRoom ? 'is-spacious-room' : ''} ${activeChannel && materialChannelId === activeChannel.id ? 'has-shared-material' : ''} ${activeChannel && roomArrangements[activeChannel.id] === 'left' ? 'has-material-left' : ''}`}>
+    <CollaborationProvider value={collaborationValue('conversation')}><div key="chat-shell" className={`fc-chat fc-flow-first ${introductionOpen ? 'has-channel-introduction' : ''} ${focusMode ? 'is-focus-mode' : ''} ${spaciousRoom ? 'is-spacious-room' : ''} ${activeChannel && materialChannelId === activeChannel.id ? 'has-shared-material' : ''} ${activeChannel && roomArrangements[activeChannel.id] === 'left' ? 'has-material-left' : ''}`}>
       {sidebarOpen && <div ref={channelDialogRef} id="chat-channel-drawer" className="fc-chat-channel-layer" role="dialog" aria-modal="true" aria-label={t("Workspace channels")} tabIndex={-1}>
       <div className="fc-chat-scrim" aria-hidden="true" onMouseDown={() => setSidebarOpen(false)} />
       <aside className="fc-chat-sidebar is-open" aria-label={t("Workspace channels")}>
@@ -2283,16 +2798,16 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         </section>}
         {renderConversationAssist()}
         {workReferences.error && workReferences.supported && <div className="fc-flow-work-notice" role="status"><span>{workReferences.error}</span><button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></div>}
-        {entryNotice && <div className="fc-flow-entry-notice" role="status"><span>{t(entryNotice)}</span>{conversationEntry?.decision.kind === 'history' && hasOlder ? <button type="button" className="fc-chat-text-button" disabled={loadingOlder} onClick={loadEarlierUnread}>{t('Load earlier history')}</button> : <button type="button" className="fc-chat-text-button" disabled={messagesLoading} onClick={retryReadingPosition}>{t('Retry reading position')}</button>}{atLatest && <button type="button" className="fc-chat-text-button" aria-label={t('Jump to latest messages')} onClick={() => { flowConversationMoved.current = true; scrollToLatest(scrollBehavior(), true); }}>{t('Jump to latest')}</button>}</div>}
+        {entryNotice && <div className="fc-flow-entry-notice" role="status"><span>{t(entryNotice)}</span>{conversationEntry?.decision.kind === 'history' && hasOlder ? <button type="button" className="fc-chat-text-button" disabled={loadingOlder} onClick={loadEarlierUnread}>{t('Load earlier history')}</button> : <button type="button" className="fc-chat-text-button" disabled={messagesLoading} onClick={retryReadingPosition}>{t('Retry reading position')}</button>}{atLatest && <button type="button" className="fc-chat-text-button" aria-label={t('Jump to latest messages')} onClick={() => { markFlowMoved(); scrollToLatest(scrollBehavior(), true); }}>{t('Jump to latest')}</button>}</div>}
         {connection !== 'Connected' && <div className="fc-chat-connection" role="status" data-connected="false"><span className="fc-chat-connection-dot" /><span>{connection}</span>{activeChannel && <button type="button" onClick={() => void loadMessages(activeChannel.id)}><RefreshCw size={11} /><span>{t("Refresh messages")}</span></button>}</div>}
 
-        <div className="fc-chat-timeline-wrap"><div ref={timelineRef} onScroll={handleTimelineScroll} onWheel={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { flowConversationMoved.current = true; if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onTouchStart={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { flowConversationMoved.current = true; if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onPointerDown={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { flowConversationMoved.current = true; if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onKeyDown={event => { if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ', 'Tab', 'Enter'].includes(event.key)) { roomOverviewRef.current = false; followingLatestRef.current = false; clearTimeout(followTimeoutRef.current); } }} className="fc-chat-timeline" aria-label={t("Channel messages")}>
+        <div className="fc-chat-timeline-wrap"><div ref={timelineRef} onScroll={handleTimelineScroll} onWheel={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { markFlowMoved(); if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onTouchStart={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { markFlowMoved(); if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onPointerDown={event => { if ((event.target as Element).closest('.fc-chat-message-list')) { markFlowMoved(); if (!entryReadBarrierRef.current) entryReadBlockedRef.current = false; } followingLatestRef.current = false; roomOverviewRef.current = false; }} onKeyDown={event => { if (['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' ', 'Tab', 'Enter'].includes(event.key)) { const target = event.target as Element; if (!event.defaultPrevented && !event.nativeEvent.isComposing && ['PageUp', 'PageDown', 'Home', 'End', 'ArrowUp', 'ArrowDown', ' '].includes(event.key) && target.closest('.fc-chat-message-list') && !target.closest('input, textarea, select, [contenteditable="true"]')) markFlowMoved(); roomOverviewRef.current = false; followingLatestRef.current = false; clearTimeout(followTimeoutRef.current); } }} className="fc-chat-timeline" aria-label={t("Channel messages")}>
           <div className="fc-chat-timeline-inner">
             {activeChannel && messages.length === 0 && <div className="fc-chat-intro"><span className="fc-kicker">{t("A space for conversation")}</span><h1>{activeChannel.name || t("Your channel")}<span>.</span></h1><p>{t("Ideas, updates, and everything in between.")}</p></div>}
             {messageError && <div role="alert" className="fc-alert">{messageError}{encryptionLocked ? <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && openSecureSettings(activeChannel.id)}>{t("Unlock encrypted messaging")}</button> : <button type="button" className="fc-chat-text-button" onClick={() => activeChannel && void loadMessages(activeChannel.id)}>{t("Retry messages")}</button>}</div>}
             {messagesLoading && messages.length === 0 && <div className="fc-chat-history-loading" role="status"><span className="fc-chat-loader" /><span>{t("Loading your conversation…")}</span></div>}
             {hasOlder && <button type="button" className="fc-button fc-chat-load-older" disabled={loadingOlder} onClick={() => void loadOlderMessages()}>{loadingOlder ? t("Loading older messages…") : t("Load older messages")}</button>}
-            {activeChannel ? messages.length > 0 || workHubOpen || collaborationTab || groupsOpen ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
+            {activeChannel ? messages.length > 0 || hasAnyWork ? <div className="fc-chat-room-content"><div className="fc-chat-message-list">
               {messages.map((msg, index) => (
                 <Fragment key={msg.id}>
                   {(index === 0 || dateKey(messages[index - 1].created_at) !== dateKey(msg.created_at)) && <div className="fc-chat-date"><span>{dateLabel(msg.created_at)}</span></div>}
@@ -2300,71 +2815,64 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                   <article id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${messageActionsOpen === msg.id ? 'has-open-actions' : ''} ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
                     <div className="fc-chat-message-avatar"><div className={`fc-chat-avatar ${avatarTone(msg.author_id)} ${msg.author_id === currentUserId ? 'fc-chat-avatar-self' : ''}`}><Avatar userId={msg.author_id} name={memberNames[msg.author_id] || authorName(msg.author_id)} workspaceId={workspace?.id} /></div><div className="fc-chat-presence"><PresenceIndicator userId={msg.author_id} size="sm" /></div></div>
                     <div className="fc-chat-message-body">
-                      {editingMessage === msg.id ? <div className="fc-chat-edit">
-                        {editReferencePicker.open && <MentionReferences id={editReferencePicker.id} candidates={editReferencePicker.candidates} activeIndex={editReferencePicker.activeIndex}
-                          onActiveIndex={editReferencePicker.setActiveIndex} onSelect={editReferencePicker.choose} onClose={() => { editReferencePicker.close(); editInputRef.current?.focus({ preventScroll: true }); }}
-                          query={editReferencePicker.query?.query || ''} loading={editReferencePicker.loading} error={editReferencePicker.error} />}
-                        <textarea ref={editInputRef} value={editContent}
-                          onBeforeInput={event => { editBeforeEdit.current = { start: event.currentTarget.selectionStart, end: event.currentTarget.selectionEnd }; }}
-                          onChange={event => {
-                            const content = event.target.value;
-                            const references = reconcileReferences(editContent, content, editReferences, editBeforeEdit.current);
-                            editBeforeEdit.current = undefined; setEditContent(content); setEditReferences(references);
-                            if (!composingRef.current) editReferencePicker.update(content, event.target.selectionStart, references, true);
-                          }}
-                          onSelect={event => { if (!composingRef.current) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
-                          onClick={event => { if (!composingRef.current) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
-                          onKeyUp={event => { if (!composingRef.current && ['ArrowLeft', 'ArrowRight'].includes(event.key)) editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart); }}
-                          onCompositionStart={() => { composingRef.current = true; editReferencePicker.close(); }}
-                          onCompositionEnd={event => { composingRef.current = false; editReferencePicker.update(event.currentTarget.value, event.currentTarget.selectionStart, editLive.current.references, true); }}
+                      {editingMessage === msg.id ? <form className="fc-chat-edit" onSubmit={event => { event.preventDefault(); void handleEditMessage(msg.id); }}>
+                        <CollaborationInput as="textarea" ref={editInputRef} contextId={`message:${activeChannel.id}:${msg.id}:edit`} value={editContent} references={editReferences}
+                          onValueChange={(content, references) => { setEditContent(content); setEditReferences(references); }}
+                          onPaletteActiveChange={active => { editPaletteActiveRef.current = active; setEditPaletteActive(active); }}
+                          onCompositionStart={() => { composingRef.current = true; }} onCompositionEnd={() => { composingRef.current = false; }}
                           onKeyDown={event => {
-                            if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229) return;
-                            if (editReferencePicker.handleKeyDown(event)) return;
-                            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); editReferencePicker.close(); setEditingMessage(null); }
-                            else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void handleEditMessage(msg.id); }
+                            if (composingRef.current || event.nativeEvent.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
+                            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); setEditingMessage(null); }
+                            else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); }
                           }}
-                          role={editReferencePicker.open ? 'combobox' : undefined} aria-autocomplete={editReferencePicker.open ? 'list' : undefined}
-                          aria-expanded={editReferencePicker.open ? true : undefined} aria-controls={editReferencePicker.open ? editReferencePicker.id : undefined}
-                          aria-activedescendant={editReferencePicker.open && editReferencePicker.candidates[editReferencePicker.activeIndex] ? referenceOptionId(editReferencePicker.id, editReferencePicker.candidates[editReferencePicker.activeIndex]) : undefined}
                           aria-label={t("Edit message")} maxLength={10000} rows={2} className="fc-input" autoFocus />
-                        <button type="button" disabled={!editContent.trim() || editReferencePicker.open} onClick={() => handleEditMessage(msg.id)} className="fc-icon-button" aria-label={t("Save edit")}><Check size={17} /></button>
-                        <button type="button" onClick={() => { editReferencePicker.close(); setEditingMessage(null); }} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button>
-                      </div> : <>
+                        <button type="submit" disabled={!editContent.trim() || editPaletteActive} className="fc-icon-button" aria-label={t("Save edit")}><Check size={17} /></button>
+                        <button type="button" onClick={() => setEditingMessage(null)} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button>
+                      </form> : <>
                         <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}{!msg.deleted && !msg.locked && <button type="button" className="fc-chat-message-menu" data-message-assist={msg.id} aria-label={t("More message actions")} aria-expanded={messageActionsOpen === msg.id} aria-controls={`message-actions-${msg.id}`} onClick={() => setMessageActionsOpen(current => current === msg.id ? null : msg.id)}><MoreHorizontal size={17} /></button>}</div>
-                        <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}><ReferencedMessage content={msg.content} references={msg.deleted || msg.locked ? [] : msg.references} channelId={msg.channel_id} workspaceId={workspace?.id} secure={!!activeChannel.secure} onOpen={openMessageReference} /></p>
+                        <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}><ReferencedMessage content={msg.content} references={msg.deleted || msg.locked ? [] : msg.references} channelId={msg.channel_id} workspaceId={workspace?.id} secure={!!activeChannel.secure} onOpen={(reference, lease) => openMessageReference(reference, undefined, lease.isCurrent, lease.element)} /></p>
                         {renderMessageAssist(msg)}
                         {!msg.deleted && !msg.locked && <DiscussionWorkSummary rows={discussionWork.get(msg.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} />}
                         {!msg.deleted && !msg.locked && msg.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${activeChannel.id}:${msg.id}`} channelId={activeChannel.id} messageId={msg.id} secure={!!activeChannel.secure} />}
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'reply', msg.id); }}><Sparkles size={15} />{t('Draft a reply')}</button><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'summary', msg.id); }}>{t('Summarize this message')}</button>{!activeChannel.secure && workReferences.documents.length > 0 && <button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'related-documents', msg.id); }}>{t('Find related documents')}</button>}<button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { editReferencePicker.close(); editBeforeEdit.current = undefined; setEditingMessage(msg.id); setEditContent(msg.content); setEditReferences(normalizeMessageReferences(msg.content, msg.references)); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'reply', msg.id); }}><Sparkles size={15} />{t('Draft a reply')}</button><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'summary', msg.id); }}>{t('Summarize this message')}</button>{!activeChannel.secure && workReferences.documents.length > 0 && <button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'related-documents', msg.id); }}>{t('Find related documents')}</button>}<button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} />{!activeChannel.secure && <button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button>}<button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { editPaletteActiveRef.current = false; setEditPaletteActive(false); setEditingMessage(msg.id); setEditContent(msg.content); setEditReferences(normalizeMessageReferences(msg.content, msg.references)); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
                   </article>
                 </Fragment>
               ))}
-            </div><div ref={workAreaRef} id={workAreaId} className="fc-chat-room-work fc-conversation-workspace" data-workspace-mode={workLayout.mode}
+            </div><div className="fc-chat-room-work-column" hidden={!scopedRetainedWork.length && (workLayout.mode === 'minimized' || !hasActiveWork && (!introductionOpen || focusMode || materialChannelId !== activeChannel.id))}>
+            <div ref={workAreaRef} id={workAreaId} className="fc-chat-room-work fc-conversation-workspace" data-collaboration-work-id="primary" data-work-kind={workHubOpen ? workHubInitialTab : groupsOpen ? 'groups' : collaborationTab || undefined}
+              data-work-active={hasActiveWork && activeRetainedWork === 'primary' ? true : undefined} data-workspace-mode={workLayout.mode}
               role={workLayout.mode === 'expanded' ? 'dialog' : undefined} aria-modal={workLayout.mode === 'expanded' ? true : undefined}
               aria-label={workLayout.mode === 'expanded' ? t('Full screen work area') : undefined} tabIndex={hasActiveWork ? -1 : undefined}
-              onFocusCapture={workLayout.onFocusCapture}
-              hidden={workLayout.mode === 'minimized' || !workHubOpen && !collaborationTab && !groupsOpen && (!introductionOpen || focusMode || materialChannelId !== activeChannel.id)}>
-              {conversationGroups || conversationWork || (conversationNotebook && <div className="fc-conversation-work"><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div><ConversationWorkControls layout={layoutActions} onClose={()=>{if(mayLeaveConversationWork())closeWorkHub();}} /></header><div className="fc-conversation-work-body">{conversationNotebook}</div></div>)}
-              <div className="fc-chat-room-material" hidden={workHubOpen || !!collaborationTab || groupsOpen}>
+              onFocusCapture={event => { if (hasActiveWork) setActiveRetainedWork('primary'); workLayout.onFocusCapture(event); }}
+              hidden={workLayout.mode === 'minimized' || !hasActiveWork && (!introductionOpen || focusMode || materialChannelId !== activeChannel.id)}>
+              <CollaborationProvider value={collaborationValue('primary')}>
+              {conversationGroups || conversationWork || (conversationNotebook && <div className="fc-conversation-work"><header className="fc-conversation-work-header"><div><span className="fc-kicker">{activeChannel.name}</span><h2>{t(collaborationTab === 'decisions' ? 'Decisions' : 'Saved items and decisions')}</h2></div><ConversationWorkControls layout={layoutActions} onClose={() => primaryCloseController.current?.()} /></header><div className="fc-conversation-work-body">{conversationNotebook}</div></div>)}
+              <div className="fc-chat-room-material" hidden={hasAnyWork}>
                 <ChatSharedMaterial key={`${workspace?.id}:${activeChannel.id}:${currentUserId}`} channel={activeChannel} workspaceId={workspace?.id} refreshKey={materialRefresh} onAvailabilityChange={available => { if (activeChannelRef.current !== activeChannel.id) return; setMaterialChannelId(available ? activeChannel.id : null); }} onOpenFiles={() => { setToolPanel('files'); setThreadMessage(null); }} onOpenDocuments={(documentId, stackId) => openRoomWork('documents', { documentId, stackId })} onOpenTasks={(taskId, projectId) => openRoomWork('tasks', { taskId, projectId })} />
               </div>
+              </CollaborationProvider>
+            </div>
+            <CollaborationWorkbench scope={flowScope} entries={scopedRetainedWork} composerRef={inputRef} timelineRef={timelineRef} renderEntry={renderRetainedWork}
+              onGuardedClose={entry => { if (workScopeCurrent(entry.scope)) retainedCloseControllers.current.get(entry.id)?.current?.(); }}
+              activeId={activeRetainedWork === 'primary' ? null : activeRetainedWork} activationKey={retainedActivation} onActiveChange={setActiveRetainedWork} />
             </div></div> : !messagesLoading && !messageError && <div className="fc-chat-empty"><div className="fc-chat-empty-mark"><MessageCircle size={25} strokeWidth={1.3} /></div><h2>{t("No messages yet")}</h2><p>{t("Start the conversation.")}<br />{t("Good things begin with a hello.")}</p><button type="button" className="fc-chat-text-button" onClick={() => { setToolPanel('members'); setThreadMessage(null); }}>{t("Invite a teammate ")}<ArrowUpRight size={14} /></button></div> : <div className="fc-chat-empty fc-chat-empty-workspace"><span className="fc-kicker">{t("Make room for good work")}</span><h1>{t("Select a channel")}</h1><p>{t("Or create a new one to get started.")}</p>{!embeddedChannelId && <button type="button" className="fc-button fc-button-primary" onClick={() => { if (channels.length) setSidebarOpen(true); else { setCreateError(''); setShowNewChannel(true); } }}><Plus size={16} />{channels.length ? t("Browse channels") : t("Create your first channel")}</button>}{!embeddedChannelId && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && !channelError && shouldSuggestWorkspaceLaunch(workspace, channels) && <div className="fc-chat-launch-prompt"><button type="button" className="fc-chat-text-button" onClick={() => setLaunchOpen(true)}><Compass size={16} />{t('Set up this workspace')}<ArrowUpRight size={14} /></button><p>{t('Name your workspace, invite a person and begin a real conversation.')}</p></div>}</div>}
           </div>
-        </div>{(pendingMessages > 0 || !atLatest && messages.length > 0) && <div className="fc-chat-latest-wrap" role="status"><button type="button" className="fc-chat-latest" aria-label={t("Jump to latest messages")} onClick={() => { flowConversationMoved.current = true; scrollToLatest(scrollBehavior(), true); }}><ArrowDown size={15} />{pendingMessages > 0 && <span>{pendingMessages} {t(" new ")}{pendingMessages === 1 ? t("message") : t("messages")}</span>}<span>{t("Jump to latest")}</span></button></div>}</div>
+        </div>{(pendingMessages > 0 || !atLatest && messages.length > 0) && <div className="fc-chat-latest-wrap" role="status"><button type="button" className="fc-chat-latest" aria-label={t("Jump to latest messages")} onClick={() => { markFlowMoved(); scrollToLatest(scrollBehavior(), true); }}><ArrowDown size={15} />{pendingMessages > 0 && <span>{pendingMessages} {t(" new ")}{pendingMessages === 1 ? t("message") : t("messages")}</span>}<span>{t("Jump to latest")}</span></button></div>}</div>
 
-        {activeChannel && <div ref={composerAreaRef} className="fc-chat-composer-area">
+        {activeChannel && <div ref={composerAreaRef} className="fc-chat-composer-area" onFocusCapture={() => setActiveRetainedWork(null)}>
           {hasActiveWork && workLayout.mode === 'minimized' && <div className="fc-work-resume-bar" role="group" aria-label={t('Work set aside')}>
-            <button type="button" className="fc-work-resume" aria-label={t('Continue work')} aria-describedby={resumeTitleId} aria-controls={workAreaId} onClick={() => { setFlowNotice(''); workLayout.resume(); }}>
+            <button type="button" className="fc-work-resume" data-collaboration-resume="primary" aria-label={t('Continue work')} aria-describedby={resumeTitleId} aria-controls={workAreaId} onClick={() => { setFlowNotice(''); restoreRetainedModals(); setActiveRetainedWork('primary'); workLayout.resume(); }}>
               {groupsOpen ? <Users size={18} aria-hidden="true" /> : collaborationTab ? <ClipboardCheck size={18} aria-hidden="true" /> : workHubInitialTab === 'tasks' ? <CheckSquare size={18} aria-hidden="true" /> : <FileText size={18} aria-hidden="true" />}
               <span><small>{t('Continue work')}</small><strong id={resumeTitleId}>{workSurfaceTitle}</strong></span><ArrowUpRight size={16} aria-hidden="true" />
             </button>
-            <button type="button" className="fc-icon-button" data-work-close aria-label={t('Close this work')} title={t('Close this work')} onClick={() => { if (mayLeaveConversationWork()) { setFlowNotice(''); closeWorkHub(); } else setFlowNotice(t('Resume this work to review unsaved changes or finish syncing.')); }}><X size={17} aria-hidden="true" /></button>
+            <button type="button" className="fc-icon-button" data-work-close aria-label={t('Close this work')} title={t('Close this work')} onClick={() => { setFlowNotice(''); primaryCloseController.current?.(); }}><X size={17} aria-hidden="true" /></button>
           </div>}
+          {parkedModals.filter(modalReturnCurrent).map(value => <div key={value.id} className="fc-work-resume-bar" role="group" aria-label={t('Work set aside')}><button type="button" className="fc-work-resume" data-modal-continue={value.chain[0].id} onClick={() => resumeModalReturn(value)}><ArrowUpRight size={16} aria-hidden="true" /><span>{t('Continue {title}', { title: modalRegistry.current.get(value.chain[0].id)?.title || value.title })}</span></button></div>)}
           {flowNotice && <p role="status" className="fc-chat-muted">{flowNotice}</p>}
           {currentUserId && <div className="fc-chat-typing"><TypingIndicator channelId={activeChannel.id} currentUserId={currentUserId} /></div>}
           {actionError && <p role="alert" className="fc-alert">{actionError}</p>}
@@ -2406,10 +2914,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         </div>}
       </main>
 
-      {activeChannel && toolPanel && <ChannelTools key={`${activeChannel.id}:${toolPanel}`} channel={activeChannel} tab={toolPanel} focusMemberId={toolPanel === 'members' ? referenceMemberId : undefined} onClose={() => { setToolPanel(null); setMaterialRefresh(value => value + 1); }} onManage={() => { setToolPanel(null); setChannelDetailsOpen(true); }} onRoleChange={(role) => { if (activeChannelRef.current === activeChannel.id) setActiveChannel((current) => current ? { ...current, role } : current); }} onLeave={() => { setChannels((records) => records.filter((record) => record.id !== activeChannel.id)); if (activeChannelRef.current === activeChannel.id) { setActiveChannel(null); setToolPanel(null); } void loadChannels(); }} />}
-      {activeChannel && channelDetailsOpen && <ChannelMetadataPanel key={`${workspace?.id}:${activeChannel.id}:${!!activeChannel.secure}:${api.getAccessToken()}`} channel={activeChannel} onClose={() => setChannelDetailsOpen(false)} onSaved={channelMetadataSaved} />}
+      {activeChannel && [...new Set([...heldToolPanels, ...(toolPanel ? [toolPanel] : [])])].map(tab => <ChannelTools key={`${flowScope}:${tab}`} channel={activeChannel} tab={tab} focusMemberId={tab === 'members' ? referenceMemberId : undefined} onClose={() => closeToolPanel(tab)} onManage={() => { closeToolPanel(tab); setChannelDetailsOpen(true); }} onRoleChange={(role) => { if (activeChannelRef.current === activeChannel.id) setActiveChannel((current) => current ? { ...current, role } : current); }} onLeave={() => { setChannels((records) => records.filter((record) => record.id !== activeChannel.id)); if (activeChannelRef.current === activeChannel.id) { setActiveChannel(null); setToolPanel(null); setHeldToolPanels([]); } void loadChannels(); }} />)}
+      {activeChannel && channelDetailsOpen && <ChannelMetadataPanel key={`${workspace?.id}:${activeChannel.id}:${!!activeChannel.secure}:${api.getAccessToken()}`} channel={activeChannel} onClose={() => { if (!resumeTargetModal(`channel:${activeChannel.id}`)) setChannelDetailsOpen(false); }} onSaved={channelMetadataSaved} />}
 
-      {referencedFile && referencedFile.token === api.getAccessToken() && referencedFile.workspaceId === workspace?.id && referencedFile.file.channel_id === activeChannel?.id && <FilePreview file={referencedFile.file} onClose={() => setReferencedFile(null)} />}
+      {referencedFiles.filter(view => view.scope === flowScope && view.token === api.getAccessToken() && view.workspaceId === workspace?.id && view.file.channel_id === activeChannel?.id).map(view => <FilePreview key={view.scope + ":" + view.file.id} file={view.file} onClose={() => { setReferencedFiles(previous => previous.filter(row => row !== view)); resumeModalReturn(view.modal); }} />)}
       <MeetingDock />
       {presenceOpen && <div className="fc-overlay"><section ref={presenceDialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t('Set your status')} className="fc-dialog"><button type="button" className="fc-icon-button" data-autofocus aria-label={t('Close status settings')} onClick={() => setPresenceOpen(false)}><X size={20} /></button><PresenceStatusSelector onClose={() => setPresenceOpen(false)} /></section></div>}
       {activeChannel && productivity && <ChatProductivityPanel key={activeChannel.id} channel={activeChannel} message={productivity.message} draft={productivity.draft} mentions={productivity.mentions} references={productivity.references} onClose={()=>setProductivity(null)} onScheduled={()=>{if(draftsRef.current[activeChannel.id]===productivity.draft && JSON.stringify(draftReferenceCache.current[activeChannel.id] || [])===JSON.stringify(productivity.references || [])){setNewMessage('');persistDraft(activeChannel.id,'',!!activeChannel.secure,[]);}setProductivity(null);}}/>}
@@ -2418,9 +2926,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
       {threadMessage && <aside ref={threadDialogRef} tabIndex={-1} className="fc-chat-thread" role="dialog" aria-modal="true" aria-label={t("Thread")}>
         <header className="fc-chat-thread-header"><div><span className="fc-kicker">{t("Keep the conversation close")}</span><h2>{t("Thread")}</h2><ThreadWatchButton channelId={threadMessage.channel_id} messageId={threadMessage.id} /></div><button type="button" onClick={() => setThreadMessage(null)} className="fc-icon-button" aria-label={t("Close thread")} data-autofocus><X size={19} /></button></header>
-        <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
+        <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => openMessageReference(reference, undefined, lease.isCurrent, lease.element)} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
         {!threadMessage.deleted && !threadMessage.locked && threadMessage.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${threadMessage.channel_id}:${threadMessage.id}`} channelId={threadMessage.channel_id} messageId={threadMessage.id} secure={!!activeChannel?.secure} />}
-        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}<div className="fc-flow-thread-actions"><button type="button" className="fc-chat-text-button" data-message-assist={threadMessage.id} onClick={() => openAssist('thread', 'summary', threadMessage.id)}><Sparkles size={16} />{t('Summarize replies')}</button><button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread', 'reply', threadMessage.id)}>{t('Draft a reply')}</button></div>{workReferences.error && workReferences.supported && <p className="fc-chat-muted" role="status">{workReferences.error} <button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></p>}<DiscussionWorkSummary rows={discussionWork.get(threadMessage.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} label={t('Work in this discussion')} />{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={openMessageReference} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{threadReplyContent.trim() && <button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread-draft', 'tidy')}><Sparkles size={16} />{t('Tidy my draft')}</button>}{renderDraftAssist('thread')}</div>
+        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}<div className="fc-flow-thread-actions"><button type="button" className="fc-chat-text-button" data-message-assist={threadMessage.id} onClick={() => openAssist('thread', 'summary', threadMessage.id)}><Sparkles size={16} />{t('Summarize replies')}</button><button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread', 'reply', threadMessage.id)}>{t('Draft a reply')}</button></div>{workReferences.error && workReferences.supported && <p className="fc-chat-muted" role="status">{workReferences.error} <button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></p>}<DiscussionWorkSummary rows={discussionWork.get(threadMessage.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} label={t('Work in this discussion')} />{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => openMessageReference(reference, undefined, lease.isCurrent, lease.element)} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{threadReplyContent.trim() && <button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread-draft', 'tidy')}><Sparkles size={16} />{t('Tidy my draft')}</button>}{renderDraftAssist('thread')}</div>
         <div ref={threadSlashRootRef} className="fc-chat-thread-composer-area">
         <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); void handleThreadReply(); }}>
           {threadSlashVisible && !threadReferencePicker.open && renderSlashCommands()}
@@ -2463,12 +2971,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
       {myDayOpen && !embeddedChannelId && <MyDay onClose={() => setMyDayOpen(false)} />}
       {launchOpen && workspace && nativeSession && ['owner', 'admin'].includes(workspace.role) && <WorkspaceLaunchPanel key={`${workspace.id}:${api.getCurrentUserId()}`} workspace={workspace} channels={channels} onClose={() => setLaunchOpen(false)} onChanged={() => refreshWorkspaces(workspace.id)} onChannelsChanged={async created => { if (created && created.workspace_id === workspaceRef.current) setChannels(records => records.some(row => row.id === created.id) ? records : [...records, created]); await loadChannels(); }} onOpenAppearance={openAppearance} onOpenConnections={channelId => { setIntegrationEntry(previous => ({ tab: 'connections', channelId, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }} onOpenChannelMembers={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel('members'); setLaunchOpen(false); } }} onSelectChannel={channel => { if (channel.workspace_id && channel.workspace_id === workspaceRef.current && (!embeddedChannelId || channel.id === embeddedChannelId)) { selectChannel(channel); setThreadMessage(null); setToolPanel(null); setLaunchComposerTarget({ channelId: channel.id, workspaceId: channel.workspace_id, token: api.getAccessToken() }); setLaunchOpen(false); } }} />}
       {feedbackOpen && workspace && <WorkspaceFeedbackDialog key={`${workspace.id}:${api.getCurrentUserId()}`} workspaceId={workspace.id} onClose={() => setFeedbackOpen(false)} onOpenLaunch={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => setLaunchOpen(true) : undefined} onOpenConnections={nativeSession && ['owner', 'admin'].includes(workspace.role) ? () => { setIntegrationEntry(previous => ({ tab: 'connections', revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); } : undefined} />}
-      {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:channels-updated')); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} initialRecipeId={initialConnectionRecipeId} />}
+      {integrationsOpen && workspace && <IntegrationsPanel key={`${workspace.id}:${integrationEntry?.revision || 0}`} workspaceId={workspace.id} channelId={integrationEntry?.channelId || activeChannel?.id} channels={channels} onClose={() => { if (resumeTargetModal(`integrations:${workspace.id}`)) return; setIntegrationsOpen(false); window.dispatchEvent(new Event('freecollab:channels-updated')); window.dispatchEvent(new Event('freecollab:launch-refresh')); }} initialTab={integrationEntry?.tab || (initialSyncReturn?.workspaceId === workspace.id ? 'sync' : undefined)} initialConnectionId={initialSyncReturn?.workspaceId === workspace.id ? initialSyncReturn.connectionId : undefined} initialRecipeId={initialConnectionRecipeId} />}
 
-      {mobileOpen && <div className="fc-overlay"><div ref={mobileDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Mobile and offline")} className="fc-dialog" style={{maxWidth:720,maxHeight:"90dvh",overflowY:"auto"}}><button type="button" className="fc-icon-button" aria-label={t("Close mobile settings")} onClick={() => setMobileOpen(false)}><X size={20} /></button><MobileSettings channel={activeChannel || undefined} /></div></div>}
+      {mobileOpen && <MobileCollaborationDialog channel={activeChannel || undefined} onClose={() => { if (!resumeTargetModal('mobile')) setMobileOpen(false); }} />}
       <CommandPalette open={commandOpen} onClose={() => setCommandOpen(false)} channels={channels} activeChannelId={activeChannel?.id || null} messages={messages.filter((message) => message.channel_id === activeChannel?.id && !message.deleted)} hasActiveChannel={!!activeChannel} onChannel={(id) => { const channel = channels.find((item) => item.id === id); if (channel) { selectChannel(channel); requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true })); } }} onMessage={jumpToMessage} onAction={runCommand} />
 
-      {showNewChannel && <div className="fc-overlay"><div ref={createDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Create channel")} className="fc-dialog fc-chat-create-dialog"><span className="fc-kicker">{t("Bring people together")}</span><h2>{t("Create Channel")}</h2><p>{t("A shared place for a project, a team, or an idea.")}</p><form onSubmit={handleCreateChannel}><label htmlFor="channel-name">{t("Channel name")}</label><input id="channel-name" type="text" value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} placeholder={t("Channel name")} maxLength={100} required className="fc-input" data-autofocus autoFocus />{secureAvailable && <label className="fc-chat-encryption-choice"><input type="checkbox" checked={createSecure} onChange={event => setCreateSecure(event.target.checked)} />{t("End-to-end encrypted")}<span>{t("Only verified devices can read this channel. Keep a recovery key.")}</span></label>}{!secureAvailable && <p className="fc-chat-muted">{t("Messages in this installation use server-side encryption. Configure the encrypted messaging service to create end-to-end encrypted channels.")}</p>}{createError && <p role="alert" className="fc-alert">{createError}</p>}<div className="fc-chat-dialog-actions"><button type="button" onClick={() => setShowNewChannel(false)} className="fc-button">{t("Cancel")}</button><button type="submit" disabled={creating || !newChannelName.trim()} className="fc-button fc-button-primary">{creating ? t("Creating…") : t("Create")}</button></div></form></div></div>}
-    </div>
+      {showNewChannel && <div className="fc-overlay"><div ref={createDialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Create channel")} className="fc-dialog fc-chat-create-dialog"><span className="fc-kicker">{t("Bring people together")}</span><h2>{t("Create Channel")}</h2><p>{t("A shared place for a project, a team, or an idea.")}</p><form onSubmit={handleCreateChannel}><label htmlFor="channel-name">{t("Channel name")}</label><input id="channel-name" type="text" disabled={creating} value={newChannelName} onChange={(event) => setNewChannelName(event.target.value)} placeholder={t("Channel name")} maxLength={100} required className="fc-input" data-autofocus autoFocus />{secureAvailable && <label className="fc-chat-encryption-choice"><input type="checkbox" disabled={creating} checked={createSecure} onChange={event => setCreateSecure(event.target.checked)} />{t("End-to-end encrypted")}<span>{t("Only verified devices can read this channel. Keep a recovery key.")}</span></label>}{!secureAvailable && <p className="fc-chat-muted">{t("Messages in this installation use server-side encryption. Configure the encrypted messaging service to create end-to-end encrypted channels.")}</p>}{createError && <p role="alert" className="fc-alert">{createError}</p>}<div className="fc-chat-dialog-actions"><button type="button" onClick={() => setShowNewChannel(false)} className="fc-button">{t("Cancel")}</button><button type="submit" disabled={creating || !newChannelName.trim()} className="fc-button fc-button-primary">{creating ? t("Creating…") : t("Create")}</button></div></form></div></div>}
+    </div></CollaborationProvider>
   );
 }

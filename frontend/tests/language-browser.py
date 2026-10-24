@@ -6,7 +6,7 @@ production App, LocaleProvider, LanguagePicker and Chat. Fixture sessions belong
 only to its private database. Latency middleware delays REAL API responses after
 their production handlers ran; no language/data/composer API is mocked.
 """
-from ui_navigation import choose_chat_channel, open_channels, open_conversation_work, activate_chat_feature
+from ui_navigation import choose_chat_channel, open_channels, open_conversation_work, activate_chat_feature, capture_work_card, conversation_work_region, close_work_card
 import base64
 import hashlib
 import json
@@ -67,9 +67,9 @@ def open_flow_with_keyboard(page, kind):
         expect(settings).to_have_count(0)
         expect(launcher).to_be_focused()
         return settings
-    work=page.get_by_role('region',name='Arbete i det här samtalet',exact=True)
+    work=conversation_work_region(page,locale='sv',kind=kind)
     expect(work).to_be_visible();expect(work).to_have_attribute('data-work-kind',kind)
-    expect(work.locator('#work-panel-'+kind)).to_be_visible(timeout=90000)
+    expect(work.locator('[id$="work-panel-'+kind+'"]')).to_be_visible(timeout=90000)
     expect(work.get_by_role('tablist')).to_have_count(0)
     expect(page.locator('.fc-work-hub')).to_have_count(0)
     expect(page.get_by_role('combobox',name='Verktyg',exact=True)).to_have_count(0)
@@ -315,17 +315,51 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                                 checks['member_slash_inventory_excludes_owner_data_controls_and_real_owner_session_exposes_the_full_inventory']=True
                                 check_stationary_pointer_navigation(product)
                                 checks['owner_swedish390_stationary_pointer_keeps_keyboard_selection_and_real_pointer_motion_changes_only_the_active_row']=True
+                            opened_cards=[]
                             for kind in ['feed','copilot','cloud','external-meetings','tasks','meetings','documents','workflows','apps','data','mobile']:
                                 work=open_flow_with_keyboard(product,kind)
+                                if kind!='mobile':opened_cards.append(capture_work_card(product,work))
                                 assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                            opened_ids=[card.get_attribute('data-collaboration-work-id') for card in opened_cards]
+                            assert len(opened_ids)==len(set(opened_ids))
+                            for card in opened_cards:expect(card.locator('.fc-conversation-work')).to_have_count(1)
                             product.get_by_role('button',name='Visa alla funktioner',exact=True).click()
                             expect(product.locator('.fc-slash-commands [role="option"][id$="-decision"]')).to_be_visible()
                             product.locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
                             work=open_flow_with_keyboard(product,'feed');expect(work.get_by_role('heading',name='Veckans fokus',exact=True)).to_be_visible()
                             if width==390:product.screenshot(path=str(REPORT.with_name('product-conversation-feed-mobile.png')),full_page=True)
-                            product.get_by_role('button',name='Skriv en uppdatering',exact=True).click();product.locator('#feed-title').fill('Ett osparat utkast');product.locator('#feed-body').fill('Behåll den här texten när jag väljer att stanna.');dialogs=[]
+                            work.get_by_role('button',name='Skriv en uppdatering',exact=True).click()
+                            feed_title=work.get_by_label('Uppdateringens titel',exact=True)
+                            feed_body=work.get_by_label('Uppdateringens text',exact=True)
+                            feed_title.fill('Ett osparat utkast');feed_body.fill('Behåll den här texten när jag väljer att stanna.')
+                            retained_feed=feed_body.element_handle();dialogs=[]
                             def cancel_navigation(dialog):dialogs.append(dialog.message);dialog.dismiss()
-                            product.once('dialog',cancel_navigation);activate_chat_feature(product,'task',keyboard=True,expect_closed=False);assert len(dialogs)==1 and 'Ändringarna har inte sparats' in dialogs[0];expect(work).to_have_attribute('data-work-kind','feed');expect(product.locator('#feed-title')).to_have_value('Ett osparat utkast');expect(product.locator('#feed-body')).to_have_value('Behåll den här texten när jag väljer att stanna.');expect(product.locator('.fc-slash-commands').get_by_role('combobox')).to_be_focused();product.locator('.fc-slash-commands').get_by_role('combobox').press('Escape');expect(product.locator('.fc-slash-commands')).to_have_count(0);assert product.evaluate('document.documentElement.scrollWidth<=innerWidth');product.once('dialog',lambda dialog:dialog.accept());product.locator('#feed-body').focus();product.keyboard.press('Escape');expect(work).to_have_count(0);expect(product.get_by_role('dialog')).to_have_count(0);checks['mobile_'+str(width)+'px_all_eleven_contextual_actions_no_tabs_tasks_feed_and_cancel_preserves_unsaved_update_without_overflow']=True
+                            product.on('dialog',cancel_navigation)
+                            activate_chat_feature(product,'task',keyboard=True)
+                            sibling=conversation_work_region(product,locale='sv',kind='tasks')
+                            assert capture_work_card(product,sibling).get_attribute('data-collaboration-work-id')!=capture_work_card(product,work).get_attribute('data-collaboration-work-id')
+                            assert not dialogs,'A sibling task must retain the unsaved update without discard'
+                            expect(work).to_have_attribute('data-work-kind','feed')
+                            expect(feed_title).to_have_value('Ett osparat utkast');expect(feed_body).to_have_value('Behåll den här texten när jag väljer att stanna.')
+                            assert feed_body.evaluate('(node,original)=>node===original&&original.isConnected',retained_feed)
+                            expect(product.locator('.fc-slash-commands')).to_have_count(0)
+                            close_work_card(product,sibling)
+                            assert not dialogs,'Closing a clean sibling must not discard the Feed draft'
+                            expect(feed_body).to_have_value('Behåll den här texten när jag väljer att stanna.')
+                            assert product.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                            # Its own close remains guarded, independently of every other card.
+                            work.locator('[data-work-close]').click()
+                            assert len(dialogs)==1 and 'Ändringarna har inte sparats' in dialogs[0]
+                            expect(feed_title).to_have_value('Ett osparat utkast')
+                            product.remove_listener('dialog',cancel_navigation)
+                            product.once('dialog',lambda dialog:dialog.accept())
+                            feed_body.focus();product.keyboard.press('Escape')
+                            expect(work).to_have_count(0)
+                            expect(product.get_by_role('dialog')).to_have_count(0)
+                            for card in opened_cards:
+                                expect(card.locator('.fc-conversation-work')).to_have_count(1)
+                                close_work_card(product,card)
+                            checks['mobile_'+str(width)+'px_all_eleven_contextual_actions_keep_sibling_feed_task_drafts_and_own_close_guard_without_overflow']=True
                     finally:product_context.close()
                     assert not errors,'Unexpected native language browser page error';checks['zero_native_browser_page_errors']=True
                 finally:context.close();browser.close()

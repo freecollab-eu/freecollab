@@ -1,0 +1,17 @@
+.fc-collaboration-input { position: relative; min-width: 0; flex: 1 1 auto; }
+.fc-collaboration-input > input, .fc-collaboration-input > textarea { width: 100%; min-width: 0; }
+.fc-collaboration-fixed-origin { position: fixed; left: 0; top: 0; width: 1px; height: 1px; visibility: hidden; pointer-events: none; }
+.fc-collaboration-popup { position: fixed; z-index: 120; height: 1px; min-width: 0; pointer-events: none; }
+.fc-collaboration-popup > .fc-slash-commands { pointer-events: auto; max-height: min(32rem, var(--fc-collaboration-popup-height, 32rem)); }
+.fc-collaboration-popup.is-below > .fc-slash-commands { bottom: auto; top: .5rem; }
+.fc-collaboration-popup.is-compact .fc-slash-commands-header { padding-block: .15rem; }
+.fc-collaboration-popup.is-compact .fc-slash-commands-footer { display: none; }
+.fc-collaboration-popup.is-compact .fc-slash-commands-group { margin-block: .25rem; }
+.fc-collaboration-tools { display: flex; align-items: center; justify-content: space-between; gap: .5rem; min-width: 0; margin-top: .2rem; }
+.fc-collaboration-tools > button { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-width: 44px; min-height: 44px; padding: .3rem .5rem; border: 0; background: transparent; color: var(--fc-muted); font: inherit; font-size: var(--fc-detail-size); cursor: pointer; }
+.fc-collaboration-tools > button:hover, .fc-collaboration-tools > button[aria-expanded="true"] { color: var(--fc-accent); }
+.fc-collaboration-tools > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: -3px; border-radius: var(--fc-radius); }
+.fc-collaboration-tools > button:first-child > span:first-child { color: var(--fc-accent); font-size: 1.15rem; }
+.fc-collaboration-status { position: absolute; top: .6rem; right: .6rem; max-width: 100%; padding: .3rem .5rem; background: var(--fc-surface); color: var(--fc-muted); font-size: var(--fc-caption-size); pointer-events: none; }
+.fc-collaboration-error { margin: .3rem 0; color: var(--fc-danger, var(--fc-text)); font-size: var(--fc-detail-size); }
+@media (forced-colors: active) { .fc-collaboration-popup > .fc-slash-commands { border-color: CanvasText; } }

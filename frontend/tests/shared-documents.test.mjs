@@ -26,7 +26,7 @@ function fixture({ encrypted = true, cryptoChanged } = {}) {
         getContent: () => ({ ...source.content, ...state.tamper?.content }) };
     },
   };
-  const api = { getAccessToken: () => state.token, request: async (path, options) => {
+  const api = { getAccessToken: () => state.token, getCurrentUserId: () => 'actor', request: async (path, options) => {
     state.requests.push({ path, options });
     if (!options) return state.records;
     const body = JSON.parse(options.body);
@@ -37,12 +37,20 @@ function fixture({ encrypted = true, cryptoChanged } = {}) {
   const dependencies = { yjs: Y, './api': { api, APIError: class APIError extends Error {} }, './secure-client': {
     getSecureMessaging: async () => { state.loads++; cryptoChanged?.(state); return secure; },
   } };
-  const source = readFileSync(new URL('../src/lib/shared-documents-api.ts', import.meta.url), 'utf8');
-  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
-  const exports = {};
-  vm.runInNewContext(compiled, { exports, require: name => dependencies[name], Date, Set, Map, Symbol, Uint8Array, ArrayBuffer,
-    atob, btoa, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout });
-  return { ...exports, state, secure };
+  dependencies['./socket'] = { getSocket: () => ({ on() {}, off() {} }) };
+  const modules = new Map();
+  function load(name) {
+    if (Object.hasOwn(dependencies, name)) return dependencies[name];
+    if (modules.has(name)) return modules.get(name);
+    const source = readFileSync(new URL('../src/lib/' + name.replace('./', '') + '.ts', import.meta.url), 'utf8');
+    const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
+    const exports = {}; modules.set(name, exports);
+    vm.runInNewContext(compiled, { exports, require: load, Date, Set, Map, Symbol, Uint8Array, ArrayBuffer,
+      atob, btoa, crypto: { randomUUID, subtle: webcrypto.subtle }, setTimeout, clearTimeout });
+    return exports;
+  }
+  const exports = load('./shared-documents-api');
+  return { ...exports, state, secure, loadModule: load };
 }
 
 test('secure document creation sends only an authenticated opaque reference to the native API', async () => {
@@ -125,4 +133,86 @@ test('canonical bounded update decoding rejects malformed, tiny and oversized pa
   const f = fixture();
   assert.deepEqual([...f.decodeDocumentUpdate('AAA=')], [0, 0]);
   for (const value of ['', 'AA==', '!!!!', 'AAA=\n', btoa('x'.repeat(256 * 1024 + 1))]) assert.throws(() => f.decodeDocumentUpdate(value));
+});
+
+test('selected document references survive initial native and encrypted updates without leaking IDs beside the secure envelope', async () => {
+  for (const encrypted of [false, true]) {
+    const f = fixture({ encrypted });
+    const title = '  Ask @Peer  ', body = 'Use @Page and @Team.';
+    const titleRefs = [{ kind: 'person', id: 'peer-selected', start: 6, end: 11 }];
+    const bodyRefs = [{ kind: 'document', id: 'page-selected', start: 4, end: 9 }, { kind: 'group', id: 'team-selected', start: 14, end: 19 }];
+    await f.sharedDocumentsApi.create('channel', title, body, { title: titleRefs, body: bodyRefs });
+    const bodySent = JSON.parse(f.state.requests[0].options.body);
+    const update = encrypted ? f.state.events[0].content.fields.update_base64 : bodySent.update_base64;
+    const doc = new Y.Doc();
+    try {
+      Y.applyUpdate(doc, f.decodeDocumentUpdate(update));
+      assert.equal(doc.getText('title').toString(), 'Ask @Peer');
+      const values = [...doc.getMap('references').values()].map(value => JSON.parse(value));
+      assert.deepEqual(values.map(value => [value.kind, value.id]).sort(), [['document', 'page-selected'], ['group', 'team-selected'], ['person', 'peer-selected']]);
+      if (encrypted) { assert.deepEqual(Object.keys(bodySent).sort(), ['id', 'matrix_event_id', 'update_id']); assert.ok(!f.state.requests[0].options.body.includes('selected')); }
+    } finally { doc.destroy(); }
+  }
+});
+
+test('document comment references trim safely, reload identically and stay exclusively in the verified secure fields', async () => {
+  for (const encrypted of [false, true]) {
+    const f = fixture({ encrypted }), ref = { kind: 'person', id: 'selected-peer', start: 6, end: 11 };
+    await f.sharedDocumentsApi.comment('channel', 'doc', '  Ask @Peer  ', [ref]);
+    const sent = JSON.parse(f.state.requests[0].options.body), event = f.state.events[0];
+    const fields = encrypted ? event.content.fields : { text: sent.text, references: sent.references };
+    assert.deepEqual(fields, { text: 'Ask @Peer', references: [{ ...ref, start: 4, end: 9 }] });
+    if (encrypted) assert.deepEqual(Object.keys(sent).sort(), ['id', 'matrix_event_id']);
+    f.state.records = [{ id: sent.id, document_id: 'doc', channel_id: 'channel', created_by: 'actor', content_mode: encrypted ? 'matrix' : 'server', matrix_event_id: sent.matrix_event_id, fields: encrypted ? undefined : fields, resolved: false, version: 1 }];
+    const read = await f.sharedDocumentsApi.comments('channel', 'doc');
+    assert.deepEqual(plain(read[0].fields), fields);
+    f.state.records[0].document_id = 'foreign';
+    await assert.rejects(f.sharedDocumentsApi.comments('channel', 'doc'), /different conversation/);
+  }
+});
+
+function initializeActualDocumentDraft(f, value) {
+  const source = readFileSync(new URL('../src/components/SharedDocumentsPanel.tsx', import.meta.url), 'utf8');
+  const tree = ts.createSourceFile('SharedDocumentsPanel.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+  const node = tree.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === 'initialDocumentDraft');
+  assert.ok(node, 'the component initialization uses this actual draft validator');
+  const exports = {}, validateFieldReferences = f.loadModule('./field-references').validateFieldReferences;
+  vm.runInNewContext(ts.transpileModule(node.getText(tree) + '\nexports.initialize = initialDocumentDraft;', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports, validateFieldReferences });
+  return exports.initialize(value);
+}
+
+test('an actual command document draft keeps selected non-person IDs through creation, coauthor state reload and revision restoration', async () => {
+  for (const encrypted of [false, true]) {
+    const f = fixture({ encrypted });
+    const chosen = { title: [{ kind: 'document', id: 'selected-brief', start: 7, end: 13 }], body: [{ kind: 'group', id: 'selected-team', start: 4, end: 9 }] };
+    const draft = initializeActualDocumentDraft(f, { key: 'review-command', title: 'Review @Brief', text: 'Ask @Team.', field_references: chosen });
+    assert.deepEqual(plain(draft.field_references), chosen);
+    const created = await f.sharedDocumentsApi.create('channel', draft.title, draft.text, draft.field_references);
+    const sent = JSON.parse(f.state.requests[0].options.body);
+    const fields = encrypted ? f.state.events[0].content.fields : { update_base64: sent.update_base64 };
+    f.state.records = { document: created, items: [{ id: sent.update_id, document_id: created.id, channel_id: 'channel', created_by: 'actor', sequence: 1,
+      content_mode: encrypted ? 'matrix' : 'server', matrix_event_id: sent.matrix_event_id, fields: encrypted ? undefined : fields }], has_more: false };
+    const session = new f.SharedDocumentSession('channel', created);
+    try {
+      await session.sync();
+      assert.equal(session.state().ready, true);
+      assert.deepEqual(plain(session.state().titleReferences), chosen.title);
+      assert.deepEqual(plain(session.state().references), chosen.body);
+      const revision = { fields: { name: 'Reviewed command context', update_base64: f.encodeDocumentUpdate(Y.encodeStateAsUpdate(session.doc)) } };
+      session.replace('title', 'Later title', []); session.replace('body', 'Later body', []);
+      session.restoreSnapshot(revision);
+      assert.equal(session.state().title, draft.title); assert.equal(session.state().body, draft.text);
+      assert.deepEqual(plain(session.state().titleReferences), chosen.title);
+      assert.deepEqual(plain(session.state().references), chosen.body);
+    } finally { session.stop(); }
+  }
+});
+
+test('document draft initialization accepts legacy text but rejects fabricated field keys or ranges before creation', () => {
+  const f = fixture({ encrypted: false });
+  const legacy = { key: 'legacy', title: 'A page', text: 'Ordinary text' };
+  assert.equal(initializeActualDocumentDraft(f, legacy).text, legacy.text);
+  assert.throws(() => initializeActualDocumentDraft(f, { ...legacy, field_references: { notes: [] } }), /writing field/);
+  assert.throws(() => initializeActualDocumentDraft(f, { ...legacy, field_references: { body: [{ kind: 'document', id: 'never-guessed', start: 0, end: 5 }] } }), /references/);
+  assert.equal(f.state.requests.length, 0);
 });

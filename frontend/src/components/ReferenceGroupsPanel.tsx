@@ -1,13 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Trash2, Users, X } from 'lucide-react';
 import { api, type ChannelMember } from '../lib/api';
 import { t, useI18n } from '../i18n';
 import { messageReferencesApi, type NotificationGroup } from '../lib/message-references-api';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
+import { CollaborationInput } from './CollaborationInput';
+import { useCollaborationContext } from '../lib/collaboration-context';
 import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
 import '../styles/message-references.css';
 
 export interface ReferenceGroupsPanelProps {
+  instanceId?: string;
+  closeController?: { current: (() => void) | null };
   channelId: string; workspaceId?: string; canManage: boolean; onClose: () => void; onChanged?: () => void;
   initialDraft?: { key: string; name: string; memberIds?: string[] };
   initialGroupId?: string;
@@ -18,8 +22,10 @@ const describe = (failure: unknown) => failure instanceof Error ? failure.messag
 const equalMembers = (left: string[], right: string[]) => JSON.stringify([...left].sort()) === JSON.stringify([...right].sort());
 
 /** The group's roster is an explicit notification audience, never an access grant. */
-export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClose, onChanged, initialDraft, initialGroupId, layoutActions }: ReferenceGroupsPanelProps) {
+export function ReferenceGroupsPanel({ instanceId, closeController, channelId, workspaceId, canManage, onClose, onChanged, initialDraft, initialGroupId, layoutActions }: ReferenceGroupsPanelProps) {
   useI18n();
+  const surfaceId = useCollaborationContext()?.surfaceId;
+  const focusEditor = () => { const node = editorName.current; if (node?.isConnected && !node.closest("[hidden], [inert]") && node.getClientRects().length) node.focus({ preventScroll: true }); };
   const currentToken = api.getAccessToken(), currentActor = api.getCurrentUserId();
   const [groups, setGroups] = useState<NotificationGroup[]>([]), [members, setMembers] = useState<ChannelMember[]>([]);
   const [editor, setEditor] = useState<Editor | null>(null), [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(''), [notice, setNotice] = useState('');
@@ -33,8 +39,8 @@ export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClos
     && owner.current.channelId === channelId && owner.current.workspaceId === workspaceId;
   useEffect(() => {
     if (!workspaceId) return;
-    return registerConversationNavigationGuard({ userId: api.getCurrentUserId(), credential: api.getAccessToken(), workspaceId }, () => mayLeave.current());
-  }, [workspaceId, channelId, currentToken, currentActor]);
+    return registerConversationNavigationGuard({ userId: api.getCurrentUserId(), credential: api.getAccessToken(), workspaceId, surfaceId }, () => mayLeave.current());
+  }, [workspaceId, channelId, currentToken, currentActor, surfaceId]);
   useEffect(() => {
     const abort = new AbortController(); const request = ++generation.current;
     owner.current = { token: api.getAccessToken(), actor: api.getCurrentUserId(), channelId, workspaceId };
@@ -58,16 +64,21 @@ export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClos
     if (!canManage || loading || initialGroupId || !initialDraft?.key || appliedDraft.current === initialDraft.key) return;
     appliedDraft.current = initialDraft.key;
     setEditor({ name: initialDraft.name.slice(0, 80), members: [...new Set(initialDraft.memberIds || [])].filter(id => members.some(member => member.user_id === id)).slice(0, 50) });
-    requestAnimationFrame(() => editorName.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(focusEditor);
   }, [initialDraft?.key, initialGroupId, loading, canManage, members]);
   const changed = () => { onChanged?.(); window.dispatchEvent(new CustomEvent('freecollab:references-changed', { detail: { channelId } })); };
   const choose = (group?: NotificationGroup) => {
     if (!mayLeave.current()) return;
     setError(''); setNotice('');
     setEditor(group ? { id: group.id, name: group.name, members: [...group.member_ids], previous: group } : { name: '', members: [] });
-    requestAnimationFrame(() => editorName.current?.focus({ preventScroll: true }));
+    requestAnimationFrame(focusEditor);
   };
   const close = () => { if (mayLeave.current()) onClose(); };
+  useLayoutEffect(() => {
+    if (!closeController) return;
+    closeController.current = close;
+    return () => { if (closeController.current === close) closeController.current = null; };
+  });
   const refresh = async () => {
     if (!mayLeave.current()) return;
     const request = generation.current; setLoading(true); setError('');
@@ -116,7 +127,7 @@ export function ReferenceGroupsPanel({ channelId, workspaceId, canManage, onClos
       {!groups.length && <p className="fc-reference-list-status">{t('No groups yet.')}</p>}
       {!canManage && <p className="fc-reference-list-status">{t('A channel administrator can create and change groups.')}</p>}
       {editor && (canManage ? <form className="fc-reference-group-editor" onSubmit={event => { event.preventDefault(); void save(); }}><fieldset disabled={busy}>
-        <label>{t('Group name')}<input ref={editorName} value={editor.name} maxLength={80} required onChange={event => setEditor(previous => previous ? { ...previous, name: event.target.value } : previous)} /></label>
+        <label>{t('Group name')}<CollaborationInput as="input" ref={editorName} contextId={`${instanceId || "primary"}:${channelId}:group:${editor.id || initialDraft?.key || "new"}:name`} allowReferences={false} value={editor.name} maxLength={80} required onValueChange={value => setEditor(previous => previous ? { ...previous, name: value } : previous)} /></label>
         <fieldset className="fc-reference-group-members"><legend>{t('Group members')}</legend>{members.map(member => {
           const duplicate = members.some(other => other.user_id !== member.user_id && other.name === member.name);
           return <label key={member.user_id}><input type="checkbox" data-reference-member-id={member.user_id} checked={editor.members.includes(member.user_id)} disabled={!editor.members.includes(member.user_id) && editor.members.length >= 50}

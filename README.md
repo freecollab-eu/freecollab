@@ -107,11 +107,16 @@ decisions open in the conversation; normal save and consent controls remain.
 The feature button preserves an existing message draft. Commands also accept
 arguments: `/task "Review budget" @Ada` opens a reviewed task draft with the
 chosen person, and `/document "Meeting notes"` prepares a real document.
-Type **`@`** anywhere in a message, reply or edit to choose people, channel
+The same **`/`** and **`@`** controls are available in document and collaboration
+writing fields. Open another task, document or discussion without replacing
+your existing work; each retained work area has its own view and close controls.
+Type **`@`** in a message, reply, edit or supported work field to choose people, channel
 groups, documents, tasks, files or the current channel. References keep stable
-identities, and groups notify their current members without granting access.
+identities. Chat mentions notify current members without granting access;
+links in autosaved documents do not send a notification on every edit.
 See the [command list](docs/SLASH_COMMANDS.md) and
-[references and groups](docs/MENTIONS_REFERENCES.md).
+[references and groups](docs/MENTIONS_REFERENCES.md), and
+[concurrent collaboration and its boundaries](docs/UNIVERSAL_COLLABORATION.md).
 
 In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. Opening a channel prioritizes an explicit source, then your scoped reading position, then the first unread incoming message established by actual receipts. Messages remain oldest to newest, with the latest beside the composer. When you scroll back, incoming messages preserve your position; **Jump to latest** explicitly resumes following. Unknown or locked history is not automatically marked read. A successful own send or newer navigation takes precedence over an older pending history load. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
 

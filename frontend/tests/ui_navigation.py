@@ -92,9 +92,61 @@ def open_conversation_work(page, kind, locale='en', keyboard=False):
         'mobile': 'mobile',
     }
     activate_chat_feature(page, feature_ids[kind], keyboard=keyboard)
-    region = page.get_by_role('region', name=('Arbete i det här samtalet' if locale == 'sv' else 'Work in this conversation'), exact=True)
-    region.wait_for(state='visible')
+    return conversation_work_region(page, locale=locale, kind=kind)
+
+
+def capture_work_card(page, work=None):
+    """Capture one immutable owner; activation can change while siblings remain."""
+    if work is not None:
+        owner = work.locator('xpath=ancestor-or-self::*[@data-collaboration-work-id][1]')
+    else:
+        chosen = page.wait_for_function("""()=>{
+          const occupied=[...document.querySelectorAll('[data-collaboration-work-id]')].filter(node=>node.querySelector('.fc-conversation-work,.fc-reference-groups'));
+          const active=occupied.filter(node=>node.dataset.workActive==='true');
+          if(active.length===1)return active[0].dataset.collaborationWorkId;
+          if(!active.length&&occupied.length===1)return occupied[0].dataset.collaborationWorkId;
+          return false;
+        }""")
+        identifier = chosen.json_value(); chosen.dispose()
+        owner = page.locator('[data-collaboration-work-id=' + json.dumps(identifier) + ']')
+    expect(owner).to_have_count(1)
+    identifier = owner.get_attribute('data-collaboration-work-id')
+    assert identifier, 'Every work view needs its actual retained card identity'
+    return page.locator('[data-collaboration-work-id=' + json.dumps(identifier) + ']')
+
+
+def conversation_work_region(page, locale='en', kind=None, card=None):
+    owner = capture_work_card(page, card)
+    region = owner.get_by_role('region', name=('Arbete i det här samtalet' if locale == 'sv' else 'Work in this conversation'), exact=True)
+    expect(region).to_be_visible()
+    if kind is not None:
+        expect(region).to_have_attribute('data-work-kind', kind)
     return region
+
+
+def work_surface(page, work=None):
+    owner = capture_work_card(page, work)
+    surface = owner if 'fc-conversation-workspace' in (owner.get_attribute('class') or '').split() else owner.locator('.fc-conversation-workspace')
+    expect(surface).to_have_count(1)
+    return surface
+
+
+def work_resume_button(page, work):
+    identifier = capture_work_card(page, work).get_attribute('data-collaboration-work-id')
+    return page.locator('[data-collaboration-resume=' + json.dumps(identifier) + ']')
+
+
+def parked_work_close_button(page, work):
+    identifier = capture_work_card(page, work).get_attribute('data-collaboration-work-id')
+    if identifier == 'primary':
+        return page.locator('.fc-work-resume-bar [data-work-close]')
+    return page.locator('[data-collaboration-close=' + json.dumps(identifier) + ']')
+
+
+def close_work_card(page, work=None):
+    owner = capture_work_card(page, work)
+    owner.locator('[data-work-close]').click()
+    expect(owner.locator('.fc-conversation-work, .fc-reference-groups')).to_have_count(0)
 
 
 def saved_document_reading(panel, title=None, text=None):
@@ -107,7 +159,7 @@ def saved_document_reading(panel, title=None, text=None):
         expect(reader.locator('.fc-shared-reading-title')).to_have_text(title)
     if text is not None:
         assert reader.locator('.fc-shared-reading-body').text_content() == text
-    editor = panel.locator('#shared-document-body')
+    editor = panel.get_by_label(re.compile(r'^(Document text|Dokumenttext)$'), exact=True)
     expect(editor).to_be_hidden()
     expect(editor).to_have_js_property('readOnly', True)
     return reader
@@ -117,7 +169,7 @@ def edit_saved_document(panel, title=None, text=None):
     """Enter the same native Yjs editor through its explicit visible Edit action."""
     saved_document_reading(panel, title=title, text=text)
     panel.get_by_role('button', name=re.compile(r'^(Edit document|Redigera dokument)$'), exact=True).click()
-    editor = panel.locator('#shared-document-body')
+    editor = panel.get_by_label(re.compile(r'^(Document text|Dokumenttext)$'), exact=True)
     expect(editor).to_be_visible()
     expect(editor).to_be_editable()
     return editor

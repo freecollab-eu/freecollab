@@ -232,6 +232,11 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/thread-commands-browser.py
           python frontend/tests/work-surface-layout-browser.py
           BACKEND_PYTHON=python python frontend/tests/workspace-modes-browser.py
+          BACKEND_PYTHON=python COLLABORATION_INPUT_REPORT="$RUNNER_TEMP/freecollab-universal/collaboration-input/browser.json" python frontend/tests/collaboration-input-browser.py
+          BACKEND_PYTHON=python COLLABORATION_WORKBENCH_REPORT="$RUNNER_TEMP/freecollab-universal/workbench/browser.json" python frontend/tests/collaboration-workbench-browser.py
+          BACKEND_PYTHON=python COLLABORATION_MODAL_REPORT="$RUNNER_TEMP/freecollab-universal/modal/browser.json" python frontend/tests/collaboration-modal-browser.py
+          BACKEND_PYTHON=python REFERENCED_MESSAGE_REPORT="$RUNNER_TEMP/freecollab-universal/reference-lifetime/browser.json" python frontend/tests/referenced-message-browser.py
+          BACKEND_PYTHON=python UNIVERSAL_PROOF_REPORT="$RUNNER_TEMP/freecollab-universal/product/current.json" python frontend/tests/universal-collaboration-browser.py
           BACKEND_PYTHON=python python frontend/tests/flow-first-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
@@ -281,6 +286,24 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/product-demo-browser.py
           PUBLIC_LAUNCH_DEMO_URL=http://127.0.0.1:3011/product-demo/ python frontend/tests/public-launch-browser.py
           python packages/components/tests/browser-proof.py
+      - name: Retain universal collaboration browser proofs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-collaboration-browser-proofs
+          path: |
+            ${{ runner.temp }}/freecollab-universal/collaboration-input/browser.json
+            ${{ runner.temp }}/freecollab-universal/collaboration-input/*.png
+            ${{ runner.temp }}/freecollab-universal/workbench/browser.json
+            ${{ runner.temp }}/freecollab-universal/workbench/*.png
+            ${{ runner.temp }}/freecollab-universal/modal/browser.json
+            ${{ runner.temp }}/freecollab-universal/modal/*.png
+            ${{ runner.temp }}/freecollab-universal/reference-lifetime/browser.json
+            ${{ runner.temp }}/freecollab-universal/reference-lifetime/*.png
+            ${{ runner.temp }}/freecollab-universal/product/current.json
+            ${{ runner.temp }}/freecollab-universal/product/*.png
+          if-no-files-found: warn
+          retention-days: 7
       - name: Upload service diagnostics on failure
         if: failure()
         uses: actions/upload-artifact@v4

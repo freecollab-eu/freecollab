@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, reveal_message_actions, edit_saved_document, show_channel_introduction
+from ui_navigation import choose_chat_channel, reveal_message_actions, edit_saved_document, show_channel_introduction, capture_work_card, work_surface, work_resume_button, parked_work_close_button
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -264,8 +264,8 @@ def register(base, name, suffix):
     return api(base, 'POST', '/auth/register', data={'name': name, 'email': suffix + '-' + RUN + '@example.com', 'password': PASSWORD})
 
 
-def workspace_pane(page, mode=None):
-    pane = page.locator('.fc-conversation-workspace')
+def workspace_pane(page, mode=None, work=None):
+    pane = work_surface(page, work)
     expect(pane).to_have_count(1)
     if mode:
         expect(pane).to_have_attribute('data-workspace-mode', mode)
@@ -316,7 +316,7 @@ def expand_work(page):
     pane = workspace_pane(page, 'expanded')
     expect(pane).to_have_attribute('role', 'dialog')
     expect(pane).to_have_attribute('aria-modal', 'true')
-    expect(pane).to_have_attribute('aria-label', re.compile(r'^(Full screen work area|Arbetsyta i helskärm)$'))
+    expect(pane).to_have_attribute('aria-label', re.compile(r'^(Full screen work area|Arbetsyta i helskärm)(: .+)?$'))
     expect(pane.locator('[data-work-expand]')).to_have_attribute('aria-pressed', 'true')
     assert pane.evaluate('node=>node.contains(document.activeElement)'), 'Expanded work must own the active focus'
     return pane
@@ -337,24 +337,26 @@ def minimize_work(page, footer=False):
         pane.get_by_role('button', name=re.compile(r'^(Back to conversation|Tillbaka till samtalet)$'), exact=True).click()
     else:
         pane.locator('[data-work-minimize]').click()
-    workspace_pane(page, 'minimized')
-    expect(page.locator('.fc-work-resume')).to_be_visible()
+    workspace_pane(page, 'minimized', pane)
+    expect(work_resume_button(page, pane)).to_be_visible()
     return previous_mode
 
 
-def continue_work(page, previous_mode):
-    chip = page.locator('.fc-work-resume')
+def continue_work(page, previous_mode, work=None):
+    owner = capture_work_card(page, work)
+    chip = work_resume_button(page, owner)
     chip.click()
-    pane = workspace_pane(page, previous_mode)
+    pane = workspace_pane(page, previous_mode, owner)
     expect(chip).to_have_count(0)
     return pane
 
 
 def close_work_area(page):
     pane = workspace_pane(page)
+    resume = work_resume_button(page, pane)
     pane.locator('[data-work-close]').click()
     expect(pane.locator('.fc-conversation-work, .fc-reference-groups')).to_have_count(0)
-    expect(page.locator('.fc-work-resume')).to_have_count(0)
+    expect(resume).to_have_count(0)
 
 
 def cycle_live_editor(page, field, dialogs, footer=False):
@@ -496,7 +498,7 @@ def native(browser):
                 pane.get_by_role('button', name='Create document', exact=True).click()
             assert created.value.ok
             document = created.value.json()
-            expect(pane.locator('#shared-document-new-title')).to_have_count(0)
+            expect(pane.locator('[id$="shared-document-new-title"]')).to_have_count(0)
             body = pane.get_by_label('Document text', exact=True)
             expect(body).to_have_value(long_body)
             expect(pane.locator('.fc-shared-sync')).to_have_text('All edits synchronized')
@@ -525,8 +527,8 @@ def native(browser):
                 expand_work(page)
                 assert_same_field(body, node, state)
                 old_mode = minimize_work(page)
-                expect(page.locator('.fc-work-resume')).to_contain_text(document_title)
-                page.locator('.fc-work-resume-bar').get_by_role('button', name='Close this work', exact=True).click()
+                expect(work_resume_button(page, pane)).to_contain_text(document_title)
+                parked_work_close_button(page, pane).click()
                 workspace_pane(page, 'minimized')
                 assert node.evaluate('node=>node.isConnected')
                 choose_chat_channel(page, other['name'])
@@ -611,7 +613,7 @@ def native(browser):
                     pane.get_by_role('button', name='Save task', exact=True).click()
                 expect(description).to_be_disabled()
                 minimize_work(page)
-                page.locator('.fc-work-resume-bar').get_by_role('button', name='Close this work', exact=True).click()
+                parked_work_close_button(page, pane).click()
                 workspace_pane(page, 'minimized')
                 assert task_node.evaluate('node=>node.isConnected')
                 continue_work(page, 'expanded')
@@ -776,8 +778,8 @@ def native(browser):
             expect(mobile_body).to_have_value(long_body)
             mobile_node, mobile_state = select_real_text(mobile_body)
             minimize_work(page)
-            expect(page.locator('.fc-work-resume')).to_contain_text(re.compile(r'Mobil arbetsyta|Dokument'))
-            assert_bounded(page, page.locator('.fc-work-resume-bar'), controls=False)
+            expect(work_resume_button(page, pane)).to_contain_text(re.compile(r'Mobil arbetsyta|Dokument'))
+            assert_bounded(page, work_resume_button(page, pane), controls=False)
             screenshot(page, 'native-swedish-parked-320')
             composer.fill('Mobil @')
             picker = references_menu(page)
@@ -834,7 +836,7 @@ def demo(browser):
                 pane.get_by_role('button', name='Create document', exact=True).click()
             assert created.value.ok
             document = created.value.json()
-            expect(pane.locator('#shared-document-new-title')).to_have_count(0)
+            expect(pane.locator('[id$="shared-document-new-title"]')).to_have_count(0)
             body = pane.get_by_label('Document text', exact=True)
             expect(body).to_have_value(long_body)
             demo_body = long_body + '\nA genuine synchronized edit in the example installation.'
@@ -845,7 +847,7 @@ def demo(browser):
             restore_work(page)
             node, saved = select_real_text(body)
             minimize_work(page)
-            expect(page.locator('.fc-work-resume')).to_contain_text(title)
+            expect(work_resume_button(page, pane)).to_contain_text(title)
             composer.fill('Review the actual example ')
             choose_reference(page, composer, 'document', document['id'], title)
             text = composer.input_value()
@@ -923,7 +925,7 @@ def demo(browser):
             geometry = assert_bounded(page, pane, expanded=True)
             screenshot(page, 'actual-demo-swedish-expanded-320')
             old_mode = minimize_work(page)
-            expect(page.locator('.fc-work-resume')).to_be_visible()
+            expect(work_resume_button(page, pane)).to_be_visible()
             screenshot(page, 'actual-demo-swedish-parked-320')
             continue_work(page, old_mode)
             expect(body).to_have_value(long_body)
@@ -1011,7 +1013,7 @@ def demo_reading_return(browser):
             card.get_by_role('button', name='Open document', exact=True).click()
             pane = workspace_pane(page, 'split')
             edit_saved_document(pane)
-            field = pane.locator('#shared-document-body')
+            field = pane.get_by_label(re.compile(r'^(Document text|Dokumenttext)$'), exact=True)
             expect(field).to_be_editable()
             long_body = field.input_value() + '\n\n' + '\n'.join('Reading line %02d — actual shared materials and decisions 🧭 åäö.' % index for index in range(80))
             update_path = '/api/channels/' + channel_id + '/shared-documents/' + document_id + '/updates'
@@ -1051,7 +1053,7 @@ def demo_reading_return(browser):
             assert node.evaluate('node=>node.isConnected')
             organization_path = '/api/channels/' + channel_id + '/shared-document-organization'
             with page.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == organization_path) as refreshed:
-                page.locator('.fc-work-resume-bar [data-work-close]').click()
+                parked_work_close_button(page, pane).click()
             assert refreshed.value.ok
             expect(pane.locator('.fc-conversation-work')).to_have_count(0)
             assert not node.evaluate('node=>node.isConnected')
@@ -1103,7 +1105,7 @@ def demo_reading_return(browser):
             page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
             moved = timeline.evaluate('''n=>{const r=n.getBoundingClientRect(),m=[...n.querySelectorAll('.fc-chat-message')].find(m=>m.getBoundingClientRect().bottom>r.top+1);return{top:n.scrollTop,id:m.id,offset:m.getBoundingClientRect().top-r.top}}''')
             assert abs(moved['top'] - opening['top']) > 100, 'Exercise an actual different reading choice while work is parked'
-            page.locator('.fc-work-resume-bar [data-work-close]').click()
+            parked_work_close_button(page, pane).click()
             expect(pane.locator('.fc-conversation-work')).to_have_count(0)
             page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(()=>requestAnimationFrame(resolve))))')
             after = timeline.evaluate('''n=>{const r=n.getBoundingClientRect(),m=[...n.querySelectorAll('.fc-chat-message')].find(m=>m.getBoundingClientRect().bottom>r.top+1);return{top:n.scrollTop,id:m.id,offset:m.getBoundingClientRect().top-r.top}}''')

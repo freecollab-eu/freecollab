@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel
+from ui_navigation import choose_chat_channel, capture_work_card, conversation_work_region, close_work_card
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -237,16 +237,17 @@ def native(browser):
             composer.fill('/document'); expect(option(page, 'document')).to_have_attribute('aria-selected', 'true')
             composer.press('Enter')
             expect(menu(page)).to_have_count(0)
-            work = page.locator('.fc-conversation-work[data-work-kind="documents"]')
+            work = conversation_work_region(page, kind='documents')
             expect(work).to_be_visible(); expect(composer).to_have_value('')
             assert no_resource_writes(writes, since), 'Discovery or opening a tool must not publish content'
             assert api(base, 'GET', '/channels/' + channel['id'] + '/shared-documents', owner) == []
             mark('typed_full_catalogue_keyboard_opens_actual_document_flow_without_publishing')
 
-            stage = 'draft guard on an explicit feature selection'
+            stage = 'sibling feature selection retains the document and composer until its own guarded close'
             work.get_by_role('button', name='New shared document', exact=True).click()
             title = work.get_by_label('Document title', exact=True)
             title.fill('Unsaved document remains here')
+            document_node = title.element_handle()
             draft = 'Keep this message draft while I choose a feature.'
             composer.fill(draft)
             page.get_by_role('button', name=FEATURES).click()
@@ -257,24 +258,35 @@ def native(browser):
                 dialogs.append(dialog.message); dialog.dismiss()
             page.on('dialog', dismiss)
             option(page, 'task').click()
-            page.remove_listener('dialog', dismiss)
-            assert len(dialogs) == 1, 'Exactly one draft warning should protect the unsaved document'
+            expect(menu(page)).to_have_count(0)
+            sibling = conversation_work_region(page, kind='tasks')
+            assert capture_work_card(page, sibling).get_attribute('data-collaboration-work-id') != capture_work_card(page, work).get_attribute('data-collaboration-work-id')
+            assert not dialogs, 'Opening a retained sibling must not discard the original document'
             expect(title).to_have_value('Unsaved document remains here'); expect(composer).to_have_value(draft)
-            expect(search).to_be_focused()
+            assert title.evaluate('(node,original)=>node===original&&original.isConnected', document_node)
+            page.get_by_role('button', name=FEATURES).click()
+            search = menu(page).get_by_role('combobox', name='Search features', exact=True)
             search.fill('next step')
             expect(option(page, 'task')).to_be_visible(); expect(composer).to_have_value(draft)
-            assert no_resource_writes(writes, since), 'Cancelled navigation must not create native content'
-            if menu(page).count():
-                page.keyboard.press('Escape')
-            work.get_by_role('button', name='Cancel', exact=True).click()
+            assert no_resource_writes(writes, since), 'Discovery and retained sibling navigation must not create native content'
+            search.press('Escape')
+            close_work_card(page, sibling)
+            assert not dialogs, "Closing the clean sibling must not invoke another card's dirty guard"
+            expect(title).to_have_value('Unsaved document remains here')
             work.get_by_role('button', name='Close this work', exact=True).click()
+            assert len(dialogs) == 1, 'Exactly one draft warning should protect the unsaved document'
+            expect(title).to_have_value('Unsaved document remains here')
+            assert title.evaluate('(node,original)=>node===original&&original.isConnected', document_node)
+            page.remove_listener('dialog', dismiss)
+            work.get_by_role('button', name='Cancel', exact=True).click()
+            close_work_card(page, work)
             page.get_by_role('button', name=FEATURES).click()
             menu(page).get_by_role('combobox', name='Search features', exact=True).fill('task')
             option(page, 'task').click()
-            expect(page.locator('.fc-conversation-work[data-work-kind="tasks"]')).to_be_visible()
+            sibling = conversation_work_region(page, kind='tasks')
             expect(composer).to_have_value(draft)
-            page.get_by_role('button', name='Close this work', exact=True).click()
-            mark('explicit_search_mouse_selection_preserves_composer_and_cancelled_native_draft')
+            close_work_card(page, sibling)
+            mark('explicit_search_mouse_selection_retains_sibling_composer_and_own_guarded_document_draft')
 
             stage = 'unknown commands, escape and literal text delivery'
             before = len(api(base, 'GET', '/messages/channels/' + channel['id'], owner))
@@ -370,7 +382,7 @@ def demo(browser):
             typed(page, composer, 'task')
             screenshot(page, 'product-demo')
             option(page, 'task').click()
-            work = page.locator('.fc-conversation-work[data-work-kind="tasks"]')
+            work = conversation_work_region(page, kind='tasks')
             expect(work).to_be_visible()
             tasks = api(base, 'GET', '/channels/' + visit['channel_id'] + '/projects/' + visit['examples']['project_id'] + '/tasks', visit['session'])['items']
             assert tasks, 'The actual demo API must provide its seeded tasks'
@@ -384,7 +396,7 @@ def demo(browser):
             expect(menu(page)).to_be_visible()
             menu(page).get_by_role('combobox', name='Search features', exact=True).fill('document')
             option(page, 'document').click()
-            expect(page.locator('.fc-conversation-work[data-work-kind="documents"]')).to_be_visible()
+            expect(conversation_work_region(page, kind='documents')).to_be_visible()
             expect(composer).to_have_value(draft)
             assert not errors and not unexpected
             assert not any(row.get('status') == 429 for row in observations)

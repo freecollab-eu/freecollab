@@ -51,13 +51,14 @@ export function MentionReferences({ id, candidates, activeIndex, onActiveIndex, 
     <div ref={list} id={id} className="fc-slash-commands-list" role="listbox" aria-labelledby={id + '-title'} aria-busy={loading}>
       {grouped.map((group, groupIndex) => <div key={group.kind + '-' + groupIndex} role="group" aria-label={t(REFERENCE_LABELS[group.kind])}>
         <p className="fc-slash-commands-group" aria-hidden="true">{t(REFERENCE_LABELS[group.kind])}</p>
+        {/* Keyboard scrolling must not select rows under a stationary pointer. */}
         {group.rows.map(({ candidate, index }) => {
           const Icon = icons[candidate.kind];
           const duplicate = candidate.kind === 'person' && candidates.some(item => item.kind === 'person' && item.id !== candidate.id && item.label === candidate.label);
           return <div role="option" key={candidate.kind + ':' + candidate.id} id={referenceOptionId(id, candidate)} tabIndex={-1}
             aria-selected={index === selected} className={`fc-slash-command fc-reference-candidate${index === selected ? ' is-active' : ''}`}
             data-reference-kind={candidate.kind} data-reference-id={candidate.id}
-            onMouseDown={event => event.preventDefault()} onMouseEnter={() => onActiveIndex(index)} onClick={() => onSelect(candidate)}>
+            onMouseDown={event => event.preventDefault()} onMouseMove={() => { if (index !== selected) onActiveIndex(index); }} onClick={() => onSelect(candidate)}>
             <Icon size={17} aria-hidden="true" /><span className="fc-slash-command-copy"><strong>{candidate.label}</strong><span>{candidate.description || t(REFERENCE_LABELS[candidate.kind])}{candidate.kind === 'group' && candidate.member_count !== undefined && <> · {t('{count} current members', { count: candidate.member_count })}</>}{duplicate && <> · {t('Account {id}', { id: candidate.id.slice(-8) })}</>}</span></span>
           </div>;
         })}

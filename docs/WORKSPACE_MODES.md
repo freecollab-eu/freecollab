@@ -1,9 +1,11 @@
-# One work area, three views
+# Work areas, three views
 
-The conversation keeps one active work area. Documents, tasks, decisions,
-channel groups and the other tools opened through the conversation's WorkHub
-use the same view controls. Change how much space the work occupies without
-opening a second editor or moving its draft into another component.
+The conversation can keep several independent work areas open. Documents,
+tasks, decisions, channel groups and other permitted tools use the same view
+controls. Opening another tool retains the earlier editor and draft. A link to
+the exact same resource can reuse its existing area. Each area changes its own
+view without moving content into a replacement editor. See
+[concurrent collaboration](UNIVERSAL_COLLABORATION.md).
 
 | View | Use it for | What stays open |
 | --- | --- | --- |
@@ -62,9 +64,10 @@ actions. Existing document synchronization keeps its normal behavior.
   close to the timeline's end. Composer resizing cannot turn this return into
   following the latest message. A deliberate move in the conversation while
   work is open takes precedence over the original source position.
-- Closing work or changing its actual target uses normal navigation guards.
-  Pending writes still block leaving; choosing another document, task, group,
-  channel or workspace cannot silently discard the current form.
+- Closing one area or replacing a target within it checks that area's guards.
+  Opening a sibling area preserves existing drafts. Actual channel/workspace
+  navigation checks every retained area, including minimized work and writing
+  dialogs. Pending writes still block leaving.
 - Account, credential, workspace, channel, encryption and active-work-target
   changes invalidate the previous view and focus snapshot. Revocation and
   authoritative access loss clear the old context rather than preserving it
@@ -93,12 +96,16 @@ server preference is required.
 
 ## Implementation and verification
 
-The shared [view-state hook](../frontend/src/lib/useWorkSurfaceLayout.ts),
+The primary [view-state hook](../frontend/src/lib/useWorkSurfaceLayout.ts),
 [work controls](../frontend/src/components/ConversationWorkControls.tsx) and
 [surface styles](../frontend/src/styles/work-surface.css) are connected by
 [Chat](../frontend/src/components/Chat.tsx) to its existing editors. The hook
 tracks real DOM nodes, focus, selections and scroll positions within the
 current authority and work context; it does not serialize editor content.
+Additional retained areas use the
+[workbench](../frontend/src/components/CollaborationWorkbench.tsx) and its
+[per-area view hook](../frontend/src/lib/useCollaborationWorkbench.ts), with
+the same editor/session retention contract and independent guards.
 
 The new view behavior passed seven real React/Chromium hook groups and 15
 actual product browser groups, alongside the existing conversation and demo

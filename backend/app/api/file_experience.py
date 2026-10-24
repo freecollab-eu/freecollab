@@ -8,7 +8,7 @@ from uuid import uuid4
 from xml.etree import ElementTree as ET
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -24,6 +24,7 @@ from ..services.crypto import decrypt_message, encrypt_message
 from ..services.request_guard import recheck_actor
 from ..services.storage import storage_service
 from ..services.remote_sync import restore_synced_file
+from ..services.field_references import ReferencedFields, normalize_field_references, preserve_referenced_text, require_field_reference_targets
 
 router = APIRouter(tags=["file experience"])
 BASE = "/channels/{channel_id}/file-experience/{file_id}"
@@ -35,9 +36,17 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CommentInput(Strict):
+class CommentInput(ReferencedFields, Strict):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     text: str = Field(min_length=1, max_length=2000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def normalize_text(cls, value):
+        return preserve_referenced_text(value, ("text",))
+
+    def reference_texts(self):
+        return {"text": self.text}
 
 
 class Confirmation(Strict):
@@ -51,9 +60,10 @@ def comment_record(row):
         if (content["document_id"], content["id"], content["file_id"]) != (row.document_id, row.id, row.file_id): raise ValueError
         text = content["text"]
         if not isinstance(text, str) or len(text) > 2000: raise ValueError
+        references = normalize_field_references({"text": text}, content.get("field_references"))
     except Exception:
         raise HTTPException(409, "File comment could not be verified") from None
-    return {"id": row.id, "document_id": row.document_id, "file_id": row.file_id, "created_by": row.created_by, "created_at": row.created_at, "text": text}
+    return {"id": row.id, "document_id": row.document_id, "file_id": row.file_id, "created_by": row.created_by, "created_at": row.created_at, "text": text, **({"field_references": references} if references else {})}
 
 
 @router.get(BASE + "/comments")
@@ -74,18 +84,25 @@ def add_comment(channel_id: str, file_id: str, data: CommentInput, response: Res
     from ..services.workspaces import require_direct_message_writable
     require_direct_message_writable(session, channel_id, actor)
     document_id = document.id if document else record.id
-    text = data.text.strip()
-    if not text: raise HTTPException(422, "Write a comment")
+    fields = data.model_dump(mode="json", exclude={"id"})
+    text = fields["text"]
+    if not text.strip(): raise HTTPException(422, "Write a comment")
     previous = session.get(FileComment, data.id)
     if previous:
         if previous.channel_id != channel_id or previous.document_id != document_id: raise HTTPException(404, "Comment not found")
         result = comment_record(previous)
-        if previous.created_by != actor or result["text"] != text or previous.file_id != record.id: raise HTTPException(409, "Comment identifier already used")
+        if previous.created_by != actor or result["text"] != text or result.get("field_references", {}) != fields.get("field_references", {}) or previous.file_id != record.id: raise HTTPException(409, "Comment identifier already used")
         return result
     count = session.exec(select(func.count()).select_from(FileComment).where(FileComment.document_id == document_id)).one()
     if count >= 100: raise HTTPException(409, "This document reached its retained comment limit")
+    require_field_reference_targets(session, channel_id, actor, fields)
+    session.expire_all(); recheck_actor(session, actor)
+    record, document = service.native_file(session, channel_id, file_id, actor)
+    require_direct_message_writable(session, channel_id, actor)
+    if (document.id if document else record.id) != document_id:
+        raise HTTPException(409, "The file version changed; reopen its current discussion")
     row = FileComment(id=data.id, channel_id=channel_id, document_id=document_id, file_id=record.id, created_by=actor,
-        encrypted_text=encrypt_message(json.dumps({"id":data.id,"document_id":document_id,"file_id":record.id,"text":text}, separators=(",", ":")), channel_id))
+        encrypted_text=encrypt_message(json.dumps({"id":data.id,"document_id":document_id,"file_id":record.id,**fields}, separators=(",", ":")), channel_id))
     session.add(row); session.commit()
     return comment_record(row)
 

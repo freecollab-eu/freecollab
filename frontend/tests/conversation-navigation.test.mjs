@@ -33,6 +33,48 @@ test('every live surface can prevent navigation until its actual pending work is
   assert.deepEqual(calls, ['document', 'document', 'decision']);
 });
 
+test('closing one retained card checks all of its guards and preserves dirty siblings', () => {
+  const f = fixture(), calls = [];
+  let pending = true;
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'document-a' }, () => { calls.push('a-shell'); return true; });
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'task-b' }, () => { calls.push('b-draft'); return false; });
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'document-a' }, () => { calls.push('a-sync'); return !pending; });
+  assert.equal(f.navigation.mayLeaveConversationWork('document-a'), false);
+  assert.deepEqual(calls, ['a-shell', 'a-sync']);
+  pending = false;
+  assert.equal(f.navigation.mayLeaveConversationWork('document-a'), true);
+  assert.deepEqual(calls, ['a-shell', 'a-sync', 'a-shell', 'a-sync']);
+  assert.equal(f.navigation.mayLeaveConversationWork(), false);
+  assert.deepEqual(calls.slice(-2), ['a-shell', 'b-draft']);
+  assert.equal(f.navigation.mayLeaveConversationWork('task-b'), false);
+  assert.equal(calls.at(-1), 'b-draft');
+});
+
+test('scoped checks permanently prune revoked siblings and never transfer mutated owner identity', () => {
+  const f = fixture(), owner = { ...f.owner(), surfaceId: 'document-a' };
+  let calls = 0;
+  f.navigation.registerConversationNavigationGuard(owner, () => { calls++; return false; });
+  owner.surfaceId = 'task-b';
+  assert.equal(f.navigation.mayLeaveConversationWork('task-b'), true);
+  assert.equal(f.navigation.mayLeaveConversationWork('document-a'), false);
+  f.state.token = 'rotated';
+  assert.equal(f.navigation.mayLeaveConversationWork('unrelated-card'), true);
+  f.state.token = 'session';
+  assert.equal(f.navigation.mayLeaveConversationWork(), true);
+  assert.equal(calls, 1);
+});
+
+test('a scoped close cannot bypass a reentrant global guard or another guard on its own card', () => {
+  const f = fixture(), calls = [];
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'document-a' }, () => {
+    calls.push('a');
+    return f.navigation.mayLeaveConversationWork();
+  });
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'task-b' }, () => { calls.push('b'); return true; });
+  assert.equal(f.navigation.mayLeaveConversationWork('document-a'), false);
+  assert.deepEqual(calls, ['a']);
+});
+
 test('old registration cleanup cannot remove its replacement or an independent surface', () => {
   const f = fixture(), owner = f.owner();
   const old = f.navigation.registerConversationNavigationGuard(owner, () => false);

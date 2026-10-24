@@ -17,7 +17,7 @@ import subprocess
 from urllib.parse import urlsplit
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, reveal_message_actions
+from ui_navigation import choose_chat_channel, reveal_message_actions, capture_work_card, close_work_card
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -98,14 +98,13 @@ def command_option(panel, identifier):
 
 
 def work(page, kind):
-    result = page.locator('.fc-conversation-work[data-work-kind=' + json.dumps(kind) + ']')
+    result = capture_work_card(page).locator('.fc-conversation-work[data-work-kind=' + json.dumps(kind) + ']')
     expect(result).to_be_visible()
     return result
 
 
 def close_work(page, parent, text=''):
-    page.locator('.fc-conversation-work').get_by_role('button', name=CLOSE_WORK, exact=True).click()
-    expect(page.locator('.fc-conversation-work')).to_have_count(0)
+    close_work_card(page)
     panel = thread(page)
     expect(panel.locator('.fc-chat-thread-parent')).to_contain_text(parent['content'])
     expect(panel.get_by_label(REPLY, exact=True)).to_have_value(text)
@@ -228,7 +227,7 @@ def native(browser):
             field.press('Enter')
             docs = work(page, 'documents')
             expect(docs.locator('.fc-shared-document-card[data-document-id=' + json.dumps(document['id']) + ']')).to_be_visible()
-            expect(docs.locator('#shared-document-new-title')).to_have_count(0)
+            expect(docs.locator('[id$="shared-document-new-title"]')).to_have_count(0)
             assert_no_delivery_or_write(writes, since)
             expect(main).to_have_value(main_draft)
             close_work(page, parent)
@@ -267,7 +266,7 @@ def native(browser):
             since = len(writes)
             thread(page).get_by_role('button', name=ALL_FEATURES, exact=True).tap()
             command_option(palette(page), 'document').tap()
-            work(page, 'documents')
+            docs = work(page, 'documents')
             page.locator('.fc-chat-composer-area').get_by_role('button', name=re.compile(r'^(Mention or reference|Omnämn eller referera)$'), exact=True).tap()
             reference_picker = page.locator('.fc-mention-references')
             expect(reference_picker).to_be_visible()
@@ -277,8 +276,7 @@ def native(browser):
             expect(reference_picker).to_have_count(0)
             main_draft = main.input_value()
             assert '@' in main_draft and 'Maja' in main_draft
-            page.locator('.fc-conversation-work').get_by_role('button', name=CLOSE_WORK, exact=True).click()
-            expect(page.locator('.fc-conversation-work')).to_have_count(0)
+            close_work_card(page, docs)
             expect(page.get_by_role('dialog', name=THREAD, exact=True)).to_have_count(0)
             expect(main).to_have_value(main_draft)
             expect(main).to_be_focused()
@@ -350,7 +348,7 @@ def native(browser):
             assert not any(row['content'] == '/docs' for row in records)
             mark('unknown_thread_command_is_guarded_until_escape_explicitly_allows_literal_reply')
 
-            stage = 'dirty task navigation keeps the actual thread command and draft after cancellation'
+            stage = 'thread docs retains an independent dirty task and only its own cancel asks to discard'
             m.stage = stage
             field.fill('/task Ett osparat granskningsutkast')
             palette(page)
@@ -359,6 +357,7 @@ def native(browser):
             task_input = tasks.get_by_label(TASK_TITLE, exact=True)
             expect(task_input).to_have_value('Ett osparat granskningsutkast')
             kept_editor = task_input.element_handle()
+            task_card = capture_work_card(page, tasks)
             open_thread(page, parent)
             field = reply(page)
             field.fill('/docs')
@@ -367,28 +366,36 @@ def native(browser):
             def stay(dialog):
                 dialogs.append(dialog.message)
                 dialog.dismiss()
-            page.once('dialog', stay)
+            page.on('dialog', stay)
             since = len(writes)
             field.press('Enter')
-            assert len(dialogs) == 1 and ('spar' in dialogs[0].lower() or 'saved' in dialogs[0].lower()), dialogs
-            expect(index).to_be_visible()
-            expect(field).to_have_value('/docs')
-            expect(field).to_be_focused()
+            expect(index).to_have_count(0)
+            docs = work(page, 'documents')
+            assert capture_work_card(page, docs).get_attribute('data-collaboration-work-id') != task_card.get_attribute('data-collaboration-work-id')
+            assert not dialogs, 'A new Documents card must not discard the actual dirty Task card'
             expect(task_input).to_have_value('Ett osparat granskningsutkast')
             assert task_input.evaluate('(node,original)=>node===original&&original.isConnected', kept_editor)
+            expect(main).to_have_value(main_draft)
             assert_no_delivery_or_write(writes, since)
-            field.press('Escape')
+            close_work(page, parent)
+            assert not dialogs, 'Closing the clean Documents sibling must not ask to discard the Task'
+            expect(task_input).to_have_value('Ett osparat granskningsutkast')
+            assert task_input.evaluate('(node,original)=>node===original&&original.isConnected', kept_editor)
             thread(page).get_by_role('button', name=CLOSE_THREAD, exact=True).click()
-            page.once('dialog', lambda dialog: dialog.accept())
+            page.remove_listener('dialog', stay)
+            accepted = []
+            def discard_task(dialog):
+                accepted.append(dialog.message); dialog.accept()
+            page.once('dialog', discard_task)
             tasks.get_by_role('button', name=TASK_CANCEL, exact=True).click()
-            # Explicitly opening/closing a newer thread invalidates automatic
-            # work return. It must not reopen that deliberately closed dialog.
-            page.locator('.fc-conversation-work').get_by_role('button', name=CLOSE_WORK, exact=True).click()
+            assert len(accepted) == 1 and ('spar' in accepted[0].lower() or 'saved' in accepted[0].lower()), accepted
+            # A deliberately closed newer thread must not return when its Task closes.
+            close_work_card(page, tasks)
             expect(page.get_by_role('dialog', name=THREAD, exact=True)).to_have_count(0)
             open_thread(page, parent)
-            expect(reply(page)).to_have_value('/docs')
+            expect(reply(page)).to_have_value('')
             reply(page).fill('')
-            mark('cancelled_dirty_navigation_preserves_thread_command_palette_focus_and_original_work_editor')
+            mark('thread_command_retains_both_work_cards_and_own_task_cancel_keeps_deliberate_thread_close')
 
             stage = 'thread command inventory remains usable in narrow short mobile viewports'
             m.stage = stage
@@ -480,7 +487,7 @@ def demo(browser):
                 command_option(index, 'document').tap()
                 docs = work(page, 'documents')
                 expect(docs.locator('.fc-shared-document-card').first).to_be_visible()
-                expect(docs.locator('#shared-document-new-title')).to_have_count(0)
+                expect(docs.locator('[id$="shared-document-new-title"]')).to_have_count(0)
                 assert_no_delivery_or_write(writes, since)
                 close_work(page, parent)
             records = m.api(base, 'GET', '/threads/messages/' + parent['id'], visit['session'])['replies']

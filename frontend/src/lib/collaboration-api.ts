@@ -1,3 +1,4 @@
+import { changedFieldReferences, validateFieldReferences, type FieldReferences } from './field-references';
 import { api, type Message } from './api';
 import { getSecureMessaging } from './secure-client';
 
@@ -20,6 +21,7 @@ export interface SavedItem {
   completed_at?: string | null;
 }
 export interface DecisionFields {
+  field_references?: FieldReferences;
   title: string;
   content: string;
   status: 'proposed' | 'accepted' | 'superseded';
@@ -89,19 +91,35 @@ async function resolveDecision(record: Decision): Promise<Decision> {
       || typeof content.title !== 'string' || !content.title.trim() || content.title.length > 200
       || typeof content.content !== 'string' || !content.content.trim() || content.content.length > 20000
       || !['proposed', 'accepted', 'superseded'].includes(content.status)) throw new Error('This encrypted decision could not be verified.');
+    const field_references = validateFieldReferences({ title: content.title, content: content.content }, content.field_references);
     return { ...record, title: content.title, content: content.content, status: content.status,
       responsible_user_id: typeof content.responsible_user_id === 'string' ? content.responsible_user_id : null,
       decision_date: typeof content.decision_date === 'string' ? content.decision_date : null,
-      source_message_id: typeof content.source_message_id === 'string' ? content.source_message_id : null };
+      source_message_id: typeof content.source_message_id === 'string' ? content.source_message_id : null,
+      field_references };
   } catch (error) { return { ...record, resolution_error: errorMessage(error) }; }
 }
 
 async function decisionPayload(channelId: string, fields: DecisionFields, previous?: Decision) {
-  if (!await (await secure()).handles(channelId)) return fields;
-  const event = await (await secure()).sendEvent(channelId, decisionType, {
-    ...fields, revision: previous ? previous.revision + 1 : 1,
+  const token = api.getAccessToken(), current = () => { if (!token || token !== api.getAccessToken()) throw new Error('The signed-in account changed.'); };
+  const client = await secure(); current();
+  const encrypted = await client.handles(channelId); current();
+  const field_references = validateFieldReferences({ title: fields.title, content: fields.content }, fields.field_references);
+  const normalized = { ...fields, ...(field_references ? { field_references } : {}) };
+  if (!field_references) delete normalized.field_references;
+  const mentioned = changedFieldReferences({ title: fields.title, content: fields.content }, field_references, previous ? { title: previous.title || '', content: previous.content || '' } : undefined, previous?.field_references);
+  if (mentioned.length) {
+    const { messageReferencesApi } = await import('./message-references-api'); current();
+    const resolved = await messageReferencesApi.resolve(channelId, mentioned, undefined, encrypted); current();
+    if (resolved.some(row => !row.available)) throw new Error('A selected reference is no longer available in this conversation.');
+  }
+  if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
+  if (!encrypted) return normalized;
+  const event = await client.sendEvent(channelId, decisionType, {
+    ...normalized, revision: previous ? previous.revision + 1 : 1,
     ...(previous ? { decision_id: previous.id, previous_event_id: previous.matrix_event_id } : {}),
   });
+  if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
   return { matrix_event_id: event.event_id };
 }
 

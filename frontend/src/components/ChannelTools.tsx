@@ -8,6 +8,7 @@ import { listChannelFiles, type ManagedFile } from '../lib/files-api';
 import { ChannelFiles } from './ChannelFiles';
 import { Avatar } from './Avatar';
 import { useModalFocus } from '../lib/useModalFocus';
+import { ModalContinuationProvider, useCollaborationModal } from '../lib/useCollaborationModal';
 import '../styles/panels.css';
 
 interface Props {
@@ -38,7 +39,8 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
   const memberScope = useRef<{ channelId: string; token: string | null; userId: string | null } | null>(null);
   const focusedMember = useRef('');
   const dialog = useRef<HTMLDivElement>(null);
-  useModalFocus(dialog, onClose);
+  const modal = useCollaborationModal(dialog, tab === 'members' ? t('Channel members') : t('Channel files'), `tools:${channel.id}:${tab}`);
+  useModalFocus(dialog, onClose, true, { suspended: modal.parked });
   const currentUser = api.getCurrentUserId();
   const ownMember = members.find((member) => member.user_id === currentUser);
   const isAdmin = ownMember?.role === 'admin' || (!ownMember && channel.role === 'admin');
@@ -131,7 +133,7 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
   }
 
   return createPortal(
-    <div ref={dialog} className="fc-channel-layer" tabIndex={-1} role="dialog" aria-modal="true" aria-label={tab === 'members' ? t("Channel members") : t("Channel files")} onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
+    <ModalContinuationProvider modalId={modal.modalId}><div ref={dialog} hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined} className="fc-channel-layer" tabIndex={-1} role="dialog" aria-modal="true" aria-label={tab === 'members' ? t("Channel members") : t("Channel files")} onMouseDown={event => { if (event.target === event.currentTarget) onClose(); }}>
       <section className="fc-channel-panel" aria-busy={loading}>
         <header className="fc-panel-header fc-channel-header">
           <div className="fc-channel-heading">
@@ -178,6 +180,6 @@ export function ChannelTools({ channel, tab, onClose, onLeave, onRoleChange, onM
           </> : <ChannelFiles key={`${channel.id}:${currentUser}`} channelId={channel.id} files={files} setFiles={updateFiles} loading={loading} onNotice={setNotice} onError={setError} />}
         </div>
       </section>
-    </div>, document.body
+    </div></ModalContinuationProvider>, document.body
   );
 }

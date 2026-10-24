@@ -10,6 +10,7 @@ from ..models.file import File
 from ..services.auth import get_current_user, security
 from ..services import shared_documents as content
 from .files import file_metadata
+from ..services.field_references import ReferencedFields, require_field_reference_targets
 
 
 def no_store(response: Response):
@@ -32,7 +33,7 @@ class Caption(BaseModel):
         return self
 
 
-class ClipInput(BaseModel):
+class ClipInput(ReferencedFields):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     matrix_event_id: str | None = Field(default=None, min_length=1, max_length=1024)
@@ -41,6 +42,16 @@ class ClipInput(BaseModel):
     duration: float | None = Field(default=None, gt=0, le=300)
     transcript: str | None = Field(default=None, max_length=30000)
     captions: list[Caption] | None = Field(default=None, max_length=300)
+
+    @model_validator(mode="before")
+    @classmethod
+    def opaque_references(cls, value):
+        if isinstance(value, dict) and value.get("matrix_event_id") and "field_references" in value:
+            raise ValueError("Secure clip references belong inside the encrypted event")
+        return value
+
+    def reference_texts(self):
+        return {"title": self.title or "", "transcript": self.transcript or ""}
 
     @model_validator(mode="after")
     def mode(self):
@@ -85,6 +96,9 @@ def create_clip(channel_id: str, data: ClipInput, user=Depends(get_current_user)
             raise HTTPException(409, "This clip identifier was already used")
         return public(session, previous)
     if not secure:
+        require_field_reference_targets(session, channel_id, user.id, fields)
+        content.locked_member(session, channel_id, user.id, credentials.credentials)
+        content.validate_mode(session, channel_id, user.id, None, credentials.credentials)
         from ..services.enterprise_governance import enforce_native_document
         enforce_native_document(session, channel_id, user.id, fields)
         file = session.get(File, data.file_id)

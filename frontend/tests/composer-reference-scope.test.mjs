@@ -217,3 +217,27 @@ test('an account transition still invalidates requests and queued focus in an un
     assert.equal(h.inserted.length, 1);
   } finally { h.unmount(); }
 });
+
+
+test('long document references respect their declared limit rather than the message budget', async () => {
+  const text = 'A'.repeat(12000) + ' @Ada';
+  const h = fixture({ contextId: 'document-body', text, maxLength: 50000 });
+  try {
+    await h.settle(); await h.query(); await h.advance(); await h.resolve(h.requests[0]);
+    await h.choose();
+    assert.equal(h.inserted.length, 1);
+    assert.equal(h.inserted[0].text, 'A'.repeat(12000) + ' @Ada Lovelace ');
+    assert.deepEqual(h.inserted[0].references, [{ kind: 'person', id: 'ada', start: 12001, end: 12014 }]);
+  } finally { h.unmount(); }
+});
+
+test('short fields retain their exact native text limit when selecting a reference', async () => {
+  const h = fixture({ contextId: 'document-title', text: '@Ada', maxLength: 8 });
+  try {
+    await h.settle(); await h.query(); await h.advance(); await h.resolve(h.requests[0]);
+    await h.choose();
+    assert.equal(h.inserted.length, 0);
+    assert.equal(h.current.open, true);
+    assert.equal(h.input.current.value, '@Ada');
+  } finally { h.unmount(); }
+});

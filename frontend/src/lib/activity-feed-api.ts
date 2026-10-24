@@ -1,10 +1,11 @@
+import { changedFieldReferences, feedReferenceTexts, validateFieldReferences, type FieldReferences } from './field-references';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 
 export interface FeedPoll { id: string; nonce: string; question: string; options: { id: string; label: string }[]; multiple: boolean; closes_at: string | null }
 export interface FeedPollRouting { id: string; option_ids: string[]; digest: string; multiple: boolean; closes_at: string | null }
-export interface FeedPostFields { title: string; body: string; poll: FeedPoll | null }
-export interface FeedCommentFields { body: string }
+export interface FeedPostFields { field_references?: FieldReferences; title: string; body: string; poll: FeedPoll | null }
+export interface FeedCommentFields { field_references?: FieldReferences; body: string }
 export interface FeedVoteFields { option_ids: string[] }
 export interface FeedReactionFields { emoji: 'like' | 'heart' | 'celebrate' | null }
 export type FeedKind = 'post' | 'comment' | 'vote' | 'reaction';
@@ -56,11 +57,18 @@ function validPoll(value: unknown): value is FeedPoll {
   return true;
 }
 
+function validReferences(value: Record<string, unknown>, post: boolean) {
+  try {
+    if (typeof value.body !== 'string' || post && typeof value.title !== 'string') return false;
+    validateFieldReferences(feedReferenceTexts(value as unknown as FeedPostFields | FeedCommentFields), value.field_references); return true;
+  } catch { return false; }
+}
+
 function validFields(kind: FeedKind, value: unknown): boolean {
   if (!object(value)) return false;
-  if (kind === 'post') return exact(value, ['title', 'body', 'poll']) && typeof value.title === 'string' && !!value.title.trim()
+  if (kind === 'post') return validReferences(value, true) && exact(value, ['title', 'body', 'poll', 'field_references']) && typeof value.title === 'string' && !!value.title.trim()
     && value.title.length <= 160 && typeof value.body === 'string' && value.body.length <= 20000 && (value.poll === null || validPoll(value.poll));
-  if (kind === 'comment') return exact(value, ['body']) && typeof value.body === 'string' && !!value.body.trim() && value.body.length <= 4000;
+  if (kind === 'comment') return validReferences(value, false) && exact(value, ['body', 'field_references']) && typeof value.body === 'string' && !!value.body.trim() && value.body.length <= 4000;
   if (kind === 'reaction') return exact(value, ['emoji']) && [null, 'like', 'heart', 'celebrate'].includes(value.emoji as string | null);
   return exact(value, ['option_ids']) && Array.isArray(value.option_ids) && value.option_ids.length <= 8
     && value.option_ids.every(item => typeof item === 'string' && opaque.test(item)) && new Set(value.option_ids).size === value.option_ids.length;
@@ -106,6 +114,12 @@ async function write<T>(channel: string, kind: FeedKind, fields: T, previous?: F
   const revision = (previous?.revision || 0) + 1, archived = options?.archived ?? previous?.archived ?? false;
   const pollId = options?.pollId || null;
   const secure = await getSecureMessaging(); current(); const encrypted = await secure.handles(channel); current();
+  const mentioned = kind === "post" || kind === "comment" ? changedFieldReferences(feedReferenceTexts(fields as FeedPostFields | FeedCommentFields), (fields as FeedPostFields | FeedCommentFields).field_references, previous?.fields ? feedReferenceTexts(previous.fields as unknown as FeedPostFields | FeedCommentFields) : undefined, (previous?.fields as unknown as FeedPostFields | FeedCommentFields | undefined)?.field_references) : [];
+  if (mentioned.length) {
+    const { messageReferencesApi } = await import('./message-references-api'); current();
+    const resolved = await messageReferencesApi.resolve(channel, mentioned, undefined, encrypted); current();
+    if (resolved.some(row => !row.available)) throw new Error('A selected reference is no longer available in this conversation.');
+  }
   const route = kind === 'post' && (fields as FeedPostFields).poll ? await pollRouting((fields as FeedPostFields).poll!) : null; current();
   let payload: Record<string, unknown> = { expected_revision: revision - 1, fields };
   if (kind === 'post' || kind === 'comment') payload = { ...payload, id, archived };

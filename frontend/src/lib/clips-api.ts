@@ -1,9 +1,11 @@
+import { validateFieldReferences, type FieldReferences } from './field-references';
+import { validateResourceReferenceTargets } from './resource-reference-targets';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
 import { uploadChannelFile, listChannelFiles, downloadChannelFile, type ManagedFile } from './files-api';
 
 export interface ClipCaption { start: number; end: number; text: string }
-export interface ClipFields { title: string; duration: number; transcript?: string; captions?: ClipCaption[] }
+export interface ClipFields { field_references?: FieldReferences; title: string; duration: number; transcript?: string; captions?: ClipCaption[] }
 export interface ChannelClip { id: string; channel_id: string; created_by: string; created_at: string; content_mode: 'server' | 'matrix'; matrix_event_id: string | null; fields?: ClipFields; file?: ManagedFile | null; resolution_error?: string }
 const path = (channel: string) => '/channels/' + encodeURIComponent(channel) + '/clips';
 const EVENT = 'eu.freecollab.clip';
@@ -27,7 +29,8 @@ async function resolve(row: ChannelClip): Promise<ChannelClip> {
         || data.fields.captions.some((caption: ClipCaption) => !Number.isFinite(caption.start) || !Number.isFinite(caption.end)
           || caption.start < 0 || caption.end < caption.start || caption.end > data.fields.duration + 1
           || typeof caption.text !== 'string' || caption.text.length > 2000))) throw new Error('Encrypted captions could not be verified.');
-    return { ...row, fields: data.fields as ClipFields, file: file || null };
+    const field_references = validateFieldReferences({ title: data.fields.title, transcript: data.fields.transcript || "" }, data.fields.field_references);
+    return { ...row, fields: { ...data.fields, field_references } as ClipFields, file: file || null };
   } catch (failure) { return { ...row, resolution_error: failure instanceof Error ? failure.message : 'Encrypted clip unavailable.' }; }
 }
 
@@ -39,6 +42,9 @@ export const clipsApi = {
   async create(channel: string, blob: Blob, fields: ClipFields, onProgress?: (percent: number) => void) {
     const owner = api.getAccessToken(); owned(owner);
     const id = crypto.randomUUID(), secure = await getSecureMessaging(), encrypted = await secure.handles(channel); owned(owner);
+    const field_references = validateFieldReferences({ title: fields.title, transcript: fields.transcript || "" }, fields.field_references);
+    fields = { ...fields, ...(field_references ? { field_references } : {}) }; if (!field_references) delete fields.field_references;
+    await validateResourceReferenceTargets(channel, { title: fields.title, transcript: fields.transcript || "" }, field_references, owner, encrypted); owned(owner);
     const mime = blob.type.split(';')[0], extension = mime.includes('mp4') ? 'mp4' : mime.includes('ogg') ? 'ogg' : 'webm';
     const file = await uploadChannelFile(channel, new File([blob], 'clip-' + id + '.' + extension, { type: mime }), { requestId: id, onProgress }); owned(owner);
     if (file.encrypted !== encrypted || await secure.handles(channel) !== encrypted) throw new Error('Channel encryption changed. Reload before publishing this clip.');

@@ -1,11 +1,26 @@
 # Shared documents
 
-The **Work → Documents** tab holds channel pages with concurrent text editing,
-authenticated comments, named revisions, archive/restore and local Markdown
+The conversation's **/ All features → Documents** opens channel pages with
+concurrent text editing, authenticated comments, named revisions, archive/restore and local Markdown
 export. The editor uses pinned **Yjs 13.6.27** text CRDTs. Different browsers can
 edit from the same starting state, reconnect in either order and merge both
 sets of changes. The one-second HTTP synchronization transports append-only Yjs
 updates; it does not replace a whole document with the last received text.
+
+## Read or edit a page
+
+Saved documents open as safe plain-text reading pages. Choose **Edit document**
+to write and **Done editing** to return to reading. The title field, textarea,
+Yjs controller, selection and pending synchronization stay in the same mounted
+session; switching the view performs no server write. New and command-prefilled
+documents start in editing and still require explicit creation. Synchronization,
+comments, Document options, export, revisions and archive actions retain their
+normal permissions and pending-write guards.
+
+Read/edit is independent of the conversation's split, full-screen and minimized
+work views. Restoring a minimized reading page focuses that visible page rather
+than its hidden textarea. See [the everyday flow](FLOW_FIRST_UX.md) and
+[work-area views](WORKSPACE_MODES.md).
 
 ## Access and storage
 
@@ -115,7 +130,8 @@ page comments. A message action reviews the current source before saving a
 reference; no text copy is stored. Moves have their own compare-and-set revision and Undo preserves later
 Yjs edits. Stack creation generations reject stale requests after an ID is
 recreated. See [DOCUMENT_ORGANIZATION.md](DOCUMENT_ORGANIZATION.md) for the protocol,
-permissions, limits, export/retention and native-only scope. These resources are
-separate from the public demo's local stacks. Encrypted channels retain flat
+permissions, limits, export/retention and native-only scope. The public example
+installation uses these same APIs with isolated temporary accounts and real
+sample records. Encrypted channels retain flat
 collaborative pages/comments/revisions; encrypted organization is explicitly
 unsupported and never uses a native plaintext fallback.

@@ -7,7 +7,7 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/copilot-intents.ts', import.meta.url), 'utf8');
 const exports = {};
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, { exports, URL });
-const { appendCopilotIntent, COPILOT_PROMPT_LIMIT, copilotIntents, copilotProviderHost } = exports;
+const { appendCopilotIntent, COPILOT_PROMPT_LIMIT, copilotIntents, copilotProviderHost, copilotDiscussionSummaryInstruction, copilotRelatedDocumentsInstruction } = exports;
 
 test('every quick intent keeps the exact existing user draft and prepares a bounded instruction', () => {
   const existing = '  My own request: åäö, <script>literal text</script>\nKeep this detail.  ';
@@ -64,4 +64,12 @@ test('recipient labels contain only parsed HTTPS hostnames and never URL credent
   assert.equal(copilotProviderHost('https://api.customer.example/v1/chat/completions'), 'api.customer.example');
   assert.equal(copilotProviderHost('https://localhost:8443/v1/chat/completions'), 'localhost');
   for (const endpoint of [undefined, '', 'not a URL', '/v1/chat/completions', 'http://api.customer.example/v1/chat/completions', 'https://user:private-key@api.customer.example/v1', 'https://api.customer.example/v1?key=private-key', 'https://api.customer.example/v1#private-key']) assert.equal(copilotProviderHost(endpoint), null);
+});
+
+test('contextual discussion and related-document instructions stay bound to reviewed sources', () => {
+  assert.ok(copilotDiscussionSummaryInstruction.includes('only the selected sources'));
+  assert.ok(copilotDiscussionSummaryInstruction.includes('when replies or context are missing'));
+  assert.ok(copilotRelatedDocumentsInstruction.includes('only the reviewed document sources'));
+  assert.ok(copilotRelatedDocumentsInstruction.includes('Do not invent documents, links, paragraph identifiers or access to other channel content'));
+  assert.ok(copilotRelatedDocumentsInstruction.includes('If no document sources were selected'));
 });

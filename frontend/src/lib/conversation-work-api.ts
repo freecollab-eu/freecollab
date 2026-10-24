@@ -5,6 +5,8 @@ export interface ConversationWorkReference {
   id: string;
   channel_id: string;
   source_message_id: string;
+  /** Current authorized native thread root, derived by the server. */
+  discussion_message_id?: string | null;
   resource_kind: ConversationWorkResourceKind;
   resource_id: string;
   project_id: string | null;
@@ -28,6 +30,9 @@ function verify(reference: ConversationWorkReference, channelId: string) {
   if (reference.channel_id !== channelId || !reference.id || !reference.source_message_id || !reference.resource_id
       || !['document', 'task', 'decision'].includes(reference.resource_kind)
       || (reference.resource_kind === 'task' ? !reference.project_id : reference.project_id !== null))
+    throw new Error('This conversation reference is unavailable.');
+  if (reference.discussion_message_id !== undefined && reference.discussion_message_id !== null
+      && (typeof reference.discussion_message_id !== 'string' || !reference.discussion_message_id || reference.discussion_message_id.length > 128))
     throw new Error('This conversation reference is unavailable.');
   return reference;
 }

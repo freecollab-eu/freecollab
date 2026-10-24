@@ -1,5 +1,50 @@
 # FreeCollab validation record
 
+## Everyday work follows the conversation — 2026-10-24
+
+The six [conversation-first UX changes](FLOW_FIRST_UX.md) are implemented in the
+shared product interface: receipt-based/scoped reading entry, a quiet composer,
+read-first documents, actual discussion work summaries, clear channel navigation
+and concrete contextual AI review. Saved document modes retain the same editor
+and live session; opening review never sends to a provider or applies a result.
+
+Executed against the final runtime candidate:
+
+- TypeScript and application/embedded production builds passed; all 593 frontend
+  Node tests passed, including the 20 entry-policy cases.
+- Ten actual native/demo flow groups passed with 596 source hashes per fixture
+  and no drift. They include a 65-message paged unread boundary and remembered
+  message/offset, genuine delayed cloud errors, read/edit/Yjs/comments, work from
+  unopened replies, explicit contextual AI, measured full mobile channel names,
+  membership loss and the isolated Swedish 320 px demo.
+- Three of those groups exercise actual network timing: an older receipt POST
+  is held while a real peer arrives; the newer receipt waits and remains current
+  after release. A failed receipt GET preserves unread state through pointer and
+  composer events until explicit Jump to latest. Sending during held initial
+  history wins over the older unread plan. Production handlers are not replaced.
+- The configured private-provider browser proof passed all 17 groups (590 source
+  hashes); the real two-member document/offline/Yjs proof passed all 8 groups
+  (585 hashes), each without source drift. These are private fixtures, not live
+  external-provider or Matrix acceptance.
+- Final native Elite navigation/reading passed 6 groups, commands and references
+  passed 18 native/demo groups, and document organization passed 15 groups.
+  Eleven legacy browser adapters retain all 234 original Python assertions,
+  with 2 additional measured/receipt assertions. They now use actual channel
+  menus, `/`, read/edit transitions and role-permitted feature entry.
+- The 55 focused backend discussion tests and 17 resolver/hook tests remain
+  applicable: all 12 recorded source hashes match. Derived native routing stays
+  bounded, same-channel and content-free; no migration or encrypted plaintext
+  fallback was introduced. The dedicated cloud focus proof passed 13 cases.
+
+Read-only review caught and checked fixes for stale source/AI frames, early own
+sends, unknown/locked read boundaries and a real concurrent receipt-write race.
+Read writes are now serialized and coalesced per scoped channel. The new flow
+and delayed-cloud-focus browser proofs are included in the Product CI job.
+The full product, language and work-view browser suites retain their existing
+business, privacy, focus, write and reading-anchor checks through the new entry
+controls; their run outputs and publication verification are recorded separately.
+
+
 ## Returning from work retains the reading position — 2026-10-23
 
 The public style acceptance caught a mobile source return that moved 90 px.

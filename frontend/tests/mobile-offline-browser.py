@@ -220,7 +220,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     results['removed_membership_requires_review_and_cannot_auto_send']=True
                     stage='logout purge and two-account cross-tab isolation'
                     peer=context.new_page();peer.goto(app,wait_until='domcontentloaded');peer.wait_for_function('navigator.serviceWorker.controller!==null')
-                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Toggle channels',exact=True).click() if page.get_by_role('button',name='Sign out',exact=True).is_hidden() else None
+                    page.get_by_role('button',name='Close mobile settings',exact=True).click();page.get_by_role('button',name='Switch channel',exact=True).click() if page.get_by_role('button',name='Sign out',exact=True).is_hidden() else None
                     open_chat_tool(page, 'Sign out')
                     page.wait_for_function('localStorage.getItem("freecollab_token")===null')
                     deadline=time.monotonic()+10

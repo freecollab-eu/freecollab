@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import reveal_message_actions
+from ui_navigation import reveal_message_actions, edit_saved_document
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('document_helpers',Path(__file__).with_name('shared-documents-browser.py'))
 doc=importlib.util.module_from_spec(spec);spec.loader.exec_module(doc)
@@ -91,7 +91,7 @@ def main():
                     expect(organize(panel).get_by_role('region',name='Unstacked',exact=True).get_by_role('button',name=re.compile('^Budget'))).to_be_visible()
                     results['actual_pointer_drag_and_keyboard_return_update_real_placement']=True
                     stage='document text edits survive guarded move Undo'
-                    organize(panel).get_by_role('button',name=re.compile('^Research brief')).click();expect(panel.get_by_label('Document text',exact=True)).to_be_editable()
+                    organize(panel).get_by_role('button',name=re.compile('^Research brief')).click();edit_saved_document(panel);expect(panel.get_by_label('Document text',exact=True)).to_be_editable()
                     organize(panel).get_by_label('Move Research brief to stack',exact=True).select_option(decisions['id']);expect(organize(panel).get_by_role('button',name='Undo move',exact=True)).to_be_visible()
                     panel.get_by_label('Document text',exact=True).fill('Newer synchronized source material.');expect(panel.get_by_text('All edits synchronized',exact=True)).to_be_visible();organize(panel).get_by_role('button',name='Undo move',exact=True).click();expect(organize(panel).get_by_label('Move Research brief to stack',exact=True)).to_have_value(underlag['id']);expect(panel.get_by_label('Document text',exact=True)).to_have_value('Newer synchronized source material.')
                     results['undo_moves_metadata_only_and_preserves_later_yjs_text']=True

@@ -29,7 +29,34 @@ The existing per-request provider disclosure and additional secure-content ackno
 
 ## In-place assistance
 
-Authenticated conversations offer **AI help** beside a message, the channel recap and an unsent main/thread draft. Messages can produce a reply draft or a read-only summary; draft actions tidy or shorten the exact reviewed text. Shared documents offer a reviewed append through their existing synchronized editor. Project/task editors use suggestions for the unsaved description. A generated answer never posts a message, saves a task or edits a document automatically: the relevant **Add reply to draft**, **Replace my draft** or **Append to document** action requires a separate click and checks the current target again. Appending a document is a synchronized edit, not an unsaved private draft.
+Authenticated conversations offer concrete actions beside the relevant content.
+A message's **More message actions** opens **Draft a reply**, **Summarize this
+message** or, when actual native documents are available, **Find related
+documents**. Threads offer **Summarize replies / Draft a reply** for loaded
+sources. **Message options** offers tidy/shorten actions for a nonempty main
+draft, and a nonempty thread draft offers tidy. The channel menu can review a
+recap or possible next steps from loaded conversation sources.
+
+Shared documents offer a reviewed append through their existing synchronized
+editor. Project/task editors use suggestions for the unsaved description. A
+generated answer never posts a message, saves a task or edits a document
+automatically: the relevant **Add reply to draft**, **Replace my draft** or
+**Append to document** action requires a separate click and checks the current
+target again. Appending a document is a synchronized edit, not an unsaved private
+draft.
+
+Related-document comparison lets the person choose actual authorized native
+documents, starting with one. Only the selected document identities and current
+message sources enter source review; source verification resolves their actual
+text before sending. The shared eight-source and text budgets remain enforced,
+without silently trimming verified text. This is deliberate comparison of
+selected sources, not global semantic retrieval or automatic linking.
+
+Opening an action only opens review; it grants no consent and sends or applies
+nothing. Clearing a draft, closing its thread or changing identity invalidates
+that activation. New typing cannot reopen a dismissed review, and an older
+close frame cannot take focus from a newer review or deliberately focused field.
+See [the everyday flow contract](FLOW_FIRST_UX.md).
 
 Each inline request reviews its exact prompt and selected sources before sending, uses the workspace's saved provider and member consent, and requires the same per-request and secure-content acknowledgments. The component rechecks provider revision, current access, selected source text/revisions and target snapshot; changed context invalidates an answer instead of replacing newer work. It creates a separate private conversation only on explicit Send, forwards no central Copilot history and clears that owned request history after completion. Inline suggestions do not expose native write tools or approve proposals. The central Copilot remains available for deliberate longer conversations and separately approved task creation.
 

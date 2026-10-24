@@ -12,7 +12,12 @@ opening a second editor or moving its draft into another component.
 | **Minimize** | Setting work aside while returning to messages. A **Continue work** bar identifies the active work. | The hidden editor, draft, selection and live document session. |
 
 **Continue work** restores the last visible view, split or expanded, and returns
-to the last available work field. Text selection and work/conversation scroll
+to the last available work field or visible document reading page. A saved
+page opens for reading, with explicit **Edit document / Done editing** controls.
+Read/edit and split/expanded/minimized are independent: changing either view
+retains the same editor and Yjs session, without creating a document edit.
+Hidden editable fields cannot take focus from the visible reading page.
+Text selection and work/conversation scroll
 positions are restored when the original nodes and field value are still
 current. A deliberate focus move to another field or a nested dialog takes
 precedence over delayed restoration.
@@ -99,5 +104,5 @@ The new view behavior passed seven real React/Chromium hook groups and 15
 actual product browser groups, alongside the existing conversation and demo
 regressions. See the dated results in [VALIDATION.md](VALIDATION.md) for the
 executed tests, source bindings and encryption boundaries.
-See also [conversation work](CONVERSATION_WORK.md),
+See also [the six everyday flows](FLOW_FIRST_UX.md), [conversation work](CONVERSATION_WORK.md),
 [the design guide](DESIGN_SYSTEM.md) and [references and groups](MENTIONS_REFERENCES.md).

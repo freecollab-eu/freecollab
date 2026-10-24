@@ -259,7 +259,7 @@ with sync_playwright() as p:
 
         close_channels(page)
         page.set_viewport_size({'width': 390, 'height': 844})
-        expect(page.get_by_role('button', name='Toggle channels', exact=True)).to_have_attribute('aria-expanded', 'false')
+        expect(page.get_by_role('button', name='Switch channel', exact=True)).to_have_attribute('aria-expanded', 'false')
         dialog = open_appearance(page)
         assert_mobile_fit(page, 'Appearance panel overflowed mobile viewport')
         choose(dialog, 'Large')

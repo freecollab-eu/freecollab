@@ -56,7 +56,7 @@ def write(page, channel, text):
 
 
 def choose_channel(page, channel):
-    page.get_by_role('button', name='Toggle channels', exact=True).click()
+    page.get_by_role('button', name='Switch channel', exact=True).click()
     page.get_by_role('navigation', name='Channels', exact=True).get_by_role('button').filter(has=page.get_by_text(channel['name'], exact=True)).click()
 
 

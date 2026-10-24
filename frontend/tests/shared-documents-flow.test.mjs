@@ -9,7 +9,7 @@ import ts from 'typescript';
 function fixture(component = 'SharedDocumentsPanel') {
   const source = readFileSync(new URL('../src/components/' + component + '.tsx', import.meta.url), 'utf8');
   const tree = ts.createSourceFile(component + '.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
-  const wanted = new Set(['publishPending', 'clearPending', 'canLeavePendingDocument', 'mayChangeDocument', 'run', 'revealReadyDocument', 'focusReadyDocument', 'focusSourceComment', 'openOrganizedDocument']);
+  const wanted = new Set(['publishPending', 'clearPending', 'canLeavePendingDocument', 'mayChangeDocument', 'run', 'revealReadyDocument', 'focusReadyDocument', 'focusSourceComment', 'openOrganizedDocument', 'changeDocumentView', 'restoreDocumentViewFocus']);
   const functions = [], inputs = {}; let registration;
   function visit(node) {
     if (ts.isFunctionDeclaration(node) && wanted.has(node.name?.text)) functions.push(node.getText(tree));
@@ -32,7 +32,7 @@ function fixture(component = 'SharedDocumentsPanel') {
     api: { getAccessToken: () => state.credential, getCurrentUserId: () => state.userId }, current: request => request === context.generation.current && context.owner.current === state.credential,
     window: { confirm: () => { state.confirmed++; return state.confirm; }, matchMedia: () => ({ matches: false }) }, t: value => value, describe: failure => failure.message, message: failure => failure.message,
     setError: value => state.errors.push(value), setNotice: () => {}, setBusy: () => {},
-    newTitle: '', newBody: '', commentDraft: { current: '' }, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio',
+    newTitle: '', newBody: '', commentDraft: { current: '' }, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio', previewRef: { current: false }, readingPage: { current: null },
   };
   const navigation = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/conversation-navigation.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
@@ -200,4 +200,67 @@ test('initial mobile document readiness reveals actual editor space above a reta
   f.focusReadyDocument(1, 'brief'); assert.equal(scrolls, 1); assert.equal(active, 'composer');
   small = false; f.context.focusedDocument.current = null; active = 'work';
   f.focusReadyDocument(1, 'brief'); assert.equal(scrolls, 1, 'desktop reading position stays unchanged');
+});
+
+test('a saved reading page receives scoped initial focus without activating its retained editor', () => {
+  const f = fixture(); let focusedReader = 0, focusedEditor = 0, active = 'work';
+  Object.assign(f.context, {
+    panel: { current: { closest: () => ({ contains: node => node === 'work' }) } },
+    document: { get activeElement() { return active; } },
+    previewRef: { current: true }, readingPage: { current: { focus: () => focusedReader++ } },
+    bodyInput: { current: { focus: () => focusedEditor++ } },
+    selectedId: { current: 'brief' }, session: { current: { state: () => ({ ready: true, locked: false }) } }, focusedDocument: { current: null },
+  });
+  f.focusReadyDocument(1, 'brief');
+  assert.equal(focusedReader, 1); assert.equal(focusedEditor, 0);
+  f.context.focusedDocument.current = null; active = 'composer';
+  f.focusReadyDocument(1, 'brief');
+  assert.equal(focusedReader, 1); assert.equal(focusedEditor, 0);
+});
+
+function readingFixture() {
+  const f = fixture(); let active = null, writes = 0;
+  const field = { isConnected: true, value: 'One unchanged shared document.', selectionStart: 4, selectionEnd: 13,
+    selectionDirection: 'backward', scrollTop: 72, scrollLeft: 3,
+    focus: () => { active = field; }, closest: () => null, getClientRects: () => [{}],
+    setSelectionRange(start, end, direction) { this.selectionStart = start; this.selectionEnd = end; this.selectionDirection = direction; },
+  };
+  const reader = { isConnected: true, focus: () => { active = reader; }, closest: () => null, getClientRects: () => [{}] };
+  Object.assign(f.context, {
+    channelId: 'channel', selected: { id: 'brief', channel_id: 'channel', archived: false }, selectedId: { current: 'brief' },
+    state: { ready: true, locked: false }, previewRef: { current: false },
+    bodyInput: { current: field }, titleInput: { current: null }, readingPage: { current: reader },
+    focusedDocument: { current: null }, lastEditingField: { current: 'body' }, editorPosition: { current: null }, viewFocus: { current: null },
+    setPreview: value => { f.context.previewRef.current = value; },
+    session: { current: { replace: () => writes++ } },
+  });
+  return { ...f, field, reader, active: () => active, writes: () => writes };
+}
+
+test('read/edit view changes retain selection and textarea scroll without writes, even with edits pending', () => {
+  const f = readingFixture(); f.publishPending('yjs', true);
+  f.changeDocumentView(true); assert.equal(f.context.previewRef.current, true);
+  f.field.selectionStart = f.field.selectionEnd = 0; f.field.scrollTop = f.field.scrollLeft = 0;
+  f.restoreDocumentViewFocus(); assert.equal(f.active(), f.reader);
+  assert.equal(f.canLeavePendingDocument(), false, 'reading keeps the pending document guard');
+  f.changeDocumentView(false); f.restoreDocumentViewFocus();
+  assert.equal(f.active(), f.field); assert.equal(f.context.bodyInput.current, f.field);
+  assert.deepEqual([f.field.selectionStart, f.field.selectionEnd, f.field.selectionDirection, f.field.scrollTop, f.field.scrollLeft], [4, 13, 'backward', 72, 3]);
+  assert.equal(f.writes(), 0); assert.equal(f.state.pending, true);
+});
+
+test('view restoration respects changed text, workspace, authority and archived editing restrictions', () => {
+  const f = readingFixture(); f.changeDocumentView(true); f.restoreDocumentViewFocus();
+  f.field.value = 'Remote text replaced the original selection.';
+  f.field.selectionStart = f.field.selectionEnd = 2; f.field.scrollTop = 0;
+  f.changeDocumentView(false); f.restoreDocumentViewFocus();
+  assert.equal(f.active(), f.field); assert.equal(f.field.selectionStart, 2); assert.equal(f.field.scrollTop, 0);
+  f.changeDocumentView(true); f.context.workspaceId = 'another-workspace'; f.restoreDocumentViewFocus();
+  assert.equal(f.active(), f.field, 'a queued view focus cannot cross its workspace');
+  f.context.workspaceId = 'studio'; f.context.viewFocus.current = null;
+  f.context.selected.archived = true; f.changeDocumentView(false);
+  assert.equal(f.context.previewRef.current, true, 'archived documents cannot enter editing');
+  f.context.selected.archived = false; f.state.credential = 'replacement'; f.changeDocumentView(false);
+  assert.equal(f.context.previewRef.current, true, 'old authority cannot enter editing');
+  assert.equal(f.writes(), 0);
 });

@@ -11,6 +11,7 @@ from pathlib import Path
 import uuid
 from urllib.request import Request, urlopen
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import show_channel_introduction
 
 BASE = os.environ['CHAT_BASE_URL'].rstrip('/')
 RUN = uuid.uuid4().hex[:10]
@@ -48,18 +49,22 @@ with sync_playwright() as p:
         expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
 
         def choose(channel):
-            page.get_by_role('button', name='Toggle channels', exact=True).click()
+            page.get_by_role('button', name='Switch channel', exact=True).click()
             page.get_by_role('navigation', name='Channels', exact=True).get_by_role('button').filter(has=page.get_by_text(channel['name'], exact=True)).click()
             expect(page.get_by_role('textbox', name='Message #' + channel['name'], exact=True)).to_be_visible()
+            if channel['id'] == room['id']:
+                show_channel_introduction(page)
 
         choose(room)
         material = page.get_by_role('region', name='Shared in this channel', exact=True)
         expect(material).to_be_visible()
         expect(material.locator('img')).to_have_attribute('src', __import__('re').compile('^blob:'))
         expect(page.locator('.fc-chat-message')).to_have_count(3)
-        expect(page.locator('.fc-chat-message.is-lead')).to_have_count(1)
+        expect(page.locator('.fc-chat-message.is-lead')).to_have_count(0)
+        scales = page.locator('.fc-chat-message-content').evaluate_all('nodes=>nodes.map(node=>getComputedStyle(node).fontSize)')
+        assert len(scales) == 3 and len(set(scales)) == 1, 'Ordinary messages do not share the actual selected reading scale'
         message_ids = page.locator('.fc-chat-message').evaluate_all('nodes => nodes.map(node => node.id)')
-        print('PASS: real channel messages and authenticated shared material, with one genuine expressive lead', flush=True)
+        print('PASS: real channel messages share the selected reading scale; authenticated material is available through the optional introduction', flush=True)
 
         def more():
             page.get_by_role('button', name='More channel tools', exact=True).click()
@@ -82,7 +87,7 @@ with sync_playwright() as p:
 
         for width, height in ((1440, 1000), (390, 844), (320, 568)):
             page.set_viewport_size({'width': width, 'height': height})
-            toggle = page.get_by_role('button', name='Toggle channels', exact=True)
+            toggle = page.get_by_role('button', name='Switch channel', exact=True)
             toggle.focus(); toggle.press('Enter')
             drawer = page.get_by_role('dialog', name='Workspace channels', exact=True)
             expect(drawer).to_be_visible()
@@ -114,8 +119,16 @@ with sync_playwright() as p:
         print('PASS:1440/390/320px real drawer isolation, focus trap, Escape restoration, overflow reachability and one-column mobile fit', flush=True)
 
         page.set_viewport_size({'width': 1440, 'height': 1000})
-        focus = page.get_by_role('button', name='Focus mode', exact=True)
-        focus.click(); expect(focus).to_have_attribute('aria-pressed', 'true')
+        def toggle_focus(enabled):
+            page.get_by_role('button', name='Message options', exact=True).click()
+            option = page.get_by_role('menuitemcheckbox', name='Focus mode', exact=True)
+            expect(option).to_have_attribute('aria-checked', 'false' if enabled else 'true')
+            option.click()
+            page.get_by_role('button', name='Message options', exact=True).click()
+            expect(option).to_have_attribute('aria-checked', 'true' if enabled else 'false')
+            option.focus(); option.press('Escape')
+
+        toggle_focus(True)
         expect(material).to_have_count(0)
         assert page.locator('.fc-chat-message').evaluate_all('nodes => nodes.map(node => node.id)') == message_ids, 'Focus filtered or reordered messages'
         assert page.locator('.fc-chat-timeline-inner').bounding_box()['width'] < 1000, 'Focus did not change reading width'
@@ -123,7 +136,7 @@ with sync_playwright() as p:
 
         held = []
         page.route('**/api/files/channels/' + room['id'], lambda route: held.append(route))
-        focus.click()
+        toggle_focus(False)
         # Inline work keeps the authorized material reader mounted during
         # focus mode. Re-enter its real channel to hold a fresh scoped read.
         choose(other)

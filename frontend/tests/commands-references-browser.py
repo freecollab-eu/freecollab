@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, reveal_message_actions
+from ui_navigation import choose_chat_channel, reveal_message_actions, saved_document_reading
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -523,6 +523,7 @@ def native(browser):
             expect(row).to_be_visible()
             row.locator('button[data-reference-kind="document"][data-reference-id=' + json.dumps(document['id']) + ']').click()
             documents = work(page, 'documents')
+            saved_document_reading(documents, title=document['title'], text=doc_body)
             expect(documents.get_by_label('Document text', exact=True)).to_have_value(doc_body)
             close_work(page)
             row.locator('button[data-reference-kind="task"][data-reference-id=' + json.dumps(task['id']) + ']').click()

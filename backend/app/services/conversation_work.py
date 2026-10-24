@@ -18,6 +18,7 @@ from ..models.shared_documents import SharedDocument, SharedDocumentUpdate
 from .access import lock_channel_writes, require_channel_member
 from .chat_notifications import require_native_channel
 from .request_guard import recheck_actor
+from .message_discussion import native_discussion_root
 from .workspaces import require_direct_message_writable
 
 MAX_CHANNEL_REFERENCES = 2000
@@ -43,18 +44,11 @@ def require_native_context(session, channel_id, user_id, *, write=False):
     return member
 
 
-def require_source(session, channel_id, message_id):
-    visited = set()
-    current = message_id
-    while current and len(visited) < 64:
-        if current in visited: break
-        visited.add(current)
-        row = session.exec(select(Message.id, Message.channel_id, Message.parent_id, Message.deleted).where(Message.id == current)).first()
-        if not row or row[1] != channel_id or row[3]:
-            raise HTTPException(404, 'Source message is unavailable in this channel')
-        current = row[2]
-    if current:
+def require_source(session, channel_id, message_id, *, cache=None):
+    root = native_discussion_root(session, channel_id, message_id, cache=cache)
+    if not root:
         raise HTTPException(404, 'Source message is unavailable in this channel')
+    return root
 
 
 def _native_revision(session, kind, item_id, revision):
@@ -112,8 +106,9 @@ def require_resource(session, channel_id, kind, resource_id):
     raise HTTPException(422, 'Unsupported work item kind')
 
 
-def reference_data(row, project_id=None):
+def reference_data(row, project_id=None, discussion_message_id=None):
     return {'id': row.id, 'channel_id': row.channel_id, 'source_message_id': row.source_message_id,
+        'discussion_message_id': discussion_message_id,
         'resource_kind': row.resource_kind, 'resource_id': getattr(row, TARGET_COLUMNS[row.resource_kind]),
         'project_id': project_id, 'created_by': row.created_by, 'created_at': row.created_at}
 
@@ -159,14 +154,15 @@ def list_references(session, channel_id, user_id, *, source_message_id=None, lim
     if source_message_id: query = query.where(r.source_message_id == source_message_id)
     rows = session.exec(query.order_by(r.created_at.desc(), r.id.desc()).offset(offset).limit(limit + 1)).all()
     result = []
+    source_roots = {}
     for row in rows[:limit]:
         try:
-            require_source(session, channel_id, row.source_message_id)
+            discussion_id = require_source(session, channel_id, row.source_message_id, cache=source_roots)
             project_id = require_resource(session, channel_id, row.resource_kind, getattr(row, TARGET_COLUMNS[row.resource_kind]))
         except HTTPException as error:
             if error.status_code not in (404, 409): raise
             continue
-        result.append(reference_data(row, project_id))
+        result.append(reference_data(row, project_id, discussion_id))
     # The page scans a bounded set of routing records; inaccessible/deleted
     # sources or native-ineligible targets never enter the returned items.
     require_native_context(session, channel_id, user_id)

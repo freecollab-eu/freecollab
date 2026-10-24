@@ -239,7 +239,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     assert cache_urls and all('/api' not in url and '/socket.io' not in url and 'token' not in url for url in cache_urls)
                     results['private_library_uses_indexeddb_never_authenticated_response_cache']=True
                     page.get_by_role('button',name='Close mobile settings',exact=True).click()
-                    if page.get_by_role('button',name='Sign out',exact=True).is_hidden():page.get_by_role('button',name='Toggle channels',exact=True).click()
+                    if page.get_by_role('button',name='Sign out',exact=True).is_hidden():page.get_by_role('button',name='Switch channel',exact=True).click()
                     open_chat_tool(page, 'Sign out');page.wait_for_function('localStorage.getItem("freecollab_token")===null')
                     deadline=time.monotonic()+10
                     while time.monotonic()<deadline:

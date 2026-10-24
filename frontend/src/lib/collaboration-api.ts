@@ -39,6 +39,8 @@ export interface Decision extends Partial<DecisionFields> {
   content_mode: 'server' | 'matrix';
   matrix_event_id: string | null;
   resolution_error?: string;
+  /** Native-only derived routing metadata; encrypted events retain their verified path. */
+  discussion_message_id?: string | null;
 }
 
 const segment = encodeURIComponent;

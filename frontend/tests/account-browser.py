@@ -54,7 +54,7 @@ def login(page, user, password=PASSWORD):
 
 
 def open_sidebar(page):
-    toggle = page.get_by_role('button', name='Toggle channels', exact=True)
+    toggle = page.get_by_role('button', name='Switch channel', exact=True)
     expect(toggle).to_be_visible()
     if toggle.get_attribute('aria-expanded') == 'false':
         toggle.click()

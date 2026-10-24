@@ -24,7 +24,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, reveal_message_actions
+from ui_navigation import choose_chat_channel, reveal_message_actions, edit_saved_document, show_channel_introduction
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -573,7 +573,9 @@ def native(browser):
             expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
             choose_chat_channel(page, channel['name'])
             page.locator('#message-' + sent['id']).locator('button[data-reference-kind="document"][data-reference-id=' + json.dumps(document['id']) + ']').click()
-            expect(workspace_pane(page, 'split').get_by_label('Document text', exact=True)).to_have_value(pending_body)
+            pane = workspace_pane(page, 'split')
+            edit_saved_document(pane, title=document_title, text=pending_body)
+            expect(pane.get_by_label('Document text', exact=True)).to_have_value(pending_body)
             close_work_area(page)
             mark('parked_real_document_and_typed_chat_references_coexist_and_send_without_replacing_the_work_editor')
 
@@ -860,6 +862,7 @@ def demo(browser):
             close_work_area(page)
             page.locator('#message-' + message['id']).locator('button[data-reference-kind="document"][data-reference-id=' + json.dumps(document['id']) + ']').click()
             pane = workspace_pane(page, 'split')
+            edit_saved_document(pane, title=title, text=demo_body)
             expect(pane.get_by_label('Document text', exact=True)).to_have_value(demo_body)
             close_work_area(page)
             mark('actual_product_demo_document_uses_same_dom_modes_real_yjs_delivery_and_canonical_reopen_after_parking')
@@ -1003,9 +1006,11 @@ def demo_reading_return(browser):
             expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
             channel_id = visit['channel_id']
             document_id = visit['examples']['document_ids'][0]
+            show_channel_introduction(page)
             card = page.locator('.fc-chat-material-document[data-document-id=' + json.dumps(document_id) + ']')
             card.get_by_role('button', name='Open document', exact=True).click()
             pane = workspace_pane(page, 'split')
+            edit_saved_document(pane)
             field = pane.locator('#shared-document-body')
             expect(field).to_be_editable()
             long_body = field.input_value() + '\n\n' + '\n'.join('Reading line %02d — actual shared materials and decisions 🧭 åäö.' % index for index in range(80))
@@ -1032,6 +1037,7 @@ def demo_reading_return(browser):
             before = material_reading_anchor(page, action)
             assert 0 < before['gap'] < 96, 'Exercise a reading choice inside the real near-bottom follow threshold'
             pane = workspace_pane(page, 'split')
+            edit_saved_document(pane, text=long_body)
             field = pane.get_by_label('Dokumenttext', exact=True)
             final_body = long_body + '\n\nEn liten verklig anteckning i mobilvyn.'
             with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path == update_path) as saved:
@@ -1053,6 +1059,7 @@ def demo_reading_return(browser):
             actual = same_material_reading_anchor(page, before)
             action.click()
             pane = workspace_pane(page, 'split')
+            edit_saved_document(pane, text=final_body)
             fresh_body = pane.get_by_label('Dokumenttext', exact=True)
             expect(fresh_body).to_have_value(final_body)
             assert fresh_body.evaluate('(current,previous)=>current!==previous&&!previous.isConnected', node)
@@ -1083,6 +1090,7 @@ def demo_reading_return(browser):
             action.scroll_into_view_if_needed()
             opening = material_reading_anchor(page, action)
             pane = workspace_pane(page, 'split')
+            edit_saved_document(pane, text=final_body)
             expect(pane.get_by_label('Dokumenttext', exact=True)).to_have_value(final_body)
             minimize_work(page)
             rectangle = timeline.bounding_box()

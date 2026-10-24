@@ -29,7 +29,7 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
-PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/contextual-actions.sv.ts','frontend/src/styles/shared-documents.css','frontend/tests/ui_navigation.py','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
 
 def main():
     stage='private startup';results={};processes=[];streams=[];server=None
@@ -170,7 +170,8 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 page.get_by_role('button',name='Close this work',exact=True).click()
                 composer=page.locator('.fc-chat-composer textarea');original_draft='My own wording stays.';composer.fill(original_draft)
                 article=page.locator('article.fc-chat-message').filter(has=page.locator('.fc-chat-message-content').filter(has_text=selected))
-                expect(article).to_have_count(1);article.locator('.fc-contextual-copilot-trigger').click()
+                expect(article).to_have_count(1);article.get_by_role('button',name='More message actions',exact=True).click()
+                article.get_by_role('button',name='Draft a reply',exact=True).click()
                 inline=article.locator('.fc-contextual-copilot-card');expect(inline).to_have_attribute('aria-busy','false')
                 expect(inline.get_by_role('button',name='Draft a reply',exact=True)).to_have_attribute('aria-pressed','true')
                 expect(inline).to_contain_text('Your request and 1 selected sources will be sent to localhost using fixture-chat.')
@@ -212,7 +213,8 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 results['inline_real_https_answer_explicit_draft_append_preserves_text_and_clears_private_history']=True
                 stage='in-place composer rewrites only the reviewed unsent draft without invented source references'
                 messy_draft='hello team ,  the plan is ready';composer.fill(messy_draft)
-                page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-trigger').click()
+                page.get_by_role('button',name='Message options',exact=True).click()
+                page.get_by_role('menu',name='Message options',exact=True).get_by_role('menuitem',name='Tidy my draft',exact=True).click()
                 draft_card=page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card')
                 expect(draft_card).to_have_attribute('aria-busy','false')
                 expect(draft_card).to_contain_text('Your request and 0 selected sources will be sent to localhost using fixture-chat.')
@@ -308,6 +310,45 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 for label in ('Sammanfatta urvalet','Föreslå nästa steg','Skriv ett svarsutkast','Föreslå en uppgift'):
                     button=panel.get_by_role('button',name=label,exact=True);expect(button).to_be_visible();assert button.bounding_box()['height']>=44
                 results['saved_swedish_account_preference_and_mobile_without_overflow']=True
+                stage='configured contextual draft review stays usable at Swedish320 without an automatic request'
+                page.locator('.fc-conversation-work-header [data-work-close]').click()
+                mobile_draft='Ett eget utkast som ska granskas innan något skickas.'
+                composer=page.locator('.fc-chat-composer textarea');composer.fill(mobile_draft)
+                provider_calls=len(requests)
+                page.get_by_role('button',name='Meddelandealternativ',exact=True).click()
+                page.get_by_role('menu',name='Meddelandealternativ',exact=True).get_by_role('menuitem',name='Putsa mitt utkast',exact=True).click()
+                mobile_review=page.locator('.fc-chat-composer-area>.fc-contextual-copilot .fc-contextual-copilot-card')
+                expect(mobile_review).to_have_attribute('aria-busy','false')
+                expect(mobile_review.get_by_role('heading',name='Putsa mitt utkast',exact=True)).to_be_visible()
+                expect(mobile_review).to_contain_text('fixture-chat')
+                mobile_send=mobile_review.get_by_role('button',name='Skicka till leverantören',exact=True)
+                expect(mobile_send).to_be_disabled()
+                mobile_review.evaluate('node=>{node.scrollTop=node.scrollHeight}')
+                geometry=mobile_review.evaluate('node=>{const r=node.getBoundingClientRect();return {left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:innerWidth,height:innerHeight}}')
+                assert geometry['left']>=-1 and geometry['right']<=geometry['width']+1
+                assert geometry['top']>=-1 and geometry['bottom']<=geometry['height']+1, json.dumps(geometry)
+                send_box=mobile_send.bounding_box();assert send_box and send_box['height']>=44 and send_box['y']+send_box['height']<=geometry['height']+1
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+                assert len(requests)==provider_calls
+                expect(composer).to_have_value(mobile_draft)
+                page.screenshot(path=str(REPORT.parent/'copilot-contextual-mobile-sv-320.png'))
+                results['configured_Swedish320_draft_review_is_bounded_gated_and_preserves_the_draft']=True
+                stage='clearing a reviewed draft requires a fresh contextual AI activation'
+                composer.fill('');expect(mobile_review).to_have_count(0)
+                fresh_draft='Ett nytt utkast utan någon begärd AI-åtgärd.';composer.fill(fresh_draft)
+                page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+                expect(mobile_review).to_have_count(0)
+                expect(composer).to_have_value(fresh_draft)
+                assert len(requests)==provider_calls
+                page.get_by_role('button',name='Meddelandealternativ',exact=True).click()
+                page.get_by_role('menu',name='Meddelandealternativ',exact=True).get_by_role('menuitem',name='Putsa mitt utkast',exact=True).click()
+                expect(mobile_review).to_have_attribute('aria-busy','false')
+                expect(mobile_review.get_by_role('heading',name='Putsa mitt utkast',exact=True)).to_be_visible()
+                mobile_review.get_by_role('button',name='Stäng AI-hjälpen',exact=True).click()
+                expect(mobile_review).to_have_count(0)
+                expect(page.get_by_role('button',name='Meddelandealternativ',exact=True)).to_be_focused()
+                assert len(requests)==provider_calls
+                results['cleared_draft_requires_a_new_AI_action_and_close_restores_its_menu_focus']=True
                 assert not errors and not any(KEY in url or PASSWORD in url for url in urls);results['no_page_errors_or_auth_secrets_in_urls']=True
                 context.close();browser.close()
             assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()), 'Copilot proof sources changed during this private run'

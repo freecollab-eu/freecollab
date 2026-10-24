@@ -1,6 +1,6 @@
 import { t, useI18n, currentLocale } from '../i18n';
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
-import { Archive, ArrowLeft, Check, Download, History, Loader2, MessageSquare, Plus, RefreshCw, RotateCcw } from 'lucide-react';
+import { useEffect, useLayoutEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { Archive, ArrowLeft, BookOpen, Check, Download, History, Loader2, MessageSquare, Pencil, Plus, RefreshCw, RotateCcw } from 'lucide-react';
 import { api } from '../lib/api';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
 import { SharedDocumentSession, sharedDocumentsApi, type DocumentState, type SharedComment, type SharedDocumentRecord, type SharedSnapshot } from '../lib/shared-documents-api';
@@ -21,7 +21,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
   const [loading, setLoading] = useState(true), [showArchived, setShowArchived] = useState(false), [creating, setCreating] = useState(false), [newTitle, setNewTitle] = useState('');
   const [state, setState] = useState<DocumentState>(empty), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [comments, setComments] = useState<SharedComment[]>([]), [comment, setComment] = useState(''), [commentsError, setCommentsError] = useState('');
-  const [history, setHistory] = useState<SharedSnapshot[] | null>(null), [snapshotName, setSnapshotName] = useState(''), [restoring, setRestoring] = useState<SharedSnapshot | null>(null), [preview, setPreview] = useState(false);
+  const [history, setHistory] = useState<SharedSnapshot[] | null>(null), [snapshotName, setSnapshotName] = useState(''), [restoring, setRestoring] = useState<SharedSnapshot | null>(null), [preview, setPreview] = useState(true);
   const [focusComment, setFocusComment] = useState<{ documentId: string; commentId: string } | null>(null);
   const [members, setMembers] = useState<Record<string, string>>({});
   const [newBody, setNewBody] = useState('');
@@ -32,7 +32,11 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
   const initialSelectionApplied = useRef(false);
   const selectedCallback = useRef(onSelectedDocument), createdCallback = useRef(onCreatedDocument);
   selectedCallback.current = onSelectedDocument; createdCallback.current = onCreatedDocument;
-  const bodyInput = useRef<HTMLTextAreaElement>(null), focusedDocument = useRef<string | null>(null);
+  const bodyInput = useRef<HTMLTextAreaElement>(null), titleInput = useRef<HTMLInputElement>(null), readingPage = useRef<HTMLElement>(null), focusedDocument = useRef<string | null>(null);
+  const previewRef = useRef(preview); previewRef.current = preview;
+  const editOnSelect = useRef<string | null>(null), lastEditingField = useRef<'title' | 'body'>('body');
+  const editorPosition = useRef<{ field: 'title' | 'body'; value: string; start: number | null; end: number | null; direction: 'forward' | 'backward' | 'none' | null; top: number; left: number } | null>(null);
+  const viewFocus = useRef<{ request: number; documentId: string; workspaceId: string; channelId: string; reading: boolean } | null>(null);
   const panel = useRef<HTMLElement>(null);
   const pendingCallback = useRef(onPendingChange); pendingCallback.current = onPendingChange;
   const pending = useRef({ yjs: false, create: false, comment: false, snapshot: false, organization: false, organizationBusy: false, busy: false });
@@ -55,7 +59,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
     publishPending('comment', false); publishPending('snapshot', false); publishPending('organization', false);
     setComment(''); setSnapshotName(''); setSelected(null); void load();
   }
-  function revealReadyDocument(editor: HTMLTextAreaElement) {
+  function revealReadyDocument(editor: HTMLElement) {
     if (!window.matchMedia('(max-width: 999px)').matches) return;
     const timeline = editor.closest('.fc-chat-timeline');
     const composer = timeline?.closest('.fc-chat')?.querySelector('.fc-chat-composer-area');
@@ -75,9 +79,36 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
     // already returned to composing a message or another part of the product.
     const region = panel.current?.closest('[data-work-kind]') || panel.current;
     focusedDocument.current = documentId;
-    if (region?.contains(document.activeElement) && bodyInput.current) {
-      bodyInput.current.focus({ preventScroll: true });
-      revealReadyDocument(bodyInput.current);
+    const target = previewRef.current ? readingPage.current : bodyInput.current;
+    if (region?.contains(document.activeElement) && target) {
+      target.focus({ preventScroll: true });
+      revealReadyDocument(target);
+    }
+  }
+  function changeDocumentView(reading: boolean) {
+    if (!selected || selected.channel_id !== channelId || owner.current !== api.getAccessToken() || reading === previewRef.current) return;
+    if (!reading && (!state.ready || state.locked || selected.archived)) return;
+    if (reading) {
+      const field = lastEditingField.current === 'title' ? titleInput.current : bodyInput.current;
+      editorPosition.current = field ? { field: lastEditingField.current, value: field.value, start: field.selectionStart, end: field.selectionEnd, direction: field.selectionDirection, top: field.scrollTop, left: field.scrollLeft } : null;
+    }
+    focusedDocument.current = selected.id;
+    viewFocus.current = { request: generation.current, documentId: selected.id, workspaceId, channelId, reading };
+    setPreview(reading);
+  }
+  function restoreDocumentViewFocus() {
+    const targetView = viewFocus.current;
+    if (!targetView || targetView.reading !== previewRef.current || !current(targetView.request) || targetView.workspaceId !== workspaceId || targetView.channelId !== channelId || selectedId.current !== targetView.documentId || selected?.channel_id !== channelId) return;
+    viewFocus.current = null;
+    const remembered = editorPosition.current;
+    const target = targetView.reading ? readingPage.current : remembered?.field === 'title' ? titleInput.current : bodyInput.current;
+    if (!target?.isConnected || target.closest('[hidden], [inert]') || !target.getClientRects().length) return;
+    target.focus({ preventScroll: true });
+    revealReadyDocument(target);
+    const field = remembered?.field === 'title' ? titleInput.current : bodyInput.current;
+    if (!targetView.reading && remembered && field && target === field && field.value === remembered.value) {
+      if (remembered.start !== null && remembered.end !== null) field.setSelectionRange(remembered.start, remembered.end, remembered.direction || 'none');
+      field.scrollTop = remembered.top; field.scrollLeft = remembered.left;
     }
   }
   function focusSourceComment(request: number, target: { documentId: string; commentId: string }) {
@@ -116,11 +147,12 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
     const draft = initialDraft && initialDraft.key && typeof initialDraft.title === 'string' && typeof initialDraft.text === 'string' ? initialDraft : null;
     initialSelectionApplied.current = !!draft;
     focusedDocument.current = null;
+    editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; setPreview(true);
     clearPending(); publishPending('create', !!draft && !!(draft.title.trim() || draft.text.trim()));
     setRows([]); setSelected(null); setState(empty); setComments([]); setComment(''); setSnapshotName(''); setHistory(null); setCreating(!!draft); setNewTitle(draft?.title || ''); setNewBody(draft?.text || ''); setError(''); setNotice(''); setBusy('');
     void load(request, false); setShowArchived(false);
     void api.getChannelMembers(channelId).then(result => { if (current(request)) setMembers(Object.fromEntries(result.map(row => [row.user_id, row.name]))); }).catch(() => undefined);
-    const changed = () => { ++generation.current; clearPending(); session.current?.stop(); session.current = null; selectedCallback.current?.(null); setRows([]); setSelected(null); setState(empty); setComments([]); setHistory(null); setNewTitle(''); setNewBody(''); setCreating(false); setComment(''); setSnapshotName(''); setLoading(false); };
+    const changed = () => { ++generation.current; clearPending(); session.current?.stop(); session.current = null; selectedCallback.current?.(null); editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; setPreview(true); setRows([]); setSelected(null); setState(empty); setComments([]); setHistory(null); setNewTitle(''); setNewBody(''); setCreating(false); setComment(''); setSnapshotName(''); setLoading(false); };
     window.addEventListener('freecollab:auth-changed', changed);
     const unload = (event: BeforeUnloadEvent) => { if (Object.values(pending.current).some(Boolean)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', unload);
@@ -138,7 +170,8 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
   useEffect(() => {
     if (!selected || selected.channel_id !== channelId) return;
     const request = generation.current, documentId = selected.id, controller = new SharedDocumentSession(channelId, selected); session.current = controller;
-    setState(empty); setComments([]); setComment(''); setCommentsError(''); setHistory(null); setRestoring(null); setPreview(false); setSnapshotName(''); setNotice('');
+    setState(empty); setComments([]); setComment(''); setCommentsError(''); setHistory(null); setRestoring(null); setPreview(editOnSelect.current !== documentId); setSnapshotName(''); setNotice('');
+    editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; lastEditingField.current = 'body';
     publishPending('comment', false); publishPending('snapshot', false);
     const unsubscribe = controller.subscribe(next => {
       if (current(request) && selectedId.current === documentId) {
@@ -151,6 +184,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
     const timer = window.setInterval(() => { if (!fetching && current(request)) { fetching = true; void loadComments(documentId, request).finally(() => { fetching = false; }); } }, 4000);
     return () => { unsubscribe(); controller.stop(); publishPending('yjs', false); if (session.current === controller) session.current = null; clearInterval(timer); };
   }, [selected?.id, channelId]);
+  useLayoutEffect(restoreDocumentViewFocus, [preview, selected?.id, channelId, workspaceId]);
   useEffect(() => {
     if (!selected) { focusedDocument.current = null; return; }
     if (!flow || selected.channel_id !== channelId || !state.ready || state.locked || focusedDocument.current === selected.id) return;
@@ -183,7 +217,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
   async function create(event: FormEvent) {
     event.preventDefault();
     if (!owner.current || owner.current !== api.getAccessToken() || state.pending) return;
-    await run('create', async request => { const row = await sharedDocumentsApi.create(channelId, newTitle, newBody); if (!current(request) || row.channel_id !== channelId) return; publishPending('create', false); setCreating(false); setNewTitle(''); setNewBody(''); const created = { ...row, title: newTitle.trim() || 'Untitled document' }; setSelected(created); createdCallback.current?.(created); await load(request, false); });
+    await run('create', async request => { const row = await sharedDocumentsApi.create(channelId, newTitle, newBody); if (!current(request) || row.channel_id !== channelId) return; publishPending('create', false); setCreating(false); setNewTitle(''); setNewBody(''); const created = { ...row, title: newTitle.trim() || 'Untitled document' }; editOnSelect.current = row.id; setPreview(false); setSelected(created); createdCallback.current?.(created); await load(request, false); });
   }
   function edit(field: 'title' | 'body', value: string) { try { if (!session.current) return false; session.current.replace(field, value); return true; } catch (failure) { setError(describe(failure)); return false; } }
   async function changeArchive() {
@@ -234,12 +268,12 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
       ]} onApply={appendSuggestion} applyActionIds={['outline', 'questions']} applyLabel="Append to document" applyHint="Appending creates a synchronized document edit." maxApplyLength={Math.max(0, 50000 - state.body.length - (state.body ? 2 : 0))} />}
       {aiReady && state.title.length + state.body.length + 1 > 12000 && <p className="fc-shared-muted">{t('AI reviews the first 12,000 characters of this document, including its title.')}</p>}
   </>;
-  const documentOptions = selected && <>{flow && <button type="button" className="fc-shared-text-button" onClick={() => setPreview(!preview)}>{preview ? t("Write") : t("Read")}</button>}
+  const documentOptions = selected && <>
       {<div className="fc-shared-toolbar"><button type="button" className="fc-button" disabled={!state.ready || !!busy} onClick={exportDocument}><Download size={15} />{t("Export Markdown")}</button><button type="button" className="fc-button" disabled={!!busy} onClick={() => void run('history', async request => { if (history !== null) setHistory(null); else await historyLoad(request); })}><History size={15} />{history === null ? t("Named revisions") : t("Hide revisions")}</button>{canManage && <button type="button" className="fc-button" disabled={!!busy || !!state.pending} onClick={() => void changeArchive()}>{selected.archived ? <RotateCcw size={15} /> : <Archive size={15} />}{selected.archived ? t("Restore document") : t("Archive document")}</button>}</div>}
       {history !== null && <section className="fc-shared-history" aria-label={t("Named document revisions")}><h4>{t("Named revisions")}</h4><p className="fc-shared-muted">{t("Saving a revision captures the verified text you have synchronized. Restoring it creates new edits and retains later history.")}</p>{writable && <form className="fc-shared-inline" onSubmit={snapshot}><label className="fc-shared-label" htmlFor="shared-snapshot-name">{t("Revision name")}</label><input id="shared-snapshot-name" className="fc-input" maxLength={100} value={snapshotName} onChange={event => { revisionDraft.current = event.target.value; publishPending("snapshot", !!event.target.value.trim()); setSnapshotName(event.target.value); }} /><button className="fc-button" type="submit" disabled={!!busy || !snapshotName.trim()}><Plus size={14} />{t("Save revision")}</button></form>}<ul>{history.map(row => <li key={row.id}><div><strong>{row.fields.name}</strong><small>{date(row.created_at)} · {members[row.created_by] || t("Channel member")} {t(" · Through edit ")}{row.covers_sequence}</small></div>{writable && <button className="fc-button" type="button" disabled={!!busy} onClick={() => setRestoring(row)}><RotateCcw size={14} />{t("Restore text")}</button>}</li>)}</ul>{!history.length && <p className="fc-shared-muted">{t("No named revisions yet. Every synchronized edit is still retained.")}</p>}{restoring && <div className="fc-shared-confirm"><p>{t("Restore “")}{restoring.fields.name}{t("” as new edits? Existing history and comments remain.")}</p><button className="fc-button" type="button" onClick={() => setRestoring(null)}>{t("Keep current text")}</button><button className="fc-button fc-button-primary" type="button" onClick={() => { try { session.current?.restoreSnapshot(restoring); setRestoring(null); setNotice(t("Revision text restored as new edits.")); } catch (failure) { setError(describe(failure)); } }}>{t("Restore revision text")}</button></div>}</section>}  </>;
   const documentFrame = (content: ReactNode) => flow ? <div className="fc-shared-flow-document">{content}</div> : content;
 
-  return <section ref={panel} className={"fc-shared-documents" + (flow ? " is-flow" : "")} data-presentation={presentation} data-workspace={workspaceId} aria-label={t("Shared documents")}>
+  return <section ref={panel} className={"fc-shared-documents" + (flow ? " is-flow" : "")} data-presentation={presentation} data-document-view={selected ? preview ? 'read' : 'edit' : undefined} data-workspace={workspaceId} aria-label={t("Shared documents")}>
     {!flow && <header className="fc-shared-heading"><div><span className="fc-kicker">{t("A living page")}</span><h3>{t("Shared documents")}</h3><p>{t("Write together in the channel. Concurrent edits merge; comments and named revisions stay separate.")}</p></div><button className="fc-icon-button" type="button" aria-label={t("Refresh shared documents")} disabled={loading || !!busy} onClick={() => { if (mayChangeDocument()) void load(); }}><RefreshCw size={16} /></button></header>}
     {error && <div ref={errorRef} tabIndex={-1} role="alert" className="fc-alert fc-account-error">{error}</div>}
     {notice && <p className="fc-shared-notice" role="status"><Check size={15} />{notice}</p>}
@@ -249,15 +283,19 @@ export function SharedDocumentsPanel({ workspaceId, channelId, isAdmin = false, 
       {flow && <details className="fc-document-flow-stack fc-shared-flow-options"><summary>{t('Document options')}</summary><label className="fc-shared-toggle"><input type="checkbox" checked={showArchived} onChange={event => { if (!mayChangeDocument()) return; const archived = event.target.checked; setShowArchived(archived); void load(generation.current, archived); }} />{t("Show archived")}</label></details>}
       {loading ? <p className="fc-shared-muted" role="status">{t("Loading shared documents…")}</p> : <SharedDocumentOrganization key={channelId + ':' + showArchived} workspaceId={workspaceId} channelId={channelId} presentation={presentation} onPendingChange={value => publishPending("organization", value)} onBusyChange={value => publishPending("organizationBusy", value)} documents={rows} initialStackId={initialStackId} archived={showArchived} isAdmin={isAdmin} members={members} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage} onOpen={openOrganizedDocument} />}
     </> : documentFrame(<>
-      <div className={"fc-shared-toolbar" + (flow ? " fc-shared-flow-toolbar" : "")}><button type="button" className="fc-button" onClick={leaveDocument}><ArrowLeft size={15} />{t(flow ? "Documents" : "All documents")}</button><span className="fc-shared-sync" role="status">{state.locked ? t("Editing unavailable") : !state.ready ? t("Synchronizing…") : state.pending ? t(state.pending === 1 ? '{count} edit waiting to sync' : '{count} edits waiting to sync', { count: state.pending }) : selected.archived ? t("Archived · Read only") : t("All edits synchronized")}</span></div>
+      <div className={"fc-shared-toolbar fc-shared-document-toolbar" + (flow ? " fc-shared-flow-toolbar" : "")}><button type="button" className="fc-button" onClick={leaveDocument}><ArrowLeft size={15} />{t(flow ? "Documents" : "All documents")}</button><span className="fc-shared-sync" role="status">{state.locked ? t("Editing unavailable") : !state.ready ? t("Synchronizing…") : state.pending ? t(state.pending === 1 ? '{count} edit waiting to sync' : '{count} edits waiting to sync', { count: state.pending }) : selected.archived ? t("Archived · Read only") : t("All edits synchronized")}</span>{(!preview || !selected.archived) && <button type="button" className="fc-button fc-shared-view-toggle" aria-controls={preview ? 'shared-document-body' : 'shared-document-reading-page'} disabled={preview && !writable} onClick={() => changeDocumentView(!preview)}>{preview ? <Pencil size={15} /> : <BookOpen size={15} />}{t(preview ? 'Edit document' : 'Done editing')}</button>}</div>
       {state.error && <div role="alert" className="fc-alert fc-account-error">{state.error}{!state.locked && <button type="button" className="fc-button" onClick={() => void session.current?.sync()}><RefreshCw size={14} />{t("Retry synchronization")}</button>}</div>}
-      <label className="fc-shared-label" htmlFor="shared-document-title">{t("Title")}</label><input id="shared-document-title" className="fc-input fc-shared-title" value={state.title} maxLength={200} readOnly={!writable} onChange={event => edit('title', event.target.value)} />
-      <div className="fc-shared-editor-heading"><label className="fc-shared-label" htmlFor="shared-document-body">{t("Document text")}</label>{!flow && <button type="button" className="fc-shared-text-button" onClick={() => setPreview(!preview)}>{preview ? t("Write") : t("Read")}</button>}</div>
-      {!flow && assistance}
-      {preview ? <div className="fc-shared-preview" aria-label={t("Document reading view")}>{state.body || t("This page is still blank.")}</div> : <textarea ref={bodyInput} id="shared-document-body" className="fc-input fc-shared-editor" rows={flow ? 10 : 15} maxLength={50000} value={state.body} readOnly={!writable} onChange={event => edit('body', event.target.value)} placeholder={t("Write together. Markdown stays portable.")} spellCheck />}
-      {flow && <div className="fc-shared-flow-assistance">{assistance}</div>}
+      <article ref={readingPage} id="shared-document-reading-page" className="fc-shared-reading-page" data-work-focus aria-label={t('Document reading view')} aria-busy={!state.ready} hidden={!preview} tabIndex={-1}>
+        <h3 className="fc-shared-reading-title">{state.ready ? state.title || t('Untitled document') : selected.title || t('Untitled document')}</h3>
+        <div className="fc-shared-reading-body">{state.ready ? state.body || t('This page is still blank.') : t('Synchronizing…')}</div>
+      </article>
+      <div className="fc-shared-editor-surface" hidden={preview} data-document-editor>
+        <label className="fc-shared-edit-label" htmlFor="shared-document-title">{t("Title")}</label><input ref={titleInput} id="shared-document-title" className="fc-input fc-shared-title" value={state.title} maxLength={200} readOnly={preview || !writable} onFocus={() => { lastEditingField.current = 'title'; }} onChange={event => { if (!preview) edit('title', event.target.value); }} />
+        <label className="fc-shared-edit-label" htmlFor="shared-document-body">{t("Document text")}</label><textarea ref={bodyInput} id="shared-document-body" className="fc-input fc-shared-editor" rows={flow ? 10 : 15} maxLength={50000} value={state.body} readOnly={preview || !writable} onFocus={() => { lastEditingField.current = 'body'; }} onChange={event => { if (!preview) edit('body', event.target.value); }} placeholder={t("Write together. Markdown stays portable.")} spellCheck />
+      </div>
+      <div className={flow ? 'fc-shared-flow-assistance' : 'fc-shared-page-assistance'}>{assistance}</div>
       {!flow && <p className="fc-shared-muted">{state.body.length.toLocaleString(currentLocale())} {t(" / 50,000 characters · Collaborative plain text and Markdown. Keep this page open while edits are waiting to sync.")}</p>}
-      {flow ? <details className="fc-document-flow-stack fc-shared-flow-options"><summary>{t('Document options')}</summary>{documentOptions}</details> : documentOptions}
+      <details className={"fc-shared-document-options" + (flow ? " fc-document-flow-stack fc-shared-flow-options" : "")}><summary>{t('Document options')}</summary>{documentOptions}</details>
       <SharedDocumentOrganization key={channelId + ':editor:' + selected.id} workspaceId={workspaceId} channelId={channelId} presentation={presentation} onPendingChange={value => publishPending("organization", value)} onBusyChange={value => publishPending("organizationBusy", value)} documents={rows.map(row => row.id === selected.id ? { ...selected, title: state.title } : row)} archived={selected.archived} isAdmin={isAdmin} selected={{ ...selected, title: state.title }} members={members} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage} onOpen={openOrganizedDocument} />
       <section className="fc-shared-comments" aria-label={t("Document comments")}><h4><MessageSquare size={17} />{t("Comments")}</h4>{commentsError && <p className="fc-shared-danger" role="alert">{commentsError}</p>}<ul>{comments.map(row => <li id={'shared-document-comment-' + row.id} tabIndex={-1} key={row.id} className={row.resolved ? 'is-resolved' : ''}><div><strong>{members[row.created_by] || t("Channel member")}</strong><small>{date(row.created_at)}{row.resolved ? t(" · Resolved") : ''}</small></div><p>{row.fields.text}</p>{writable && (row.created_by === api.getCurrentUserId() || isAdmin) && <button className="fc-shared-text-button" type="button" disabled={!!busy} onClick={() => void run('resolve', async request => { await sharedDocumentsApi.resolveComment(channelId, selected.id, row); if (current(request)) await loadComments(selected.id, request); })}>{row.resolved ? t("Reopen comment") : t("Resolve comment")}</button>}</li>)}</ul>{!comments.length && <p className="fc-shared-muted">{t("Start a discussion alongside the page.")}</p>}{writable && <form onSubmit={addComment} className="fc-shared-form"><label htmlFor="shared-document-comment">{t("Add a comment")}</label><textarea id="shared-document-comment" className="fc-input" rows={3} maxLength={2000} value={comment} onChange={event => { commentDraft.current = event.target.value; publishPending("comment", !!event.target.value.trim()); setComment(event.target.value); }} /><button className="fc-button" type="submit" disabled={!!busy || !comment.trim()}><MessageSquare size={15} />{t("Post comment")}</button></form>}</section>
     </>)}

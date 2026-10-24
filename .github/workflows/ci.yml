@@ -231,6 +231,7 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
           python frontend/tests/work-surface-layout-browser.py
           BACKEND_PYTHON=python python frontend/tests/workspace-modes-browser.py
+          BACKEND_PYTHON=python python frontend/tests/flow-first-browser.py
           python frontend/tests/notification-browser.py
           python frontend/tests/account-browser.py
           python frontend/tests/account-race-browser.py
@@ -268,6 +269,7 @@ jobs:
           python frontend/tests/file-experience-browser.py
           python frontend/tests/activity-feed-browser.py
           python frontend/tests/cloud-files-browser.py
+          python frontend/tests/cloud-picker-focus-browser.py
           python frontend/tests/external-meetings-browser.py
           python frontend/tests/copilot-browser.py
           python frontend/tests/language-browser.py

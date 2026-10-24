@@ -6,7 +6,7 @@ SQLite database supplies two accounts, two workspaces and independent native
 channels. The optional document gate holds the real update request before its
 production handler; no API response, document state or navigation state is mocked.
 """
-from ui_navigation import choose_chat_channel, close_channels
+from ui_navigation import choose_chat_channel, close_channels, activate_chat_feature
 import base64
 import hashlib
 import json
@@ -110,19 +110,20 @@ def selected(dialog, value):
 
 def select(dialog, value):
     page = dialog.page
-    actions = page.locator('.fc-chat-flow-actions')
-    names = {'tasks': re.compile(r'^(Next step|Nästa steg)$'), 'documents': re.compile(r'^(Add a document|Lägg till ett dokument)$'), 'meetings': re.compile(r'^(Meet|Mötas)$')}
-    if value in names:
-        target = actions.get_by_role('button', name=names[value], exact=True)
-    else:
-        more = actions.get_by_role('button', name=re.compile(r'^(More|Mer)$'), exact=True)
-        more.click()
-        page.get_by_role('button', name=WORK).evaluate('(node)=>{window.flowExpectedReturn=node}')
-        target = actions.get_by_role('menuitem', name={'feed': 'Channel activity', 'workflows': 'Workflows', 'cloud': 'Cloud files'}[value], exact=True)
-    if value in names:
-        target.evaluate('(node)=>{window.flowExpectedReturn=node}')
-    target.click()
+    feature_id = {'tasks': 'task', 'documents': 'document', 'meetings': 'meetings', 'feed': 'activity', 'workflows': 'workflows', 'cloud': 'cloud'}[value]
+    target = activate_chat_feature(page, feature_id)
+    target.evaluate('(node)=>{window.flowExpectedReturn=node}')
     selected(dialog, value)
+
+
+def guarded_feature(page, feature_id):
+    """A rejected / choice keeps its real picker, editor and draft intact."""
+    activate_chat_feature(page, feature_id, expect_closed=False)
+    picker = page.locator('.fc-slash-commands')
+    expect(picker).to_be_visible()
+    expect(picker.get_by_role('combobox')).to_be_focused()
+    picker.get_by_role('combobox').press('Escape')
+    expect(picker).to_have_count(0)
 
 
 def leave(page, dialog, button=None):
@@ -267,7 +268,8 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     composer.fill(draft)
                     composer.evaluate('(node)=>{window.flowComposer=node;node.setSelectionRange(3,11)}')
                     timeline = page.locator('.fc-chat-timeline')
-                    expect(page.locator('.fc-chat-message')).to_have_count(50)
+                    expect(page.locator('.fc-chat-message')).to_have_count(70)
+                    expect(page.locator('#message-flow-message-1')).to_be_in_viewport(ratio=.7)
                     assert timeline.evaluate('(node)=>node.scrollHeight>node.clientHeight+400')
                     timeline.evaluate('(node)=>{node.scrollTop=Math.min(300,node.scrollHeight-node.clientHeight);node.dispatchEvent(new Event("scroll"));window.flowTimeline=node;window.flowScroll=node.scrollTop}')
                     dialog, button = work(page)
@@ -381,7 +383,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     expect(dialog).to_be_visible()
                     expect(body).to_have_value('This real pending document edit must stay here until synchronized.')
                     dialog.evaluate('(node)=>{window.flowGuardedWork=node}')
-                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    guarded_feature(page, 'task')
                     assert not confirmations
                     selected(dialog, 'documents')
                     assert dialog.evaluate('(node)=>node===window.flowGuardedWork')
@@ -430,7 +432,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     expect(comment_draft).to_have_value('Keep this unsent native document comment.')
                     page.once('dialog', decline_document_draft)
-                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    guarded_feature(page, 'task')
                     assert len(draft_confirmations) == 2 and all('Changes have not saved' in value for value in draft_confirmations)
                     expect(comment_draft).to_have_value('Keep this unsent native document comment.')
                     comment_draft.fill('')
@@ -455,7 +457,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     page.once('dialog', decline_task)
                     dialog.get_by_role('button', name=re.compile(r'^(Close this work|Stäng arbetet)$'), exact=True).click()
                     page.once('dialog', decline_task)
-                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Add a document', exact=True).click()
+                    guarded_feature(page, 'document')
                     page.once('dialog', decline_task)
                     choose_chat_channel(page, 'Design')
                     close_channels(page)
@@ -477,7 +479,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     checks['real_task_draft_blocks_close_target_channel_workspace_then_saves_native_record'] = True
 
                     stage = 'unsaved native decision guards work target channel and workspace'
-                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Decision', exact=True).click()
+                    activate_chat_feature(page, 'decision')
                     notebook = page.get_by_role('region', name='Decisions in this conversation', exact=True)
                     expect(notebook).to_be_visible()
                     expect(notebook.get_by_role('tablist')).to_have_count(0)
@@ -491,7 +493,7 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                         decision_confirmations.append(value.message)
                         value.dismiss()
                     page.once('dialog', decline_decision)
-                    page.locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    guarded_feature(page, 'task')
                     page.once('dialog', decline_decision)
                     choose_chat_channel(page, 'Design')
                     close_channels(page)
@@ -582,16 +584,28 @@ createRoot(document.querySelector('#root')!).render(<React.StrictMode><LocalePro
                     expect(page.locator('.proof-flow-controls')).to_contain_text('Språket har sparats', timeout=10000)
                     page.set_viewport_size({'width': 320, 'height': 900})
                     choose_chat_channel(page, 'Courtyard')
-                    dialog, button = work(page)
+                    button = activate_chat_feature(page, 'document', keyboard=True)
+                    button.evaluate('(node)=>{window.flowExpectedReturn=node}')
+                    dialog = page.get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     expect(dialog.get_by_role('button', name='Tillbaka till samtalet', exact=True)).to_be_visible()
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     assert dialog.evaluate('(node)=>node.scrollWidth<=node.clientWidth')
+                    retained = dialog.element_handle()
+                    dialog.get_by_role('button', name='Tillbaka till samtalet', exact=True).click()
+                    expect(page.locator('.fc-conversation-workspace')).to_have_attribute('data-workspace-mode', 'minimized')
+                    resume = page.get_by_role('button', name='Fortsätt arbeta', exact=True)
+                    resume.focus(); resume.press('Enter')
+                    expect(dialog).to_be_visible()
+                    assert dialog.evaluate('(node,previous)=>node===previous&&previous.isConnected', retained)
+                    selected(dialog, 'documents')
                     dialog.focus()
                     page.keyboard.press('Escape')
                     expect(dialog).to_have_count(0)
                     assert page.evaluate('window.flowExpectedReturn?.isConnected&&document.activeElement===window.flowExpectedReturn')
-                    dialog, button = work(page)
+                    button = activate_chat_feature(page, 'document', keyboard=True)
+                    button.evaluate('(node)=>{window.flowExpectedReturn=node}')
+                    dialog = page.get_by_role('region', name=DIALOG)
                     selected(dialog, 'documents')
                     leave(page, dialog, button)
                     checks['swedish_320px_resume_return_escape_and_focus_without_overflow'] = True

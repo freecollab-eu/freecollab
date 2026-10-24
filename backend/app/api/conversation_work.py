@@ -38,7 +38,8 @@ def attach_reference(channel_id: str, data: ReferenceInput, response: Response,
     actor_id = user.id
     try:
         row, created, project_id = service.attach_reference(session, channel_id, actor_id, **data.model_dump())
-        result = service.reference_data(row, project_id)
+        discussion_id = service.require_source(session, channel_id, row.source_message_id)
+        result = service.reference_data(row, project_id, discussion_id)
         session.commit()
     except IntegrityError:
         session.rollback()

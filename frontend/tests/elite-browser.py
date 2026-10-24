@@ -57,7 +57,7 @@ def send(channel, user, content):
 def choose_channel(page, channel):
     nav = page.get_by_role('navigation', name='Channels', exact=True)
     if not nav.is_visible():
-        page.get_by_role('button', name='Toggle channels', exact=True).click()
+        page.get_by_role('button', name='Switch channel', exact=True).click()
     nav.get_by_role('button').filter(has=page.get_by_text(channel['name'], exact=True)).click()
     expect(composer(page, channel)).to_be_visible()
 
@@ -120,13 +120,19 @@ notes = api('POST', '/channels', alice, {
 old_needle = 'archived-needle-' + RUN
 loaded_needle = 'diagram-needle-' + RUN
 private_needle = 'notes-only-' + RUN
+history = []
 for index in range(60):
     content = old_needle if index == 0 else loaded_needle if index == 48 else (
         f'Conversation {index:02d} · {RUN}\n'
         'A clear thought with enough room to read.\n'
         'A second detail worth returning to.'
     )
-    send(studio, alice if index % 2 else bob, content)
+    history.append(send(studio, alice if index % 2 else bob, content))
+# This proof exercises the quick switcher's loaded-window boundary. Give its
+# person a genuine receipt within that window so the new unread-entry seeker
+# does not correctly load all sixty unread roots before the search assertions.
+api('POST', '/read-receipts/channels/' + studio['id'], alice, {'message_id': history[11]['id']})
+assert last_read(studio, alice) == history[11]['id']
 send(notes, alice, private_needle)
 
 
@@ -398,9 +404,9 @@ with sync_playwright() as p:
         expect(composer(page, studio)).to_be_visible()
         for width, height in ((390, 844), (320, 568)):
             page.set_viewport_size({'width': width, 'height': height})
-            expect(page.get_by_role('button', name='Toggle channels', exact=True)).to_have_attribute('aria-expanded', 'false')
+            expect(page.get_by_role('button', name='Switch channel', exact=True)).to_have_attribute('aria-expanded', 'false')
             assert_fit(page, f'Chat overflowed at {width}px')
-            page.get_by_role('button', name='Toggle channels', exact=True).click()
+            page.get_by_role('button', name='Switch channel', exact=True).click()
             page.get_by_role('button', name='Quick switcher', exact=True).click()
             palette = page.get_by_role('dialog', name='Quick switcher', exact=True)
             search = palette.get_by_role('combobox', name='Search channels, messages or actions', exact=True)

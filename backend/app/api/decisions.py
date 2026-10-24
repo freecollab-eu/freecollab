@@ -91,7 +91,7 @@ def new_revision(decision: Decision, data: DecisionContent, number: int, actor_i
     )
 
 
-def revision_data(session, decision: Decision, revision: DecisionRevision):
+def revision_data(session, decision: Decision, revision: DecisionRevision, *, source_roots=None):
     result = {"id": decision.id, "channel_id": decision.channel_id, "created_by": decision.created_by,
               "created_at": decision.created_at, "revision": revision.revision,
               "revision_id": revision.id, "revised_by": revision.created_by, "revised_at": revision.created_at,
@@ -105,6 +105,9 @@ def revision_data(session, decision: Decision, revision: DecisionRevision):
         except (CryptoError, ValueError, TypeError, AttributeError):
             raise HTTPException(409, "Stored decision could not be decrypted") from None
         result.update({key: payload.get(key) for key in ("title", "content", "status", "responsible_user_id", "decision_date", "source_message_id")})
+        from ..services.message_discussion import native_discussion_root
+        result['discussion_message_id'] = native_discussion_root(
+            session, decision.channel_id, result.get('source_message_id'), cache=source_roots)
     return result
 
 
@@ -113,10 +116,11 @@ def get_decisions(channel_id: str, user=Depends(get_current_user), session=Depen
     require_channel_member(session, channel_id, user.id)
     decisions = session.exec(select(Decision).where(Decision.channel_id == channel_id).order_by(Decision.created_at.desc())).all()
     result = []
+    source_roots = {}
     for decision in decisions:
         latest = session.exec(select(DecisionRevision).where(DecisionRevision.decision_id == decision.id).order_by(DecisionRevision.revision.desc()).limit(1)).first()
         if latest:
-            result.append(revision_data(session, decision, latest))
+            result.append(revision_data(session, decision, latest, source_roots=source_roots))
     return result
 
 

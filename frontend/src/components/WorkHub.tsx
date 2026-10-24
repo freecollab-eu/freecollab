@@ -84,7 +84,7 @@ export function WorkHub({ presentation = 'dialog', layoutActions, sourceMessage,
   const onSharedPending = useCallback((pending: boolean) => { sharedPending.current = pending; }, []);
   const mayLeaveDocument = () => !(documentPending.current || feedPending.current || sharedPending.current || (presentation !== 'flow' && taskPending.current)) || window.confirm(t('Changes have not saved yet. Leaving may discard them. Leave anyway?'));
   const close = () => { if (presentation === 'flow' ? mayLeaveConversationWork() : mayLeaveDocument()) onClose(); };
-  useModalFocus(dialog, close, presentation === 'dialog');
+  useModalFocus(dialog, close, presentation === 'dialog', { escapePhase: 'bubble' });
   useEffect(() => {
     if (presentation !== 'flow') return;
     return registerConversationNavigationGuard({ userId: api.getCurrentUserId(), credential: api.getAccessToken(), workspaceId }, mayLeaveDocument);

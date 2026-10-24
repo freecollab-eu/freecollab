@@ -4,7 +4,12 @@
 .fc-contextual-copilot-trigger { display: inline-flex; align-items: center; gap: .5rem; padding: .5rem .65rem; border: 0; border-radius: calc(var(--fc-radius) * .65); background: transparent; color: var(--fc-accent); font-size: var(--fc-detail-size) !important; }
 .fc-contextual-copilot-trigger:hover { background: var(--fc-accent-soft); }
 .fc-contextual-copilot-card { max-width: 680px; min-width: 0; margin: .65rem 0; padding: 1.15rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); background: var(--fc-surface); color: var(--fc-text); font-size: max(.875rem, calc(var(--fc-body-size) * .95)); line-height: 1.75; }
+.fc-contextual-copilot-card:focus { outline: none; }
+.fc-contextual-copilot-card:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 3px; }
 .fc-contextual-copilot-card > header { display: flex; align-items: center; justify-content: space-between; gap: .65rem; }
+.fc-contextual-copilot-card > header > div { min-width: 0; }
+.fc-contextual-copilot-card h3 { margin: .25rem 0 0; font-family: var(--fc-heading-font); font-size: 1.15rem; font-weight: 450; line-height: 1.35; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.fc-contextual-copilot-context { display: block; color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.6; overflow-wrap: anywhere; }
 .fc-contextual-copilot-card > header button { display: grid; place-items: center; min-width: 44px; flex-shrink: 0; border: 0; background: transparent; color: inherit; }
 .fc-contextual-copilot-card p { margin: .65rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 .fc-contextual-copilot-card fieldset { min-width: 0; border: 0; margin: 0; padding: 0; }
@@ -25,6 +30,10 @@
 .fc-contextual-copilot-secure { padding: .85rem; background: var(--fc-accent-soft); border-radius: calc(var(--fc-radius) * .7); }
 .fc-contextual-copilot-result { margin-top: 1.15rem; padding-top: 1rem; border-top: 1px solid var(--fc-border); }
 .fc-contextual-copilot-result > small { display: block; color: var(--fc-muted); font-size: var(--fc-caption-size); margin-top: .65rem; }
+.fc-contextual-copilot-citations { margin: 1rem 0; padding-top: .75rem; border-top: 1px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-detail-size); line-height: 1.65; }
+.fc-contextual-copilot-citations ol { display: grid; gap: .35rem; list-style: none; margin: .5rem 0 0; padding: 0; }
+.fc-contextual-copilot-citations li { overflow-wrap: anywhere; }
+.fc-contextual-copilot-citations li > span { color: var(--fc-text); font-variant-numeric: tabular-nums; }
 .fc-contextual-copilot-card > [role=status] { display: flex; align-items: center; gap: .5rem; }
 .fc-contextual-copilot-card > [role=alert] { color: var(--fc-danger); }
 .fc-chat-main > .fc-contextual-copilot,

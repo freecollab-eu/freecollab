@@ -81,7 +81,8 @@ def main():
                 composer = page.get_by_role('textbox',name='Message #Thoughtful work',exact=True)
                 stage = 'actual scheduled send and encrypted database record'
                 composer.fill(text)
-                page.get_by_role('button',name='Schedule & reminders',exact=True).click()
+                page.get_by_role('button',name='Message options',exact=True).click()
+                page.get_by_role('menuitem',name='Schedule & reminders',exact=True).click()
                 panel = page.get_by_role('dialog',name='Scheduled messages and reminders',exact=True)
                 panel.get_by_role('button',name='Schedule message',exact=True).click()
                 expect(panel).to_have_count(0); expect(composer).to_have_value('')
@@ -144,7 +145,8 @@ def main():
                 checks['missed_live_event_recovered_from_authorized_bounded_native_cursor']=True
                 stage = 'narrow scheduling layout'
                 page.set_viewport_size({'width':320,'height':800})
-                page.get_by_role('button',name='Schedule & reminders',exact=True).click()
+                page.get_by_role('button',name='Message options',exact=True).click()
+                page.get_by_role('menuitem',name='Schedule & reminders',exact=True).click()
                 expect(panel).to_be_visible()
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                 panel.get_by_role('button',name='Close scheduling',exact=True).click()

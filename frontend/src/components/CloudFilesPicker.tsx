@@ -27,6 +27,7 @@ function CloudFilesPickerContent({ workspaceId, channelId, onImported, onClose, 
   const [application, setApplication] = useState(freshApplication), [authorization, setAuthorization] = useState<{ connection: CloudConnection; action: 'connect' | 'disconnect' } | null>(null);
   const [password, setPassword] = useState(''), [code, setCode] = useState(''), [busy, setBusy] = useState(''), [loading, setLoading] = useState(true), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const generation = useRef(0), browsing = useRef(0), token = useRef(api.getAccessToken()), importId = useRef(crypto.randomUUID());
+  const pickerRef = useRef<HTMLElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
   const current = (request: number) => generation.current === request && token.current === api.getAccessToken();
   const connection = connections.find(row => row.id === connectionId);
@@ -56,7 +57,20 @@ function CloudFilesPickerContent({ workspaceId, channelId, onImported, onClose, 
     window.addEventListener('freecollab:auth-changed', changed);
     return () => { ++generation.current; ++browsing.current; window.removeEventListener('freecollab:auth-changed', changed); };
   }, [workspaceId, channelId]);
-  useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
+  useEffect(() => {
+    const picker = pickerRef.current, alert = errorRef.current, active = document.activeElement;
+    if (!error || token.current !== api.getAccessToken() || !picker?.isConnected || !alert?.isConnected
+        || !(active instanceof HTMLElement) || !picker.contains(active)
+        || picker.closest('[hidden], [inert], [aria-hidden="true"]')
+        || !picker.getClientRects().length || getComputedStyle(picker).visibility !== 'visible') return;
+    const box = picker.getBoundingClientRect();
+    if (box.bottom <= 0 || box.top >= innerHeight || box.right <= 0 || box.left >= innerWidth) return;
+    const dialog = active.closest('dialog[open], [role="dialog"], [aria-modal="true"]');
+    if (dialog && dialog !== picker.closest('dialog[open], [role="dialog"], [aria-modal="true"]')) return;
+    // Announce all current errors, but never pull keyboard focus back from a
+    // newer conversation/menu/dialog or work that has been set aside.
+    alert.focus({ preventScroll: true });
+  }, [error]);
   async function run(key: string, operation: (request: number) => Promise<void>) {
     if (busy) return; const request = generation.current; setBusy(key); setError(''); setNotice('');
     try { await operation(request); } catch (failure) { if (current(request)) setError(failure instanceof Error ? failure.message : 'The cloud file action could not be completed.'); }
@@ -118,7 +132,7 @@ function CloudFilesPickerContent({ workspaceId, channelId, onImported, onClose, 
     const draft = freshCloudApplication(provider, !!initialProvider); baseline.current = JSON.stringify(draft);
     setApplication(draft); setAuthorization(null); setPassword(''); setCode('');
   }
-  return <section className="cloud-picker" aria-label={t('Cloud files')}>
+  return <section ref={pickerRef} className="cloud-picker" aria-label={t('Cloud files')}>
     <header className="cloud-picker-heading"><div><span className="cloud-picker-eyebrow">{t('Connected collections')}</span><h2><Cloud size={21} aria-hidden="true" />{t('Cloud files')}</h2><p>{t('Choose a file from your own cloud, or share a provider link.')}</p></div><div className="cloud-heading-actions"><button type="button" className="cloud-icon" disabled={!!busy || loading} aria-label={t('Reload cloud connections')} onClick={() => { ++browsing.current; setConnectionId(''); setItems([]); setSelection(null); setConfirmed(false); setFolder(null); setTrail([]); setPage(null); void load(); }}><RefreshCw size={17} /></button>{onClose && <button type="button" className="cloud-icon" aria-label={t('Close cloud files')} disabled={!!busy} onClick={onClose}><X size={18} /></button>}</div></header>
     {error && <div className="cloud-error" role="alert" tabIndex={-1} ref={errorRef}>{t(error)}</div>}
     {notice && <p className="cloud-notice" role="status"><Check size={16} />{t(notice)}</p>}

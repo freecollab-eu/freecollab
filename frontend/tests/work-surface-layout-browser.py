@@ -27,16 +27,16 @@ import{api}from API;import{useModalFocus}from MODAL;import{useWorkSurfaceLayout}
 api.applySession({access_token:'layout-fixture-token',user_id:'layout-fixture-owner',token_type:'bearer',public_key:'',encrypted_private_key:null});
 window.layoutApi=api;window.editorMounts=0;window.editorUnmounts=0;window.inputEvents=0;
 function Nested({onClose}){const ref=useRef(null);useModalFocus(ref,onClose);return createPortal(<section id="nested" role="dialog" aria-modal="true" ref={ref}><input id="nested-first"/><button onClick={onClose}>Close nested</button></section>,document.body)}
-function Surface(){const workRef=useRef(null),timelineRef=useRef(null),composerRef=useRef(null);const[scope,setScope]=useState('first-work'),[enabled,setEnabled]=useState(true),[nested,setNested]=useState(false),[popup,setPopup]=useState(false),[text,setText]=useState('retained draft\n'.repeat(90));
+function Surface(){const workRef=useRef(null),timelineRef=useRef(null),composerRef=useRef(null);const[scope,setScope]=useState('first-work'),[enabled,setEnabled]=useState(true),[nested,setNested]=useState(false),[popup,setPopup]=useState(false),[reading,setReading]=useState(false),[text,setText]=useState('retained draft\n'.repeat(90));
 const layout=useWorkSurfaceLayout({workRef,timelineRef,composerRef,scope,enabled});
 useModalFocus(workRef,layout.toggleExpanded,layout.mode==='expanded',{preserveInsideFocus:true,restoreFocus:false,escapePhase:'bubble'});
 useEffect(()=>{++window.editorMounts;return()=>{++window.editorUnmounts}},[]);
-window.layoutProof={...layout,setScope,setEnabled,setText,flushSync};
+window.layoutProof={...layout,setScope,setEnabled,setText,setReading,flushSync};
 const before=()=>layout.beforeViewChange();return <><div id="timeline" ref={timelineRef}><div style={{height:2400}}>Conversation scroll fixture</div></div>
 <section id="work" ref={workRef} data-mode={layout.mode} tabIndex={-1} onFocusCapture={layout.onFocusCapture}
 onKeyDown={event=>{if(!window.skipSurfaceEscape&&event.key==='Escape'&&!event.defaultPrevented&&!event.nativeEvent.isComposing&&event.keyCode!==229&&!(event.target.closest('[role="dialog"]'))&&layout.mode==='expanded'){event.preventDefault();event.stopPropagation();layout.toggleExpanded()}}}>
 <header><button id="toggle" onPointerDown={before} onClick={layout.toggleExpanded}>Expand or restore</button><button id="minimize" onPointerDown={before} onClick={layout.minimize}>Minimize</button><button id="resume" hidden={layout.mode!=='minimized'} onPointerDown={before} onClick={layout.resume}>Resume</button></header>
-<div id="work-body" className="fc-conversation-work-body" hidden={layout.mode==='minimized'}><textarea id="editor" value={text} onChange={event=>{++window.inputEvents;setText(event.target.value)}} onKeyDown={event=>{if(event.key==='Escape'&&window.preventEscape)event.preventDefault()}}/><input id="readonly" readOnly value="Read only selection"/><button id="open-popup" onClick={()=>setPopup(true)}>Open popup</button>
+<div id="work-body" className="fc-conversation-work-body" hidden={layout.mode==='minimized'}><textarea id="editor" hidden={reading} value={text} onChange={event=>{++window.inputEvents;setText(event.target.value)}} onKeyDown={event=>{if(event.key==='Escape'&&window.preventEscape)event.preventDefault()}}/><article id="reading-page" data-work-focus hidden={!reading} tabIndex={-1}>A retained reading page with the same hidden editor.</article><input id="readonly" readOnly value="Read only selection"/><button id="open-popup" onClick={()=>setPopup(true)}>Open popup</button>
 {popup&&<button id="popup" onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();setPopup(false)}}}>Reference popup</button>}
 <button id="open-nested" onClick={()=>setNested(true)}>Open nested modal</button><div id="groups-scroll" className="fc-reference-groups-body" style={{height:80,overflow:'auto'}}><div style={{height:700}}>Group scroll fixture</div></div><div style={{height:1200}}>Work scroll fixture</div><button id="last-control">Last control</button></div></section>
 <textarea id="composer" ref={composerRef} defaultValue="independent message draft"/>{nested&&<Nested onClose={()=>setNested(false)}/>}</>}
@@ -55,7 +55,7 @@ def main():
                 server.bind(('127.0.0.1', 0)); port = server.getsockname()[1]
             web = private / 'web'; web.mkdir()
             (web / 'index.html').write_text('''<!doctype html><html><head><style>
-body{margin:20px}button,input,textarea{font:16px sans-serif}#timeline{position:absolute;top:70px;left:20px;width:30%;height:520px;overflow:auto}#work{margin-left:35%;width:55%;background:white;border:1px solid #aaa}#work header{padding:8px;display:flex;gap:5px}#work-body{height:350px;overflow:auto;padding:8px}#editor{display:block;width:90%;height:180px}#work[data-mode=expanded]{position:fixed;inset:20px;width:auto;margin:0;z-index:10}#work[data-mode=expanded] #work-body{height:calc(100vh - 120px)}#work-body[hidden]{display:none}#composer{position:fixed;left:20px;bottom:20px;width:25%;height:60px}#nested{position:fixed;inset:30%;z-index:20;background:#eee;padding:20px}
+body{margin:20px}button,input,textarea{font:16px sans-serif}#timeline{position:absolute;top:70px;left:20px;width:30%;height:520px;overflow:auto}#work{margin-left:35%;width:55%;background:white;border:1px solid #aaa}#work header{padding:8px;display:flex;gap:5px}#work-body{height:350px;overflow:auto;padding:8px}#editor{display:block;width:90%;height:180px}#work[data-mode=expanded]{position:fixed;inset:20px;width:auto;margin:0;z-index:10}#work[data-mode=expanded] #work-body{height:calc(100vh - 120px)}#work-body[hidden],#editor[hidden],#reading-page[hidden]{display:none}#composer{position:fixed;left:20px;bottom:20px;width:25%;height:60px}#nested{position:fixed;inset:30%;z-index:20;background:#eee;padding:20px}
 </style></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>''')
             source = ENTRY
             for marker, name in {'API':'api.ts','MODAL':'useModalFocus.ts','LAYOUT':'useWorkSurfaceLayout.ts'}.items():
@@ -112,6 +112,22 @@ body{margin:20px}button,input,textarea{font:16px sans-serif}#timeline{position:a
                         assert page.locator('#editor').evaluate('field=>field.selectionStart===40&&field.selectionEnd===49')
                         assert page.locator('#work-body').evaluate('body=>body.scrollTop===70')
                     checks['minimize_resume_retains_last_mode_field_and_scroll'] = True
+                    stage = 'reading page and stale hidden editor focus across retained work modes'
+                    # A disconnected layout is not required: a real hidden
+                    # textarea stays mounted behind the focused reading page.
+                    page.evaluate("()=>{document.getElementById('editor').focus();layoutProof.flushSync(()=>layoutProof.setReading(true));document.getElementById('open-popup').focus()}")
+                    page.locator('#toggle').click(); settle(); expect(page.locator('#work')).to_have_attribute('data-mode','split')
+                    expect(page.locator('#open-popup')).to_be_focused(); expect(page.locator('#editor')).to_be_hidden()
+                    for mode in ['split','expanded']:
+                        if mode == 'expanded': page.locator('#toggle').click(); settle()
+                        page.locator('#reading-page').focus()
+                        page.evaluate("()=>{window.originalReader=document.getElementById('reading-page');document.getElementById('work-body').scrollTop=35}")
+                        page.locator('#minimize').click(); settle(); expect(page.locator('#composer')).to_be_focused()
+                        page.locator('#resume').click(); settle(); expect(page.locator('#work')).to_have_attribute('data-mode',mode)
+                        expect(page.locator('#reading-page')).to_be_focused()
+                        assert page.evaluate("()=>originalReader===document.getElementById('reading-page')&&originalEditor===document.getElementById('editor')&&originalEditor.isConnected&&originalEditor.hidden&&document.getElementById('work-body').scrollTop===35&&window.editorMounts===1&&window.editorUnmounts===0&&window.inputEvents===0")
+                    page.evaluate("()=>{layoutProof.flushSync(()=>layoutProof.setReading(false));document.getElementById('editor').focus()}")
+                    checks['reading_page_resume_skips_retained_hidden_editor'] = True
                     stage = 'nested popup, IME and modal stack Escape/Tab priority'
                     page.locator('#open-popup').click(); page.locator('#popup').focus(); page.keyboard.press('Escape'); settle()
                     expect(page.locator('#popup')).to_have_count(0); expect(page.locator('#work')).to_have_attribute('data-mode','expanded')
@@ -149,7 +165,7 @@ body{margin:20px}button,input,textarea{font:16px sans-serif}#timeline{position:a
                 try: process.wait(timeout=8)
                 except subprocess.TimeoutExpired: os.killpg(process.pid, signal.SIGKILL); process.wait(timeout=8)
             after = hashes(); REPORT.parent.mkdir(parents=True, exist_ok=True)
-            result = {'status':'pass' if len(checks)==7 and not errors and not unexpected else 'fail','stage':stage,'checks':checks,'source_before':before,'source_after':after,'source_mismatch':[name for name in SOURCES if before[name]!=after[name]],'errors':errors,'unexpected_requests':unexpected,'owned_process_stopped':not process or process.poll() is not None,'duration_seconds':round(time.time()-started,2),'scope':'Real Chromium and actual hooks with retained controlled React editor fixture; no full-product editor/session or deployed service proof.'}
+            result = {'status':'pass' if len(checks)==8 and not errors and not unexpected else 'fail','stage':stage,'checks':checks,'source_before':before,'source_after':after,'source_mismatch':[name for name in SOURCES if before[name]!=after[name]],'errors':errors,'unexpected_requests':unexpected,'owned_process_stopped':not process or process.poll() is not None,'duration_seconds':round(time.time()-started,2),'scope':'Real Chromium and actual hooks with retained controlled React editor fixture; no full-product editor/session or deployed service proof.'}
             REPORT.write_text(json.dumps(result, indent=2)+'\n')
             print(json.dumps(result, indent=2))
     assert result['status']=='pass' and not result['source_mismatch'], 'Layout hook proof failed'

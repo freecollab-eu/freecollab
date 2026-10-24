@@ -74,6 +74,89 @@ def listing(work, *, actor="owner", channel="a", query=""):
     return work.client.get("/channels/" + channel + "/conversation-work" + query, headers=headers(work, actor))
 
 
+def test_unopened_reply_work_has_derived_same_channel_discussion_routing(work):
+    response = save(work, source=work.reply['id'])
+    assert response.status_code == 201
+    assert response.json()['source_message_id'] == work.reply['id']
+    assert response.json()['discussion_message_id'] == work.source['id']
+    rows = listing(work).json()['items']
+    assert len(rows) == 1 and rows[0]['discussion_message_id'] == work.source['id']
+    assert 'PRIVATE' not in json.dumps(rows)
+
+
+def test_canonical_reply_decision_derives_discussion_without_duplicate_index_write(work):
+    response = work.client.post('/channels/a/decisions', headers=headers(work), json={
+        'title': 'Canonical discussion agreement', 'content': 'Agreed in an existing reply',
+        'source_message_id': work.reply['id'],
+    })
+    assert response.status_code == 200
+    assert response.json()['source_message_id'] == work.reply['id']
+    assert response.json()['discussion_message_id'] == work.source['id']
+    decisions_page = work.client.get('/channels/a/decisions', headers=headers(work))
+    found = next(row for row in decisions_page.json() if row['id'] == response.json()['id'])
+    assert found['discussion_message_id'] == work.source['id']
+    with Session(work.engine) as session:
+        assert not session.exec(select(ConversationWorkReference)).all()
+
+
+@pytest.mark.parametrize('invalid', ['deleted', 'foreign', 'cycle'])
+def test_invalid_reply_ancestry_never_exposes_a_discussion_root(work, invalid):
+    saved = save(work, source=work.reply['id'])
+    assert saved.status_code == 201
+    with Session(work.engine) as session:
+        source = session.get(Message, work.source['id'])
+        reply = session.get(Message, work.reply['id'])
+        if invalid == 'deleted':
+            source.deleted = True
+        elif invalid == 'foreign':
+            reply.parent_id = work.foreign_source['id']
+        else:
+            source.parent_id = reply.id
+        session.add(source); session.add(reply); session.commit()
+    assert listing(work).json()['items'] == []
+    assert save(work, source=work.reply['id']).status_code == 404
+
+
+def test_discussion_ancestry_cache_preserves_the_depth_bound_and_valid_suffixes(work):
+    from app.services.message_discussion import native_discussion_root
+    with Session(work.engine) as session:
+        parent = work.source['id']
+        for index in range(70):
+            row = Message(id='ancestry-' + str(index), channel_id='a', author_id='owner', content='Routing fixture', parent_id=parent)
+            session.add(row); session.flush(); parent = row.id
+        session.commit()
+        cache = {}
+        assert native_discussion_root(session, 'a', 'ancestry-69', cache=cache) is None
+        assert native_discussion_root(session, 'a', 'ancestry-30', cache=cache) == work.source['id']
+        # A cached shorter suffix cannot bypass the 64-node bound.
+        assert native_discussion_root(session, 'a', 'ancestry-69', cache=cache) is None
+        assert native_discussion_root(session, 'a', 'ancestry-62', cache=cache) == work.source['id']
+        assert native_discussion_root(session, 'b', 'ancestry-30', cache=cache) is None
+
+
+def test_client_cannot_supply_derived_discussion_routing(work):
+    assert save(work, discussion_message_id=work.foreign_source['id']).status_code == 422
+    response = work.client.post('/channels/a/decisions', headers=headers(work), json={
+        'title': 'An agreement', 'content': 'Still a native decision',
+        'source_message_id': work.reply['id'], 'discussion_message_id': work.foreign_source['id'],
+    })
+    assert response.status_code == 422
+
+
+def test_opaque_decision_serialization_does_not_derive_plaintext_discussion_metadata(work, monkeypatch):
+    from app.services import message_discussion
+    def forbidden(*_args, **_kwargs):
+        raise AssertionError('An encrypted decision must not use native discussion routing')
+    monkeypatch.setattr(message_discussion, 'native_discussion_root', forbidden)
+    record = Decision(id='opaque-decision', channel_id='a', created_by='owner')
+    revision = DecisionRevision(decision_id=record.id, revision=1, created_by='owner',
+                                content_mode='matrix', matrix_event_id='$verified-reference')
+    with Session(work.engine) as session:
+        result = decisions.revision_data(session, record, revision)
+    assert result['content_mode'] == 'matrix' and result['matrix_event_id'] == '$verified-reference'
+    assert 'discussion_message_id' not in result and 'source_message_id' not in result and 'content' not in result
+
+
 def test_links_use_real_native_targets_and_expose_only_routing_metadata(work):
     saved = [save(work, kind) for kind in ("document", "task", "decision")]
     assert [response.status_code for response in saved] == [201, 201, 201]
@@ -82,9 +165,10 @@ def test_links_use_real_native_targets_and_expose_only_routing_metadata(work):
     assert records.json()["next_offset"] is None
     assert {item["resource_kind"] for item in records.json()["items"]} == {"document", "task", "decision"}
     for item in records.json()["items"]:
-        assert set(item) == {"id", "channel_id", "source_message_id", "resource_kind", "resource_id",
+        assert set(item) == {"id", "channel_id", "source_message_id", "discussion_message_id", "resource_kind", "resource_id",
                              "project_id", "created_by", "created_at"}
         assert item["channel_id"] == "a" and item["source_message_id"] == work.source["id"]
+        assert item["discussion_message_id"] == work.source["id"]
         assert item["resource_id"] == work.targets[item["resource_kind"]]
         assert item["project_id"] == ("project-a" if item["resource_kind"] == "task" else None)
     assert "PRIVATE" not in records.text and "FOREIGN" not in records.text and "encrypted_payload" not in records.text

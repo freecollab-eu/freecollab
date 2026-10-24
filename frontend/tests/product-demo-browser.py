@@ -23,7 +23,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, reveal_message_actions
+from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, reveal_message_actions, activate_chat_feature, saved_document_reading, edit_saved_document, reveal_discussion_work, show_channel_introduction
 
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('PRODUCT_DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/conversation-flow-20261023/product-demo-browser.json')))
@@ -75,14 +75,8 @@ def live_conversation(page, region):
 
 def open_flow(page, kind='Documents'):
     close_channels(page)
-    rail = page.locator('.fc-chat-flow-actions')
-    name = {'Documents': re.compile(r'^(Add a document|Lägg till ett dokument)$'),
-            'Tasks': re.compile(r'^(Next step|Nästa steg)$')}.get(kind)
-    if name:
-        rail.get_by_role('button',name=name,exact=True).click()
-    else:
-        rail.get_by_role('button',name=re.compile(r'^(More|Mer)$'),exact=True).click()
-        rail.get_by_role('menuitem',name=kind,exact=True).click()
+    feature = {'Documents': 'document', 'Tasks': 'task', 'Channel activity': 'activity', 'Workflows': 'workflows', 'Cloud files': 'cloud', 'AI settings': 'copilot'}[kind]
+    activate_chat_feature(page, feature)
     region = flow_region(page)
     live_conversation(page,region)
     return region
@@ -106,17 +100,22 @@ def send_actual_message(page, channel, content):
     return message
 
 
+def toggle_focus_mode(page):
+    page.get_by_role('button', name='Message options', exact=True).click()
+    page.get_by_role('menuitemcheckbox', name='Focus mode', exact=True).click()
+
+
 def room_geometry(page):
     """Record rendered layout without changing the product or its DOM."""
     return page.evaluate("""() => {
       const rect = selector => { const node = document.querySelector(selector); if (!node) return null;
         const box = node.getBoundingClientRect(); return {x:box.x,y:box.y,width:box.width,height:box.height}; };
       const room = document.querySelector('.fc-chat-room-content');
-      const lead = document.querySelector('.fc-chat-message.is-lead .fc-chat-message-content');
+      const message = document.querySelector('.fc-chat-message-content');
       return {viewport:{width:innerWidth,height:innerHeight},conversation:rect('.fc-chat-message-list'),
         material:rect('.fc-chat-shared-material'),photo:rect('.fc-chat-material-preview img'),
         columns:room ? getComputedStyle(room).gridTemplateColumns : null,
-        leadFont:lead ? getComputedStyle(lead).fontSize : null};
+        messageFont:message ? getComputedStyle(message).fontSize : null,introduction:rect('.fc-chat-channel-introduction')};
     }""")
 
 
@@ -385,8 +384,10 @@ def main():
                     return visit
                 try:
                     stage = 'normal signed demo visit and actual product shell'
-                    visit = bootstrap(page, lambda: page.goto(app + '/product-demo/?locale=en',wait_until='domcontentloaded'))
+                    with page.expect_response(lambda response: response.request.method == 'GET' and re.fullmatch(r'/api/read-receipts/channels/[^/]+',urlsplit(response.url).path) is not None) as opening_receipts:
+                        visit = bootstrap(page, lambda: page.goto(app + '/product-demo/?locale=en',wait_until='domcontentloaded'))
                     token, channel = visit['session']['access_token'], visit['channel_id']
+                    assert urlsplit(opening_receipts.value.url).path == '/api/read-receipts/channels/' + channel
                     me = request(base,'GET','/auth/me',token); assert me['id'] == visit['session']['user_id']
                     channels = request(base,'GET','/channels?workspace_id=' + visit['workspace_id'],token)
                     selected = next(row for row in channels if row['id'] == channel)
@@ -399,6 +400,19 @@ def main():
                     stage = 'approved courtyard story and real authenticated reference image'
                     source = request(base,'GET','/messages/' + visit['examples']['message_id'],token)
                     assert source['content'] == 'Shall we open up to the courtyard?'
+                    # The actual visit has no receipt for its visitor. Its first
+                    # incoming root is independently known from the native seed,
+                    # rather than from the frontend entry-policy implementation.
+                    initial_receipts = opening_receipts.value.json()
+                    assert not any(row['user_id'] == visit['session']['user_id'] for row in initial_receipts)
+                    roots = sorted((row for row in messages if not row.get('parent_id') and not row.get('deleted')),key=lambda row:row['created_at'])
+                    assert next(row for row in roots if row['author_id'] != visit['session']['user_id'])['id'] == source['id']
+                    expect(page.locator('#message-' + source['id'])).to_be_in_viewport(ratio=.7)
+                    expect(page.locator('.fc-chat-message.is-lead')).to_have_count(0)
+                    expect(page.get_by_role('region',name='Channel introduction',exact=True)).to_have_count(0)
+                    visual_geometry['initial_entry'] = {'kind':'first-unread','message_id':source['id'],'receipt_user_ids':[row['user_id'] for row in initial_receipts],'anchor':reading_anchor(page)}
+                    introduction = show_channel_introduction(page)
+                    expect(introduction.get_by_role('heading',level=1)).to_have_text(selected['name'])
                     seeded_files = request(base,'GET','/files/channels/' + channel,token)
                     courtyard = next(row for row in seeded_files if row['filename'] == 'courtyard.png')
                     reference_photo = (ROOT / 'frontend/src/assets/open-studio/courtyard.png').read_bytes()
@@ -420,16 +434,26 @@ def main():
                     assert avatar.evaluate('node=>node.naturalWidth > 0 && node.src.startsWith("blob:")')
                     passed('approved_profile_portraits_use_authenticated_native_private_images')
 
-                    stage = 'complete room opens at the story with a clear way to newest messages'
-                    assert visual_geometry['initial_reading_anchor']['top'] == 0
+                    stage = 'first unread entry and explicit native history and newest navigation'
+                    assert visual_geometry['initial_entry']['message_id'] == source['id'] and visual_geometry['initial_entry']['kind'] == 'first-unread'
+                    # Give the compact conversation genuine history to navigate.
+                    # Each setup update is a normal native UI send, never a DOM
+                    # height, synthetic scroll position or fabricated API reply.
+                    for index in range(16):
+                        if page.locator('.fc-chat-timeline').evaluate('node=>node.scrollHeight-node.clientHeight>600'):
+                            break
+                        send_actual_message(page,channel,'A working studio update ' + str(index + 1) + '. Keeping materials, people and decisions close to the conversation.')
+                    assert page.locator('.fc-chat-timeline').evaluate('node=>node.scrollHeight-node.clientHeight>600')
+                    history_start = page.locator('#message-' + source['id']).get_by_role('button',name='More message actions',exact=True)
+                    history_start.focus(); history_start.press('Control+Home')
+                    page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop === 0")
                     expect(page.locator('#message-' + source['id'])).to_be_in_viewport(ratio=.7)
-                    stage = 'explicit newest navigation from the initial story'
+                    stage = 'explicit newest navigation from an ordinary earlier message'
                     page.get_by_role('button',name='Jump to latest messages',exact=True).click()
-                    newest_seed = max(messages,key=lambda row:row['created_at'])
+                    newest_seed = max(request(base,'GET','/messages/channels/' + channel + '?limit=100',token),key=lambda row:row['created_at'])
                     expect(page.locator('#message-' + newest_seed['id'])).to_be_in_viewport(ratio=.7)
-                    journey = page.locator('.fc-chat-journey')
-                    stage = 'return from newest to the story through the real journey control'
-                    journey.get_by_role('button',name=re.compile('The conversation')).click()
+                    stage = 'native keyboard returns from newest to earlier conversation history'
+                    history_start.focus(); history_start.press('Control+Home')
                     page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop === 0")
                     expect(page.locator('#message-' + source['id'])).to_be_in_viewport(ratio=.7)
                     passed('room_overview_and_explicit_newest_navigation_are_both_usable')
@@ -440,8 +464,7 @@ def main():
                     page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop > 60")
                     page.wait_for_timeout(600)  # Chromium's native keyboard-scroll animation.
                     keyboard_anchor = reading_anchor(page)
-                    page.locator('.fc-chat-flow-actions').get_by_role('button',name='Next step',exact=True).focus()
-                    page.keyboard.press('Enter')
+                    activate_chat_feature(page,'task',keyboard=True)
                     keyboard_tools = flow_region(page)
                     expect(keyboard_tools.locator('.fc-project-flow-tasks')).to_be_visible()
                     live_conversation(page,keyboard_tools)
@@ -452,7 +475,7 @@ def main():
                     assert refreshed_page.value.ok and refreshed_tasks.value.ok
                     page.evaluate('() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
                     expect(keyboard_tools).to_have_count(0); same_reading_anchor(page,keyboard_anchor)
-                    journey.get_by_role('button',name='The conversation',exact=True).click()
+                    history_start.focus(); history_start.press('Control+Home')
                     page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop === 0")
                     passed('keyboard_reading_anchor_survives_workspace_return_and_real_material_API_refresh')
 
@@ -468,6 +491,7 @@ def main():
                     brief_card.get_by_role('button',name='Open document',exact=True).scroll_into_view_if_needed()
                     anchor = click_with_reading_anchor(page,brief_card.get_by_role('button',name='Open document',exact=True))
                     inline_tools = flow_region(page)
+                    edit_saved_document(inline_tools, title=brief['title'])
                     expect(inline_tools.get_by_label('Title',exact=True)).to_have_value(brief['title'])
                     expect(inline_tools.get_by_label('Document text',exact=True)).to_be_editable()
                     live_conversation(page,inline_tools)
@@ -527,6 +551,7 @@ def main():
                     stage = 'material document source reveal clears its target before ordinary message save'
                     brief_card.get_by_role('button',name='Open document',exact=True).click()
                     inline_tools = flow_region(page)
+                    edit_saved_document(inline_tools, title=brief['title'])
                     expect(inline_tools.get_by_label('Title',exact=True)).to_have_value(brief['title'])
                     stack_context = inline_tools.locator('details[data-document-stack="' + seed_stack['id'] + '"]')
                     stack_context.locator(':scope > summary').click()
@@ -579,7 +604,9 @@ def main():
                     expect(page.locator('.fc-chat-shared-material')).to_have_count(1)
                     expect(page.locator('.fc-chat-material-document')).to_have_count(1)
                     expect(page.locator('.fc-chat-material-next-step')).to_have_count(1)
-                    expect(page.locator('#message-' + source['id'])).to_have_class(re.compile(r'\bis-lead\b'))
+                    expect(page.locator('.fc-chat-message.is-lead')).to_have_count(0)
+                    ordinary_sizes = page.locator('#message-' + source['id'] + ' .fc-chat-message-content, #message-' + latest_message['id'] + ' .fc-chat-message-content').evaluate_all('nodes=>nodes.map(node=>parseFloat(getComputedStyle(node).fontSize))')
+                    assert len(ordinary_sizes) == 2 and abs(ordinary_sizes[0] - ordinary_sizes[1]) < .01, 'Ordinary history and the newest message use the same readable message typography'
                     after_growth = room_geometry(page); visual_geometry['after_thirteen_messages'] = after_growth
                     assert abs(after_growth['material']['width']-before_growth['material']['width']) <= 3
                     assert after_growth['conversation']['x'] < after_growth['material']['x']
@@ -602,14 +629,14 @@ def main():
                     newest_above_composer(page,latest_message['id'])
                     open_chat_tool(page,'Shared material on the right')
                     page.get_by_role('button',name='More channel tools',exact=True).click()
-                    page.get_by_role('button',name='Focus mode',exact=True).click()
+                    toggle_focus_mode(page)
                     expect(page.locator('.fc-chat')).to_have_class(re.compile(r'\bis-focus-mode\b'))
                     focused_composer = page.locator('.fc-chat-composer-area').bounding_box()
                     assert focused_composer['width'] > baseline_composer['width'] + 80
                     assert abs(focused_composer['x'] + focused_composer['width']/2 - 720) <= 3
                     expect(page.locator('.fc-chat-shared-material')).to_be_hidden()
                     expect(composer).to_have_value(multiline); newest_above_composer(page,latest_message['id'])
-                    page.get_by_role('button',name='Focus mode',exact=True).click()
+                    toggle_focus_mode(page)
                     expect(page.locator('.fc-chat-shared-material')).to_be_visible()
                     visual_geometry['multiline_arrangement'] = {'left':left_geometry,'left_composer':left_composer,'restored':room_geometry(page)}
                     composer.fill('')
@@ -656,7 +683,7 @@ def main():
                     management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); region = management.get_by_role('region',name='Reviewed examples',exact=True); expect(region.get_by_role('button',name=re.compile('^Product demo verification page'))).to_be_visible()
                     management.get_by_role('button',name='Undo move',exact=True).click(); expect(management.get_by_label('Move Product demo verification page to stack',exact=True)).to_have_value('')
                     management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); expect(region.get_by_text('A comment on the actual shared page.',exact=True)).to_be_visible()
-                    region.get_by_role('button',name='Comment in Product demo verification page',exact=True).click(); expect(panel.get_by_label('Document text',exact=True)).to_have_value(simultaneous_body)
+                    region.get_by_role('button',name='Comment in Product demo verification page',exact=True).click(); edit_saved_document(panel,title='Product demo verification page',text=simultaneous_body); expect(panel.get_by_label('Document text',exact=True)).to_have_value(simultaneous_body)
                     passed('normal_stack_placement_Undo_and_derived_discussion_source')
                     panel.get_by_role('button',name='Close this work',exact=True).click()
 
@@ -732,11 +759,13 @@ def main():
                     panel.get_by_role('button',name='Show source message',exact=True).click()
                     expect(source_article).to_be_focused(); expect(panel).to_be_visible(); assert source_editor.evaluate('node=>node===window.__sourceEditor')
                     panel.get_by_role('button',name='Close this work',exact=True).click()
+                    reveal_discussion_work(source_article)
                     doc_card = source_article.locator('[data-work-reference="' + doc_reference['id'] + '"]')
                     expect(doc_card).to_contain_text('A document from our conversation')
                     choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name'])
+                    reveal_discussion_work(source_article)
                     expect(doc_card).to_contain_text('A document from our conversation'); doc_card.click()
-                    panel = flow_region(page); expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
+                    panel = flow_region(page); edit_saved_document(panel,title='A document from our conversation',text=text + ' Revised.'); expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
                     index_rows = request(base,'GET','/channels/' + channel + '/conversation-work?source_message_id=' + message['id'],token)['items']
                     assert any(row['id'] == doc_reference['id'] and row['resource_id'] == doc_reference['resource_id'] for row in index_rows)
                     panel.get_by_role('button',name='Close this work',exact=True).click()
@@ -753,9 +782,10 @@ def main():
                     assert linked_task.value.ok; task_reference = linked_task.value.json()
                     assert task_reference['source_message_id'] == message['id'] and task_reference['resource_kind'] == 'task'
                     panel.get_by_role('button',name='Close this work',exact=True).click()
+                    reveal_discussion_work(source_article)
                     task_card = source_article.locator('[data-work-reference="' + task_reference['id'] + '"]')
                     expect(task_card).to_contain_text('A next step from our conversation')
-                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name']); task_card.click()
+                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name']); reveal_discussion_work(source_article); task_card.click()
                     panel = flow_region(page); expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text('A next step from our conversation')
                     assert any(row['id'] == task_reference['id'] for row in request(base,'GET','/channels/' + channel + '/conversation-work?source_message_id=' + message['id'],token)['items'])
                     panel.get_by_role('button',name='Close this work',exact=True).click()
@@ -773,6 +803,7 @@ def main():
                     assert source_decision['source_message_id'] == message['id']
                     decisions_flow.get_by_role('button',name='Source',exact=True).click(); expect(decisions_flow).to_be_visible(); expect(source_article).to_be_focused()
                     page.get_by_role('button',name='Close this work',exact=True).click()
+                    reveal_discussion_work(source_article)
                     decision_card = source_article.locator('.fc-chat-linked-work button').filter(has=page.get_by_text('A decision from our conversation',exact=True))
                     expect(decision_card).to_be_visible(); decision_card.click()
                     decisions_flow = page.get_by_role('region',name='Decisions in this conversation',exact=True)
@@ -787,14 +818,15 @@ def main():
                     dirty_form = panel.get_by_role('form',name='Edit task',exact=True); dirty_form.get_by_label('Description',exact=True).fill('An unsaved task draft to keep.')
                     dirty_form.evaluate('node=>{window.__guardedTaskEditor=node}')
                     page.once('dialog',lambda dialog:dialog.dismiss())
-                    page.locator('.fc-chat-flow-actions').get_by_role('button',name='Add a document',exact=True).click()
+                    activate_chat_feature(page,'document',expect_closed=False)
                     expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.'); assert dirty_form.evaluate('node=>node===window.__guardedTaskEditor')
+                    expect(page.locator('.fc-slash-commands')).to_be_visible(); page.locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
                     page.once('dialog',lambda dialog:dialog.dismiss()); choose_chat_channel(page,other['name']); close_channels(page)
                     expect(page.locator('#chat-channel-name')).to_have_text(selected['name']); expect(dirty_form.get_by_label('Description',exact=True)).to_have_value('An unsaved task draft to keep.')
                     live_conversation(page,panel)
                     page.once('dialog',lambda dialog:dialog.accept()); choose_chat_channel(page,other['name'])
                     expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(flow_region(page)).to_have_count(0)
-                    choose_chat_channel(page,selected['name']); task_card.click(); panel = flow_region(page)
+                    choose_chat_channel(page,selected['name']); reveal_discussion_work(source_article); task_card.click(); panel = flow_region(page)
                     expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text(text + ' Revised.')
                     assert panel.get_by_role('form',name='Edit task',exact=True).count() == 0
                     panel.get_by_role('button',name='Close this work',exact=True).click()
@@ -803,9 +835,12 @@ def main():
                     stage = 'real saved appearance and truthful unconfigured AI'
                     open_chat_tool(page,'Appearance settings'); appearance = page.get_by_role('dialog',name='Make space your own.',exact=True); appearance.get_by_role('radio',name='Dark',exact=True).check(); appearance.get_by_role('button',name='Save changes',exact=True).click(); expect(appearance).to_have_count(0)
                     assert request(base,'GET','/preferences/appearance',token)['mode'] == 'dark'
-                    ai = page.locator('.fc-chat-journey-context .fc-contextual-copilot')
-                    ai.get_by_role('button',name=re.compile('^AI help for ')).click()
-                    expect(ai.locator('.fc-contextual-copilot-card')).to_be_visible()
+                    page.get_by_role('button',name='Channel menu',exact=True).click()
+                    page.get_by_role('menuitem',name='Recap this channel',exact=True).click()
+                    ai = page.get_by_role('region',name=re.compile(r'^AI help for Loaded conversation in #'))
+                    expect(ai).to_be_visible()
+                    expect(ai).to_have_class(re.compile(r'\bfc-contextual-copilot-card\b'))
+                    expect(ai.get_by_role('heading',name='Recap this channel',exact=True)).to_be_visible()
                     expect(ai).to_contain_text(re.compile('not enabled|not configured|disabled|must enable and connect',re.I))
                     expect(ai.get_by_role('button',name='Send to provider',exact=True)).to_have_count(0)
                     ai.get_by_role('button',name='Close AI help',exact=True).click()
@@ -846,6 +881,7 @@ def main():
                     expect(swedish.get_by_role('button',name='Skicka meddelande',exact=True)).to_be_visible(); assert swedish.evaluate('document.documentElement.scrollWidth <= innerWidth + 1')
                     sv_documents = request(base,'GET','/channels/' + sv_visit['channel_id'] + '/shared-documents',sv_visit['session']['access_token'])
                     sv_seed = next(row for row in sv_documents if row['id'] == sv_visit['examples']['document_ids'][0])
+                    show_channel_introduction(swedish)
                     sv_card = swedish.locator('.fc-chat-material-document[data-document-id="' + sv_seed['id'] + '"]')
                     expect(sv_card).to_be_visible(timeout=45000)
                     REPORT.parent.mkdir(parents=True,exist_ok=True); swedish.mouse.move(1,1)
@@ -855,6 +891,7 @@ def main():
                     sv_card.locator('.fc-chat-material-footer button').scroll_into_view_if_needed()
                     sv_anchor = click_with_reading_anchor(swedish,sv_card.locator('.fc-chat-material-footer button'))
                     sv_inline = flow_region(swedish)
+                    edit_saved_document(sv_inline, title=sv_seed['title'])
                     expect(sv_inline.locator('#shared-document-title')).to_have_value(sv_seed['title'])
                     sv_body = sv_inline.get_by_label('Dokumenttext',exact=True); expect(sv_body).to_be_editable()
                     swedish.wait_for_function("""() => {
@@ -879,6 +916,7 @@ def main():
                     expect(sv_inline).to_have_count(0); expect(sv_composer).to_have_value('Ett oskickat utkast som ska finnas kvar.'); same_reading_anchor(swedish,sv_anchor)
                     sv_reopen_anchor = click_with_reading_anchor(swedish,sv_card.locator('.fc-chat-material-footer button'))
                     sv_inline = flow_region(swedish)
+                    edit_saved_document(sv_inline, title=sv_seed['title'], text=saved_body)
                     expect(sv_inline.get_by_label('Dokumenttext',exact=True)).to_have_value(saved_body)
                     assert sv_inline.evaluate('node=>node.scrollWidth <= node.clientWidth + 1')
                     return_from_sv_document()

@@ -28,7 +28,8 @@ interface Transition {
 }
 
 const editable = (element: HTMLElement): element is HTMLInputElement | HTMLTextAreaElement => element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement;
-const visible = (element: HTMLElement) => element.isConnected && !element.closest('[inert]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+const visible = (element: HTMLElement) => element.isConnected && !element.closest('[hidden], [inert]') && element.getClientRects().length > 0 && getComputedStyle(element).visibility !== 'hidden';
+const preferredField = (element: HTMLElement) => visible(element) && (editable(element) || element.isContentEditable || element.hasAttribute('data-work-focus'));
 function fieldSnapshot(element: HTMLElement): FieldSnapshot {
   if (editable(element) && element.selectionStart !== null && element.selectionEnd !== null)
     return { element, selection: { start: element.selectionStart, end: element.selectionEnd, direction: element.selectionDirection || 'none', value: element.value } };
@@ -42,34 +43,34 @@ export function useWorkSurfaceLayout({ workRef, timelineRef, composerRef, scope,
   const currentIdentity = useRef(identity), generation = useRef(0), mounted = useRef(true);
   const prepared = useRef<SurfaceSnapshot | null>(null), minimized = useRef<SurfaceSnapshot | null>(null);
   const resumeMode = useRef<'split' | 'expanded'>('split');
-  const lastEditable = useRef<HTMLElement | null>(null), pending = useRef<Transition | null>(null);
+  const lastPreferredField = useRef<HTMLElement | null>(null), pending = useRef<Transition | null>(null);
   const [view, setView] = useState<{ identity: string; mode: WorkSurfaceMode }>({ identity, mode: 'split' });
   if (currentIdentity.current !== identity) {
     currentIdentity.current = identity; ++generation.current;
-    prepared.current = null; minimized.current = null; lastEditable.current = null; pending.current = null;
+    prepared.current = null; minimized.current = null; lastPreferredField.current = null; pending.current = null;
     resumeMode.current = 'split';
   }
   const mode: WorkSurfaceMode = enabled && view.identity === identity ? view.mode : 'split';
   const liveMode = useRef(mode); liveMode.current = mode;
   const current = () => mounted.current && enabled && identity === currentIdentity.current && actor === api.getCurrentUserId() && token === api.getAccessToken();
 
-  function workFocus(work: HTMLElement, preferEditable: boolean): FieldSnapshot | null {
+  function workFocus(work: HTMLElement, preferField: boolean): FieldSnapshot | null {
     const active = document.activeElement;
     if (active instanceof HTMLElement && work.contains(active)) {
-      if (editable(active) || active.isContentEditable) lastEditable.current = active;
-      if (!preferEditable || editable(active) || active.isContentEditable) return fieldSnapshot(active);
+      if (preferredField(active)) lastPreferredField.current = active;
+      if ((!preferField || preferredField(active)) && visible(active)) return fieldSnapshot(active);
     }
-    const previous = lastEditable.current;
-    if (previous?.isConnected && work.contains(previous)) return fieldSnapshot(previous);
-    return active instanceof HTMLElement && work.contains(active) ? fieldSnapshot(active) : null;
+    const previous = lastPreferredField.current;
+    if (previous && visible(previous) && work.contains(previous)) return fieldSnapshot(previous);
+    return active instanceof HTMLElement && visible(active) && work.contains(active) ? fieldSnapshot(active) : null;
   }
-  function capture(preferEditable: boolean): SurfaceSnapshot | null {
+  function capture(preferField: boolean): SurfaceSnapshot | null {
     const work = workRef.current;
     if (!current() || !work?.isConnected) return null;
     const scrollers = new Set<HTMLElement>([work]);
     if (timelineRef.current) scrollers.add(timelineRef.current);
     for (const element of work.querySelectorAll<HTMLElement>('.fc-conversation-work-body, .fc-collaboration-body, .fc-reference-groups-body, textarea, [data-work-scroll]')) scrollers.add(element);
-    return { work, focus: workFocus(work, preferEditable), scroll: [...scrollers].map(element => ({ element, top: element.scrollTop, left: element.scrollLeft })) };
+    return { work, focus: workFocus(work, preferField), scroll: [...scrollers].map(element => ({ element, top: element.scrollTop, left: element.scrollLeft })) };
   }
   function beforeViewChange(_event?: { type?: string }) {
     prepared.current = capture(true);
@@ -93,18 +94,18 @@ export function useWorkSurfaceLayout({ workRef, timelineRef, composerRef, scope,
   }
   function resume() { if (liveMode.current === 'minimized') transition(resumeMode.current, minimized.current || capture(true)); }
   function reset() {
-    ++generation.current; pending.current = null; prepared.current = null; minimized.current = null; lastEditable.current = null;
+    ++generation.current; pending.current = null; prepared.current = null; minimized.current = null; lastPreferredField.current = null;
     resumeMode.current = 'split';
     liveMode.current = 'split'; setView({ identity: currentIdentity.current, mode: 'split' });
   }
   function onFocusCapture(event: FocusEvent<HTMLElement>) {
     const element = event.target;
-    if (current() && element instanceof HTMLElement && workRef.current?.contains(element) && (editable(element) || element.isContentEditable)) lastEditable.current = element;
+    if (current() && element instanceof HTMLElement && workRef.current?.contains(element) && preferredField(element)) lastPreferredField.current = element;
   }
 
   useLayoutEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; ++generation.current; pending.current = null; prepared.current = null; minimized.current = null; lastEditable.current = null; };
+    return () => { mounted.current = false; ++generation.current; pending.current = null; prepared.current = null; minimized.current = null; lastPreferredField.current = null; };
   }, []);
   useEffect(() => {
     if (!enabled) return;

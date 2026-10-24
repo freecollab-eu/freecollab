@@ -43,7 +43,7 @@ function fixture({ secure = false, consented = true, configured = true, refs, do
   const button = name => { const found = nodes().find(node => node.type === 'button' && text(node).trim() === name); assert.ok(found, 'Missing button ' + name); return found; };
   async function click(name) { const node = button(name); assert.ok(!node.props.disabled, 'Button disabled: ' + name); node.props.onClick(); await settle(); }
   async function check(label, value = true) { const row = nodes().find(node => node.type === 'label' && text(node).includes(label)); assert.ok(row, 'Missing checkbox ' + label); const input = row.props.children.find(node => node?.type === 'input'); input.props.onChange({ target: { checked: value } }); await settle(); }
-  return { calls, applied, exports, settle, nodes, button, click, check, text: () => text(tree), async open() { await settle(); await click('AI help'); }, setState(next) { state = { ...state, ...next }; }, setChoices(next) { choices = next; }, setDocumentText(next) { documentText = next; }, setProps(next) { props = { ...props, ...next }; pending = true; }, changeActor() { token = 'different-actor'; listeners.get('freecollab:auth-changed')?.(); }, rawChoices: () => plain(choices) };
+  return { calls, applied, exports, settle, nodes, button, click, check, text: () => text(tree), async open() { await settle(); const trigger = nodes().find(node => node.type === 'button' && node.props.className === 'fc-contextual-copilot-trigger'); assert.ok(trigger, 'Missing concrete contextual action'); assert.ok(!trigger.props.disabled); trigger.props.onClick(); await settle(); }, setState(next) { state = { ...state, ...next }; }, setChoices(next) { choices = next; }, setDocumentText(next) { documentText = next; }, setProps(next) { props = { ...props, ...next }; pending = true; }, changeActor() { token = 'different-actor'; listeners.get('freecollab:auth-changed')?.(); }, rawChoices: () => plain(choices) };
 }
 
 test('opening inline AI makes no provider request, reuse of central history, consent change or write', async () => {
@@ -52,6 +52,116 @@ test('opening inline AI makes no provider request, reuse of central history, con
   assert.equal(h.applied.length, 0); assert.ok(h.text().includes('api.customer.example')); assert.ok(h.text().includes('reviewed-model'));
   await h.check('I opt in'); assert.deepEqual(h.calls.find(call => call.kind === 'consent'), { kind: 'consent', revision: 4, enabled: true });
   assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create').length, 0);
+});
+
+test('the entry describes its actual action while an external activation opens review without a provider request', async () => {
+  const h = fixture(); await h.settle();
+  const trigger = h.nodes().find(node => node.type === 'button' && node.props.className === 'fc-contextual-copilot-trigger');
+  assert.equal(h.text(), 'Draft a reply');
+  assert.equal(trigger.props['aria-label'], 'Draft a reply for This message');
+  assert.equal(h.calls.length, 0);
+  h.setProps({ hideTrigger: true, activation: { actionId: 'reply', key: 1 } }); await h.settle();
+  assert.ok(!h.nodes().some(node => node.props.className === 'fc-contextual-copilot-trigger'));
+  assert.ok(h.nodes().some(node => node.type === 'h3' && node.props.children === 'Draft a reply'));
+  assert.deepEqual(h.calls.map(call => call.kind), ['status', 'sources', 'prepare']);
+  assert.equal(h.button('Send to provider').props.disabled, true);
+  assert.equal(h.applied.length, 0);
+});
+
+test('unknown and ambiguous action activations never fall back or load selected content', async () => {
+  for (const actions of [[{ id: 'reply', label: 'Draft a reply', prompt: 'Only this action.' }], [{ id: 'reply', label: 'One', prompt: 'One' }, { id: 'reply', label: 'Two', prompt: 'Two' }]]) {
+    const h = fixture();
+    h.setProps({ actions, hideTrigger: true, activation: { actionId: actions.length === 1 ? 'unknown' : 'reply', key: 1 } }); await h.settle();
+    assert.equal(h.calls.length, 0);
+    assert.ok(!h.nodes().some(node => node.type === 'section'));
+    assert.equal(h.applied.length, 0);
+  }
+});
+
+test('external action changes discard the prior answer and its disclosure instead of sending the next action', async () => {
+  const h = fixture();
+  h.setProps({ actions: [{ id: 'reply', label: 'Draft a reply', prompt: 'Reply to selected source.' }, { id: 'next_steps', label: 'Suggest next steps', prompt: 'Suggest only reviewed next steps.' }], hideTrigger: true, activation: { actionId: 'reply', key: 1 } });
+  await h.settle(); await h.check('Send this request'); await h.click('Send to provider');
+  assert.ok(h.text().includes('A reviewed suggestion [S1].'));
+  h.setProps({ activation: { actionId: 'next_steps', key: 2 } }); await h.settle();
+  assert.ok(!h.text().includes('A reviewed suggestion [S1].'));
+  assert.ok(h.nodes().some(node => node.type === 'h3' && node.props.children === 'Suggest next steps'));
+  assert.equal(h.button('Send to provider').props.disabled, true);
+  assert.equal(h.calls.filter(call => call.kind === 'send').length, 1);
+  assert.equal(h.applied.length, 0);
+});
+
+test('closing an externally activated review does not reopen until a new activation key', async () => {
+  const h = fixture(); let closed = 0;
+  h.setProps({ hideTrigger: true, activation: { actionId: 'reply', key: 1 }, onClose: () => closed++ }); await h.settle();
+  const close = h.nodes().find(node => node.type === 'button' && node.props['aria-label'] === 'Close AI help');
+  close.props.onClick(); await h.settle();
+  assert.equal(closed, 1); assert.ok(!h.nodes().some(node => node.type === 'section'));
+  h.setProps({ contextLabel: 'Same reviewed message' }); await h.settle();
+  assert.ok(!h.nodes().some(node => node.type === 'section'));
+  h.setProps({ activation: { actionId: 'reply', key: 2 } }); await h.settle();
+  assert.ok(h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create').length, 0);
+});
+
+test('restoring a temporarily unavailable action cannot reopen a dismissed activation', async () => {
+  const h = fixture(), actions = [{ id: 'reply', label: 'Draft a reply', prompt: 'Reply to selected source.' }];
+  h.setProps({ actions, hideTrigger: true, activation: { actionId: 'reply', key: 1 } }); await h.settle();
+  h.nodes().find(node => node.type === 'button' && node.props['aria-label'] === 'Close AI help').props.onClick(); await h.settle();
+  const reads = h.calls.length;
+  h.setProps({ actions: [] }); await h.settle();
+  h.setProps({ actions }); await h.settle();
+  assert.ok(!h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.length, reads);
+  h.setProps({ activation: { actionId: 'reply', key: 2 } }); await h.settle();
+  assert.ok(h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.filter(call => call.kind === 'create' || call.kind === 'send').length, 0);
+});
+
+test('an invalid activation is consumed and replacing its action does not create a new user request', async () => {
+  const h = fixture();
+  h.setProps({ actions: [], hideTrigger: true, activation: { actionId: 'reply', key: 1 } }); await h.settle();
+  h.setProps({ actions: [{ id: 'reply', label: 'Draft a reply', prompt: 'Reply.' }] }); await h.settle();
+  assert.ok(!h.nodes().some(node => node.type === 'section'));
+  h.setProps({ actions: [{ id: 'summary', label: 'Summarize this message', prompt: 'Summarize.' }], activation: { actionId: 'summary', key: 1 } }); await h.settle();
+  assert.ok(!h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.length, 0);
+  h.setProps({ activation: { actionId: 'summary', key: 2 } }); await h.settle();
+  assert.ok(h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.filter(call => call.kind === 'create' || call.kind === 'send').length, 0);
+});
+
+test('Escape closes its own review before surrounding work, while composition keeps it open', async () => {
+  const h = fixture(); let closed = 0, prevented = 0, stopped = 0;
+  h.setProps({ hideTrigger: true, activation: { actionId: 'reply', key: 1 }, onClose: () => closed++ }); await h.settle();
+  const panel = h.nodes().find(node => node.type === 'section');
+  const event = composing => ({ key: 'Escape', defaultPrevented: false, nativeEvent: { isComposing: composing }, keyCode: composing ? 229 : 27, preventDefault: () => prevented++, stopPropagation: () => stopped++ });
+  panel.props.onKeyDown(event(true)); await h.settle();
+  assert.equal(closed, 0); assert.equal(prevented, 0); assert.equal(stopped, 0);
+  assert.ok(h.nodes().some(node => node.type === 'section'));
+  panel.props.onKeyDown(event(false)); await h.settle();
+  assert.equal(closed, 1); assert.equal(prevented, 1); assert.equal(stopped, 1);
+  assert.ok(!h.nodes().some(node => node.type === 'section'));
+  assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create').length, 0);
+});
+
+test('an honest unconfigured action review still names its purpose and never fabricates an answer', async () => {
+  const h = fixture({ configured: false });
+  h.setProps({ hideTrigger: true, activation: { actionId: 'reply', key: 1 } }); await h.settle();
+  assert.ok(h.text().includes('Draft a reply'));
+  assert.ok(h.text().includes('A workspace owner must enable and connect an AI provider'));
+  assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create' || call.kind === 'consent').length, 0);
+  assert.equal(h.applied.length, 0);
+});
+
+test('returned citations list the exact reviewed sources without inventing links or including unselected content', async () => {
+  const h = fixture(); await h.open(); await h.check('Send this request'); await h.click('Send to provider');
+  const citations = h.nodes().find(node => node.props.className === 'fc-contextual-copilot-citations');
+  assert.ok(citations);
+  assert.ok(h.text().includes('[S1] Chosen message'));
+  assert.ok(!h.text().includes('UNSELECTED SECRET'));
+  assert.ok(!h.nodes().some(node => node.type === 'a'));
+  assert.equal(h.applied.length, 0);
 });
 
 test('secure requests need both acknowledgments and only explicit Send discloses one selected source', async () => {

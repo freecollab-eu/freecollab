@@ -14,16 +14,25 @@ one column. See [workspace modes](WORKSPACE_MODES.md).
   Swedish; arrows and Enter open a feature, Escape keeps the draft. The button
   searches separately without replacing an existing message. See
   [commands, permissions and safe draft behavior](SLASH_COMMANDS.md).
-- Choose **Add a document**, **Next step**, **Decision** or **Meet** beside the
-  composer. **More** offers channel activity, workflows, cloud files, apps and
-  installation settings in the same work area.
+- The composer keeps attachments, writing and sending primary. **Message
+  options** holds scheduling, focus and relevant draft assistance. Documents,
+  tasks, decisions, meetings, activity, workflows, cloud files and other
+  permitted services are reached through the same `/` list.
 - Open a message's **More message actions** to **Continue in a document**,
   **Make a next step** or create a decision. Document and task text starts as a
   reviewed draft. Creating the real record requires the normal explicit action;
   opening a draft does not save a resource.
 - A saved document or task can be linked to the source message. A decision uses
-  its existing native source-message field. The message then offers the actual
-  current resource, including its native title and task/decision status.
+  its existing native source-message field. Each discussion has a compact
+  expandable count of unique documents, tasks and decisions, including work
+  from unopened replies. Its links show current native titles and statuses.
+- Saved documents open as readable pages. **Edit document / Done editing**
+  switches the view without replacing the real editor or Yjs session. New
+  documents start in editing; creation still requires its explicit action.
+- A message's concrete **Draft a reply**, **Summarize this message** or
+  **Find related documents** action opens source review beside it. Threads can
+  summarize loaded replies; nonempty drafts have tidy/shorten actions. Review
+  never sends to a provider or applies a result automatically.
 - **Full screen / Split view** changes the active work's space. **Minimize**
   and the footer's **Back to conversation** park it. **Continue work** restores
   the last view and available field; the same editor, selection and session
@@ -65,7 +74,12 @@ metadata are resolved from current native records. The server checks the actual
 source and target in the same currently authorized channel, including fresh
 membership and DM-block checks around writes. Missing or inaccessible targets
 are omitted from reads. A routing reference is not a retention hold; normal
-source/target erasure also removes dependent routing rows.
+source/target erasure also removes dependent routing rows. Reads add optional
+`discussion_message_id` metadata derived from valid same-channel native source
+ancestry. It groups reply work under its root without persisting another thread
+model. Missing, deleted, cross-channel, cyclic or invalid ancestry never invents
+a root. The canonical decision source remains authoritative and needs no second
+routing write.
 
 New native rooms and DMs do not generate an unused legacy encryption envelope.
 Existing legacy envelopes remain untouched. The reference API rejects legacy
@@ -76,12 +90,16 @@ this native routing capability.
 ## Current limits
 
 Link creation is explicit, not automatic semantic pairing. Editing a source
-message does not rewrite the resulting document or task. The conversation reads
-the most recent 50 routing references and resolves a bounded set of task projects;
-this is not a complete channel inventory. The paginated API is available for
-other clients. Local changes, window focus and a bounded 60-second refresh update
-the reference cards; no dedicated realtime reference event is promised. There is
+message does not rewrite the resulting document or task. One scoped conversation
+resolver reads the bounded routing pages and authorized resource lists once for
+all message summaries. It pages through the server's
+2,000-reference bound and resolves referenced task projects with at most four
+concurrent requests, rather than omitting projects beyond the first boards.
+Resource APIs retain their own limits. Partial or legacy metadata loads are
+labeled **Available work**; the summary is not a complete channel inventory.
+Local changes, window focus and a bounded 60-second refresh update the reference
+cards; no dedicated realtime reference event is promised. There is
 currently no unlink button on the conversation card.
 
-See [the shared design contract](DESIGN_SYSTEM.md), [demo installation and
+See [the six everyday flows](FLOW_FIRST_UX.md), [the shared design contract](DESIGN_SYSTEM.md), [demo installation and
 boundaries](PRODUCT_DEMO.md) and [dated validation evidence](VALIDATION.md).

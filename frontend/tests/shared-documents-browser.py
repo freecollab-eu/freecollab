@@ -22,6 +22,7 @@ import tempfile
 import time
 
 from playwright.sync_api import expect, sync_playwright
+from ui_navigation import activate_chat_feature
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('document_proof_helpers', Path(__file__).with_name('remote-sync-browser.py'))
@@ -252,6 +253,10 @@ def login(page, app, email, workspace_id, user_id):
 
 def select_document(panel):
     panel.get_by_role('button', name=re.compile('^' + re.escape(TITLE))).click()
+    expect(panel.locator('.fc-shared-reading-page')).to_be_visible()
+    expect(panel.locator('.fc-shared-reading-title')).to_have_text(TITLE)
+    expect(panel.get_by_label('Document text', exact=True)).to_be_hidden()
+    panel.get_by_role('button', name='Edit document', exact=True).click()
     expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
     expect(panel.get_by_text('All edits synchronized', exact=True)).to_be_visible()
 
@@ -330,6 +335,27 @@ def main():
                     document_id = records[0]['id']; endpoint = '/channels/' + channel['id'] + '/shared-documents/' + document_id
                     results['real_two_member_editor_and_named_baseline'] = True
 
+                    stage = 'read/edit retains the actual shared editor without publishing a view change'
+                    editor = first.get_by_label('Document text', exact=True)
+                    retained = editor.element_handle()
+                    editor.focus(); editor.press('Home'); editor.press('Shift+ArrowRight'); editor.press('Shift+ArrowRight')
+                    selection = editor.evaluate('node=>({start:node.selectionStart,end:node.selectionEnd,top:node.scrollTop})')
+                    before_view_updates = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    first.get_by_role('button', name='Done editing', exact=True).click()
+                    expect(first.locator('.fc-shared-reading-page')).to_be_visible()
+                    expect(first.locator('.fc-shared-reading-body')).to_have_text(BASELINE)
+                    assert retained.evaluate('node=>node.isConnected'), 'Reading view remounted the real Yjs editor'
+                    expect(editor).to_be_hidden()
+                    first.get_by_role('button', name='Edit document', exact=True).click()
+                    assert editor.evaluate('(node,previous)=>node===previous', retained), 'Edit reopened a different textarea'
+                    expect(editor).to_be_focused()
+                    expect(editor).to_have_js_property('selectionStart', selection['start'])
+                    expect(editor).to_have_js_property('selectionEnd', selection['end'])
+                    expect(editor).to_have_js_property('scrollTop', selection['top'])
+                    after_view_updates = helpers.api(base, 'GET', endpoint + '/updates', alice)
+                    assert after_view_updates == before_view_updates, 'Read/edit controls published a document update'
+                    results['saved_reading_page_and_same_editor_selection_without_view_writes'] = True
+
                     stage = 'simultaneous disconnected edits with no last-write-wins replacement'
                     for context in contexts: context.set_offline(True)
                     first.get_by_label('Document text', exact=True).fill(BASELINE + 'Alice concurrent note.\n')
@@ -338,9 +364,10 @@ def main():
                         expect(panel.get_by_label('Document text', exact=True)).to_be_editable()
                         expect(panel.get_by_text(re.compile('edit[s]? waiting to sync'))).to_be_visible()
                         expect(panel.get_by_role('button', name='Retry synchronization', exact=True)).to_be_visible()
-                    pages[0].locator('.fc-chat-flow-actions').get_by_role('button', name='Next step', exact=True).click()
+                    activate_chat_feature(pages[0], 'task', expect_closed=False)
                     expect(first).to_have_attribute('data-work-kind', 'documents')
                     expect(first.get_by_label('Document text', exact=True)).to_have_value(BASELINE + 'Alice concurrent note.\n')
+                    pages[0].locator('.fc-slash-commands').get_by_role('combobox').press('Escape')
                     results['offline_editing_and_unsynced_navigation_guard'] = True
                     for context in reversed(contexts): context.set_offline(False)
                     for panel in [first, second]:

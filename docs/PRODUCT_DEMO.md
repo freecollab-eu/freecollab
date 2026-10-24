@@ -23,7 +23,8 @@ En ändring i dessa komponenter ska därför synas även i demon.
 ## Samma sammanhängande arbetsvy
 
 Den gemensamma produktvyn håller samtalet och dess skrivfält kvar när man
-öppnar delat arbete. Materialkolumnen i en vanlig native-kanal kan visa en
+öppnar delat arbete. Den valbara **Kanalintroduktionen** nås via **Kanalmeny**;
+där kan materialkolumnen i en vanlig native-kanal visa en
 befintlig bild eller fil, en delad sida med ett kort utdrag och dess dokumenthög,
 samt ett konkret ofärdigt steg från kanalens senaste projekt. Dessa är riktiga
 produktposter, inte kort med hårdkodad demotext. En tom kanal får inget påhittat
@@ -50,9 +51,11 @@ personliga inställningar.
 I en bred vy kan materialet flyttas till vänster eller höger via verktygsmenyn;
 placeringen gäller bara användarens aktuella session och kanal. På smala skärmar
 ligger samtal och material i en kolumn. Dokument-, hög- och uppgiftslänkar öppnar
-den riktiga posten i samtalets arbetsregion. **Lägg till ett dokument**,
-**Nästa steg**, **Beslut** och **Mötas** finns vid skrivfältet; **Mer** öppnar bland
-annat kanalaktivitet och befintliga arbetsflöden. Den vanliga samtalsvyn har ingen
+den riktiga posten i samtalets arbetsregion. **/ Alla funktioner** samlar
+dokument, uppgifter, beslut, möten, kanalaktivitet, arbetsflöden och andra
+tillåtna verktyg. Skrivfältet prioriterar text, bilagor och sändning;
+**Meddelandealternativ** samlar schemaläggning, fokus och hjälp för aktuellt
+utkast. Den vanliga samtalsvyn har ingen
 verktygsflikrad och arbetsregionen är inte modal. Man kan fortsätta skriva och
 skicka meddelanden medan det riktiga dokumentet, uppgiften eller beslutet är öppet.
 
@@ -62,7 +65,10 @@ en beständig koppling med endast resursens och källmeddelandets identifierare.
 Beslut har redan ett källmeddelandefält i sin ordinarie revision; länken härleds
 direkt från det sparade beslutet. Innehåll och status läses från de vanliga
 behörighetskontrollerade API:erna. Ett klick öppnar den
-exakta posten. Dessa meddelandekopplingar stöds i native-kanaler. Krypterade
+exakta posten. En kompakt utfällbar sammanställning räknar unika dokument,
+uppgifter och beslut för diskussionen, även arbete från ännu oöppnade svar.
+Roten härleds ur verklig native-källmetadata; ofullständiga laddningar benämns
+tillgängligt arbete. Dessa meddelandekopplingar stöds i native-kanaler. Krypterade
 kanaler får ingen klartextfallback. Arbetsflöden är fortfarande kanalens vanliga
 arbetsflöden med start, godkännande och bakgrundsjobb, inte meddelandebundna
 flödesinstanser.
@@ -77,17 +83,29 @@ i arbetsregionen gäller dess vanliga skydd mot att lämna osparade ändringar.
 Återgång bevarar samma monterade skrivfält och samtalsutkast. Utloggning, ny
 session och förlorad behörighet rensar det gamla sammanhanget direkt.
 
+Sparade dokument öppnas som läsbara sidor. **Redigera dokument / Klar med
+redigering** växlar visning med samma monterade editor, markering och
+Yjs-session; själva visningsbytet lagrar inget. Nya dokument börjar i
+redigering och behöver fortfarande skapas uttryckligen. Läsvy och delad,
+förstorad eller minimerad arbetsvy är oberoende av varandra. Minimerad läsning
+återfår fokus på den synliga sidan, utan att ett dolt textfält tar över.
+
 Dokumentets övriga funktioner finns under **Dokumentalternativ** och
 **Ordna dokument**: befintlig historik, arkivering, export, högar, flytt,
 ångra och relationer använder samma produktåtgärder som tidigare. Den separata
 WorkHub-dialog som uttryckliga SDK-/inbäddningsvyer använder är en egen
 presentationsform av de ordinarie verktygen.
 
-En komplett kanal utan tidigare läsposition öppnas vid samtalets början.
-**Hoppa till senaste** leder till nya meddelanden; direktchattar, sidindelad
-historik och exakta källänkar behåller sina ordinarie läs- och återgångsflöden.
-Tangentbordsnavigation och uppdatering av material ska bevara användarens valda
-läsposition.
+Kanalen öppnas vid en uttrycklig källa, en scoped ihågkommen läsposition eller
+första olästa inkommande rot som fastställs av verkligt läskvitto och ordning.
+Känt lästa samtal öppnas vid slutet. Senaste meddelandet ligger längst ned vid
+skrivfältet. Okänd eller låst historik visas utan att automatiskt markeras läst.
+**Hoppa till senaste** och ett eget skickat meddelande är uttryckliga val som
+vinner över en äldre väntande startladdning. En nyare källänk ersätter äldre
+köad källnavigation. Meddelanden använder samma lässkala; kanalens större
+rubrik finns i den valbara introduktionen. Tangentbordsnavigation och
+materialuppdateringar bevarar den valda läspositionen. Se
+[de sex vardagsflödena](FLOW_FIRST_UX.md).
 
 Exempeldata läggs i den riktiga datamodellen: arbetsyta, kanaler, medlemmar,
 meddelanden, dokument, högar, kommentarer, uppgifter och filer. Exempelpersonerna

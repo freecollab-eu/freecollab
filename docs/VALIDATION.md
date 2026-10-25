@@ -1,5 +1,38 @@
 # FreeCollab validation record
 
+## Personal source navigation across workspaces — 2026-10-25
+
+CI for `e31934d` passed frontend, all four backend shards, native artifacts and
+real-client encryption/recovery. Its Product workflow exposed a genuine My Day
+navigation bug: the destination workspace/channel opened, but the channel-scope
+reset removed the exact task pane before it could be used. The unchanged local
+browser assertion reproduced the same failure.
+
+Personal source navigation now retains an actor/session-bound request until the
+destination scope commits, then rechecks the canonical channel before opening
+the exact project/task through the ordinary scoped work opener. Newer typing,
+navigation, authentication or encryption-scope changes invalidate the request.
+Workspace refreshes also retain their original selection generation: a delayed
+list cannot override a newer manual choice, including a same-ID or A→B→A choice.
+Canceled requests still accept authoritative membership removal and a safe
+workspace fallback. The existing unsaved-work guard remains in force.
+
+The actual My Day browser proof passed **13 groups**, retaining all seven
+original checks and adding held real reads, newer navigation/typing, manual
+workspace selection, credential/actor ABA and a declined workspace guard. The
+declined case preserves the exact unsaved task form, issues no task write and
+cannot replay later. Its 607 recorded source inputs and 372 actual private
+frontend copies remained unchanged. All owned fixtures were stopped.
+
+The actual provider-callback regression reproduced six failures before the fix
+and passed all **8 tests** afterward; the related navigation suite passed
+**23 tests** in total. The complete **720 frontend Node tests** and application/
+embedded production builds passed with 446 unchanged recorded inputs. The full
+**34-group/102-command** collaboration proof also passed again in all four
+disposable modes, with matching runtime source hashes and no HTTP 429 responses.
+All four fixtures/eight API+Vite processes stopped and the owned demo visit was
+deleted. No backend, storage or reference protocol changed.
+
 ## Commands, references and concurrent collaboration — 2026-10-24
 
 The [shared collaboration contract](UNIVERSAL_COLLABORATION.md) is implemented

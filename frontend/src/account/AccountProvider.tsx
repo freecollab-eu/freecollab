@@ -21,7 +21,7 @@ interface AccountContextValue {
   openDirectMessages: () => void;
   openSecureSettings: (channelId?: string) => void;
   selectWorkspace: (id: string) => void;
-  refreshWorkspaces: (selectedId?: string) => Promise<void>;
+  refreshWorkspaces: (selectedId?: string, selectionCurrent?: () => boolean) => Promise<void>;
 }
 const AccountContext = createContext<AccountContextValue | null>(null);
 const preferenceKey = (userId: string) => `freecollab.workspace:${userId}`;
@@ -40,7 +40,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
   const selectedRef = useRef<string | null>(null);
   const identityRef = useRef(identity);
   const sessionRef = useRef(api.getAccessToken());
-  const generation = useRef(0);
+  const generation = useRef(0), selectionGeneration = useRef(0);
   const mounted = useRef(true);
 
   const choose = useCallback((id: string | null, userId: string) => {
@@ -54,28 +54,38 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     if (changed) window.dispatchEvent(new CustomEvent('freecollab:workspace-changed', { detail: { workspace_id: id } }));
   }, []);
 
-  const refreshWorkspaces = useCallback(async (selectedId?: string) => {
+  const refreshWorkspaces = useCallback(async (selectedId?: string, selectionCurrent?: () => boolean) => {
     const userId = api.getCurrentUserId();
     const session = api.getAccessToken();
     if (!userId || userId !== identityRef.current) return;
-    const request = ++generation.current;
+    const request = ++generation.current, selection = selectionGeneration.current;
+    const current = () => mounted.current && request === generation.current && userId === api.getCurrentUserId()
+      && userId === identityRef.current && session === api.getAccessToken();
+    const maySelectRequested = () => {
+      try { return selection === selectionGeneration.current && (!selectionCurrent || selectionCurrent()) && selection === selectionGeneration.current; }
+      catch { return false; }
+    };
     setWorkspacesLoading(true); setWorkspacesError('');
     try {
       const records = await workspaceApi.list();
-      if (!mounted.current || request !== generation.current || userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken()) return;
+      if (!current()) return;
+      const requested = selectedId && maySelectRequested() ? selectedId : undefined;
+      if (!current()) return;
       setWorkspaces(records);
       const previousWorkspace = selectedRef.current;
-      const candidates = [selectedId, previousWorkspace, savedWorkspace(userId)];
-      let next = candidates.find(candidate => candidate && records.some(record => record.id === candidate)) || records[0]?.id || null;
-      // Creation may request a new selection. Keep still-authorized work open
-      // when declined, while always accepting membership removal/fallback.
-      if (selectedId && next === selectedId && next !== previousWorkspace
+      const fallback = () => [previousWorkspace, savedWorkspace(userId)].find(candidate => candidate && records.some(record => record.id === candidate)) || records[0]?.id || null;
+      let next = requested && records.some(record => record.id === requested) ? requested : fallback();
+      // A canceled navigation still refreshes membership and accepts an
+      // authoritative fallback, but cannot select or warn for its old target.
+      if (requested && next === requested && next !== previousWorkspace
         && records.some(record => record.id === previousWorkspace) && !mayLeaveConversationWork()) next = previousWorkspace;
-      if (!mounted.current || request !== generation.current || userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken() || previousWorkspace !== selectedRef.current) return;
+      const selectionStillCurrent = !requested || maySelectRequested();
+      if (!current() || previousWorkspace !== selectedRef.current) return;
+      if (!selectionStillCurrent) next = fallback();
       choose(next, userId);
     } catch (failure) {
-      if (mounted.current && request === generation.current && userId === api.getCurrentUserId() && userId === identityRef.current) setWorkspacesError(failure instanceof Error ? failure.message : 'Workspaces could not be loaded.');
-    } finally { if (mounted.current && request === generation.current && userId === api.getCurrentUserId() && userId === identityRef.current) setWorkspacesLoading(false); }
+      if (current()) setWorkspacesError(failure instanceof Error ? failure.message : 'Workspaces could not be loaded.');
+    } finally { if (current()) setWorkspacesLoading(false); }
   }, [choose]);
 
   useEffect(() => {
@@ -88,7 +98,7 @@ export function AccountProvider({ children }: { children: ReactNode }) {
       const changedAccount = next !== identityRef.current;
       setConversationNavigationWorkspace(null);
       sessionRef.current = session;
-      generation.current += 1; identityRef.current = next; selectedRef.current = null;
+      generation.current += 1; selectionGeneration.current += 1; identityRef.current = next; selectedRef.current = null;
       setIdentity(next); setWorkspaces([]); setSelected(null); if (changedAccount || !next) setPanel(null); setWorkspacesError(''); setWorkspacesLoading(!!next);
       if (next) {
         void refreshWorkspaces();
@@ -109,6 +119,9 @@ export function AccountProvider({ children }: { children: ReactNode }) {
     const session = api.getAccessToken();
     const previousWorkspace = selectedRef.current;
     if (!userId || userId !== identityRef.current || !workspaces.some(record => record.id === id)) return;
+    // An explicit newer choice, including the same workspace or an ABA path,
+    // supersedes a pending refresh even when its own dirty guard is declined.
+    ++selectionGeneration.current;
     if (id !== selectedRef.current && !mayLeaveConversationWork()) return;
     if (userId !== api.getCurrentUserId() || userId !== identityRef.current || session !== api.getAccessToken() || previousWorkspace !== selectedRef.current) return;
     setPanel(null); choose(id, userId);

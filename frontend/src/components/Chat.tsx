@@ -118,6 +118,12 @@ interface ConversationReadingSnapshot extends ConversationReadingPosition {
   introduction?: boolean;
 }
 
+interface PersonalNavigationIntent extends PersonalSource {
+  actor: string; token: string; request: number; secure: boolean; expectedScope: string;
+  changingWorkspace: boolean; workspaceAccepted: boolean; opening: boolean;
+  current: () => boolean;
+}
+
 type ComposerSurface = 'main' | 'thread';
 interface ComposerPalette {
   channelId: string; workspaceId: string; token: string;
@@ -253,6 +259,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const primaryAuthorityCurrent = primaryAuthority.current === flowScope;
   const scopedRetainedWork = retainedWork.filter(entry => entry.scope === flowScope);
   useLayoutEffect(() => {
+    const personal = pendingPersonalSource.current;
+    if (!personal?.current() || personal.expectedScope !== flowScope &&
+        !(personal.changingWorkspace && personal.workspaceAccepted && workspace?.id === personal.workspace_id)) cancelPersonalSource();
     primaryAuthority.current = flowScope;
     ++referenceOpenRequest.current; setReferencedFile(null);
     modalRegistry.current.clear(); modalTargetReturns.current.clear(); parkedModalsRef.current = []; setParkedModals([]);
@@ -403,8 +412,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const workspaceRef = useRef(workspace?.id); workspaceRef.current = workspace?.id;
   const channelsWorkspaceRef = useRef<string | null>(null);
   const pendingJumpRef = useRef<Message | null>(null);
-  const pendingPersonalSource = useRef<(PersonalSource & { token: string }) | null>(null);
+  const pendingPersonalSource = useRef<PersonalNavigationIntent | null>(null);
   const personalNavigation = useRef(0);
+  const personalIntentCleanup = useRef<(() => void) | null>(null);
+  const cancelPersonalSource = () => {
+    ++personalNavigation.current; pendingPersonalSource.current = null;
+    personalIntentCleanup.current?.(); personalIntentCleanup.current = null;
+  };
   const timelineRef = useRef<HTMLDivElement>(null);
   const nearBottomRef = useRef(true);
   const roomOverviewRef = useRef(false);
@@ -671,50 +685,87 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   },[channels,embeddedChannelId]);
 
   useEffect(() => {
+    let live = true;
     const open = async (event: Event) => {
       const detail = (event as CustomEvent<PersonalSource>).detail;
       if (!detail || typeof detail.channel_id !== 'string' || typeof detail.workspace_id !== 'string'
           || !['task', 'calendar', 'message', 'meeting'].includes(detail.kind)
+          || detail.item_id !== undefined && typeof detail.item_id !== 'string' || detail.project_id !== undefined && typeof detail.project_id !== 'string'
+          || detail.kind === 'task' && (!detail.item_id || !detail.project_id)
           || embeddedChannelId && detail.channel_id !== embeddedChannelId) return;
-      const token = api.getAccessToken(), request = ++personalNavigation.current;
-      if (!token) return;
+      cancelPersonalSource();
+      const token = api.getAccessToken(), actor = api.getCurrentUserId(), request = personalNavigation.current, sourceScope = liveFlowScope.current;
+      if (!token || !actor) return;
+      const current = () => live && request === personalNavigation.current && actor === api.getCurrentUserId() && token === api.getAccessToken();
+      const newerIntent = (intent: Event) => {
+        if (intent instanceof KeyboardEvent && ['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock'].includes(intent.key)) return;
+        if (current()) cancelPersonalSource();
+      };
+      document.addEventListener('pointerdown', newerIntent, true); document.addEventListener('keydown', newerIntent, true);
+      personalIntentCleanup.current = () => { document.removeEventListener('pointerdown', newerIntent, true); document.removeEventListener('keydown', newerIntent, true); };
       try {
         // Device notifications and a retained personal view are navigation
         // hints. Neither grants a channel, workspace or meeting admission.
         const channel = await api.getChannel(detail.channel_id);
-        if (request !== personalNavigation.current || token !== api.getAccessToken()) return;
-        if (channel.workspace_id !== detail.workspace_id) throw new Error('This source is no longer available in your current workspace.');
-        pendingPersonalSource.current = { ...detail, token };
+        if (!current()) return;
+        if (sourceScope !== liveFlowScope.current) { cancelPersonalSource(); return; }
+        if (channel.id !== detail.channel_id || channel.workspace_id !== detail.workspace_id) throw new Error('This source is no longer available in your current workspace.');
+        const target: PersonalNavigationIntent = { ...detail, actor, token, request, current, secure: !!channel.secure,
+          expectedScope: JSON.stringify([actor, token, channel.workspace_id, channel.id, !!channel.secure]),
+          changingWorkspace: workspaceRef.current !== channel.workspace_id, workspaceAccepted: false, opening: false };
+        pendingPersonalSource.current = target;
         setMyDayOpen(false);
-        if (workspaceRef.current !== channel.workspace_id) await refreshWorkspaces(channel.workspace_id);
+        if (target.changingWorkspace) {
+          await refreshWorkspaces(channel.workspace_id, current);
+          if (current() && pendingPersonalSource.current === target && !target.workspaceAccepted && workspaceRef.current !== target.workspace_id) cancelPersonalSource();
+        }
         else { setChannels(rows => rows.some(row => row.id === channel.id) ? rows.map(row => row.id === channel.id ? channel : row) : [...rows, channel]); }
       } catch (failure) {
-        if (request === personalNavigation.current && token === api.getAccessToken()) {
-          pendingPersonalSource.current = null; setActionError(failure instanceof Error ? failure.message : 'This source is no longer available in your current workspace.');
+        if (current()) {
+          cancelPersonalSource(); setActionError(failure instanceof Error ? failure.message : 'This source is no longer available in your current workspace.');
         }
       }
     };
+    const workspaceChanged = (event: Event) => {
+      const target = pendingPersonalSource.current;
+      if (target?.current() && target.changingWorkspace && !target.workspaceAccepted &&
+          (event as CustomEvent<{ workspace_id: string }>).detail?.workspace_id === target.workspace_id) { target.workspaceAccepted = true; return; }
+      cancelPersonalSource();
+    };
+    const newerNavigation = () => cancelPersonalSource();
+    const sourceEvents = ['freecollab:open-channel', 'freecollab:open-workspace-tools', 'freecollab:open-decision', 'freecollab:open-search-source'];
     window.addEventListener('freecollab:open-personal-source', open);
-    return () => { ++personalNavigation.current; window.removeEventListener('freecollab:open-personal-source', open); };
+    window.addEventListener('freecollab:auth-changed', newerNavigation); window.addEventListener('storage', newerNavigation); window.addEventListener('freecollab:workspace-changed', workspaceChanged);
+    sourceEvents.forEach(name => window.addEventListener(name, newerNavigation));
+    return () => {
+      live = false; cancelPersonalSource(); window.removeEventListener('freecollab:open-personal-source', open);
+      window.removeEventListener('freecollab:auth-changed', newerNavigation); window.removeEventListener('storage', newerNavigation); window.removeEventListener('freecollab:workspace-changed', workspaceChanged);
+      sourceEvents.forEach(name => window.removeEventListener(name, newerNavigation));
+    };
   }, [embeddedChannelId, refreshWorkspaces]);
 
   useEffect(() => {
     const target = pendingPersonalSource.current;
     if (!target) return;
-    if (target.token !== api.getAccessToken()) { pendingPersonalSource.current = null; return; }
+    if (!target.current()) { cancelPersonalSource(); return; }
     if (workspace?.id !== target.workspace_id || channelsWorkspaceRef.current !== target.workspace_id || loading) return;
     const channel = channels.find(row => row.id === target.channel_id);
-    pendingPersonalSource.current = null;
-    if (!channel) { setActionError('This source is no longer available in your current workspace.'); return; }
-    const sameChannel = activeChannelRef.current === channel.id;
-    if (!sameChannel && (!mayLeaveConversationWork() || !selectChannel(channel, true))) return;
-    if (sameChannel && (target.kind === 'task' || target.kind === 'meeting')) { sameRoomWork.current.hub?.(target.kind === 'task' ? 'tasks' : 'meetings', target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : {}); return; }
-    if (target.kind === 'message' && target.item_id) { pendingJumpRef.current = { id: target.item_id, channel_id: channel.id, author_id: '', content: '', encrypted: !!channel.secure, created_at: '' }; entryChoiceRef.current = null; ++entryNavigationRef.current; }
-    if (!sameChannel) { setWorkHubSource(null); setCollaborationTab(null); }
-    if (target.kind === 'message' && activeChannelRef.current === channel.id) void loadMessages(channel.id);
-    if (target.kind === 'task' || target.kind === 'meeting') { setWorkHubDocument(null); workHubOrigin.current = null; setWorkHubTask(target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : null); setWorkHubInitialTab(target.kind === 'task' ? 'tasks' : 'meetings'); setWorkHubOpen(true); }
-    if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: channel.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
-  }, [channels, workspace?.id, loading]);
+    if (!channel || channel.workspace_id !== target.workspace_id || !!channel.secure !== target.secure) { cancelPersonalSource(); setActionError('This source is no longer available in your current workspace.'); return; }
+    target.changingWorkspace = false;
+    // Channel selection commits a new authority scope and clears old work. Open
+    // the source only in the subsequent committed render, never before that reset.
+    if (activeChannel?.id !== channel.id) { if (!selectChannel(channel, false, target.request)) cancelPersonalSource(); return; }
+    if (flowScope !== target.expectedScope || target.opening) return;
+    target.opening = true;
+    void api.getChannel(target.channel_id).then(verified => {
+      if (!target.current() || pendingPersonalSource.current !== target) return;
+      if (liveFlowScope.current !== target.expectedScope || verified.id !== target.channel_id || verified.workspace_id !== target.workspace_id || !!verified.secure !== target.secure) { cancelPersonalSource(); return; }
+      pendingPersonalSource.current = null; personalIntentCleanup.current?.(); personalIntentCleanup.current = null;
+      if (target.kind === 'task' || target.kind === 'meeting') sameRoomWork.current.hub?.(target.kind === 'task' ? 'tasks' : 'meetings', target.kind === 'task' ? { projectId: target.project_id, taskId: target.item_id } : {});
+      if (target.kind === 'message' && target.item_id) { pendingJumpRef.current = { id: target.item_id, channel_id: verified.id, author_id: '', content: '', encrypted: !!verified.secure, created_at: '' }; entryChoiceRef.current = null; ++entryNavigationRef.current; void loadMessages(verified.id); }
+      if (target.kind === 'calendar') { setIntegrationEntry(previous => ({ tab: 'calendar', channelId: verified.id, revision: (previous?.revision || 0) + 1 })); setIntegrationsOpen(true); }
+    }).catch(failure => { if (target.current() && pendingPersonalSource.current === target) { cancelPersonalSource(); setActionError(failure instanceof Error ? failure.message : 'This source is no longer available in your current workspace.'); } });
+  }, [channels, workspace?.id, activeChannel?.id, activeChannel?.secure, loading, flowScope]);
 
   useEffect(() => { setMobileToolsOpen(false); setProductivity(null); }, [activeChannel?.id, workspace?.id]);
   useEffect(() => {
@@ -1849,10 +1900,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     workHubOrigin.current = null; setFlowNotice('');
     setGroupsOpen(false); setGroupCommandDraft(undefined); setWorkHubCommandDraft(null); setDecisionCommandDraft(null);
   };
-  const selectChannel = (channel: Channel, preflightDone = false) => {
+  const selectChannel = (channel: Channel, preflightDone = false, personalRequest?: number) => {
+    if (personalRequest === undefined) cancelPersonalSource();
+    else if (pendingPersonalSource.current?.request !== personalRequest || !pendingPersonalSource.current.current()) return false;
     const token = api.getAccessToken(), actor = api.getCurrentUserId();
     if (embeddedChannelId && channel.id !== embeddedChannelId) return false;
     if (channel.id !== activeChannelRef.current && !preflightDone && !mayLeaveConversationWork()) return false;
+    if (personalRequest !== undefined && (pendingPersonalSource.current?.request !== personalRequest || !pendingPersonalSource.current.current())) return false;
     if (token !== api.getAccessToken() || actor !== api.getCurrentUserId()) return false;
     if (channel.id !== activeChannelRef.current) resetConversationWork();
     workContextChannel.current = channel.id;

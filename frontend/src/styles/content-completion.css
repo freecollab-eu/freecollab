@@ -1,7 +1,7 @@
 .fc-content-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
 .fc-content-toolbar h3 { display: flex; align-items: center; gap: .5rem; margin-inline-end: auto; }
 .fc-content-editor { display: grid; gap: .8rem; margin-block: 1rem; padding: 1rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius, .7rem); }
-.fc-content-editor > label, .fc-content-dates > label { display: grid; gap: .3rem; min-width: 0; }
+.fc-content-editor > .fc-labeled-writing-field, .fc-content-editor > label, .fc-content-dates > label { display: grid; gap: .3rem; min-width: 0; }
 .fc-content-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
 .fc-content-items { list-style: none; padding: 0; margin: 0; }
 .fc-content-items > li { display: flex; gap: .5rem; align-items: center; padding-block: .75rem; border-bottom: 1px solid var(--fc-border); overflow-wrap: anywhere; }

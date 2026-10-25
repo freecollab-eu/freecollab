@@ -1,0 +1,3 @@
+.fc-labeled-writing-field { display: grid; gap: .4rem; min-width: 0; }
+/* The outer field owns the spacing; only this text labels the input. */
+.fc-labeled-writing-field > label[for] { display: block; margin: 0; font: inherit; }

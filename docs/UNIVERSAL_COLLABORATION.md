@@ -155,3 +155,13 @@ samtidighet, referenser, behörigheter och mobil. Faktiskt körda resultat och
 avgränsningar redovisas separat i [valideringsloggen](VALIDATION.md).
 Den separata [dialogkontrollen](../frontend/tests/collaboration-modal-browser.py)
 provar behållen DOM, portalernas föräldraordning och återupptaget fokus.
+
+
+### Writing-field labels
+
+A field label names only its input. `LabeledWritingField` associates a separate
+label and stable input ID while keeping command, reference and AI controls
+outside that label. Existing input IDs, refs and handlers survive the wrapper.
+This prevents helper buttons or expanded AI content from changing the name read
+by assistive technology. Keyboard focus and live Swedish labels are covered by
+the actual command/reference browser regression.

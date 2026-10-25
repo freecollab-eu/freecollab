@@ -1,3 +1,4 @@
+import { LabeledWritingField } from './LabeledWritingField';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Loader2, Plus, RefreshCw, Save, Trash2, Users, X } from 'lucide-react';
 import { api, type ChannelMember } from '../lib/api';
@@ -127,7 +128,7 @@ export function ReferenceGroupsPanel({ instanceId, closeController, channelId, w
       {!groups.length && <p className="fc-reference-list-status">{t('No groups yet.')}</p>}
       {!canManage && <p className="fc-reference-list-status">{t('A channel administrator can create and change groups.')}</p>}
       {editor && (canManage ? <form className="fc-reference-group-editor" onSubmit={event => { event.preventDefault(); void save(); }}><fieldset disabled={busy}>
-        <label>{t('Group name')}<CollaborationInput as="input" ref={editorName} contextId={`${instanceId || "primary"}:${channelId}:group:${editor.id || initialDraft?.key || "new"}:name`} allowReferences={false} value={editor.name} maxLength={80} required onValueChange={value => setEditor(previous => previous ? { ...previous, name: value } : previous)} /></label>
+        <LabeledWritingField label={t('Group name')}><CollaborationInput as="input" ref={editorName} contextId={`${instanceId || "primary"}:${channelId}:group:${editor.id || initialDraft?.key || "new"}:name`} allowReferences={false} value={editor.name} maxLength={80} required onValueChange={value => setEditor(previous => previous ? { ...previous, name: value } : previous)} /></LabeledWritingField>
         <fieldset className="fc-reference-group-members"><legend>{t('Group members')}</legend>{members.map(member => {
           const duplicate = members.some(other => other.user_id !== member.user_id && other.name === member.name);
           return <label key={member.user_id}><input type="checkbox" data-reference-member-id={member.user_id} checked={editor.members.includes(member.user_id)} disabled={!editor.members.includes(member.user_id) && editor.members.length >= 50}

@@ -15,11 +15,12 @@ function fixture({ response, commandPatch = {} } = {}) {
     supports_secure_foreground: true, delivery: 'foreground', ...commandPatch };
   const react = {
     useId: () => 'review-state',
+    cloneElement: (child, props) => ({ ...child, props: { ...child.props, ...props } }),
     useRef(value) { const slot = index++; return hooks[slot] ||= { current: value }; },
     useState(value) { const slot = index++; if (!(slot in hooks)) hooks[slot] = value; return [hooks[slot], next => { const value = typeof next === 'function' ? next(hooks[slot]) : next; if (!Object.is(value, hooks[slot])) { hooks[slot] = value; dirty = true; } }]; },
     useEffect(callback, deps) { const slot = index++, old = hooks[slot]; if (!old || deps.some((value, i) => !Object.is(value, old.deps[i]))) effects.push(() => { old?.cleanup?.(); hooks[slot] = { deps, cleanup: callback() }; }); },
   };
-  const jsx = (type, props) => ({ type, props: props || {} });
+  const jsx = (type, props) => typeof type === 'function' ? type(props || {}) : { type, props: props || {} };
   const dependencies = {
     react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, key) => key }),
     '../lib/api': { api: { getAccessToken: () => token, getCurrentUserId: () => actor } },
@@ -32,6 +33,13 @@ function fixture({ response, commandPatch = {} } = {}) {
     '../lib/secure-client': { getSecureMessaging: async () => ({ roomFor: async channel => ({ c: { getDeviceId: () => 'BOUND-DEVICE' } }),
       sendMessage: async (...args) => { calls.push({ kind: 'encrypted-publication', args }); } }) },
   };
+  // Exercise the real presentation wrapper so its sibling label/id cloning
+  // cannot hide or replace the reviewed field's value and change handler.
+  const presentation = {};
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/components/LabeledWritingField.tsx', import.meta.url), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText,
+  { exports: presentation, require: name => name.endsWith('.css') ? {} : dependencies[name] });
+  dependencies['./LabeledWritingField'] = presentation;
   const exported = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/components/AppCommandReview.tsx', import.meta.url), 'utf8'),
     { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText,

@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Real React/Intl presentation regression only; no Matrix/protocol claim.
 
-The encrypted-work client is replaced with owned calendar records in this one
-browser route. Actual channel authorization and encryption are covered separately
+Only the client calendar-data load is replaced with owned records for this one
+channel. The real module exports, client scope and cleanup remain intact.
+Actual channel authorization and encryption are covered separately
 by connect-federation-browser.py against independent homeservers.
 """
 import hashlib
@@ -23,6 +24,8 @@ from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / 'frontend'
 PROOFS = ROOT.parent / '.freecollab/proof-results'
+REPORT_DIR = Path(os.environ.get('FREECOLLAB_PROOF_REPORT_DIR', str(PROOFS))).resolve()
+CRYPTO_PROOF = Path(os.environ.get('FREECOLLAB_CALENDAR_CRYPTO_PROOF', str(PROOFS / 'connect-federation-browser-013.json'))).resolve()
 
 
 def main():
@@ -31,7 +34,7 @@ def main():
     entry = FRONTEND / ('.fc-calendar-ui-' + secrets.token_hex(6) + '.html')
     source = FRONTEND / 'src/components/FederatedWorkPanel.tsx'
     initial_hash = hashlib.sha256(source.read_bytes()).hexdigest()
-    crypto_proof = json.loads((PROOFS / 'connect-federation-browser-013.json').read_text())
+    crypto_proof = json.loads(CRYPTO_PROOF.read_text())
     baseline = crypto_proof['runtime_source_sha256']
     assert all(hashlib.sha256((ROOT / path).read_bytes()).hexdigest() == digest for path, digest in baseline.items() if path != str(source.relative_to(ROOT))), 'A non-presentation protocol source changed'
     with tempfile.TemporaryDirectory(prefix='fc-calendar-ui-') as directory:
@@ -39,7 +42,9 @@ def main():
         process = None
         try:
             entry.write_text('''<!doctype html><html lang="en"><head><meta charset="utf-8"></head><body><div id="root"></div><script type="module">
-import React from 'react';import{createRoot}from'react-dom/client';import{api}from'/src/lib/api.ts';import{FederatedWorkPanel}from'/src/components/FederatedWorkPanel.tsx';
+import React from 'react';import{createRoot}from'react-dom/client';import{api}from'/src/lib/api.ts';import{FederatedWorkClient}from'/src/lib/federated-work-api.ts';import{FederatedWorkPanel}from'/src/components/FederatedWorkPanel.tsx';
+const actualLoad=FederatedWorkClient.prototype.load;
+FederatedWorkClient.prototype.load=function(){return this.channelId==='owned-calendar-presentation'?Promise.resolve(structuredClone(window.presentationCalendarSnapshot)):actualLoad.call(this)};
 api.getAccessToken=()=>'owned-calendar-presentation';createRoot(document.getElementById('root')).render(React.createElement(FederatedWorkPanel,{channelId:'owned-calendar-presentation'}));window.presentationReady=true;
 </script></body></html>''')
             config = private / 'vite.config.mjs'
@@ -65,14 +70,15 @@ api.getAccessToken=()=>'owned-calendar-presentation';createRoot(document.getElem
                     revision = {'event_id': '$' + identifier, 'sender': '@fc_member:matrix.example.com', 'timestamp': 1, 'id': identifier, 'kind': 'calendar', 'parents': [], 'archived': False, 'fields': {**fields, **values}}
                     records.append({'id': identifier, 'kind': 'calendar', 'root_event_id': revision['event_id'], 'created_by': revision['sender'], 'heads': [revision], 'selected': revision, 'history': [revision], 'conflicts': False, 'invalid': []})
                 snapshot = {'context': {'members': []}, 'records': records, 'warnings': [], 'pending_pointers': 0, 'quarantined_event_ids': []}
-                stub = 'export class FederatedWorkClient{stop(){}hasCurrentScope(){return true}async load(){return ' + json.dumps(snapshot) + '}}'
                 with sync_playwright() as playwright:
                     browser = playwright.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH', '/usr/bin/chromium'), headless=True, args=['--no-sandbox'])
+                    failures = []; page_errors = []
                     try:
                         context = browser.new_context(timezone_id='America/Los_Angeles', locale='en-US')
-                        page = context.new_page(); failures = []
+                        context.add_init_script('window.presentationCalendarSnapshot=' + json.dumps(snapshot) + ';')
+                        page = context.new_page()
                         page.on('requestfailed', lambda request: failures.append(request.failure))
-                        page.route(re.compile(r'/src/lib/federated-work-api\.ts(?:\?.*)?$'), lambda route: route.fulfill(status=200, content_type='text/javascript', body=stub))
+                        page.on('pageerror', lambda error: page_errors.append(str(error)))
                         for attempt in range(3):
                             failures.clear()
                             try:
@@ -89,10 +95,14 @@ api.getAccessToken=()=>'owned-calendar-presentation';createRoot(document.getElem
                         assert 'Nov 1, 2026' in second and 'Oct 31' not in second, second
                         assert '10:00 AM' in timed and '1:00 AM' not in timed, timed
                         assert page.evaluate("Intl.DateTimeFormat().resolvedOptions().timeZone") == 'America/Los_Angeles'
+                    except Exception:
+                        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+                        (REPORT_DIR / 'federated-work-calendar-ui-errors.private.json').write_text(json.dumps({'page_errors':page_errors,'request_failures':failures,'panel_sha256':initial_hash},indent=2)+'\n')
+                        raise
                     finally: browser.close()
                 assert initial_hash == hashlib.sha256(source.read_bytes()).hexdigest(), 'Panel source changed during UI verification'
-                PROOFS.mkdir(parents=True, exist_ok=True)
-                (PROOFS / 'federated-work-calendar-ui-013.json').write_text(json.dumps({'checks': {'all_day_date_preserved_west_of_utc': True, 'all_day_date_preserved_on_dst_boundary': True, 'timed_entry_uses_declared_iana_zone': True}, 'browser_timezone': 'America/Los_Angeles', 'crypto_proof_panel_sha256': baseline[str(source.relative_to(ROOT))], 'ui_verified_panel_sha256': initial_hash, 'non_presentation_runtime_sources_match_crypto_proof': True, 'scope': 'Actual React panel and Intl rendering with owned client-derived calendar fixtures. Only the client data adapter is mocked; encryption/auth policy remain covered by the separate independent-homeserver proof.'}, indent=2) + '\n')
+                REPORT_DIR.mkdir(parents=True, exist_ok=True)
+                (REPORT_DIR / 'federated-work-calendar-ui-013.json').write_text(json.dumps({'checks': {'all_day_date_preserved_west_of_utc': True, 'all_day_date_preserved_on_dst_boundary': True, 'timed_entry_uses_declared_iana_zone': True}, 'browser_timezone': 'America/Los_Angeles', 'crypto_proof_sha256':hashlib.sha256(CRYPTO_PROOF.read_bytes()).hexdigest(), 'crypto_proof_panel_sha256': baseline[str(source.relative_to(ROOT))], 'ui_verified_panel_sha256': initial_hash, 'non_presentation_runtime_sources_match_crypto_proof': True, 'scope': 'Actual React panel and Intl rendering with owned client-derived calendar fixtures. Only the channel calendar-data load is mocked; real module exports, scope and cleanup remain intact. Encryption/auth policy remain covered by the separate independent-homeserver proof.'}, indent=2) + '\n')
                 print('Shared calendar real React/Intl proof passed: three timezone presentation checks.')
         finally:
             entry.unlink(missing_ok=True)

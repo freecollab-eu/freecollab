@@ -1,3 +1,4 @@
+import { LabeledWritingField } from './LabeledWritingField';
 import { useEffect, useId, useState } from 'react';
 import { api } from '../lib/api';
 import { installedAppCommandsApi, type InstalledAppCommand } from '../lib/installed-app-commands';
@@ -25,11 +26,11 @@ export function WorkflowAppStepEditor({ workspaceId, channelId, value, onChange,
     }}><option value="">{t('Choose an installed command')}</option>{commands.map(command => <option key={command.key} value={command.key}>{command.app_name} · /{command.name}</option>)}</select></label>
     {selected && <><p>{selected.description} · <code>{selected.origin}</code> · {t('Version')} {selected.generation}</p>
       {selected.generation !== value.expected_generation && <p role="alert">{t('The installed app changed. Select its current command and review again.')}</p>}
-      {selected.arguments.map(argument => <label key={argument.name}>{argument.label}
+      {selected.arguments.map(argument => <LabeledWritingField key={argument.name} label={argument.label}>
         {argument.type === 'choice' || argument.type === 'boolean' ? <select required={argument.required} value={value.arguments?.[argument.name] || ''} onChange={event => onChange({ arguments: { ...value.arguments, [argument.name]: event.target.value }, disclose_to_app: false })}>
           <option value="">{t('Choose a value')}</option>{(argument.type === 'boolean' ? ['true', 'false'] : argument.choices || []).map(option => <option value={option} key={option}>{option}</option>)}
         </select> : <CollaborationInput as="textarea" toolbar allowReferences={false} channelId={channelId} contextId={`${writingId}:${selected.key}:${argument.name}`} rows={2} required={argument.required} maxLength={argument.max_length} value={value.arguments?.[argument.name] || ''} onValueChange={text => onChange({ arguments: { ...value.arguments, [argument.name]: text }, disclose_to_app: false })} />}
-      </label>)}
+      </LabeledWritingField>)}
       <p>{t('Every matching run sends exactly these static arguments through the current installed app grant. No message or document content is read. Revoking or changing the app stops pending actions; uncertain external writes require inspection.')}</p>
       <label><input type="checkbox" required checked={!!value.disclose_to_app} onChange={event => onChange({ disclose_to_app: event.target.checked })} />{t('Authorize these exact arguments and recipient for future matching workflow runs.')}</label>
     </>}

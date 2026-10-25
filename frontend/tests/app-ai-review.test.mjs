@@ -20,11 +20,12 @@ function fixture({ prepare } = {}) {
   const changed = (left, right) => !left || left.length !== right.length || left.some((value, n) => !Object.is(value, right[n]));
   const hooks = {
     useId: () => "app-ai-fixture",
+    cloneElement: (child, props) => ({ ...child, props: { ...child.props, ...props } }),
     useState(initial) { const n = index++; if (!(n in slots)) slots[n] = initial; return [slots[n], value => { const next = typeof value === 'function' ? value(slots[n]) : value; if (!Object.is(next, slots[n])) { slots[n] = next; pending = true; } }]; },
     useRef(initial) { const n = index++; return slots[n] ||= { current: initial }; },
     useEffect(callback, deps) { const n = index++; if (!slots[n] || changed(slots[n].deps, deps)) effects.push(() => { slots[n]?.cleanup?.(); slots[n] = { deps, cleanup: callback() }; }); },
   };
-  const jsx = (type, props) => ({ type, props: props || {} });
+  const jsx = (type, props) => typeof type === 'function' ? type(props || {}) : { type, props: props || {} };
   const dependencies = {
     react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, key) => key }), '../lib/api': { api },
     './ScopedCollaborationInput': { ScopedCollaborationInput: 'collaboration-input' },
@@ -38,6 +39,13 @@ function fixture({ prepare } = {}) {
       return { ...choice.source, expected_text_sha256: 'a'.repeat(64) };
     } },
   };
+  // Keep the actual sibling label/id wrapper in this state fixture; the private
+  // prompt's value, palette callback and disclosure reset remain its own props.
+  const presentation = {};
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/components/LabeledWritingField.tsx', import.meta.url), 'utf8'),
+    { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText,
+  { exports: presentation, require: name => name.endsWith('.css') ? {} : dependencies[name] });
+  dependencies['./LabeledWritingField'] = presentation;
   const code = ts.transpileModule(readFileSync(new URL('../src/components/ChannelApps.tsx', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   vm.runInNewContext(code, { exports, require: name => name.endsWith('.css') ? {} : dependencies[name] || (() => { throw new Error(name); })(), Set });
   function visit() { const all = []; function walk(node) { if (Array.isArray(node)) node.forEach(walk); else if (node?.props) { all.push(node); walk(node.props.children); } } walk(tree); return all; }

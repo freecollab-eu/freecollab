@@ -1,3 +1,4 @@
+import { LabeledWritingField } from './LabeledWritingField';
 import { useEffect, useId, useRef, useState } from 'react';
 import { AlertCircle, CheckCircle2, Send } from 'lucide-react';
 import { api } from '../lib/api';
@@ -91,11 +92,11 @@ export function AppCommandReview({ workspaceId, channelId, command, arguments: i
     {job && <p role="status"><CheckCircle2 size={16} />{job.foreground ? t(job.status === 'delivered' ? 'The recipient acknowledged this foreground action.' : 'Inspect the recipient: this action may already have been received.') : t('Command queued for delivery.')} <code>{job.id}</code></p>}
     {job?.foreground && <aside><p>{job.failure}</p>{job.preview && <><h4>{t('Private response preview')}</h4><pre>{job.preview}</pre><label className="fc-app-check"><input type="checkbox" checked={publishConsent} disabled={busy || published} onChange={event => setPublishConsent(event.target.checked)} />{t('I reviewed this response and want to publish it encrypted to this channel.')}</label><button type="button" className="fc-button" disabled={busy || !publishConsent || published} onClick={() => void publish()}>{t(published ? 'Encrypted response published' : 'Publish encrypted response')}</button></>}{!outcomeAcknowledged && <button type="button" className="fc-button" disabled={busy} onClick={() => setOutcomeAcknowledged(true)}>{t('I acknowledge the delivery outcome. Do not retry this action.')}</button>}</aside>}
     <form onSubmit={event => void invoke(event)}><fieldset disabled={busy || !ready || !!job}>
-      {command.arguments.map(argument => <label key={argument.name}>{argument.label}
+      {command.arguments.map(argument => <LabeledWritingField key={argument.name} label={argument.label}>
         {argument.type === 'choice' || argument.type === 'boolean' ? <select required={argument.required} value={arguments_[argument.name] || ''} onChange={event => change(argument.name, event.target.value)}>
           <option value="">{t('Choose a value')}</option>{(argument.type === 'boolean' ? ['true', 'false'] : argument.choices || []).map(value => <option value={value} key={value}>{value}</option>)}
         </select> : <CollaborationInput as="textarea" aria-label={argument.label} toolbar allowReferences={false} channelId={channelId} contextId={`${writingId}:${command.key}:${argument.name}`} submissionScope={submissionScope} onPaletteActiveChange={active => { if (active) activePalettes.current.add(argument.name); else activePalettes.current.delete(argument.name); }} rows={argument.max_length > 500 ? 3 : 1} inputMode={argument.type === 'number' ? 'decimal' : undefined} maxLength={argument.max_length} required={argument.required} value={arguments_[argument.name] || ''} onValueChange={value => change(argument.name, value)} />}
-      </label>)}
+      </LabeledWritingField>)}
       <p><strong>{t('Recipient')}: </strong><code>{command.origin}</code> · {command.app_name} · {t('Version')} {command.generation}</p>
       <p>{t('Only these arguments are shared. Channel history and unrelated documents are not included. The external app may retain this information and perform the requested action.')}</p>
       {foreground && <p>{t('These device-selected arguments leave end-to-end encryption for this exact recipient. FreeCollab relays them in memory and retains only a content-free delivery receipt. No history is decrypted on the server and no response is published automatically.')}</p>}

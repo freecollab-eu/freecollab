@@ -18,7 +18,7 @@
 .fc-document-proposals small { display: block; color: var(--fc-muted); font-size: var(--fc-caption-size); line-height: 1.7; }
 .fc-document-proposals .fc-button,
 .fc-document-relations .fc-button { flex-shrink: 0; }
-.fc-document-organization .fc-shared-inline > label { min-width: 0; flex: 1; }
+.fc-document-organization .fc-shared-inline > label, .fc-document-organization .fc-shared-inline > .fc-labeled-writing-field { min-width: 0; flex: 1; }
 .fc-document-organization .fc-shared-inline .fc-input { width: 100%; min-width: 0; }
 .fc-document-organization .fc-shared-toolbar > strong { margin-right: auto; font-size: var(--fc-detail-size); font-weight: 500; }
 .fc-document-organization [draggable=true] { cursor: grab; }
@@ -53,6 +53,6 @@
   .fc-document-relations > li,
   .fc-document-proposals > div { align-items: flex-start; flex-direction: column; }
   .fc-document-organization .fc-shared-inline { flex-wrap: wrap; }
-  .fc-document-organization .fc-shared-inline > label { flex-basis: 100%; }
+  .fc-document-organization .fc-shared-inline > label, .fc-document-organization .fc-shared-inline > .fc-labeled-writing-field { flex-basis: 100%; }
   .fc-document-stack { padding: .85rem; }
 }

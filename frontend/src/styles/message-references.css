@@ -33,8 +33,8 @@ form:has(> .fc-mention-references) { position: relative; }
 .fc-reference-groups-list > button:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
 .fc-reference-group-editor { margin-top: 1.25rem; padding-top: 1.1rem; border-top: 1px solid var(--fc-border); }
 .fc-reference-group-editor > fieldset { display: grid; gap: 1rem; min-width: 0; padding: 0; border: 0; margin: 0; }
-.fc-reference-group-editor label { color: var(--fc-text); font-size: .8rem; line-height: 1.5; }
-.fc-reference-group-editor > fieldset > label { display: grid; gap: .45rem; }
+.fc-reference-group-editor label, .fc-reference-group-editor .fc-labeled-writing-field { color: var(--fc-text); font-size: .8rem; line-height: 1.5; }
+.fc-reference-group-editor > fieldset > label, .fc-reference-group-editor > fieldset > .fc-labeled-writing-field { display: grid; gap: .45rem; }
 .fc-reference-group-editor input[type="text"], .fc-reference-group-editor input:not([type]) { width: 100%; min-width: 0; min-height: 44px; padding: .65rem .75rem; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .45); color: var(--fc-text); background: var(--fc-surface); font: inherit; }
 .fc-reference-group-editor input:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
 .fc-reference-group-members { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: .3rem .8rem; min-width: 0; padding: .6rem 0 0; border: 0; margin: 0; }

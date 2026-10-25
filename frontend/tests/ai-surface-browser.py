@@ -21,6 +21,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from urllib.parse import parse_qs, urlsplit
 from playwright.sync_api import expect, sync_playwright
 
@@ -157,9 +158,44 @@ else:
                 stage='real shared execution projection and budget ledger'
                 panel.get_by_text('All AI and automation executions',exact=True).click();expect(panel.locator('.fc-ai-execution').first).to_be_visible();budget=helpers.api(base,'GET',prefix,owner)['budget'];assert budget['used_tokens']>0 and budget['reserved_tokens']==0;checks['actual_execution_projection_and_settled_budget_ledger']=True
                 stage='canonical profile refresh retires old disclosure and a scope change clears typed secrets'
-                panel.get_by_label('Send this reviewed request to the selected model.',exact=True).check();before=len(requests);helpers.api(base,'PUT',prefix+'/profiles/'+fast['id'],owner,{'password':PASSWORD,'expected_revision':fast['revision'],'name':'Fast reviewer','protocol':'openai','endpoint':endpoint,'model':'fixture-fast-v2','key_source':'workspace','enabled':True,'max_output_tokens':2048,'input_cost_per_million_micros':0,'output_cost_per_million_micros':0});panel.get_by_role('button',name='Refresh',exact=True).click();expect(panel.get_by_label('I opt in to this exact model profile and recipient.',exact=True)).not_to_be_checked();expect(panel.get_by_label('Send this reviewed request to the selected model.',exact=True)).not_to_be_checked();assert len(requests)==before;form.get_by_label('Provider API key',exact=True).fill('synthetic-unsaved-scoped-key');form.get_by_label('Current password',exact=True).fill(PASSWORD);page.get_by_role('button',name='Switch conversation',exact=True).click();expect(panel.get_by_label('AI budget')).to_be_visible();summary=panel.get_by_text('Model profiles and monthly limits',exact=True);
-                if not summary.evaluate('(node)=>node.parentElement.open'): summary.click()
-                expect(form.get_by_label('Provider API key',exact=True)).to_have_value('');expect(form.get_by_label('Current password',exact=True)).to_have_value('');checks['recipient_revision_refresh_and_scope_change_retire_disclosure_and_clear_secrets']=True
+                panel.get_by_label('Send this reviewed request to the selected model.',exact=True).check();before=len(requests);helpers.api(base,'PUT',prefix+'/profiles/'+fast['id'],owner,{'password':PASSWORD,'expected_revision':fast['revision'],'name':'Fast reviewer','protocol':'openai','endpoint':endpoint,'model':'fixture-fast-v2','key_source':'workspace','enabled':True,'max_output_tokens':2048,'input_cost_per_million_micros':0,'output_cost_per_million_micros':0});panel.get_by_role('button',name='Refresh',exact=True).click();expect(panel.get_by_label('I opt in to this exact model profile and recipient.',exact=True)).not_to_be_checked();expect(panel.get_by_label('Send this reviewed request to the selected model.',exact=True)).not_to_be_checked();assert len(requests)==before
+                expect(panel.get_by_role('button',name='Refresh',exact=True)).to_be_enabled()
+                form.get_by_label('Provider API key',exact=True).fill('synthetic-unsaved-scoped-key');form.get_by_label('Current password',exact=True).fill(PASSWORD)
+                old_budget=panel.get_by_label('AI budget').element_handle();old_key=form.get_by_label('Provider API key',exact=True).element_handle();held_status=[]
+                def hold_scope_status(route):
+                    if route.request.method=='GET' and urlsplit(route.request.url).path=='/api'+prefix: held_status.append(route)
+                    else: route.continue_()
+                page.route('**/copilot/runtime',hold_scope_status)
+                try:
+                    page.get_by_role('button',name='Switch conversation',exact=True).click()
+                    deadline=time.monotonic()+15
+                    while not held_status and time.monotonic()<deadline: page.wait_for_timeout(25)
+                    assert len(held_status)==1,'The scope change must request its actual fresh runtime status'
+                    # Hold the unchanged HTTP request until the old React leaves
+                    # are gone. An old visible budget/open details cannot satisfy
+                    # the assertions for the newly scoped settings form.
+                    page.wait_for_function('(node)=>!node.isConnected',arg=old_budget)
+                    assert not old_key.evaluate('(node)=>node.isConnected')
+                    expect(panel.get_by_label('AI budget')).to_have_count(0)
+                    expect(form).to_have_count(0)
+                    with page.expect_response(lambda response: response.request.method=='GET' and urlsplit(response.url).path=='/api'+prefix) as scoped_status:
+                        held_status.pop().continue_()
+                    assert scoped_status.value.status==200
+                    loaded_status=scoped_status.value.json()
+                    assert next(item for item in loaded_status['profiles'] if item['id']==fast['id'])['model']=='fixture-fast-v2'
+                    assert KEY not in json.dumps(loaded_status) and PASSWORD not in json.dumps(loaded_status) and 'synthetic-unsaved-scoped-key' not in json.dumps(loaded_status)
+                    expect(panel.get_by_label('AI budget')).to_be_visible()
+                    assert panel.get_by_label('AI budget').evaluate('(node,previous)=>node!==previous',old_budget)
+                    summary=panel.get_by_text('Model profiles and monthly limits',exact=True)
+                    expect(summary).to_be_visible();assert not summary.evaluate('(node)=>node.parentElement.open')
+                    summary.click()
+                    expect(form.get_by_label('Provider API key',exact=True)).to_be_visible()
+                    expect(form.get_by_label('Provider API key',exact=True)).to_have_value('');expect(form.get_by_label('Current password',exact=True)).to_have_value('')
+                    expect(panel.get_by_label('I opt in to this exact model profile and recipient.',exact=True)).not_to_be_checked();expect(panel.get_by_label('Send this reviewed request to the selected model.',exact=True)).not_to_be_checked();assert len(requests)==before
+                finally:
+                    for pending in held_status: pending.continue_()
+                    page.unroute('**/copilot/runtime',hold_scope_status)
+                checks['recipient_revision_refresh_and_scope_change_retire_disclosure_and_clear_secrets']=True
                 stage='narrow keyboard and touch layout'
                 page.set_viewport_size({'width':320,'height':900});page.get_by_role('heading',name='Private AI collaboration proof',exact=True).scroll_into_view_if_needed();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1');page.screenshot(path=str(REPORT.with_suffix('.png')),full_page=True);checks['320px_no_document_overflow']=True
                 assert not errors, errors

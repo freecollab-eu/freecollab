@@ -284,6 +284,7 @@ DIALOGS = {
     'appearance': ('.appearance-panel', 'Close appearance settings'),
     'account': ('[role="dialog"][aria-label="Account settings"]', 'Close account settings'),
     'my-day': ('.fc-day', 'Close my day'),
+    'personal-calendar': ('.fc-day', 'Close my day'),
     'integrations': ('.fc-integrations-panel', 'Close integrations'),
     'direct-message': ('.fc-dm-panel', 'Close direct messages'),
     'new-channel': ('.fc-chat-create-dialog', 'Cancel'),
@@ -322,6 +323,9 @@ def exercise_inventory(page, source, writes, name, *, ids=None, source_document=
     source_node = live_handle(source)
     available = inventory(source)
     assert len(available) >= 29 and len(available) == len(set(available)), available
+    handler_coverage = set(INLINE) | set(DIALOGS) | {'focus'}
+    assert set(available) <= handler_coverage, 'Current command catalog has no actual dispatch expectation: ' + json.dumps(sorted(set(available) - handler_coverage))
+    assert set(ids or available) <= set(available), 'The requested inventory contains an unavailable command'
     if SKIP_INVENTORY_EXECUTION:
         mark(name + '_inventory_visible_only', inventory=available)
         return available
@@ -334,7 +338,13 @@ def exercise_inventory(page, source, writes, name, *, ids=None, source_document=
         before = card_ids(page)
         since = len(writes)
         browse(source)
-        choose_command(source, command_id)
+        if command_id == 'personal-calendar':
+            with page.expect_response(lambda response: response.request.method == 'GET' and re.fullmatch(r'/api/workspaces/[^/]+/personal-calendar', urlsplit(response.url).path)) as private_calendar_read:
+                choose_command(source, command_id)
+            assert private_calendar_read.value.status == 200
+            assert isinstance(private_calendar_read.value.json(), list)
+        else:
+            choose_command(source, command_id)
         if command_id in INLINE:
             target = latest_card(page, before)
             expect(target).to_be_visible()
@@ -354,12 +364,20 @@ def exercise_inventory(page, source, writes, name, *, ids=None, source_document=
             if command_id == 'schedule':
                 expect(target.locator('blockquote')).to_have_count(0)
                 expect(target.locator('.fc-productivity-form')).to_have_count(0)
+            elif command_id == 'personal-calendar':
+                calendar = target.get_by_role('region', name='Private calendar', exact=True)
+                expect(calendar).to_be_visible()
+                expect(calendar.get_by_role('button', name='New private event', exact=True)).to_be_visible()
+                expect(calendar.get_by_role('form', name='Private event', exact=True)).to_have_count(0)
+                expect(target.get_by_role('button', name='Back to overview', exact=True)).to_have_attribute('aria-pressed', 'true')
             target.get_by_role('button', name=close, exact=True).click()
             expect(target).to_have_count(0) if command_id != 'channels' else expect(target).not_to_be_visible()
+            if command_id == 'personal-calendar':
+                expect(source).to_be_focused()
         same_node(source, source_node, source_text)
         no_target_writes(writes, since, source_document)
         exercised.append(command_id)
-    mark(name + '_real_permission_inventory_opens_intended_functions_without_publishing_source', inventory=available, opened=exercised)
+    mark(name + '_real_permission_inventory_opens_intended_functions_without_publishing_source', inventory=available, opened=exercised, coveredAvailableIds=sorted(set(available) & handler_coverage))
     return available
 
 

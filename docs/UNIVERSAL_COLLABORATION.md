@@ -165,3 +165,8 @@ outside that label. Existing input IDs, refs and handlers survive the wrapper.
 This prevents helper buttons or expanded AI content from changing the name read
 by assistive technology. Keyboard focus and live Swedish labels are covered by
 the actual command/reference browser regression.
+
+The full browser inventory checks every currently available command against an
+explicit UI handler before dispatch. A newly added command cannot silently fall
+out of the test. The private-calendar command opens its real My Day list without
+creating an event and restores the originating writer on close.

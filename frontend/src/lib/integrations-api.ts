@@ -84,6 +84,7 @@ export interface OperationsStatus {
   worker: { last_seen_at: string | null; status: string };
   database: { reachable: boolean };
   integration_worker?: { last_seen_at: string | null; status: string; enabled: boolean };
+  ai_runtime_worker?: { last_seen_at: string | null; status: string; enabled: boolean };
   integration_queues?: Record<string, Record<string, number | null | undefined>>;
 }
 export interface MailDelivery { id: string; created_at: string; status: string; attempts: number; next_attempt_at: string; delivered_at: string | null; failure: string | null; retryable: boolean }

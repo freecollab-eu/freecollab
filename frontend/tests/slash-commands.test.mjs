@@ -36,7 +36,7 @@ test('empty search exposes the full feature inventory without truncating the lis
   const allNative = getSlashCommands(context);
   const union = new Set([...all, ...allNative].map(command => command.id));
   assert.deepEqual([...union].sort(), [
-    'document', 'task', 'decision', 'meetings', 'files', 'members', 'groups', 'channel', 'bookmarks', 'pins', 'notification-settings', 'search', 'activity', 'workflows', 'cloud', 'external-meetings', 'apps', 'copilot', 'data', 'mobile', 'shared-work', 'schedule', 'focus', 'appearance', 'account', 'my-day', 'integrations', 'direct-message', 'new-channel', 'channels', 'secure-settings', 'status', 'notifications', 'get-started', 'feedback', 'admin',
+    'document', 'task', 'decision', 'meetings', 'files', 'members', 'groups', 'channel', 'bookmarks', 'pins', 'notification-settings', 'search', 'activity', 'workflows', 'cloud', 'external-meetings', 'apps', 'copilot', 'data', 'mobile', 'shared-work', 'schedule', 'focus', 'appearance', 'account', 'my-day', 'personal-calendar', 'integrations', 'direct-message', 'new-channel', 'channels', 'secure-settings', 'status', 'notifications', 'get-started', 'feedback', 'admin',
   ].sort());
   for (const commands of [all, allNative]) {
     assert.equal(new Set(commands.map(command => command.id)).size, commands.length);

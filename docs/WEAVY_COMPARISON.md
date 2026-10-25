@@ -1,6 +1,6 @@
 # Weavy comparison: current FreeCollab source
 
-Updated **2026-10-23** for 0.13 and the subsequent review branch. The
+Updated **2026-10-25** for 0.13 and the subsequent review branch. The
 [implementation audit](FEATURE_AUDIT.md) is the current source of feature status,
 code, tests and missing work. The dated Weavy sources below were read on
 2026-10-21; Weavy has not been exercised here and its current product may differ.
@@ -12,9 +12,9 @@ code, tests and missing work. The dated Weavy sources below were read on
 | Production feeds | Native/Matrix feed posts, comments, reactions, polls, following and read state. [Activity feeds](ACTIVITY_FEEDS.md). | Older experimental posts routes are separate. |
 | Modular embedding | Eleven native SDK modules, Web Components/React and isolated trusted Matrix client. [SDK audit](audit/SDK_OPERATIONS.md). | Packable, not npm-published; actual customer host acceptance separate. |
 | Cloud files | Google Drive, OneDrive/SharePoint, Dropbox and Box pickers, plus supported selective synchronization. [Integration audit](audit/INTEGRATIONS.md). | Customer-owned registrations/grants; encrypted links and server import have different limits. |
-| Contextual AI and agents | Reviewed message/draft/document/stack/task help, one compatible provider/model per workspace, fixed tools and separately approved writes. [AI audit](audit/AI_WORKFLOWS.md). | Not a general multi-step agent platform: no routing, AI spending ledger, arbitrary HTTP/web-search or workspace RAG. |
+| Contextual AI and agents | Shared writer/reader assistance, durable run/step jobs, several native providers/profiles, routing and bounded planning, personal keys, usage budgets, reviewed RAG/search/registered HTTPS tools and separately approved writes. [AI audit](audit/AI_WORKFLOWS.md). | Customer models/grants; no arbitrary code or unregistered destination. Live provider billing and workload acceptance remain separate. |
 | External meetings | Meet, Teams and Zoom adapters, plus own browser calls and optional LiveKit. [Integration audit](audit/INTEGRATIONS.md). | Customer grants/licenses and real provider acceptance required. |
-| Recent natural workflow | Real channel metadata, native document stacks, message references and derived stack discussions. [Organization](DOCUMENT_ORGANIZATION.md). | Native stacks do not imply Matrix stacks or general binary/external file taxonomy. |
+| Recent natural workflow | Real channel metadata, native/encrypted document stacks, mixed material collections, passage comments, exact source navigation and reviewed semantic proposals. [Organization](DOCUMENT_ORGANIZATION.md). | Originals retain their ACL/history. Model proposals require explicit application; peer operation uses verified encrypted publication authority. |
 
 These are implemented bounded flows, not proof of full Weavy parity or an
 overall product/security ranking. See [the practical scorecard](OPEN_SOURCE_SCORECARD.md).

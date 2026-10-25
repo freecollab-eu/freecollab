@@ -30,6 +30,8 @@ from .crypto import encrypt_message, decrypt_message
 from . import remote_transport
 
 PROTOCOL = "freecollab-connect/1"
+WORK_PROTOCOLS = ["freecollab-federated-work/1", "freecollab-federated-work/2", "freecollab-encrypted-work/2", "freecollab-work-authority/1"]
+ROOM_PROTOCOLS = ["freecollab-matrix-meeting/1"]
 PATH = "/connect/federation/wire/"
 MAX_MEMBERS = 100
 MAX_WIRE_BYTES = 128 * 1024
@@ -208,7 +210,8 @@ def local_roster(session, connection, *, provision=False):
         raise HTTPException(409, "Federated channel participant limit reached")
     operator, _ = service_token(session)
     return {"status": connection.status if authority_valid(session, connection) else "revoked",
-        "connection_id": connection.id, "operator": operator, "members": sorted(roster, key=lambda m: m["matrix_user_id"])}
+        "connection_id": connection.id, "operator": operator, "members": sorted(roster, key=lambda m: m["matrix_user_id"]),
+        "work_protocols": WORK_PROTOCOLS, "room_protocols": ROOM_PROTOCOLS}
 
 
 def remote_snapshot(session, connection):
@@ -219,9 +222,15 @@ def remote_snapshot(session, connection):
     domain = peers[connection.peer_origin][1]
     try:
         members = result["members"]
+        protocols = result.get("work_protocols", ["freecollab-federated-work/1"])
+        room_protocols = result.get("room_protocols", [])
         if (result.get("status") != "active" or result.get("connection_id") != connection.id
                 or result.get("operator") != connection.peer_operator or not isinstance(members, list)
-                or len(members) > MAX_MEMBERS):
+                or len(members) > MAX_MEMBERS or not isinstance(protocols, list) or len(protocols) > 16
+                or any(not isinstance(value, str) or len(value) > 100 or not re.fullmatch(r"[a-z0-9_/-]+", value) for value in protocols)
+                or len(set(protocols)) != len(protocols) or not isinstance(room_protocols, list) or len(room_protocols) > 16
+                or any(not isinstance(value, str) or len(value) > 100 or not re.fullmatch(r"[a-z0-9_/-]+", value) for value in room_protocols)
+                or len(set(room_protocols)) != len(room_protocols)):
             raise ValueError()
         seen = set()
         for member in members:

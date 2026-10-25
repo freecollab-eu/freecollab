@@ -25,7 +25,7 @@ args.output.mkdir(mode=0o700, parents=False, exist_ok=False)
 running = compose(args.env_file, args.project, "ps", "--status", "running", "--services", profiles=["*"], capture_output=True, text=True).stdout.split()
 if "db" not in running:
     parser.exit(1, "Database must be running before a backup\n")
-writers = [name for name in ("frontend", "backend", "mail-worker", "integration-worker", "sfu-worker", "matrix") if name in running]
+writers = [name for name in ("frontend", "backend", "mail-worker", "integration-worker", "ai-runtime-worker", "sfu-worker", "matrix") if name in running]
 images = {}
 for service in sorted(BASE_SERVICES | OPTIONAL_SERVICES):
     container_id = compose(args.env_file, args.project, "ps", "-aq", service, profiles=["*"], capture_output=True, text=True).stdout.strip()
@@ -34,6 +34,8 @@ for service in sorted(BASE_SERVICES | OPTIONAL_SERVICES):
             parser.exit(1, f"Missing service container: {service}\n")
         continue
     images[service] = docker("inspect", "--format", "{{.Image}}", container_id, capture_output=True, text=True).stdout.strip()
+if "ai-runtime-worker" in images and images["ai-runtime-worker"] != images["backend"]:
+    parser.exit(1, "AI runtime worker must use the same backend image before taking a cold backup. No writers were stopped.\n")
 volumes = []
 for volume in sorted(VOLUME_NAMES):
     existing = docker("volume", "ls", "-q", "--filter", f"name=^{args.project}_{volume}$", capture_output=True, text=True).stdout.strip()

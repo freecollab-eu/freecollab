@@ -12,6 +12,7 @@ export type ComposerCommandIntent =
   | { kind: 'decision'; title: string; content: string }
   | { kind: 'groups'; name: string; memberText: string }
   | { kind: 'search'; query: string }
+  | { kind: 'app-command'; key: string; generation: number; argumentText: string }
   | { kind: 'open'; action: SlashAction };
 
 export interface ParsedComposerCommand {
@@ -23,6 +24,7 @@ export interface ParsedComposerCommand {
   intent?: ComposerCommandIntent;
   usage?: string;
   error?: string;
+  ambiguous?: boolean;
 }
 
 /** Explicit person IDs only; a display name or group never implies identity. */
@@ -118,6 +120,7 @@ const aliases: Partial<Record<SlashAction, readonly string[]>> = {
 const normalize = (value: string) => value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
 export function composerCommandUsage(command: SlashCommand): string {
+  if (command.installedApp) return `/${command.command} ${command.installedApp.arguments.map(argument => `${argument.name}="…"`).join(' ')}`.trimEnd();
   if (['document', 'task', 'decision'].includes(command.id)) return `/${command.command} ${t('"Title" Optional context on the same or next line')}`;
   if (command.id === 'search') return `/${command.command} ${t('Words to find')}`;
   if (command.id === 'groups') return `/${command.command} ${t('"Group name" @people')}`;
@@ -135,7 +138,8 @@ export function getComposerCommandQuery(value: string): string | null {
 /** Multiline ordinary text stays a message unless its command is recognized. */
 export function isComposerCommandDraft(value: string, context: SlashContext): boolean {
   if (getComposerCommandQuery(value) === null) return false;
-  return !/[\r\n\u2028\u2029]/.test(value) || !!parseComposerCommand(value, context).command;
+  const parsed = parseComposerCommand(value, context);
+  return !/[\r\n\u2028\u2029]/.test(value) || !!parsed.command || !!parsed.ambiguous;
 }
 
 function titleAndContext(argument: string): { title: string; text: string } | { error: string } {
@@ -163,13 +167,22 @@ function titleAndContext(argument: string): { title: string; text: string } | { 
 export function parseComposerCommand(value: string, context: SlashContext, selectedAction?: SlashAction): ParsedComposerCommand {
   const query = getComposerCommandQuery(value);
   if (query === null) return { status: 'unknown', query: '', error: t('Type / followed by a command, or keep writing a message.') };
-  if (value.length > 10000 || query.length > 80) return { status: 'invalid', query, error: t('This command exceeds the supported writing limit.') };
+  const installedPrefix = context.installedCommands?.some(command => normalize(`${command.app_id}:${command.name}`).startsWith(normalize(query)));
+  if (value.length > 10000 || query.length > 192 || query.length > 80 && !installedPrefix) return { status: 'invalid', query, error: t('This command exceeds the supported writing limit.') };
   const match = /^\/[ \t]*([^\s]*)([\s\S]*)$/.exec(value)!;
   const argument = match[2].replace(/^[ \t]+/, '').replace(/^\r?\n/, '');
   const commands = getSlashCommands(context), normalized = normalize(query);
   if (!query && !selectedAction) return { status: 'menu', query: '' };
-  const command = selectedAction ? commands.find(item => item.id === selectedAction) : commands.find(item =>
+  const exact = commands.filter(item =>
     normalize(item.command) === normalized || (aliases[item.id] || []).some(alias => normalize(alias) === normalized));
+  let command = selectedAction ? commands.find(item => item.id === selectedAction)
+    : exact.find(item => !item.installedApp) || (exact.length === 1 ? exact[0] : undefined);
+  if (!selectedAction && !command && exact.length > 1) return { status: 'menu', query, arguments: argument, ambiguous: true };
+  if (!command && !selectedAction) {
+    const installed = commands.filter(item => item.installedApp && normalize(item.installedApp.name) === normalized);
+    if (installed.length === 1) command = installed[0];
+    else if (installed.length > 1) return { status: 'menu', query, arguments: argument, ambiguous: true };
+  }
   if (!command) {
     const matches = getSlashCommands(context, query);
     return { status: matches.length ? 'menu' : 'unknown', query, arguments: argument,
@@ -180,6 +193,7 @@ export function parseComposerCommand(value: string, context: SlashContext, selec
     return { status: 'invalid', query, command, arguments: argument, error: t('Choose a command matching what you typed.') };
   }
   const base = { query, command, arguments: argument, usage: composerCommandUsage(command) };
+  if (command.installedApp) return { ...base, status: 'ready', intent: { kind: 'app-command', key: command.installedApp.key, generation: command.installedApp.generation, argumentText: argument } };
   if (!argument.trim()) return { ...base, status: 'ready', intent: { kind: 'open', action: command.id } };
   if (command.id === 'search') {
     let search = argument.trim();

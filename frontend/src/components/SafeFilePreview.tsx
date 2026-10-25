@@ -5,9 +5,10 @@ import { parseCsv, previewKind } from '../lib/file-preview';
 import { useI18n } from '../i18n';
 import '../styles/file-experience.css';
 
-export function SafeFilePreview({ file }: { file: ManagedFile }) {
+export function SafeFilePreview({ file, onVerifiedText }: { file: ManagedFile; onVerifiedText?: (value: { key: string; owner: string | null; text: string }) => void }) {
   const { t } = useI18n(), kind = previewKind(file), owner = useRef(api.getAccessToken());
   const [loading, setLoading] = useState(true), [error, setError] = useState(''), [text, setText] = useState(''), [url, setUrl] = useState(''), [blocks, setBlocks] = useState<string[]>([]), [truncated, setTruncated] = useState(false);
+  const textCallback = useRef(onVerifiedText); textCallback.current = onVerifiedText;
   useEffect(() => {
     const token = api.getAccessToken(); owner.current = token;
     let stopped = false, objectUrl = ''; const abort = new AbortController();
@@ -22,6 +23,7 @@ export function SafeFilePreview({ file }: { file: ManagedFile }) {
         if (!valid()) return;
         if (result.passive !== true || !Array.isArray(result.blocks) || result.blocks.length > 2000 || result.blocks.some(value => typeof value !== 'string') || result.blocks.join('').length > 100000) throw new Error('This Office preview could not be verified.');
         setBlocks(result.blocks); setTruncated(result.truncated);
+        textCallback.current?.({ key: file.channel_id + ':' + file.id, owner: token, text: result.blocks.join('\n') });
       } else {
         const maximum = kind === 'text' || kind === 'csv' ? 1024 * 1024 : 50 * 1024 * 1024;
         if (file.size > maximum) throw new Error(kind === 'text' || kind === 'csv' ? 'Text preview limit is 1 MiB. Download the file to read it.' : 'Media preview limit is 50 MiB.');
@@ -32,6 +34,7 @@ export function SafeFilePreview({ file }: { file: ManagedFile }) {
           let value: string; try { value = new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('This file is not supported UTF-8 text.'); }
           if (value.includes('\0')) throw new Error('Binary content cannot be displayed as text.');
           setText(value);
+          textCallback.current?.({ key: file.channel_id + ':' + file.id, owner: token, text: value });
         } else { objectUrl = URL.createObjectURL(new Blob([blob], { type: file.content_type })); setUrl(objectUrl); }
       }
       if (valid()) setLoading(false);

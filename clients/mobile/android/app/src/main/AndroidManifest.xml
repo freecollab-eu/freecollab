@@ -29,6 +29,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="freecollab" android:host="native" android:path="/complete" />
             </intent-filter>
+            <!-- FREECOLLAB_VERIFIED_LINKS_START -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="freecollab.eu" android:path="/open" />
+            </intent-filter>
+            <!-- FREECOLLAB_VERIFIED_LINKS_END -->
 
         </activity>
 

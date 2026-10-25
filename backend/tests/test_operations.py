@@ -155,6 +155,53 @@ def test_worker_and_metrics_report_queue_lag_without_account_labels(operator):
     assert client.get("/operations/status", headers=headers()).json()["worker"]["status"] == "stale"
 
 
+def test_ai_slack_and_encrypted_work_queues_report_actual_states_without_opening_content(operator, monkeypatch):
+    from app.models.ai_runtime import AIRun
+    from app.models.slack_livebridge import SlackBridge, SlackBridgeJob
+    from app.models.connect_federation import FederatedConnection
+    from app.models.encrypted_work import EncryptedWorkRemoteCursor
+    from app.services import ai_runtime, encrypted_work
+    client, engine, _ = operator
+    monkeypatch.setattr(settings, "copilot_enabled", True)
+    monkeypatch.setattr(settings, "demo_instance", False)
+    now = datetime.utcnow()
+    with Session(engine) as session:
+        session.add(Workspace(id="private-workspace", name="Private workspace"))
+        session.add(Channel(id="private-channel", name="Private channel")); session.commit()
+        for status, age in (("queued", 2), ("running", 1), ("awaiting_review", 60)):
+            session.add(AIRun(workspace_id="private-workspace", channel_id="private-channel", user_id="operator", request_id="private-" + status,
+                request_digest="private-digest", profile_id="private-profile", profile_revision=1, operation="answer", status=status,
+                encrypted_payload="must-not-open", encrypted_authority="must-not-open", updated_at=now - timedelta(minutes=age)))
+        session.add(SlackBridge(id="private-bridge", workspace_id="private-workspace", channel_id="private-channel", granted_by="operator",
+            slack_team_id="private-team", slack_channel_id="private-channel", slack_bot_user_id="private-bot", encrypted_config="must-not-open")); session.commit()
+        for name, due in (("due", now - timedelta(minutes=4)), ("future", now + timedelta(minutes=10))):
+            session.add(SlackBridgeJob(bridge_id="private-bridge", generation=1, direction="outbound", event_key="private-" + name,
+                body_digest="private-digest", encrypted_payload="must-not-open", next_attempt_at=due))
+        session.add(FederatedConnection(id="private-federation", workspace_id="private-workspace", channel_id="private-channel", peer_origin="https://private-peer.example",
+            peer_workspace_id="private-remote", role="host", authority_user_id="operator", status="active", invitation_expires_at=now + timedelta(hours=1), created_at=now - timedelta(minutes=5)))
+        session.commit()
+    def forbidden(*args, **kwargs): raise AssertionError("Diagnostics cannot open private content or contact a peer")
+    monkeypatch.setattr(ai_runtime.copilot, "opened", forbidden)
+    monkeypatch.setattr(encrypted_work, "run_pending", forbidden)
+    response = client.get("/operations/status", headers=headers()); assert response.status_code == 200, response.text
+    body = response.json(); queues = body["integration_queues"]
+    assert body["ai_runtime_worker"]["enabled"] and body["ai_runtime_worker"]["status"] == "unknown"
+    assert queues["ai-runtime"]["pending"] == queues["ai-runtime"]["processing"] == queues["ai-runtime"]["awaiting_review"] == 1
+    assert 119 <= queues["ai-runtime"]["oldest_pending_seconds"] < 140
+    assert queues["slack-livebridge"]["pending"] == queues["slack-livebridge"]["scheduled"] == 1
+    assert 239 <= queues["slack-livebridge"]["oldest_pending_seconds"] < 260
+    assert queues["encrypted-work"]["pending"] == 1 and queues["encrypted-work"]["oldest_pending_seconds"] >= 299
+    with Session(engine) as session:
+        record_worker_heartbeat(session, name="ai-runtime")
+        session.add(EncryptedWorkRemoteCursor(connection_id="private-federation", checked_at=datetime.utcnow())); session.commit()
+    metrics = client.get("/operations/metrics", headers=headers())
+    assert metrics.status_code == 200, metrics.text
+    assert 'freecollab_integration_queue_records{queue="ai-runtime",status="awaiting_review"} 1' in metrics.text
+    assert 'freecollab_ai_runtime_worker_healthy 1' in metrics.text
+    assert 'freecollab_integration_queue_records{queue="encrypted-work",status="scheduled"} 1' in metrics.text
+    assert "private-" not in response.text + metrics.text and "must-not-open" not in response.text + metrics.text
+
+
 def test_test_delivery_requires_fresh_verified_operator_and_only_queues_own_address(operator):
     client, engine, tmp_path = operator
     assert client.post("/operations/mail/test", headers=headers(), json={"password": "wrong"}).status_code == 403

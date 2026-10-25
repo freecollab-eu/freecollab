@@ -6,7 +6,23 @@ Open **Workspace tools → Workflows** inside a channel. A personal account that
 
 Supported events are a manual start, native file upload/new version, shared-document creation, decision creation/revision and task creation/revision. Producers enqueue metadata in the same database transaction as the resource change. A manual start runs only the selected workflow. The creator condition can limit events to the administrator who saved the current revision. The editor supports native task status conditions and native decision status conditions (`proposed`, `accepted`, `superseded`). Decision producers forward only that validated status to the local workflow queue; it is not added to outgoing webhook payloads. Encrypted decision events retain no readable status condition.
 
-Actions are an approval request, a generic in-app notification to selected current channel members, and creation of a To do task in an existing native project. There are no arbitrary URLs, scripts, email actions, file exports or external-provider destinations. Generated tasks do not trigger more workflows. A task action creates one task per run and does not overwrite subsequent user edits.
+Actions are an approval request, a generic in-app notification to selected current channel members, creation of a To do task in an existing native project, or a registered installed-app command. There are no arbitrary URLs, scripts or implicit history/file exports. Generated tasks do not trigger more workflows. A task action creates one task per run and does not overwrite subsequent user edits.
+
+An `app_command` step chooses an existing granted app, command, exact installation
+generation and fixed typed arguments. Saving requires explicit approval of future
+disclosure to that recipient as well as the normal password/MFA confirmation.
+No event text, document or channel history is interpolated into the arguments.
+The app platform validates its current manifest/grant again on each run. A
+signed-webhook installation is the configured HTTP action contract; endpoints
+retain the same public-HTTPS, signed delivery and credential boundaries as
+[ordinary app commands](APP_PLATFORM.md).
+
+The workflow queues one deterministic app request per run/step and waits in
+`waiting_external` until the actual outbox reports delivery. Run details expose
+the exact job ID/status. Unknown or failed remote writes stop the workflow with
+an honest failure, never a fabricated success or automatic duplicate create.
+Canceling a run or changing its definition cancels its undelivered app outbox
+requests in the same transaction. Already completed external actions remain.
 
 Each approval step has a quorum, a deadline, zero to three reminders and optional escalation recipients. Escalation makes the selected current members eligible after the final reminder. A rejection ends the run. Each actor can record one immutable choice per step; retries of that same choice are idempotent. Removed, blocked or deprovisioned members cannot vote, and their earlier votes do not count toward a later dispatch. An impossible quorum cancels the run explicitly.
 
@@ -16,13 +32,20 @@ Workflow names, action settings, task titles and routing choices are administrat
 
 The worker never reads Matrix message bodies or shared-document content. Encrypted channels support activity metadata, generic notifications and public approval choices. Optional approval notes are encrypted on the client as a Matrix event; the API stores an opaque event reference and validates the current sender and channel. Clients check the decrypted event's sender, run, step and choice before displaying a note. There is no plaintext note fallback. Native approval notes use server encryption at rest.
 
-Content/status conditions, native file triggers and server-created task actions are unavailable in encrypted channels. Secure attachment uploads do not pass through the native file event source. Generic notification titles contain no workflow name, resource title or approval note. Existing notification preferences and current channel access apply. Changing encryption mode cancels incompatible queued work; native channel history must be handled by the channel's conversion safeguards.
+Content/status conditions, native file triggers, server-created task actions and
+server-dispatched external app commands are unavailable in encrypted channels.
+Trusted-device encrypted work uses its own explicit disclosure/execution contract;
+this server worker never decrypts it. Secure attachment uploads do not pass through
+the native file event source. Generic notification titles contain no workflow name,
+resource title or approval note. Existing notification preferences and current
+channel access apply. Changing encryption mode cancels incompatible queued work;
+native channel history must be handled by the channel's conversion safeguards.
 
 ## Current grants and durable processing
 
 Every dispatch checks that the saving administrator is still an active personal account with both workspace and channel administrator access. Workers cannot borrow an installation owner's permissions. Writes lock the grant actor before workspace/channel rows, refresh membership and recheck request authentication after locks. Edits create immutable revisions, cancel earlier pending runs and require a fresh grant; pausing cancels pending runs without undoing completed actions.
 
-Run `python -m app.services.integration_worker --interval 10` beside the API. `WORKFLOWS_ENABLED=true` enables the queue and worker; setting it false pauses new events and processing while keeping configuration and history readable. A queue with no definitions is idle. The durable worker claims bounded batches, recovers expired 60-second leases and retries failures at most five times with bounded backoff. Unique event identities, row claims and deterministic notice/task identities prevent duplicate effects after retry or concurrent claims. No action sends content outside FreeCollab.
+Run `python -m app.services.integration_worker --interval 10` beside the API. `WORKFLOWS_ENABLED=true` enables the queue and worker; setting it false pauses new events and processing while keeping configuration and history readable. A queue with no definitions is idle. The durable worker claims bounded batches, recovers expired 60-second leases and retries failures at most five times with bounded backoff. Unique event identities, row claims and deterministic notice/task/app-request identities prevent duplicate effects after retry or concurrent claims. Only an explicitly configured installed-app step sends its reviewed static arguments outside FreeCollab.
 
 Run states include queued, processing, waiting for approval, completed, rejected, cancelled, timed out and failed. The panel shows recent runs, per-step choices and activity, plus immutable configuration versions. The default history API returns 50 runs, supports a limit of 100 and a `before` timestamp. A channel permits at most 20 definitions and 2,000 retained runs. At capacity, enqueue trims up to 100 oldest terminal runs and their approval/activity metadata. If every retained run is active, new events fail atomically with HTTP 429 rather than silently disappearing. Archive or cancel active work before retrying. Resource files and tasks are not removed by history trimming.
 

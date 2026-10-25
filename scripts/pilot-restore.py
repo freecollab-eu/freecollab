@@ -16,7 +16,8 @@ parser.add_argument("backup", type=Path)
 parser.add_argument("--project", required=True, help="New project, never an existing installation")
 parser.add_argument("--env-file", type=Path, required=True, help="New private configuration path")
 parser.add_argument("--port", type=int, default=8081)
-parser.add_argument("--resume-integrations", action="store_true", help="Resume the restored outbound worker after reviewing destinations and deduplication")
+parser.add_argument("--resume-integrations", action="store_true", help="Resume the restored outbound worker, including recurring AI recaps, after reviewing destinations and deduplication")
+parser.add_argument("--resume-ai", action="store_true", help="Resume a source-running AI worker only after reviewing queued/uncertain jobs, model grants, budgets, source activity and possible duplicate charges")
 parser.add_argument("--resume-mail", action="store_true", help="Resume restored mail delivery after reviewing retained messages and SMTP destinations")
 parser.add_argument("--resume-sfu", action="store_true", help="Resume meeting authorization after reviewing external LiveKit rooms and restored participant leases")
 args = parser.parse_args()
@@ -44,7 +45,7 @@ if settings.get("ENVIRONMENT") != "production":
     settings["CORS_ORIGINS"] = json.dumps([f"http://localhost:{args.port}", f"http://127.0.0.1:{args.port}"], separators=(",", ":"))
     settings["PUBLIC_APP_URL"] = f"http://127.0.0.1:{args.port}"
 write_env(args.env_file, settings)
-profiles = (["secure"] if "matrix" in manifest["images"] else []) + (["mail"] if "mail-worker" in manifest["images"] else []) + (["integrations"] if "integration-worker" in manifest["images"] else []) + (["large-meetings"] if "sfu-worker" in manifest["images"] else [])
+profiles = (["secure"] if "matrix" in manifest["images"] else []) + (["mail"] if "mail-worker" in manifest["images"] else []) + (["integrations"] if {"integration-worker", "ai-runtime-worker"} & manifest["images"].keys() else []) + (["large-meetings"] if "sfu-worker" in manifest["images"] else [])
 volumes = manifest.get("volumes", ["files"])
 with tempfile.TemporaryDirectory(prefix="freecollab-restore-") as directory:
     overrides = Path(directory) / "images.json"
@@ -62,6 +63,8 @@ with tempfile.TemporaryDirectory(prefix="freecollab-restore-") as directory:
         services.append("mail-worker")
     if args.resume_integrations and "integration-worker" in manifest.get("running_services", []):
         services.append("integration-worker")
+    if args.resume_ai and "ai-runtime-worker" in manifest.get("running_services", []):
+        services.append("ai-runtime-worker")
     if args.resume_sfu and "sfu-worker" in manifest.get("running_services", []):
         services.append("sfu-worker")
     compose(args.env_file, args.project, "up", "-d", "--no-build", "--wait", "--wait-timeout", "120", *services, extra_file=overrides, profiles=profiles)
@@ -71,5 +74,9 @@ if "integration-worker" in manifest.get("running_services", []) and not args.res
     print("Outbound integration worker remains stopped. Review restored destinations before starting it.")
 if "mail-worker" in manifest.get("running_services", []) and not args.resume_mail:
     print("Mail worker remains stopped. Review retained messages and SMTP destinations before starting it.")
+if "ai-runtime-worker" in manifest.get("running_services", []) and not args.resume_ai:
+    print("AI worker remains stopped. Review queued/uncertain jobs, model grants, budgets, source activity and possible duplicate charges before starting it.")
+elif args.resume_ai and "ai-runtime-worker" not in manifest.get("running_services", []):
+    print("AI worker was not running in the source backup; it remains stopped.")
 if "sfu-worker" in manifest.get("running_services", []) and not args.resume_sfu:
     print("Meeting authorization worker remains stopped. Review restored leases and external LiveKit rooms before starting it.")

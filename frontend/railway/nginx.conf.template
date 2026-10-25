@@ -50,6 +50,33 @@ server {
         add_header Referrer-Policy no-referrer always;
         add_header X-Content-Type-Options nosniff always;
     }
+    location = /.well-known/apple-app-site-association {
+        proxy_pass http://freecollab_private_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $upstream_scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location = /.well-known/assetlinks.json {
+        proxy_pass http://freecollab_private_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $upstream_scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+        add_header X-Content-Type-Options nosniff always;
+    }
+    location = /open {
+        proxy_pass http://freecollab_private_api;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $remote_addr;
+        proxy_set_header X-Forwarded-Proto $upstream_scheme;
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 10s;
+        add_header X-Content-Type-Options nosniff always;
+    }
     location /api/ {
         proxy_pass http://freecollab_private_api/;
         proxy_http_version 1.1;

@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { writeAssociationFiles } from './associations.mjs';
 export function installationOrigin(value) {
   const url = new URL(value);
   if (typeof value !== 'string' || value.length > 2048 || /\s/.test(value) || url.protocol !== 'https:' || url.username || url.password
@@ -36,6 +37,28 @@ export async function configure(root = fileURLToPath(new URL('../', import.meta.
     try { const target=path.join(root,relative); await fs.writeFile(target,replace(await fs.readFile(target,'utf8'))); }
     catch (failure) { if (failure.code !== 'ENOENT') throw failure; }
   }
+  const host = new URL(origin).hostname;
+  const manifest = path.join(root, 'android/app/src/main/AndroidManifest.xml');
+  try {
+    const contents = await fs.readFile(manifest, 'utf8');
+    const filter = '<!-- FREECOLLAB_VERIFIED_LINKS_START -->\n            <intent-filter android:autoVerify="true">\n                <action android:name="android.intent.action.VIEW" />\n                <category android:name="android.intent.category.DEFAULT" />\n                <category android:name="android.intent.category.BROWSABLE" />\n                <data android:scheme="https" android:host="' + host + '" android:path="/open" />\n            </intent-filter>\n            <!-- FREECOLLAB_VERIFIED_LINKS_END -->';
+    const updated = /<!-- FREECOLLAB_VERIFIED_LINKS_START -->[\s\S]*?<!-- FREECOLLAB_VERIFIED_LINKS_END -->/.test(contents)
+      ? contents.replace(/<!-- FREECOLLAB_VERIFIED_LINKS_START -->[\s\S]*?<!-- FREECOLLAB_VERIFIED_LINKS_END -->/, filter)
+      : contents.replace('</activity>', '    ' + filter + '\n        </activity>');
+    await fs.writeFile(manifest, updated);
+  } catch (failure) { if (failure.code !== 'ENOENT') throw failure; }
+  const entitlements = path.join(root, 'ios/App/App/App.entitlements');
+  try {
+    let contents = await fs.readFile(entitlements, 'utf8');
+    const domains = '<key>com.apple.developer.associated-domains</key><array><string>applinks:' + host + '</string></array>';
+    contents = /<key>com.apple.developer.associated-domains<\/key>\s*<array>[\s\S]*?<\/array>/.test(contents)
+      ? contents.replace(/<key>com.apple.developer.associated-domains<\/key>\s*<array>[\s\S]*?<\/array>/, domains)
+      : contents.replace('</dict>', domains + '</dict>');
+    await fs.writeFile(entitlements, contents);
+  } catch (failure) { if (failure.code !== 'ENOENT') throw failure; }
+  await writeAssociationFiles(path.join(root, 'association-files'), { origin, applicationId: config.appId,
+    appleTeamId: process.env.FREECOLLAB_APPLE_TEAM_ID,
+    androidFingerprints: (process.env.FREECOLLAB_ANDROID_CERT_SHA256 || '').split(',').map(value => value.trim()).filter(Boolean) });
   console.log('FreeCollab mobile installation: ' + origin);
 }
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await configure();

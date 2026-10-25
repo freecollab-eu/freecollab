@@ -5,9 +5,13 @@ export interface MeetingParticipant { id: string; name: string; kind: 'member' |
 export interface MeetingAccess { meeting_id?: string; meeting?: Meeting; participant: MeetingParticipant; meeting_token: string }
 export interface MeetingPoll { meeting_id: string; participant_id: string; state: MeetingParticipant['state']; is_host: boolean; expires_at: string; encryption: 'webrtc-dtls-srtp'; participants: MeetingParticipant[]; signals: Array<{ sequence: number; sender_id: string; payload: { description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit } }>; cursor: number; ice_servers: RTCIceServer[] }
 export interface MeetingView { state: 'connecting' | 'waiting' | 'admitted' | 'ended'; host: boolean; participants: MeetingParticipant[]; streams: Map<string, MediaStream>; local: MediaStream | null; error: string; microphone: boolean; camera: boolean; sharing: boolean; connected: number }
+export interface MeetingTransport { pollInterval?: number; request<T>(operation: string, body?: unknown, keepalive?: boolean): Promise<T> }
 
 const segment = encodeURIComponent;
+let memberEpoch=0;
+if(typeof window!=='undefined')for(const name of ['freecollab:auth-changed','freecollab:session-expired'])window.addEventListener(name,()=>{++memberEpoch;});
 export const meetingsApi = {
+  get: (channel: string, id: string) => api.request<Meeting & { transport: 'mesh' | 'livekit' }>('/channels/' + segment(channel) + '/meetings/' + segment(id)),
   list: (channel: string) => api.request<Meeting[]>(`/channels/${segment(channel)}/meetings`),
   create: (channel: string) => api.request<MeetingAccess>(`/channels/${segment(channel)}/meetings`, { method: 'POST', body: '{}' }),
   join: (meeting: string) => api.request<MeetingAccess>(`/meetings/${segment(meeting)}/join`, { method: 'POST', body: '{}' }),
@@ -18,19 +22,21 @@ export const meetingsApi = {
   resumeGuest: (meeting: string, token: string) => accessRequest<MeetingAccess>(meeting, token, 'resume', {}),
 };
 
-async function accessRequest<T>(meeting: string, token: string, operation: string, body?: unknown, keepalive = false): Promise<T> {
+async function accessRequest<T>(meeting: string, token: string, operation: string, body?: unknown, keepalive = false, member?: {token:string;epoch:number}): Promise<T> {
+  const current=()=>{if(member&&(member.token!==api.getAccessToken()||member.epoch!==memberEpoch))throw new Error('The meeting sign-in changed.');};current();
   const response = await fetch(api.getBaseUrl().replace(/\/$/, '') + '/meeting-access/' + segment(meeting) + '/' + operation, {
     method: body === undefined ? 'GET' : 'POST', credentials: 'omit', cache: 'no-store', keepalive,
-    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Meeting-Token': token } : {}) },
+    headers: { 'Content-Type': 'application/json', ...(token ? { 'X-Meeting-Token': token } : {}),...(member?{Authorization:'Bearer '+member.token}:{}) },
     ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
   const result = await response.json().catch(() => null);
+  current();
   if (!response.ok) throw new Error(typeof result?.detail === 'string' ? result.detail : 'The meeting connection could not be completed.');
   return result as T;
 }
 
-export function leaveMeeting(meeting: string, token: string) {
-  return accessRequest(meeting, token, 'leave', {}, true);
+export function leaveMeeting(meeting: string, token: string, memberToken?: string) {
+  return accessRequest(meeting, token, 'leave', {}, true,memberToken?{token:memberToken,epoch:memberEpoch}:undefined);
 }
 
 /** Native browser WebRTC mesh. HTTP only carries SDP/ICE; never media. */
@@ -44,15 +50,20 @@ export class MeetingConnection {
   private screen: MediaStream | null = null;
   private ice: RTCIceServer[] = [];
   private view: MeetingView;
-  constructor(readonly meetingId: string, readonly access: MeetingAccess, local: MediaStream | null, private update: (view: MeetingView) => void) {
+  private readonly member: {token:string;epoch:number}|undefined;
+  constructor(readonly meetingId: string, readonly access: MeetingAccess, local: MediaStream | null, private update: (view: MeetingView) => void, private transport?: MeetingTransport) {
     this.local = local;
+    const token=api.getAccessToken();this.member=access.participant.kind==='member'&&token?{token,epoch:memberEpoch}:undefined;
     this.view = { state: 'connecting', host: false, participants: [], streams: new Map(), local, error: '', microphone: !!local?.getAudioTracks().some(t => t.enabled), camera: !!local?.getVideoTracks().some(t => t.enabled), sharing: false, connected: 0 };
   }
   private emit() { if (!this.stopped) this.update({ ...this.view, streams: new Map([...this.peers].map(([id, peer]) => [id, peer.stream])), local: this.screen || this.local }); }
   start() { void this.poll(); }
+  private request<T>(operation: string, body?: unknown, keepalive = false): Promise<T> {
+    return this.transport ? this.transport.request<T>(operation, body, keepalive) : accessRequest<T>(this.meetingId, this.access.meeting_token, operation, body, keepalive,this.member);
+  }
   private async signal(id: string, payload: { description?: RTCSessionDescriptionInit; candidate?: RTCIceCandidateInit }) {
     if (this.stopped) return;
-    await accessRequest(this.meetingId, this.access.meeting_token, 'signal', { recipient_id: id, ...payload });
+    await this.request('signal', { recipient_id: id, ...payload });
   }
   private peer(id: string) {
     const existing = this.peers.get(id); if (existing) return existing;
@@ -100,7 +111,7 @@ export class MeetingConnection {
   private async poll() {
     if (this.stopped) return;
     try {
-      const response = await accessRequest<MeetingPoll>(this.meetingId, this.access.meeting_token, 'poll?after=' + this.cursor);
+      const response = await this.request<MeetingPoll>('poll?after=' + this.cursor);
       if (this.stopped) return;
       this.view.state = response.state === 'waiting' ? 'waiting' : 'admitted';
       this.view.host = response.is_host; this.view.participants = response.participants; this.ice = response.ice_servers;
@@ -114,7 +125,7 @@ export class MeetingConnection {
         this.cursor = response.cursor;
       }
       this.emit();
-      this.timeout = setTimeout(() => void this.poll(), 750);
+      this.timeout = setTimeout(() => void this.poll(), this.transport?.pollInterval || 750);
     } catch (error) {
       if (this.stopped) return;
       this.view.error = error instanceof Error ? error.message : 'The meeting connection has ended.';
@@ -125,7 +136,7 @@ export class MeetingConnection {
     if (this.local || this.stopped) return;
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: camera });
     if (this.stopped) { stream.getTracks().forEach(track => track.stop()); return; }
-    try { await accessRequest(this.meetingId, this.access.meeting_token, 'ready', {}); }
+    try { await this.request('ready', {}); }
     catch (error) { stream.getTracks().forEach(track => track.stop()); throw error; }
     if (this.stopped) { stream.getTracks().forEach(track => track.stop()); return; }
     this.local = stream; this.view.microphone = true; this.view.camera = camera; this.emit();
@@ -156,7 +167,7 @@ export class MeetingConnection {
     // still release server admission after the network has recovered.
     if (notify && !this.leaveSent) {
       this.leaveSent = true;
-      void leaveMeeting(this.meetingId, this.access.meeting_token).catch(() => { this.leaveSent = false; });
+      void this.request('leave', {}, true).catch(() => { this.leaveSent = false; });
     }
     if (this.stopped) return;
     this.stopped = true; clearTimeout(this.timeout);

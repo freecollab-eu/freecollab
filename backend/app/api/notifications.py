@@ -37,6 +37,10 @@ def notification_channel(session, notification, _seen=None):
     kind, identifier = key
     if kind == "channel":
         return identifier
+    if kind == "encrypted_work":
+        from ..models.encrypted_work import EncryptedWorkNotice
+        marker = session.get(EncryptedWorkNotice, identifier)
+        return marker.channel_id if marker and marker.user_id == notification.user_id else None
     if kind == "calendar_invitation":
         from ..models.integration_content import IntegrationContent
         record = session.get(IntegrationContent, identifier)
@@ -81,8 +85,16 @@ def notification_visible(session, notification, user_id: str, _seen=None) -> boo
     seen.add(key)
     channel_id = None
     encrypted = notification.entity_type == "encrypted_message"
-    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post", "message_reminder", "calendar_invitation"}
-    if notification.entity_type == "calendar_invitation":
+    metadata_only = notification.entity_type in {"workflow_run", "activity_feed_post", "message_reminder", "calendar_invitation", "encrypted_work"}
+    if notification.entity_type == "encrypted_work":
+        from ..models.encrypted_work import EncryptedWorkNotice
+        from ..models.secure_channel import SecureChannel
+        marker = session.get(EncryptedWorkNotice, notification.entity_id)
+        binding = session.get(SecureChannel, marker.channel_id) if marker else None
+        if not marker or marker.user_id != user_id or not binding or binding.status != "active":
+            return False
+        channel_id = marker.channel_id
+    elif notification.entity_type == "calendar_invitation":
         from ..models.calendar_planning import CalendarAttendee
         from ..models.integration_content import IntegrationContent
         from .integrations_content import latest_revision

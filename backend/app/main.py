@@ -41,6 +41,8 @@ from .api import my_day
 from .api import personal_oauth
 from .api import avatars
 from .api import conversation_work
+from .api import content_completion, encrypted_work, slack_livebridge
+from .api import media_capture, native_associations
 from .services.native_calls import configured as native_call_configuration
 from .models import workspace_crypto_grant  # Register additive tables before init_db.
 from .realtime.socket import sio, start_realtime_broker, stop_realtime_broker, realtime_broker_ready
@@ -162,6 +164,11 @@ app.include_router(embed.router)
 app.include_router(chat_productivity.router)
 app.include_router(connect.router)
 app.include_router(app_platform.router)
+app.include_router(content_completion.router)
+app.include_router(encrypted_work.router)
+app.include_router(slack_livebridge.router)
+app.include_router(media_capture.router)
+app.include_router(native_associations.router)
 app.include_router(enterprise_search.router)
 app.include_router(clips.router)
 app.include_router(sfu.router)

@@ -9,24 +9,25 @@ export interface DocumentRelation { id: string; channel_id: string; first_docume
 export interface StackMessageReference { id: string; channel_id: string; stack_id: string; message_id: string; created_by: string; created_at: string; available: boolean; excerpt: string | null; author_id?: string; source_edited_at?: string | null }
 export interface StackMessagePreview { id: string; channel_id: string; text: string; author_id: string; created_at: string; edited_at: string | null; expected_text_sha256: string }
 export interface StackDocumentComment { id: string; channel_id: string; document_id: string; stack_id: string | null; text: string; references?: MessageReference[]; created_by: string; created_at: string; resolved: boolean; version: number }
-export interface DocumentOrganization { documents: SharedDocumentRecord[]; supported: boolean; stacks: DocumentStack[]; placements: DocumentPlacement[]; relations: DocumentRelation[]; message_references: StackMessageReference[]; stack_comments: StackDocumentComment[]; comments_incomplete: boolean }
+export interface DocumentOrganization { documents: SharedDocumentRecord[]; supported: boolean; content_mode?: 'server' | 'matrix'; organization_conflicts?: Array<{ event_id: string; author: string; at: number; stacks: string[] }>; stacks: DocumentStack[]; placements: DocumentPlacement[]; relations: DocumentRelation[]; message_references: StackMessageReference[]; stack_comments: StackDocumentComment[]; comments_incomplete: boolean }
 export interface DocumentMoveUndo { documentId: string; fromStackId: string | null; toStackId: string | null; expectedVersion: number; fromStackGeneration: string | null }
 const path = (channel: string) => '/channels/' + encodeURIComponent(channel) + '/shared-document-organization';
 const unchanged = (owner: string | null) => { if (!owner || owner !== api.getAccessToken()) throw Error('The signed-in account changed.'); };
+const encryptedApi = async () => (await import('./encrypted-document-organization-api')).encryptedDocumentOrganizationApi;
 async function native(channel: string, owner: string | null) {
   unchanged(owner); const secure = await getSecureMessaging(); unchanged(owner);
   const encrypted = await secure.handles(channel); unchanged(owner); return !encrypted;
 }
 async function mutate<T>(channel: string, suffix: string, method: string, body?: unknown): Promise<T> {
   const owner = api.getAccessToken();
-  if (!await native(channel, owner)) throw Error('Document stacks and relations are not yet available in encrypted channels.');
+  if (!await native(channel, owner)) throw Error('Channel encryption changed. Reload the organization before saving.');
   unchanged(owner); const result = await api.request<T>(path(channel) + suffix, { method, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); unchanged(owner);
   return result;
 }
 export const documentOrganizationApi = {
   async list(channel: string, archived = false): Promise<DocumentOrganization> {
     const owner = api.getAccessToken();
-    if (!await native(channel, owner)) return { documents: [], supported: false, stacks: [], placements: [], relations: [], message_references: [], stack_comments: [], comments_incomplete: false };
+    if (!await native(channel, owner)) { const result = await (await encryptedApi()).list(channel, archived); unchanged(owner); return { ...result, content_mode: 'matrix' }; }
     const result = await api.request<Omit<DocumentOrganization, 'supported'>>(path(channel) + (archived ? '?archived=true' : '')); unchanged(owner);
     if (!Array.isArray(result.stack_comments)) throw Error('Document comments could not be verified.');
     const stack_comments = result.stack_comments.map(row => {
@@ -37,21 +38,22 @@ export const documentOrganizationApi = {
       if (references.length) value.references = references; else delete value.references;
       return value;
     });
-    return { ...result, stack_comments, supported: true };
+    return { ...result, stack_comments, supported: true, content_mode: 'server' };
   },
+  async resolveConflict(channel: string, eventId: string) { const owner = api.getAccessToken(); if (await native(channel, owner)) throw Error('There is no encrypted organization to resolve.'); await (await encryptedApi()).resolveConflict(channel, eventId); unchanged(owner); },
   async previewMessage(channel: string, id: string): Promise<StackMessagePreview> {
     const owner = api.getAccessToken();
-    if (!await native(channel, owner)) throw Error('Saving messages in document stacks is not yet available in encrypted channels.');
+    if (!await native(channel, owner)) { const result = await (await encryptedApi()).previewMessage(channel, id); unchanged(owner); return result; }
     const result = await api.request<StackMessagePreview>(path(channel) + '/message-preview/' + encodeURIComponent(id)); unchanged(owner); return result;
   },
-  saveMessage: (channel: string, stack: DocumentStack, preview: StackMessagePreview, id: string) => mutate<StackMessageReference>(channel, '/stacks/' + encodeURIComponent(stack.id) + '/message-references', 'POST', { id, message_id: preview.id, expected_text_sha256: preview.expected_text_sha256, stack_generation: stack.generation }),
-  removeMessage: (channel: string, id: string) => mutate<void>(channel, '/message-references/' + encodeURIComponent(id), 'DELETE'),
-  createStack: (channel: string, title: string, id: string) => mutate<DocumentStack>(channel, '/stacks', 'POST', { id, title }),
-  renameStack: (channel: string, stack: DocumentStack, title: string) => mutate<DocumentStack>(channel, '/stacks/' + encodeURIComponent(stack.id), 'PATCH', { title, expected_version: stack.version, expected_generation: stack.generation }),
-  deleteStack: (channel: string, stack: DocumentStack) => mutate<void>(channel, '/stacks/' + encodeURIComponent(stack.id) + '?expected_version=' + stack.version + '&expected_generation=' + encodeURIComponent(stack.generation), 'DELETE'),
-  move: (channel: string, documentId: string, stackId: string | null, expectedVersion: number, stackGeneration: string | null) => mutate<DocumentPlacement>(channel, '/documents/' + encodeURIComponent(documentId) + '/placement', 'PUT', { stack_id: stackId, expected_version: expectedVersion, stack_generation: stackGeneration }),
-  relate: (channel: string, documentId: string, relatedDocumentId: string, id: string) => mutate<DocumentRelation>(channel, '/relations', 'POST', { id, document_id: documentId, related_document_id: relatedDocumentId }),
-  unlink: (channel: string, id: string) => mutate<void>(channel, '/relations/' + encodeURIComponent(id), 'DELETE'),
+  async saveMessage(channel: string, stack: DocumentStack, preview: StackMessagePreview, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).saveMessage(channel, stack, preview, id); return mutate<StackMessageReference>(channel, '/stacks/' + encodeURIComponent(stack.id) + '/message-references', 'POST', { id, message_id: preview.id, expected_text_sha256: preview.expected_text_sha256, stack_generation: stack.generation }); },
+  async removeMessage(channel: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).removeMessage(channel, id); return mutate<void>(channel, '/message-references/' + encodeURIComponent(id), 'DELETE'); },
+  async createStack(channel: string, title: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).createStack(channel, title, id); return mutate<DocumentStack>(channel, '/stacks', 'POST', { id, title }); },
+  async renameStack(channel: string, stack: DocumentStack, title: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).renameStack(channel, stack, title); return mutate<DocumentStack>(channel, '/stacks/' + encodeURIComponent(stack.id), 'PATCH', { title, expected_version: stack.version, expected_generation: stack.generation }); },
+  async deleteStack(channel: string, stack: DocumentStack) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).deleteStack(channel, stack); return mutate<void>(channel, '/stacks/' + encodeURIComponent(stack.id) + '?expected_version=' + stack.version + '&expected_generation=' + encodeURIComponent(stack.generation), 'DELETE'); },
+  async move(channel: string, documentId: string, stackId: string | null, expectedVersion: number, stackGeneration: string | null) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).move(channel, documentId, stackId, expectedVersion, stackGeneration); return mutate<DocumentPlacement>(channel, '/documents/' + encodeURIComponent(documentId) + '/placement', 'PUT', { stack_id: stackId, expected_version: expectedVersion, stack_generation: stackGeneration }); },
+  async relate(channel: string, documentId: string, relatedDocumentId: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).relate(channel, documentId, relatedDocumentId, id); return mutate<DocumentRelation>(channel, '/relations', 'POST', { id, document_id: documentId, related_document_id: relatedDocumentId }); },
+  async unlink(channel: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).unlink(channel, id); return mutate<void>(channel, '/relations/' + encodeURIComponent(id), 'DELETE'); },
 };
 
 /** Visible native titles only. A proposal creates no relationship or request. */

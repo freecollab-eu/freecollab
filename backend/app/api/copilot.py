@@ -185,6 +185,9 @@ def send_turn(workspace_id: str,conversation_id: str,data: service.TurnInput,use
         pieces.append('['+ref['citation']+'] '+source.kind+'\n'+text)
     context='\n\n'.join(pieces)
     if len(context)>service.MAX_CONTEXT: raise HTTPException(413,'Select at most 24,000 characters of context')
+    if not row.secure:
+        from ..services.enterprise_governance import enforce_native_content
+        enforce_native_content(session,row.channel_id,user.id,data.prompt+'\n'+context,surface='assistant')
     prior=service.history(session,row,user.id) if not row.secure else []
     messages=[{'role':'system','content':service.SYSTEM+'\nAgent instructions: '+agent.instructions}]
     # Prior private AI exchanges are bounded and every citation is rechecked.
@@ -206,8 +209,22 @@ def send_turn(workspace_id: str,conversation_id: str,data: service.TurnInput,use
     turn.encrypted_sources=service.seal(refs,'sources',turn.id)
     identifier=turn.id; expected_config=config.revision; expected_conversation=row.revision
     session.add(turn); service.audit(session,workspace_id,user.id,'turn_requested',len(refs)); session.commit()
+    usage_identifier=None; usage_provider=None; usage_sent=False
     try:
+        # The compatibility foreground path shares the same durable usage
+        # reservation as named profiles; it cannot bypass a workspace budget.
+        from ..services import ai_runtime
+        service.grant(session,workspace_id,row.channel_id,user.id,lock=True)
+        usage_provider=ai_runtime.resolve_profile(session,workspace_id,'default',user.id,expected_config)
+        reservation=ai_runtime.reserve(session,workspace_id,user.id,'turn:'+identifier,0,1,'default',expected_config,usage_provider,messages,2048)
+        usage_identifier=reservation.id; session.commit()
+        row=service.conversation_for(session,workspace_id,conversation_id,user.id)
+        current=service.configuration(session,workspace_id); service.consent_for(session,workspace_id,user.id,current.revision)
+        if current.revision!=expected_config: raise HTTPException(409,'Provider changed before the request')
+        service.check_sources(session,row,refs,user.id); session.commit()
+        usage_sent=True
         answer=service.completion(provider,payload)
+        ai_runtime.settle(session,usage_identifier,usage_provider,answer.get('usage')); session.commit()
         row=service.conversation_for(session,workspace_id,conversation_id,user.id,lock=True)
         current=service.configuration(session,workspace_id); service.consent_for(session,workspace_id,user.id,current.revision)
         if current.revision!=expected_config or row.revision!=expected_conversation: raise HTTPException(409,'Provider or conversation changed during the request')
@@ -227,6 +244,8 @@ def send_turn(workspace_id: str,conversation_id: str,data: service.TurnInput,use
                 proposals.append({'id':'p'+str(len(proposals)+1),'tool':'create_task','project_id':arguments['project_id'],'title':fields.title,'description':fields.description})
         if any(int(marker)>len(refs) or int(marker)<1 for marker in re.findall(r'\[S(\d+)\]',answer['text'])): raise HTTPException(502,'Provider cited an unavailable source')
         result={'prompt':data.prompt,'text':answer['text'],'agent':agent.name,'citations':refs,'proposals':proposals,'tool_results':safe_results,'ephemeral':row.secure}
+        if not row.secure:
+            enforce_native_content(session,row.channel_id,user.id,answer['text'],surface='assistant')
         turn=session.get(CopilotTurn,identifier,populate_existing=True)
         if not turn or turn.status!='processing': raise HTTPException(409,'Conversation was reset or request already finished')
         turn.status='complete'; turn.completed_at=datetime.utcnow()
@@ -235,6 +254,8 @@ def send_turn(workspace_id: str,conversation_id: str,data: service.TurnInput,use
         return {'id':turn.id,'revision':row.revision,**result}
     except Exception as failure:
         session.rollback()
+        if usage_identifier and usage_provider:
+            ai_runtime.settle(session,usage_identifier,usage_provider,sent=usage_sent); session.commit()
         failed=session.get(CopilotTurn,identifier,populate_existing=True)
         if failed and failed.status=='processing':
             failed.status='failed'; failed.completed_at=datetime.utcnow(); session.add(failed)
@@ -262,3 +283,8 @@ def approve(workspace_id: str,turn_id: str,proposal_id: str,data: ApprovalInput,
     session.add(CopilotToolApproval(turn_id=turn.id,proposal_id=proposal_id,user_id=user.id,resource_id=task.id))
     service.audit(session,workspace_id,user.id,'task_approved'); recheck_actor(session,user.id); session.commit()
     return {'task_id':task.id,'already_approved':False}
+
+
+# Additive runtime routes share the existing authenticated/no-store prefix.
+from .ai_runtime import router as runtime_router
+router.include_router(runtime_router)

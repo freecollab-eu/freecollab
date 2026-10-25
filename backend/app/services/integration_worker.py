@@ -15,6 +15,7 @@ from sqlmodel import Session
 from ..config import settings
 from ..models.operations import WorkerHeartbeat
 from ..models import avatar  # noqa: F401 -- additive private photo erasure queue
+from ..models import content_completion, encrypted_work, slack_livebridge, ai_runtime, media_capture  # noqa: F401 -- additive collaboration queues
 from ..models import app_platform, calendar_delivery, chat_productivity, file, file_version, integration_content, notification, native_calls, native_push, personal_oauth, remote_sync, slack_import, user, channel, workspace  # noqa: F401 -- register queue tables before schema creation
 
 log = logging.getLogger("freecollab.integrations")
@@ -43,6 +44,8 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
     from .chat_productivity import run_pending as productivity_pending
     from .app_platform import run_pending as apps_pending, run_recaps
     from .avatars import erase_pending_avatar_blobs
+    from .slack_livebridge import run_pending as bridge_pending
+    from .encrypted_work import run_pending as encrypted_work_pending
 
     batches = (
         ("avatar-cleanup", True, erase_pending_avatar_blobs),
@@ -60,6 +63,8 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
         ("chat", True, productivity_batch or (lambda session: productivity_pending(session, limit=10))),
         ("apps", True, apps_batch or (lambda session: apps_pending(session, limit=2))),
         ("recaps", settings.copilot_enabled, recaps_batch or (lambda session: run_recaps(session, limit=1))),
+        ("slack-livebridge", True, lambda session: bridge_pending(session, limit=10)),
+        ("encrypted-work", getattr(settings, "connect_federation_enabled", False), lambda session: encrypted_work_pending(session, limit=2)),
     )
     with Session(engine) as session:
         heartbeat = session.get(WorkerHeartbeat, "integrations") or WorkerHeartbeat(name="integrations")

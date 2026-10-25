@@ -12,6 +12,9 @@ services:
   integration-worker:
     image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
     pull_policy: always
+  ai-runtime-worker:
+    image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
+    pull_policy: always
   mail-worker:
     image: ${FREECOLLAB_BACKEND_IMAGE:?Generate images.env from a verified release manifest}
     pull_policy: always

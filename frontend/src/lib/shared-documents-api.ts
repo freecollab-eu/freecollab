@@ -4,20 +4,23 @@ import { getSecureMessaging } from './secure-client';
 import { reconcileReferences, validateMessageReferences, type MessageReference } from './message-references';
 import { getSocket } from './socket';
 import { DOCUMENT_REFERENCE_MAP, readDocumentReferences, restoreDocumentReferences, validateDocumentReferences, validateDocumentReferenceWrite, writeDocumentReferences } from './document-references';
+import { validateDocumentAnchor, type DocumentCommentAnchor } from './document-anchors';
 
 export interface SharedDocumentRecord {
   id: string; channel_id: string; created_by: string; created_at: string; updated_at: string;
   archived: boolean; version: number; update_count: number; title?: string;
   summary_event_id: string | null; summary_update_id: string | null; summary_by: string | null;
   resolution_error?: string;
+  /** Verified peer metadata; must open the actual federated reader, never a native document request. */
+  encrypted_resource?: boolean; encrypted_kind?: 'document'; encrypted_source_version?: string;
 }
 export interface SharedRecord {
   id: string; document_id: string; channel_id: string; created_by: string; created_at: string;
   content_mode: 'server' | 'matrix'; matrix_event_id: string | null; sequence?: number;
   covers_sequence?: number; resolved?: boolean; version?: number;
-  fields?: { update_base64?: string; name?: string; text?: string; title?: string | null; references?: MessageReference[] };
+  fields?: { update_base64?: string; name?: string; text?: string; title?: string | null; references?: MessageReference[]; anchor?: DocumentCommentAnchor };
 }
-export interface SharedComment extends SharedRecord { fields: { text: string; references?: MessageReference[] }; resolved: boolean; version: number }
+export interface SharedComment extends SharedRecord { fields: { text: string; references?: MessageReference[]; anchor?: DocumentCommentAnchor }; resolved: boolean; version: number }
 export interface SharedSnapshot extends SharedRecord { fields: { name: string; update_base64: string }; covers_sequence: number }
 interface Page { document: SharedDocumentRecord; items: SharedRecord[]; has_more: boolean; next_sequence: number }
 interface PendingUpdate { id: string; bytes: Uint8Array; title: string; eventId?: string; parts?: string[]; sending?: boolean }
@@ -187,13 +190,14 @@ export const sharedDocumentsApi = {
       const fields = await verifiedContent(row, 'comment');
       if (typeof fields?.text !== 'string' || fields.text.length > 2000) throw new Error('A document comment could not be verified.');
       if (fields.references !== undefined) validateMessageReferences(fields.text, fields.references);
+      if (fields.anchor !== undefined) validateDocumentAnchor(fields.anchor, documentId);
       return { ...row, fields } as SharedComment;
     })); current(token); return result;
   },
-  async comment(channelId: string, documentId: string, text: string, references: MessageReference[] = []) {
+  async comment(channelId: string, documentId: string, text: string, references: MessageReference[] = [], anchor?: DocumentCommentAnchor) {
     const token = api.getAccessToken(); current(token);
     const cleanText = text.trim(), bound = trimmedReferences(text, references);
-    const id = crypto.randomUUID(), fields = { text: cleanText, ...(bound.length ? { references: bound } : {}) };
+    const id = crypto.randomUUID(), fields = { text: cleanText, ...(bound.length ? { references: bound } : {}), ...(anchor ? { anchor: validateDocumentAnchor(anchor, documentId) } : {}) };
     if (!fields.text || fields.text.length > 2000) throw new Error('Write a comment of at most 2,000 characters.');
     const secure = await getSecureMessaging(), encrypted = await secure.handles(channelId); current(token);
     let body: Record<string, unknown> = { id, ...fields };

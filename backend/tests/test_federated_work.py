@@ -19,7 +19,8 @@ def setup(pair, monkeypatch):
         side = 'a' if channel_id == host['channel_id'] else 'b'
         if event_id != '$owned-' + side:
             raise HTTPException(400, 'Encrypted event does not belong to this sender and channel')
-        return {'room_id': '!owned', 'sender': '@fc_' + user_id + ':matrix.' + side + '.example.com',
+        from app.models.secure_channel import SecureChannel
+        return {'room_id': session.get(SecureChannel, channel_id).matrix_room_id, 'sender': '@fc_' + user_id + ':matrix.' + side + '.example.com',
             'type': 'm.room.encrypted', 'content': {'ciphertext': 'opaque'}}
     monkeypatch.setattr(matrix_bridge, 'validate_secure_event', event)
     return host, guest

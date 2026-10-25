@@ -17,6 +17,7 @@ import { disconnectSocket } from './lib/socket'
 import { type MFAChallenge, needsSecondFactor } from './lib/account-api'
 import type { SSOExchange } from './lib/integrations-api'
 import { demoDestinationHash, readDemoDestination, type DemoDestination } from './lib/demo-showroom'
+import { nativeSourceFromLocation, pendingNativeSource, rememberNativeSource } from './lib/native-links'
 
 type View = 'landing' | 'demo' | 'auth' | 'chat' | 'admin' | 'docs' | 'invite' | 'account-link' | 'workspace-invite' | 'sso' | 'meeting'
 const INVITE_KEY = 'freecollab_pending_invite'
@@ -59,6 +60,17 @@ export default function App() {
 
   useEffect(() => {
     const route = () => {
+      try {
+        const source = nativeSourceFromLocation()
+        if (source) {
+          const previous = pendingNativeSource()
+          if (!previous || JSON.stringify(previous.source) !== JSON.stringify(source)) rememberNativeSource(source)
+          setView(api.isAuthenticated() ? 'chat' : 'auth'); return
+        }
+      } catch (failure) {
+        setNotice(failure instanceof Error ? t(failure.message) : t('This app link could not be opened.'))
+        setView(api.isAuthenticated() ? 'chat' : 'auth'); return
+      }
       const params = new URLSearchParams(window.location.hash.slice(1))
       const demo = readDemoDestination(window.location.hash)
       if (demo) { setDemoDestination(demo); setView('demo'); return }

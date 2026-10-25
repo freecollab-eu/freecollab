@@ -6,9 +6,12 @@ from sqlmodel import Session
 
 from app.config import settings
 from app.models.app_platform import AppAIDraft, AppInstallation, AppJob, ChannelRecapSchedule
+from app.models.ai_runtime import AIRun
 from app.models.avatar import AvatarErasure
 from app.models.calendar_delivery import CalendarProviderJob, CalendarProviderPublication
 from app.models.channel import Channel
+from app.models.connect_federation import FederatedConnection
+from app.models.encrypted_work import EncryptedWorkRemoteCursor
 from app.models.chat_productivity import MessageReminder, ScheduledMessage
 from app.models.integration_content import IntegrationContent
 from app.models.native_calls import NativeCallDevice
@@ -16,16 +19,17 @@ from app.models.native_push import NativePushDelivery, NativePushDevice
 from app.models.personal_oauth import PersonalOAuthClient, PersonalOAuthGrant
 from app.models.remote_sync import RemoteSyncConnection
 from app.models.slack_import import SlackImport
+from app.models.slack_livebridge import SlackBridge, SlackBridgeJob
 from app.models.workspace import Workspace
 from app.services.maildiagnostics import integration_queue_status, integration_worker_required
 from tests.test_operations import headers, operator
 
 
 FLAGS = ("webhooks_enabled", "otrust_enabled", "sync_enabled", "workflows_enabled",
-         "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled")
+         "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled", "connect_federation_enabled")
 GROUPS = {"webhooks", "otrust", "sync", "calendar-delivery", "workflows", "data", "push",
           "native_push", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup",
-          "chat", "apps", "recaps", "avatar-cleanup"}
+          "chat", "apps", "recaps", "avatar-cleanup", "ai-runtime", "slack-livebridge", "encrypted-work"}
 
 
 def disable_features(monkeypatch):
@@ -87,7 +91,20 @@ def seed_new_groups(engine, now):
         session.add(MessageReminder(user_id="operator", channel_id="private-channel", item_id="private-completed", kind="message",
             due_at=past, session_hash="private-session", claims_json="{}", status="completed", completed_at=now))
         session.add(AvatarErasure(blob_id="private-removed-profile-photo", user_id="operator", created_at=past))
+        for status, updated in (("queued", past), ("running", past), ("awaiting_review", past - timedelta(days=30))):
+            session.add(AIRun(workspace_id="private-team", channel_id="private-channel", user_id="operator", request_id="private-" + status,
+                request_digest="private-digest", profile_id="private-profile", profile_revision=1, operation="answer", status=status,
+                encrypted_payload="private-ai-content", encrypted_authority="private-authority", updated_at=updated))
+        session.add(SlackBridge(id="private-live-bridge", workspace_id="private-team", channel_id="private-channel", granted_by="operator",
+            slack_team_id="private-team", slack_channel_id="private-room", slack_bot_user_id="private-bot", encrypted_config="private-config"))
+        session.add(FederatedConnection(id="private-federation", workspace_id="private-team", channel_id="private-channel", peer_origin="https://private-peer.invalid",
+            peer_workspace_id="private-remote", role="host", authority_user_id="operator", status="active", invitation_expires_at=future, created_at=past))
         session.commit()
+        for key, status, due in (("due", "pending", past), ("future", "pending", future), ("claimed", "processing", future), ("uncertain", "uncertain", past)):
+            session.add(SlackBridgeJob(bridge_id="private-live-bridge", generation=1, direction="outbound", event_key="private-" + key,
+                body_digest="private-digest", encrypted_payload="private-bridge-content", status=status, next_attempt_at=due,
+                claimed_at=past if status == "processing" else None, created_at=past - timedelta(days=2)))
+        session.add(EncryptedWorkRemoteCursor(connection_id="private-federation", checked_at=past))
         for index, status in enumerate(("queued", "running", "succeeded", "uncertain")):
             session.add(CalendarProviderJob(client_id=str(index), request_hash="private-request", user_id="operator", channel_id="private-channel",
                 item_id="private-event", publication_id="private-publication", action="invite", event_revision=1, publication_revision=1,
@@ -116,6 +133,12 @@ def test_all_worker_groups_report_real_states_due_lag_and_no_private_data(operat
     assert "published" not in queues["recaps"] and "completed" not in queues["recaps"]
     assert queues["native-call-cleanup"] == {"pending": 1, "scheduled": 1, "oldest_pending_seconds": 420}
     assert queues["avatar-cleanup"] == {"pending": 1, "oldest_pending_seconds": 420}
+    assert queues["ai-runtime"] == {"pending": 1, "processing": 1, "awaiting_review": 1, "completed": 0,
+        "failed": 0, "cancelled": 0, "oldest_pending_seconds": 420}  # Human review is not worker lag.
+    assert queues["slack-livebridge"] == {"pending": 1, "processing": 1, "delivered": 0, "failed": 0,
+        "uncertain": 1, "cancelled": 0, "scheduled": 1, "oldest_pending_seconds": 420}
+    assert {key: value for key, value in queues["encrypted-work"].items() if key != "oldest_pending_seconds"} == {"pending": 1, "processing": 0, "failed": 0, "scheduled": 0}
+    assert 420 <= queues["encrypted-work"]["oldest_pending_seconds"] < 440
     for group in ("slack-import-cleanup", "personal-oauth-cleanup"):
         assert queues[group] == {"pending": 1, "scheduled": 1, "inactive": 1, "oldest_pending_seconds": 420}
     response = client.get("/operations/status", headers=headers())
@@ -126,6 +149,10 @@ def test_all_worker_groups_report_real_states_due_lag_and_no_private_data(operat
     assert 'queue="chat",status="notification_pending"} 1' in metrics.text
     assert 'queue="recaps",status="scheduled"} 1' in metrics.text
     assert 'queue="avatar-cleanup",status="pending"} 1' in metrics.text
+    assert 'queue="ai-runtime",status="awaiting_review"} 1' in metrics.text
+    assert 'queue="slack-livebridge",status="scheduled"} 1' in metrics.text
+    assert 'queue="encrypted-work",status="pending"} 1' in metrics.text
+    assert response.json()["ai_runtime_worker"]["status"] == "unknown"  # Retained jobs do not fake a heartbeat.
     assert "private-" not in response.text + metrics.text
 
 
@@ -146,9 +173,10 @@ def test_always_on_work_requires_worker_but_terminal_or_disabled_queue_records_d
     with Session(engine) as session:
         queues = integration_queue_status(session)
     assert integration_worker_required(queues)
-    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup"):
+    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "slack-livebridge"):
         assert integration_worker_required({group: queues[group]})
     assert not integration_worker_required({"webhooks": {"pending": 2}, "recaps": {"scheduled": 1}})
+    assert not integration_worker_required({"ai-runtime": {"pending": 1, "awaiting_review": 1}, "encrypted-work": {"pending": 1}})
     assert not integration_worker_required({"apps": {"delivered": 3, "uncertain": 1, "failed": 1},
         "chat": {"sent": 1, "notified": 2, "completed": 1}, "personal-oauth-cleanup": {"inactive": 2}, "avatar-cleanup": {"pending": 0}})
 

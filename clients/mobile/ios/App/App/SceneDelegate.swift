@@ -63,22 +63,62 @@ public class FreeCollabNativePlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "FreeCollabNative"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
-        CAPPluginMethod(name: "cancelSignIn", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "cancelSignIn", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getPendingLink", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "clearPendingLink", returnType: CAPPluginReturnPromise)
     ]
     private var pending: CAPPluginCall?
     private var state: String?
     private var verifier: String?
     private var deadline: Date?
     private var observer: NSObjectProtocol?
+    private var linkObserver: NSObjectProtocol?
+    private var pendingLink: String?
+    private var pendingLinkGeneration: String?
+    private static var consumedLink: String?
     private let callback = "freecollab://native/complete"
 
     public override func load() {
+        acceptLink(ApplicationDelegateProxy.shared.lastURL, restoring: true)
         observer = NotificationCenter.default.addObserver(forName: .capacitorOpenURL, object: nil, queue: .main) { [weak self] notification in
             guard let values = notification.object as? [String: Any], let url = values["url"] as? URL else { return }
             self?.complete(url)
         }
+        linkObserver = NotificationCenter.default.addObserver(forName: .capacitorOpenUniversalLink, object: nil, queue: .main) { [weak self] notification in
+            guard let values = notification.object as? [String: Any], let url = values["url"] as? URL else { return }
+            self?.acceptLink(url)
+        }
     }
-    deinit { if let observer = observer { NotificationCenter.default.removeObserver(observer) } }
+    deinit {
+        if let observer = observer { NotificationCenter.default.removeObserver(observer) }
+        if let linkObserver = linkObserver { NotificationCenter.default.removeObserver(linkObserver) }
+    }
+
+    private func acceptLink(_ url: URL?, restoring: Bool = false) {
+        guard let url = url, let configured = origin(bridge?.config.serverURL), origin(url) == configured, url.path == "/open",
+              url.fragment == nil, url.absoluteString.count <= 2048,
+              let parts = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        if restoring && Self.consumedLink == url.absoluteString { return }
+        let items = parts.queryItems ?? [], keys = items.map { $0.name }
+        let allowed: Set<String> = ["workspace_id", "channel_id", "kind", "item_id", "project_id"]
+        guard Set(keys).count == keys.count, Set(keys).isSubset(of: allowed),
+              Set(["workspace_id", "channel_id", "kind", "item_id"]).isSubset(of: Set(keys)) else { return }
+        pendingLink = url.absoluteString
+        pendingLinkGeneration = UUID().uuidString
+    }
+    @objc func getPendingLink(_ call: CAPPluginCall) {
+        guard installation() != nil else { call.reject("The installation changed."); return }
+        call.resolve(pendingLink.map { ["url": $0, "generation": pendingLinkGeneration ?? ""] } ?? [:])
+    }
+    @objc func clearPendingLink(_ call: CAPPluginCall) {
+        guard installation() != nil else { call.reject("The installation changed."); return }
+        if let value = call.getString("url"), pendingLink == value, pendingLinkGeneration == call.getString("generation") {
+            pendingLink = nil
+            pendingLinkGeneration = nil
+            Self.consumedLink = value
+        }
+        call.resolve()
+    }
 
     private func origin(_ url: URL?) -> String? {
         guard let url = url, url.scheme == "https", let host = url.host, url.user == nil, url.password == nil else { return nil }

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { enterpriseSearchApi, type ExternalSearchHit, type SearchConnection } from '../lib/enterprise-search';
 import { t, useI18n } from '../i18n';
+import { SemanticSearchPanel } from './SemanticSearchPanel';
 import { PersonalOAuthPanel } from './PersonalOAuthPanel';
 
 /** Separate explicit provider query; never receives the local history query. */
@@ -64,7 +65,7 @@ export function EnterpriseSearchPanel({ workspaceIds }: { workspaceIds: string[]
     } catch (failure) { page?.close(); if (current(owner, target)) { setHits(old => old.filter(item => item.reference !== hit.reference)); setError(failure instanceof Error ? failure.message : 'Access changed.'); } }
     finally { if (current(owner, target)) setBusy(false); }
   }
-  return <details className="fc-enterprise-search"><summary>{t('Search connected services')}</summary>
+  return <><SemanticSearchPanel key={workspace} workspaceId={workspace} /><details className="fc-enterprise-search"><summary>{t('Search connected services')}</summary>
     <p className="fc-chat-muted">{t('This separate query is sent only to your selected personal provider. Local history and decrypted channel content stay on this device.')}</p>
     {workspaceIds.length > 1 && <label>{t('Workspace')}<select className="fc-input" disabled={busy} value={workspace} onChange={event => setWorkspace(event.target.value)}>{workspaceIds.map(id => <option key={id} value={id}>{id}</option>)}</select></label>}
     {connections.length > 0 && <form onSubmit={event => void search(event)} className="fc-enterprise-search-form">
@@ -89,5 +90,5 @@ export function EnterpriseSearchPanel({ workspaceIds }: { workspaceIds: string[]
     {error && <p className="fc-alert" role="alert">{error}</p>}
     {incomplete && <p role="status">{t('Provider results are limited. Refine this query for more precise results.')}</p>}
     {hits.map(hit => <button type="button" className="fc-history-result" key={hit.reference} disabled={busy} onClick={() => void open(hit)}><span><strong>{hit.title}</strong><small>{hit.provider} · {t('Personal provider access verified')}</small></span>{hit.text && <p>{hit.text}</p>}</button>)}
-  </details>;
+  </details></>;
 }

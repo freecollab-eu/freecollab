@@ -1,3 +1,5 @@
+import { ReviewedResourceCopilot } from './ReviewedResourceCopilot';
+import { useResourceTargetFocus } from '../lib/useResourceTargetFocus';
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Archive, ArrowDown, Check, Heart, History, MessageSquare, Pencil, Plus, RefreshCw, Rss, ThumbsUp, Trash2, UserPlus, X } from 'lucide-react';
 import { useI18n } from '../i18n';
@@ -10,7 +12,7 @@ import type { MessageReference } from '../lib/message-references';
 import { EnterpriseAlerts } from './EnterpriseControls';
 import '../styles/activity-feed.css';
 
-interface Props { instanceId?: string; workspaceId: string; channelId: string; isAdmin?: boolean; onPendingChange?: (pending: boolean) => void }
+interface Props { instanceId?: string; workspaceId: string; channelId: string; isAdmin?: boolean; onPendingChange?: (pending: boolean) => void; focusPostId?: string }
 const blank = (): FeedPostFields => ({ title: '', body: '', poll: null });
 const message = (error: unknown) => error instanceof Error ? error.message : 'The activity could not be completed.';
 
@@ -37,7 +39,7 @@ function SafeBody({ value, references = [], channelId }: { value: string; refere
   })}</div>;
 }
 
-export function ActivityFeedPanel({ instanceId, channelId, isAdmin = false, onPendingChange }: Props) {
+export function ActivityFeedPanel({ instanceId, workspaceId, channelId, isAdmin = false, onPendingChange, focusPostId }: Props) {
   const { t, locale } = useI18n();
   const fieldId = (name: string) => instanceId ? instanceId + "-" + name : name;
   const fieldContext = (name: string) => `${instanceId || "primary"}:${channelId}:feed:${editor?.previous?.id || "new"}:${name}`;
@@ -85,6 +87,15 @@ export function ActivityFeedPanel({ instanceId, channelId, isAdmin = false, onPe
     return () => { mounted.current = false; ++epoch.current; window.clearInterval(timer); window.removeEventListener('freecollab:auth-changed', clear); };
   }, [channelId, filter]);
 
+  const targetRegion = useRef<HTMLElement>(null);
+  useResourceTargetFocus(targetRegion, `${workspaceId}:${channelId}`, 'feed', focusPostId, !loading, async (id, sourceCurrent) => {
+    if (!sourceCurrent() || !mayReplaceComment()) return false;
+    const request = epoch.current, detail = await activityFeedApi.detail(channelId, id);
+    if (!sourceCurrent() || !current(request) || detail.post.id !== id || detail.post.channel_id !== channelId) return false;
+    detailId.current = id; setDetails(detail); setComment(''); setCommentReferences([]); setCommentEdit(null); setHistory(null);
+    setSelected(detail.votes.find(vote => vote.created_by === actor)?.fields?.option_ids || []);
+    return true;
+  });
   async function act(key: string, action: (generation: number) => Promise<void>) {
     if (busy || !current(epoch.current)) return;
     const generation = epoch.current; setBusy(key); setError(''); setNotice('');
@@ -173,7 +184,8 @@ export function ActivityFeedPanel({ instanceId, channelId, isAdmin = false, onPe
     {!loading && !displayed.length && <p className="fc-account-muted">{t('No updates in this view yet.')}</p>}
     {next && <button type="button" className="fc-button" disabled={!!busy || loading} onClick={() => void load(true)}><ArrowDown size={15} />{t('Load older updates')}</button>}
 
-    {details && <section className="fc-account-section fc-feed-discussion" aria-label={t('Activity discussion')}><div className="fc-account-section-heading"><div><span className="fc-kicker">{t('Discussion')}</span><h3>{details.post.fields ? <FieldReferenceText value={details.post.fields.title} references={details.post.fields.field_references?.title} channelId={channelId} /> : t('Encrypted update')}</h3></div><button type="button" className="fc-icon-button" aria-label={t('Close activity discussion')} onClick={() => { if (!mayReplaceComment()) return; detailId.current = ''; setDetails(null); setComment(''); setCommentReferences([]); setCommentEdit(null); }}><X size={16} /></button></div>
+    {details && <section ref={targetRegion} tabIndex={-1} data-resource-kind="feed" data-resource-id={details.post.id} className="fc-account-section fc-feed-discussion" aria-label={t('Activity discussion')}><div className="fc-account-section-heading"><div><span className="fc-kicker">{t('Discussion')}</span><h3>{details.post.fields ? <FieldReferenceText value={details.post.fields.title} references={details.post.fields.field_references?.title} channelId={channelId} /> : t('Encrypted update')}</h3></div><button type="button" className="fc-icon-button" aria-label={t('Close activity discussion')} onClick={() => { if (!mayReplaceComment()) return; detailId.current = ''; setDetails(null); setComment(''); setCommentReferences([]); setCommentEdit(null); }}><X size={16} /></button></div>
+      {details.post.fields && <ReviewedResourceCopilot workspaceId={workspaceId} channelId={channelId} label={details.post.fields.title} snapshot={JSON.stringify([details.post.id, details.post.revision, details.post.fields])} text={details.post.fields.title + '\n' + details.post.fields.body + (details.post.fields.poll ? '\n' + JSON.stringify(details.post.fields.poll) : '')} />}
       <div className="fc-account-actions"><button type="button" className="fc-account-link" disabled={!!busy || !details.post.fields} onClick={() => void act('read', async generation => { await activityFeedApi.read(channelId, details.post); if (current(generation)) await load(); })}><Check size={14} />{t('Mark as read')}</button>{(['like', 'heart', 'celebrate'] as const).map(emoji => <button type="button" key={emoji} className={'fc-button fc-feed-reaction ' + (ownReaction?.fields?.emoji === emoji ? 'is-selected' : '')} aria-pressed={ownReaction?.fields?.emoji === emoji} aria-label={t(emoji === 'like' ? 'Like update' : emoji === 'heart' ? 'Love update' : 'Celebrate update')} disabled={!!busy || details.post.archived || !details.post.fields} onClick={() => void act('reaction', async generation => { await activityFeedApi.react(channelId, details.post.id, ownReaction?.fields?.emoji === emoji ? null : emoji, ownReaction); if (current(generation)) await refreshDetail(generation); })}>{emoji === 'like' ? <ThumbsUp size={14} /> : emoji === 'heart' ? <Heart size={14} /> : <span aria-hidden="true">✦</span>}<span>{details.reactions.filter(value => value.fields?.emoji === emoji).length}</span></button>)}</div>
       {poll && <fieldset className="fc-feed-poll"><legend><FieldReferenceText value={poll.question} references={details.post.fields?.field_references?.["poll.question"]} channelId={channelId} /></legend>{poll.options.map(option => { const count = voters.filter(vote => vote.fields!.option_ids.includes(option.id)).length; return <label key={option.id}><input type={poll.multiple ? 'checkbox' : 'radio'} name={fieldId("feed-poll-choice")} disabled={!!busy || details.post.archived || pollClosed} checked={selected.includes(option.id)} onChange={event => setSelected(poll.multiple ? event.target.checked ? [...selected, option.id] : selected.filter(id => id !== option.id) : [option.id])} /><span><FieldReferenceText value={option.label} references={details.post.fields?.field_references?.["poll.option:" + option.id]} channelId={channelId} /></span><small>{t('{count} votes', { count })}</small></label>; })}<p className="fc-account-muted">{t('{count} voters', { count: voters.length })}{poll.closes_at && ' · ' + t('Closes {date}', { date: when(poll.closes_at) })}</p><button type="button" className="fc-button fc-button-primary" disabled={!!busy || details.post.archived || pollClosed || !selected.length} onClick={() => void act('vote', async generation => { await activityFeedApi.vote(channelId, details.post, selected, ownVote); if (current(generation)) { setNotice(t('Your vote is saved.')); await refreshDetail(generation); } })}>{t(pollClosed ? 'Poll closed' : ownVote ? 'Update my vote' : 'Submit vote')}</button>{ownVote && <button type="button" className="fc-account-link" disabled={!!busy || pollClosed || details.post.archived} onClick={() => void act('clear-vote', async generation => { await activityFeedApi.vote(channelId, details.post, [], ownVote); if (current(generation)) { setSelected([]); await refreshDetail(generation); } })}>{t('Remove my vote')}</button>}</fieldset>}
       {(details.votes.some(vote => vote.resolution_error) || details.reactions.some(value => value.resolution_error)) && <p className="fc-alert" role="alert">{t('Some encrypted responses could not be verified and are excluded from counts.')}</p>}

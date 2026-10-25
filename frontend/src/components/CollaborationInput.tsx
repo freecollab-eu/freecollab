@@ -9,6 +9,7 @@ import { insertReference, normalizeMessageReferences, reconcileReferences, refer
 import { useComposerReferences } from '../lib/useComposerReferences';
 import { SlashCommands } from './SlashCommands';
 import { MentionReferences } from './MentionReferences';
+import { WritingCopilot, writingSuggestion } from './WritingCopilot';
 import '../styles/collaboration-input.css';
 
 export type { CollaborationInputElement } from '../lib/collaboration-context';
@@ -22,6 +23,8 @@ export interface CollaborationInputProps extends NativeAttributes {
   onValueChange: (text: string, references: MessageReference[]) => void;
   allowCommands?: boolean;
   allowReferences?: boolean;
+  /** Explicit AI review is available beside ordinary writing, never technical credentials. */
+  allowAI?: boolean;
   /** Consume only the accepted current command line, never unrelated writing. */
   consumeCommands?: boolean;
   toolbar?: boolean;
@@ -71,7 +74,7 @@ interface Placement { left: number; top: number; width: number; height: number; 
 
 /** Explicit opt-in writing field. Source text and reference persistence remain owned by its editor. */
 export const CollaborationInput = forwardRef<CollaborationInputElement, CollaborationInputProps>(function CollaborationInput({
-  as = 'textarea', contextId, value, references = [], onValueChange, allowCommands = true, allowReferences = true,
+  as = 'textarea', contextId, value, references = [], onValueChange, allowCommands = true, allowReferences = true, allowAI = true,
   consumeCommands = true, toolbar = false, containerClassName = '', onPaletteActiveChange, submissionScope, onChange, onBeforeInput, onKeyDown, onKeyUp, onClick, onSelect,
   onCompositionStart, onCompositionEnd, ...attributes
 }, forwardedRef) {
@@ -334,6 +337,24 @@ export const CollaborationInput = forwardRef<CollaborationInputElement, Collabor
       {allowCommands && <button type="button" aria-label={t('Browse collaboration features')} aria-haspopup="listbox" aria-expanded={!!activePalette} onMouseDown={event => event.preventDefault()} onClick={browse}><span aria-hidden="true">/</span><span>{t('All features')}</span></button>}
       {allowReferences && <button type="button" aria-label={t('Insert a reference')} aria-haspopup="listbox" aria-expanded={picker.open} onMouseDown={event => event.preventDefault()} onClick={mention}>@</button>}
     </div>}
+    {available && allowAI && <WritingCopilot value={value} identity={identity} disabled={!!activePalette || picker.open || pending || composing.current} maxLength={attributes.maxLength ?? 10000} capture={origin}
+      apply={(source, selection, text) => {
+        const field = input.current;
+        if (!source.isCurrent() || !visible(field) || field.disabled || field.readOnly || field.value !== selection.value) return false;
+        const next = writingSuggestion(selection, text, source.references, attributes.maxLength ?? 10000);
+        if (!next) return false;
+        const expectedIdentity = live.current.identity;
+        let moved = false;
+        const newerIntent = () => { moved = true; };
+        document.addEventListener('pointerdown', newerIntent, true); document.addEventListener('keydown', newerIntent, true);
+        live.current.onValueChange(next.value, next.references);
+        requestAnimationFrame(() => {
+          document.removeEventListener('pointerdown', newerIntent, true); document.removeEventListener('keydown', newerIntent, true);
+          if (!moved && live.current.identity === expectedIdentity && input.current === field && visible(field) && field.value === next.value
+            && api.getAccessToken() === source.token && api.getCurrentUserId() === source.actorId) { field.focus({ preventScroll: true }); field.setSelectionRange(next.caret, next.caret); }
+        });
+        return true;
+      }} />}
     {error && picker.open && <p role="alert" className="fc-collaboration-error">{error}</p>}
   </div>;
 });

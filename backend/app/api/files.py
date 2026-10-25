@@ -1,4 +1,5 @@
 import hashlib
+import re
 from uuid import uuid4
 from urllib.parse import quote
 
@@ -15,6 +16,9 @@ from ..models.file import File
 from ..models.file_version import FileDocument, FileUploadReceipt, FileVersion
 from ..models.cloud_files import CloudFileImport
 from ..models.file_experience import FileComment, OfficeEditLock, OfficeEditSession
+from ..models.user import User
+from ..models.account_security import AccountSecurity
+from ..models.workspace import Workspace, WorkspaceChannel
 from ..services.auth import get_current_user
 from ..services.access import require_channel_member, lock_channel_writes
 from ..services.storage import storage_service
@@ -74,6 +78,16 @@ def require_native_upload(session, channel_id: str):
         raise HTTPException(409, "Use encrypted file transfer for this channel")
 
 
+def lock_upload_actor(session, channel_id: str, actor_id: str):
+    # Match account erasure's lock order before channel locks and uploader FKs.
+    session.execute(update(User).where(User.id == actor_id).values(is_blocked=User.is_blocked))
+    session.execute(update(AccountSecurity).where(AccountSecurity.user_id == actor_id).values(auth_version=AccountSecurity.auth_version))
+    recheck_actor(session, actor_id)
+    mapping = session.get(WorkspaceChannel, channel_id, populate_existing=True)
+    if mapping:
+        session.execute(update(Workspace).where(Workspace.id == mapping.workspace_id).values(name=Workspace.name))
+
+
 async def validated_content(file: UploadFile) -> bytes:
     if file.content_type not in ALLOWED_TYPES:
         raise HTTPException(400, "File type not allowed")
@@ -118,27 +132,55 @@ def acknowledged_upload(session, user_id: str, request_id, fingerprint: str):
     return file_metadata(record, version, document)
 
 
+def recording_publication(session, channel_id, actor_id, request_id, receipt_id, clip_id):
+    # Header defaults are objects when unit callers invoke the route directly.
+    receipt_id = receipt_id if isinstance(receipt_id, str) else None
+    clip_id = clip_id if isinstance(clip_id, str) else None
+    if receipt_id is None and clip_id is None:
+        return
+    if (not receipt_id or not re.fullmatch(r"[a-f0-9]{32}", receipt_id)
+            or not clip_id or not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", clip_id)
+            or not isinstance(request_id, str) or request_id != clip_id):
+        raise HTTPException(400, "Recording uploads require a receipt and matching clip request ID")
+    from ..services.media_capture import authorize_publication
+    authorize_publication(session, receipt_id, channel_id, actor_id, clip_id)
+
+
 @router.post("/channels/{channel_id}")
 async def upload_file(channel_id: str, file: UploadFile = FastAPIFile(...),
                       user=Depends(get_current_user), session=Depends(get_session),
-                      request_id: str | None = Header(None, alias="Idempotency-Key", pattern=r"^[A-Za-z0-9_-]{16,128}$")):
+                      request_id: str | None = Header(None, alias="Idempotency-Key", pattern=r"^[A-Za-z0-9_-]{16,128}$"),
+                      capture_receipt: str | None = Header(None, alias="X-Meeting-Capture-Receipt", pattern=r"^[a-f0-9]{32}$"),
+                      capture_clip_id: str | None = Header(None, alias="X-Meeting-Capture-Clip-ID", pattern=r"^[A-Za-z0-9_-]{16,128}$")):
     actor_id = user.id
     require_channel_member(session, channel_id, actor_id)
     require_direct_message_writable(session, channel_id, actor_id)
     require_native_upload(session, channel_id)
     content = await validated_content(file)
-    lock_channel_writes(session, channel_id)
-    session.expire_all()
-    recheck_actor(session, actor_id)
-    require_channel_member(session, channel_id, actor_id)
-    require_direct_message_writable(session, channel_id, actor_id)
-    require_native_upload(session, channel_id)
     fingerprint = upload_fingerprint(channel_id, None, file, content)
-    previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
-    if previous:
-        return previous
-    from ..services.enterprise_governance import enforce_native_file
-    warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
+
+    def authorize():
+        lock_upload_actor(session, channel_id, actor_id)
+        lock_channel_writes(session, channel_id)
+        session.expire_all(); recheck_actor(session, actor_id)
+        require_channel_member(session, channel_id, actor_id)
+        require_direct_message_writable(session, channel_id, actor_id)
+        require_native_upload(session, channel_id)
+
+    # A retry of an existing immutable upload needs fresh authority, but no I/O.
+    if acknowledged_upload(session, actor_id, request_id, fingerprint):
+        authorize()
+        previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+        if previous:
+            recording_publication(session, channel_id, actor_id, request_id, capture_receipt, capture_clip_id)
+            return previous
+    from ..services.enterprise_governance import enforce_native_file, native_file_allowed
+    if not native_file_allowed(session, channel_id, safe_filename(file.filename), file.content_type, content):
+        raise HTTPException(423, "Workspace content policy blocks this native file")
+    # End the read transaction before storage. In particular, consent withdrawal
+    # must be able to acquire its actor/workspace/channel fences during this wait.
+    # Request authority is in session.info and is freshly checked after I/O.
+    session.rollback()
     file_id = uuid4().hex
     storage_path = await storage_service.save_file(file_id, content)
     record = File(id=file_id, channel_id=channel_id, uploader_id=actor_id,
@@ -148,14 +190,22 @@ async def upload_file(channel_id: str, file: UploadFile = FastAPIFile(...),
                             current_file_id=file_id)
     version = FileVersion(file_id=file_id, document_id=file_id, number=1)
     try:
-        session.expire_all(); recheck_actor(session, actor_id)
-        require_channel_member(session, channel_id, actor_id)
-        require_direct_message_writable(session, channel_id, actor_id)
-        require_native_upload(session, channel_id)
-        session.add(record)
-        session.flush()
-        session.add(document)
-        session.flush()
+        authorize()
+        previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+        if previous:
+            session.rollback()
+            await storage_service.delete_file(file_id)
+            authorize()
+            previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+            if not previous:
+                raise HTTPException(409, "The previous upload is no longer available")
+            recording_publication(session, channel_id, actor_id, request_id, capture_receipt, capture_clip_id)
+            return previous
+        warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
+        # No storage await follows this live consent check before metadata commit.
+        recording_publication(session, channel_id, actor_id, request_id, capture_receipt, capture_clip_id)
+        session.add(record); session.flush()
+        session.add(document); session.flush()
         session.add(version)
         if isinstance(request_id, str):
             session.add(FileUploadReceipt(user_id=actor_id, request_id=request_id, file_id=file_id, fingerprint=fingerprint))
@@ -165,8 +215,10 @@ async def upload_file(channel_id: str, file: UploadFile = FastAPIFile(...),
     except IntegrityError:
         session.rollback()
         await storage_service.delete_file(file_id)
+        authorize()
         previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
         if previous:
+            recording_publication(session, channel_id, actor_id, request_id, capture_receipt, capture_clip_id)
             return previous
         raise HTTPException(409, "Another upload completed first. Refresh and try again.")
     except Exception:
@@ -220,50 +272,63 @@ async def upload_version(file_id: str, file: UploadFile = FastAPIFile(...),
     require_direct_message_writable(session, channel_id, actor_id)
     require_native_upload(session, channel_id)
     _, document = file_context(session, record)
-    owner_id = document.owner_id if document else record.uploader_id
-    if owner_id != actor_id:
-        raise HTTPException(403, "Only the document owner can upload a new version")
-    content = await validated_content(file)
-    lock_channel_writes(session, channel_id)
-    session.expire_all()
-    recheck_actor(session, actor_id)
-    record = find_file(session, file_id, actor_id)
-    require_native_upload(session, channel_id)
-    require_direct_message_writable(session, channel_id, actor_id)
-    _, document = file_context(session, record)
     if (document.owner_id if document else record.uploader_id) != actor_id:
         raise HTTPException(403, "Only the document owner can upload a new version")
-    fingerprint = upload_fingerprint(record.channel_id, document.id if document else record.id, file, content)
-    previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
-    if previous:
-        return previous
+    content = await validated_content(file)
+    fingerprint = upload_fingerprint(channel_id, document.id if document else record.id, file, content)
+
+    def authorize():
+        lock_upload_actor(session, channel_id, actor_id)
+        lock_channel_writes(session, channel_id)
+        session.expire_all(); recheck_actor(session, actor_id)
+        current_record = find_file(session, file_id, actor_id)
+        if current_record.channel_id != channel_id:
+            raise HTTPException(409, "The document channel changed")
+        require_native_upload(session, channel_id)
+        require_direct_message_writable(session, channel_id, actor_id)
+        _, current_document = file_context(session, current_record)
+        if (current_document.owner_id if current_document else current_record.uploader_id) != actor_id:
+            raise HTTPException(403, "Only the document owner can upload a new version")
+        if upload_fingerprint(channel_id, current_document.id if current_document else current_record.id, file, content) != fingerprint:
+            raise HTTPException(409, "The document identity changed before upload")
+        return current_record, current_document
+
+    if acknowledged_upload(session, actor_id, request_id, fingerprint):
+        authorize()
+        previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+        if previous:
+            return previous
+    from ..services.enterprise_governance import enforce_native_file, native_file_allowed
+    if not native_file_allowed(session, channel_id, safe_filename(file.filename), file.content_type, content):
+        raise HTTPException(423, "Workspace content policy blocks this native file")
+    session.rollback()
     new_id = uuid4().hex
-    from ..services.enterprise_governance import enforce_native_file
-    warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
-    path = None
+    path = await storage_service.save_file(new_id, content)
     try:
+        record, document = authorize()
+        previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+        if previous:
+            session.rollback(); await storage_service.delete_file(new_id)
+            authorize()
+            previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
+            if not previous:
+                raise HTTPException(409, "The previous upload is no longer available")
+            return previous
+        warnings = enforce_native_file(session, channel_id, actor_id, safe_filename(file.filename), file.content_type, content)
         if document:
-            # PostgreSQL serializes allocation. Unique version numbers also
-            # prevent SQLite/concurrent clients from overwriting history.
+            # Allocate the immutable revision only after private blob I/O.
             document = session.exec(select(FileDocument).where(FileDocument.id == document.id)
                                     .with_for_update().execution_options(populate_existing=True)).one()
         else:
-            document = FileDocument(id=record.id, channel_id=record.channel_id, owner_id=record.uploader_id,
+            document = FileDocument(id=record.id, channel_id=channel_id, owner_id=record.uploader_id,
                                     current_file_id=record.id, created_at=record.created_at)
-            session.add(document)
-            session.flush()
+            session.add(document); session.flush()
             session.add(FileVersion(file_id=record.id, document_id=document.id, number=1))
-        path = await storage_service.save_file(new_id, content)
-        session.expire_all(); recheck_actor(session, actor_id)
-        require_channel_member(session, channel_id, actor_id)
-        require_direct_message_writable(session, channel_id, actor_id)
-        require_native_upload(session, channel_id)
-        replacement = File(id=new_id, channel_id=record.channel_id, uploader_id=actor_id,
+        replacement = File(id=new_id, channel_id=channel_id, uploader_id=actor_id,
                            filename=safe_filename(file.filename), content_type=file.content_type,
                            size=len(content), storage_path=path, encrypted=False)
         version = FileVersion(file_id=new_id, document_id=document.id, number=document.version_count + 1)
-        session.add(replacement)
-        session.flush()
+        session.add(replacement); session.flush()
         session.add(version)
         if isinstance(request_id, str):
             session.add(FileUploadReceipt(user_id=actor_id, request_id=request_id, file_id=new_id, fingerprint=fingerprint))
@@ -272,20 +337,17 @@ async def upload_version(file_id: str, file: UploadFile = FastAPIFile(...),
         session.add(document)
         restore_synced_file(session, document.id)
         from ..services.webhooks import enqueue_channel_event
-        enqueue_channel_event(session, record.channel_id, "file.version.created", replacement.id)
+        enqueue_channel_event(session, channel_id, "file.version.created", replacement.id)
         session.commit()
     except IntegrityError:
-        session.rollback()
-        if path:
-            await storage_service.delete_file(new_id)
+        session.rollback(); await storage_service.delete_file(new_id)
+        authorize()
         previous = acknowledged_upload(session, actor_id, request_id, fingerprint)
         if previous:
             return previous
         raise HTTPException(409, "Another version was just uploaded. Refresh and try again.")
     except Exception:
-        session.rollback()
-        if path:
-            await storage_service.delete_file(new_id)
+        session.rollback(); await storage_service.delete_file(new_id)
         raise
     return {**file_metadata(replacement, version, document), "policy_warnings": warnings}
 

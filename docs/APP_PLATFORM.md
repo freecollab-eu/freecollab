@@ -76,8 +76,49 @@ The three supported scopes are `commands:invoke`, `cards:write`, `actions:write`
 Direct provider writes require `actions:write`. Commands and their exact argument
 names, requiredness and bounds are validated against the installed manifest.
 An ordinary current channel member can invoke an installed command only for that
-channel, with `confirm: true` and `disclose_to_app: true`; the request includes only
+channel, with `confirm: true`, `disclose_to_app: true` and the exact reviewed
+`expected_generation`; the request includes only
 the reviewed arguments and bounded routing metadata. No history is included.
+
+Arguments can additionally declare `type: "text" | "number" | "boolean" |
+"choice"`. Choice arguments provide a bounded unique `choices` list. Number
+arguments accept finite decimal/scientific notation; boolean values are the
+literal strings `true` and `false`. The payload remains an object of strings,
+preserving custom app receiver contracts. Unknown, duplicated or oversized
+arguments are rejected before creating a job.
+
+## Installed commands in every writing surface
+
+The shared `/` catalogue includes currently granted installed commands alongside
+the product's built-in tools. `/customer.app:command name="quoted text"` selects
+an exact app namespace. A unique command name can also be used without its app
+namespace; duplicate names require choosing the actual installation. Single-text
+commands accept positional text. Parsing does not run shell expressions or code.
+
+Selecting a command opens the ordinary retained review surface. Its arguments
+can be edited, and editing clears approval. The actual recipient origin,
+installation generation and argument schema are checked again before enqueue.
+Opening or typing does not queue a request, disclose history or execute an app.
+An unsent initial argument draft participates in the same scoped navigation guard
+as other work. A lost queue response retries the same request ID and body; an
+ambiguous external delivery remains a separate inspection step.
+
+`GET /workspaces/{workspace}/channels/{channel}/apps/commands` returns the actual
+granted command catalogue. `POST` to that path plus `/{installation}` requires
+`request_id`, `expected_generation`, `command`, `arguments`, `confirm` and
+`disclose_to_app`. The channel comes from the path and is reauthorized. The
+original `/apps/{installation}/commands` write endpoint now also requires the
+reviewed generation: callers must carry the generation returned when they showed
+the installation to the user. Omitting it fails closed with HTTP422; a changed
+generation returns409. Do not fetch a new generation silently at invocation and
+use it to authorize an old recipient review. This is a security tightening for
+existing API clients, not automatic approval of changed apps.
+
+The [workflow builder](WORKFLOWS.md) can also grant a registered app command with
+fixed reviewed arguments for future matching runs. These use the same outbox and
+uncertain-delivery receipts; a signed-webhook app is the registered HTTP action,
+not an arbitrary URL/code-execution step. [Continuous Slack bridges](SLACK_LIVEBRIDGE.md)
+are separate customer-owned app connections with their own signed event ingress.
 
 `PUT /workspaces/{workspace}/apps/{installation}` requires the expected current
 generation and regrants the complete manifest, channels, destination and
@@ -233,3 +274,35 @@ The same browser proof now configures a private loopback HTTPS/SSE provider, che
 full selected text and the actual revision/digest request fields, keeps a generated
 summary private until separate publication, and rejects an old recap-schedule
 review after a provider change and fresh consent in another tab.
+
+## Reviewed foreground actions from encrypted channels
+
+A customer administrator may opt an installation into `secure_foreground: true`
+and explicitly grant encrypted workspace channels. This mode forbids
+`cards:write`: a provider cannot write plaintext callback cards into an encrypted
+room. The same catalogue and `/` review UI expose only currently granted commands
+with `supports_secure_foreground: true` and `delivery: foreground`.
+
+Each invocation requires separate approval that its exact arguments leave
+end-to-end encryption for the displayed recipient. The trusted device supplies
+only those arguments; the service never fetches or decrypts channel history. The
+native authenticated request must be bound to the current unrevoked Matrix
+device session. Native actor, exact app generation and grant, Matrix room/account,
+channel membership epoch and device are rechecked before and after provider I/O.
+Changed authority discards the response preview even if the recipient already
+received the action.
+
+The dedicated `POST /workspaces/{workspace}/channels/{channel}/apps/foreground/
+{installation}` endpoint accepts the ordinary reviewed command fields plus
+`disclose_decrypted_content: true` and `matrix_device_id`. It retains a
+purpose-bound keyed request digest and delivery status in `AppForegroundReceipt`,
+never argument text, output, payload copies or provider error bodies. Its
+HTTPS relay uses the registered destination and bounded transport. No background
+job or automatic retry exists. Repeating the same request identifier only reads
+its content-free outcome; unknown delivery must be inspected at the recipient.
+A lost response cannot be recovered as plaintext from the server.
+
+A successful response preview remains on the current device. Publishing it into
+the encrypted conversation is a separate reviewed action using the ordinary
+secure client and a stable encryption transaction identifier. Slack mirroring
+and recurring server workflows do not receive encrypted-channel plaintext.

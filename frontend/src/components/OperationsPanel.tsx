@@ -22,6 +22,8 @@ const queueNames: Record<string, string> = {
   push: 'Web Push', native_push: 'Native push', apps: 'App commands', recaps: 'Private recap schedules',
   chat: 'Scheduled messages and reminders', 'native-call-cleanup': 'Call capability cleanup',
   'slack-import-cleanup': 'Slack preview cleanup', 'personal-oauth-cleanup': 'Provider consent checks',
+  'slack-livebridge': 'Slack live bridge', 'ai-runtime': 'AI runs',
+  'encrypted-work': 'Encrypted work notices',
 };
 const queueStates: Record<string, string> = {
   pending: 'Pending', processing: 'Processing', delivered: 'Delivered', failed: 'Failed', cancelled: 'Cancelled',
@@ -31,6 +33,7 @@ const queueStates: Record<string, string> = {
   connected: 'Connected', attention: 'Needs attention', disconnected: 'Disconnected',
   waiting_approval: 'Waiting for approval', rejected: 'Rejected', expired: 'Expired', ready: 'Ready',
   erasing_files: 'Erasing files', proof_available: 'Available proof',
+  queued: 'Queued', running: 'Running', awaiting_review: 'Awaiting review',
 };
 function queueSummary(counts: Record<string, number | null | undefined>) {
   const states = Object.entries(counts).filter(([name, count]) => name !== 'oldest_pending_seconds' && typeof count === 'number' && count > 0);
@@ -94,6 +97,7 @@ export function OperationsPanel({ security }: { security: AccountSecurity | null
       {loading ? <p className="fc-account-loading" role="status"><Loader2 size={18} className="fc-account-spinner" />{t("Checking services…")}</p> : status ? <>
         <dl className="fc-integration-status-grid"><div><dt>{t("Email transport")}</dt><dd>{status.mail.mode}</dd></div><div><dt>{t("Configuration")}</dt><dd>{status.mail.configured ? t("Configured") : t("Needs attention")}</dd></div><div><dt>{t("Transport encryption")}</dt><dd>{typeof status.mail.tls === 'boolean' ? status.mail.tls ? t("Enabled") : t("Disabled") : status.mail.tls}</dd></div><div><dt>{t("Mail worker")}</dt><dd>{status.worker.status}</dd></div><div><dt>{t("Database")}</dt><dd>{status.database.reachable ? t("Available") : t("Unavailable")}</dd></div>{status.integration_worker && <div><dt>{t("Integration worker")}</dt><dd>{status.integration_worker.enabled ? status.integration_worker.status : t("Not enabled")}</dd></div>}</dl>
         {status.mail.issues.length > 0 && <ul className="fc-integration-issues">{status.mail.issues.map(issue => <li key={issue}><AlertCircle size={14} /><span>{issues[issue] || issue.replace(/_/g, ' ')}</span></li>)}</ul>}
+        {status.ai_runtime_worker && <p className="fc-account-muted">{t("AI worker")}: {status.ai_runtime_worker.enabled ? status.ai_runtime_worker.status : t("Not enabled")} · {date(status.ai_runtime_worker.last_seen_at)}</p>}
         <p className="fc-account-muted">{t("Mail worker last seen: ")}{date(status.worker.last_seen_at)}</p>
         <div className="fc-integration-queue-grid">{Object.entries(status.queue).filter(([key]) => ['pending', 'processing', 'failed', 'delivered'].includes(key)).map(([key, count]) => <div key={key}><strong>{count ?? 0}</strong><span>{key}</span></div>)}</div>
         {status.integration_queues && <><p className="fc-account-muted">{t('Counts describe retained work and local cleanup checks. Scheduled work is not a completed delivery.')}</p><div className="fc-integration-queue-details">{Object.entries(status.integration_queues).map(([name, counts]) => <p key={name} data-worker-queue={name}><strong>{t(queueNames[name] || name)}</strong><span>{queueSummary(counts)}</span></p>)}</div></>}

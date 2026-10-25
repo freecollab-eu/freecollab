@@ -8,19 +8,37 @@ import { projectTasksApi, type TaskRecord } from '../lib/project-tasks-api';
 import { expandCalendarOccurrences } from '../lib/calendar';
 import { loadMyDay, openPersonalSource, type MyDaySnapshot } from '../lib/my-day';
 import { useModalFocus } from '../lib/useModalFocus';
+import { useAccount } from '../account/AccountProvider';
+import { useCollaborationContext } from '../lib/collaboration-context';
+import { ModalContinuationProvider, useCollaborationModal } from '../lib/useCollaborationModal';
+import type { WritingLeaveController } from '../lib/useScopedWritingGuard';
+import { PersonalCalendar } from './PersonalCalendar';
 import '../styles/my-day.css';
 
-type Section = 'all' | 'tasks' | 'calendar' | 'attention';
+type Section = 'all' | 'tasks' | 'calendar' | 'attention' | 'private';
 const empty: MyDaySnapshot = { generated_at: '', channels: [], tasks: [], calendar: [], notifications: [], reminders: [], saved: [], incomplete: false };
 const describe = (failure: unknown) => failure instanceof Error ? failure.message : 'Your day could not be loaded.';
-export function MyDay({ onClose }: { onClose: () => void }) {
+export function MyDay({ onClose, initialPrivate = false, initialPrivateEventId, closeController }: { onClose: () => void; initialPrivate?: boolean; initialPrivateEventId?: string; closeController?: { current: (() => boolean) | null } }) {
   useI18n();
+  const { workspace } = useAccount();
+  const collaboration = useCollaborationContext();
   const [data, setData] = useState<MyDaySnapshot>(empty), [loading, setLoading] = useState(true), [busy, setBusy] = useState(''), [error, setError] = useState('');
-  const [section, setSection] = useState<Section>('all');
+  const [section, setSection] = useState<Section>(initialPrivate ? 'private' : 'all');
+  const calendarLeave = useRef<WritingLeaveController['current']>(null);
   const dialog = useRef<HTMLElement>(null), generation = useRef(0), controller = useRef<AbortController | null>(null), owner = useRef(api.getAccessToken());
   const close = useRef(onClose), pendingAction = useRef(false), mounted = useRef(false); close.current = onClose;
   const current = (request: number) => mounted.current && request === generation.current && owner.current === api.getAccessToken();
-  useModalFocus(dialog, onClose);
+  const requestClose = () => { if (calendarLeave.current?.() === false) return false; onClose(); return true; };
+  const closeAction = useRef(requestClose); closeAction.current = requestClose;
+  useEffect(() => {
+    if (!closeController) return;
+    const action = () => closeAction.current(); closeController.current = action;
+    return () => { if (closeController.current === action) closeController.current = null; };
+  }, [closeController]);
+  const modal = useCollaborationModal(dialog, t('My day'), 'my-day');
+  useModalFocus(dialog, requestClose, true, { suspended: modal.parked, escapePhase: 'bubble' });
+  const selectSection = (next: Section) => { if (next !== section && calendarLeave.current?.() === false) return; setSection(next); };
+  useEffect(() => { if (initialPrivate && calendarLeave.current?.() !== false) setSection('private'); }, [initialPrivate, initialPrivateEventId]);
   const load = useCallback(async () => {
     const request = ++generation.current; controller.current?.abort(); const abort = new AbortController(); controller.current = abort;
     setLoading(true); setError('');
@@ -41,6 +59,7 @@ export function MyDay({ onClose }: { onClose: () => void }) {
     return () => { mounted.current = false; ++generation.current; controller.current?.abort(); window.clearInterval(timer); window.removeEventListener('freecollab:auth-changed', auth); window.removeEventListener('storage', auth); document.removeEventListener('visibilitychange', refresh); };
   }, [load]);
   const source = (channelId: string, kind: 'task' | 'calendar' | 'message', itemId?: string) => {
+    if (calendarLeave.current?.() === false) return;
     const channel = data.channels.find(row => row.id === channelId);
     if (!channel) return;
     openPersonalSource({ workspace_id: channel.workspace_id, channel_id: channel.id, kind, item_id: itemId,
@@ -66,13 +85,15 @@ export function MyDay({ onClose }: { onClose: () => void }) {
   const show = (value: Section) => section === 'all' || section === value;
   const date = (value: string) => new Date(value.length === 10 ? value + 'T12:00:00' : /(?:Z|[+-]\d\d:\d\d)$/.test(value) ? value : value + 'Z');
   const time = (value: string) => date(value).toLocaleString(currentLocale(), { weekday: 'short', month: 'short', day: 'numeric', ...(value.length === 10 ? {} : { hour: '2-digit', minute: '2-digit' }) });
-  return createPortal(<div className="fc-overlay fc-day-overlay"><section ref={dialog} tabIndex={-1} className="fc-day" role="dialog" aria-modal="true" aria-label={t('My day')}>
-    <header className="fc-day-header"><div><span className="fc-kicker"><Sun size={15} />{t('A little more clarity')}</span><h2>{t('My day')}</h2><p>{new Date().toLocaleDateString(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</p></div><div className="fc-day-header-actions"><button type="button" disabled={loading || !!busy} className="fc-icon-button" aria-label={t('Refresh my day')} onClick={() => void load()}><RefreshCw size={19} className={loading ? 'fc-day-spin' : ''} /></button><button type="button" className="fc-icon-button" aria-label={t('Close my day')} onClick={onClose}><X size={20} /></button></div></header>
+  return createPortal(<ModalContinuationProvider modalId={modal.modalId}><div hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined} className="fc-overlay fc-day-overlay"><section ref={dialog} tabIndex={-1} className="fc-day" role="dialog" aria-modal="true" aria-label={t('My day')}>
+    <header className="fc-day-header"><div><span className="fc-kicker"><Sun size={15} />{t('A little more clarity')}</span><h2>{t('My day')}</h2><p>{new Date().toLocaleDateString(currentLocale(), { weekday: 'long', day: 'numeric', month: 'long' })}</p></div><div className="fc-day-header-actions"><button type="button" disabled={loading || !!busy} className="fc-icon-button" aria-label={t('Refresh my day')} onClick={() => void load()}><RefreshCw size={19} className={loading ? 'fc-day-spin' : ''} /></button><button type="button" className="fc-icon-button" aria-label={t('Close my day')} onClick={requestClose}><X size={20} /></button></div></header>
     <p className="fc-day-intro">{t('Your next steps, across the places you work.')}</p>
     <nav className="fc-day-filters" aria-label={t('My day views')}>{([
       ['all', 'Overview', Sun, data.tasks.length + meetings.length + attention], ['tasks', 'Assigned to me', CheckCheck, data.tasks.length],
       ['calendar', 'Next seven days', CalendarDays, meetings.length], ['attention', 'Follow up', Bell, attention],
-    ] as const).map(([value, label, Icon, count]) => <button type="button" key={value} aria-pressed={section === value} onClick={() => setSection(value)}><Icon size={17} /><span>{t(label)}</span><strong>{count}</strong></button>)}</nav>
+    ] as const).map(([value, label, Icon, count]) => <button type="button" key={value} aria-pressed={section === value} onClick={() => selectSection(value)}><Icon size={17} /><span>{t(label)}</span><strong>{count}</strong></button>)}</nav>
+    {workspace && <button type="button" className="fc-button" aria-pressed={section === 'private'} onClick={() => selectSection(section === 'private' ? 'all' : 'private')}><CalendarDays size={16} />{t(section === 'private' ? 'Back to overview' : 'Your private calendar')}</button>}
+    {section === 'private' && workspace && <PersonalCalendar key={workspace.id} workspaceId={workspace.id} channelId={collaboration?.channelId} initialEventId={initialPrivateEventId} leaveController={calendarLeave} />}
     {error && <div className="fc-alert" role="alert">{t(error)} <button type="button" className="fc-text-button" onClick={() => void load()}>{t('Retry')}</button></div>}
     {loading && <p className="fc-day-empty" role="status">{t('Gathering your day…')}</p>}
     {!loading && !error && <>
@@ -88,5 +109,5 @@ export function MyDay({ onClose }: { onClose: () => void }) {
       </div>
     </>}
     <footer className="fc-day-footer"><LockKeyhole size={14} /><span>{t('Your current access applies. Encrypted content stays on your device.')}</span></footer>
-  </section></div>, document.body);
+    </section></div></ModalContinuationProvider>, document.body);
 }

@@ -100,6 +100,13 @@ class Settings(BaseSettings):
     meetings_turn_urls: list[str] = Field(default_factory=list, max_length=10)
     meetings_turn_secret: SecretStr | None = None
     enterprise_search_enabled: bool = True
+    # Operator-owned optional vector backend. No user-supplied destination.
+    semantic_opensearch_url: str = ""
+    semantic_opensearch_index: str = "freecollab-semantic-v1"
+    semantic_opensearch_username: str = ""
+    semantic_opensearch_password: SecretStr = SecretStr("")
+    semantic_opensearch_ca_bundle: str = ""
+    semantic_opensearch_timeout: float = Field(default=8, ge=1, le=15)
     meetings_sfu_provider: Literal["disabled", "livekit"] = "disabled"
     meetings_sfu_url: str = ""
     meetings_sfu_api_url: str = ""
@@ -153,6 +160,10 @@ class Settings(BaseSettings):
                  self.cloud_files_enabled, self.external_meetings_enabled, self.copilot_enabled,
                  self.push_enabled, self.native_push_enabled, self.native_calls_enabled,
                  self.enable_experimental_features, self.enterprise_search_enabled, self.data_controls_enabled)
+        if (self.semantic_opensearch_url or self.semantic_opensearch_username
+                or self.semantic_opensearch_password.get_secret_value() or self.semantic_opensearch_ca_bundle
+                or self.semantic_opensearch_index != "freecollab-semantic-v1"):
+            raise ValueError("Public demo cannot configure a semantic external vector backend")
         if any(flags) or self.meetings_sfu_provider != "disabled" or self.meetings_ice_servers or self.meetings_turn_urls:
             raise ValueError("Public demo cannot enable external providers, federation, push or public media services")
         return self

@@ -185,6 +185,42 @@ def test_expiry_and_physical_cleanup_preserve_another_visits_rows_and_files(samp
     assert sample.client.get(f"/messages/channels/{survivor['channel_id']}", headers=h).status_code == 200
 
 
+def test_expiry_cleans_new_calendar_collections_semantic_and_capture_state(sample):
+    from app.api import content_completion, meetings, media_capture
+    from app.models.content_completion import PersonalCalendarEvent, ChannelSemanticIndex, ContentCollectionItem
+    from app.models.media_capture import MeetingCapture, MeetingCaptureConsent
+    for module in (content_completion, meetings, media_capture): sample.client.app.include_router(module.router)
+    old, survivor = begin(sample), begin(sample)
+    first, other = headers(old), headers(survivor)
+    fields = {"title": "Visit-only appointment", "description": "Temporary personal notes", "location": "",
+        "starts_at": "2026-11-02T09:00:00Z", "ends_at": "2026-11-02T10:00:00Z", "all_day": False,
+        "timezone": "UTC", "reminder_minutes": None, "external_uid": None}
+    for visit, auth in ((old, first), (survivor, other)):
+        assert sample.client.post(f"/workspaces/{visit['workspace_id']}/personal-calendar", headers=auth,
+            json={"id": "event-" + visit["visit_id"], "fields": fields}).status_code == 200
+    sources = sample.client.get(f"/channels/{old['channel_id']}/shared-documents", headers=first).json()
+    collection = sample.client.post(f"/channels/{old['channel_id']}/content-collections", headers=first,
+        json={"id": "visit-material", "title": "Temporary collection", "items": [{"kind": "document", "id": sources[0]["id"]}]})
+    assert collection.status_code == 201, collection.text
+    search = sample.client.post(f"/workspaces/{old['workspace_id']}/semantic-search", headers=first, json={"query": "courtyard"})
+    assert search.status_code == 200, search.text
+    joined = sample.client.post(f"/channels/{old['channel_id']}/meetings", headers=first, json={})
+    assert joined.status_code == 201, joined.text
+    capture = sample.client.post(f"/meetings/mesh/{joined.json()['meeting']['id']}/capture", headers=first, json={})
+    assert capture.status_code == 201, capture.text
+    with Session(sample.engine) as session:
+        visit = session.get(PublicDemoVisit, old["visit_id"]); visit.expires_at = datetime.utcnow() - timedelta(seconds=1)
+        session.add(visit); session.commit()
+    with Session(sample.engine) as session:
+        assert service.cleanup_expired_visits(session) == 1
+        assert not session.exec(select(PersonalCalendarEvent).where(PersonalCalendarEvent.workspace_id == old["workspace_id"])).all()
+        assert not session.exec(select(ChannelSemanticIndex).where(ChannelSemanticIndex.channel_id == old["channel_id"])).all()
+        assert not session.exec(select(ContentCollectionItem).where(ContentCollectionItem.channel_id == old["channel_id"])).all()
+        assert not session.exec(select(MeetingCapture).where(MeetingCapture.channel_id == old["channel_id"])).all()
+        assert not session.exec(select(MeetingCaptureConsent)).all()
+    assert sample.client.get(f"/workspaces/{survivor['workspace_id']}/personal-calendar", headers=other).json()[0]["fields"]["title"] == fields["title"]
+
+
 def test_capacity_is_atomic_and_revoked_visits_are_reclaimed(sample, monkeypatch):
     monkeypatch.setattr(settings, "demo_max_visits", 2)
     def create():

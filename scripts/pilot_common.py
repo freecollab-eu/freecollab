@@ -9,7 +9,7 @@ import tarfile
 
 ROOT = Path(__file__).resolve().parents[1]
 BASE_SERVICES = {"frontend", "backend", "db"}
-OPTIONAL_SERVICES = {"mail-worker", "matrix", "integration-worker", "sfu-worker"}
+OPTIONAL_SERVICES = {"mail-worker", "matrix", "integration-worker", "ai-runtime-worker", "sfu-worker"}
 VOLUME_NAMES = {"files", "mail", "matrix"}
 
 # The snapshot container has no network and mounts one volume read-only. Root
@@ -150,6 +150,8 @@ def check_backup(directory):
         raise ValueError("Matrix backup is missing its exact server image")
     if any(not isinstance(identifier, str) or not re.fullmatch(r"sha256:[a-f0-9]{64}", identifier) for identifier in images.values()):
         raise ValueError("Backup image identifier is invalid")
+    if "ai-runtime-worker" in images and images["ai-runtime-worker"] != images["backend"]:
+        raise ValueError("AI runtime worker must use the backed-up backend image")
     if version.endswith("v2"):
         running = manifest.get("running_services")
         if not isinstance(running, list) or any(not isinstance(name, str) for name in running) or len(set(running)) != len(running) or not set(running) <= set(images) or "db" not in running:

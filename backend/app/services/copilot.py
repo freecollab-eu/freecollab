@@ -57,6 +57,9 @@ class Provider(Strict):
     agents: list[Agent] = Field(default_factory=lambda:[Agent(name='copilot')], min_length=1, max_length=8)
 
 class Source(Strict):
+    # Reviewed document/text snapshots and their hashes bind exact characters,
+    # including leading indentation and trailing newlines.
+    model_config = ConfigDict(extra='forbid', str_strip_whitespace=False)
     kind: str = Field(pattern=r'^(message|file|shared_document|clip)$')
     id: str = Field(min_length=1, max_length=1024)
     # Only trusted-client text is accepted for secure events and Yjs documents.
@@ -232,12 +235,16 @@ def _events(chunks):
 
 
 def parse_completion(chunks):
-    text=''; calls={}; done=False; finished=False
+    text=''; calls={}; done=False; finished=False; measured=None
     for event in _events(chunks):
         if done: raise ValueError('trailing event')
         if event=='[DONE]': done=True; continue
         packet=json.loads(event,object_pairs_hook=transport._pairs,parse_constant=transport._constant)
         if not isinstance(packet,dict) or packet.get('error'): raise ValueError('provider error')
+        usage=packet.get('usage')
+        if isinstance(usage,dict) and type(usage.get('prompt_tokens')) is int and type(usage.get('completion_tokens')) is int:
+            if not 0<=usage['prompt_tokens']<=1000000 or not 0<=usage['completion_tokens']<=1000000: raise ValueError('invalid usage')
+            measured={'input_tokens':usage['prompt_tokens'],'output_tokens':usage['completion_tokens'],'usage_reported':True}
         choices=packet.get('choices',[])
         if not choices: continue
         if finished: raise ValueError('content after finished choice')
@@ -262,7 +269,7 @@ def parse_completion(chunks):
             finished=True
     if not done or not finished: raise ValueError('incomplete provider stream')
     if not text.strip() and not calls: raise ValueError('empty provider answer')
-    return {'text':text,'tool_calls':list(calls.values())}
+    return {'text':text,'tool_calls':list(calls.values()),'usage':measured or {'input_tokens':0,'output_tokens':0,'usage_reported':False}}
 
 
 def completion(provider, payload):

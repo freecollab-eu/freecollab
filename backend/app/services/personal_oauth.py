@@ -200,7 +200,8 @@ def current_grant(session, identifier, *, user_id=None, status="active"):
             visible = False
             for channel_id in app_platform.channels(target):
                 try:
-                    app_platform.native_channel(session, row.workspace_id, channel_id, row.user_id)
+                    app_platform.native_channel(session, row.workspace_id, channel_id, row.user_id,
+                        allow_secure=app_platform.manifest_for(target).secure_foreground)
                     visible = True
                 except HTTPException:
                     continue

@@ -1,0 +1,12 @@
+.fc-meeting-capture{border-top:1px solid var(--fc-border);padding:.75rem;display:grid;gap:.65rem;font-size:.875rem}
+.fc-meeting-capture header,.fc-meeting-capture header strong,.fc-meeting-capture-actions{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.fc-meeting-capture header{justify-content:space-between}.fc-meeting-capture header span{color:var(--fc-muted)}
+.fc-meeting-capture details{display:grid;gap:.6rem}.fc-meeting-capture details>label{display:flex;gap:.5rem;align-items:center;margin-block:.65rem}
+.fc-meeting-capture fieldset{border:1px solid var(--fc-border);padding:.7rem;margin-block:.7rem;min-width:0}
+.fc-meeting-capture p{margin:0;line-height:1.65;overflow-wrap:anywhere}.fc-meeting-capture button{min-height:2.75rem}
+.fc-recording-dot{color:var(--fc-accent);fill:currentColor}.fc-live-captions{max-height:12rem;overflow:auto;border-left:2px solid var(--fc-accent);padding:.5rem .75rem;background:var(--fc-surface)}
+.fc-meeting-capture .fc-input{max-width:100%}.fc-meeting-capture-actions{align-items:stretch}
+
+.fc-meeting-recording-recovery { margin: 1rem 0; padding: 1rem; border: 1px solid var(--border-color, #d8d4cb); border-radius: 14px; }
+.fc-meeting-recording-recovery article { display: grid; gap: .5rem; padding-block: .75rem; }
+.fc-meeting-recording-recovery small { color: var(--text-muted, #74716a); }

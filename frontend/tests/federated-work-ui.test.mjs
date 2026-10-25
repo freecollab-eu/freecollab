@@ -27,7 +27,8 @@ function fixture({ records = [], first, host = null } = {}) {
   const jsx = (type, props) => ({ type, props: props || {} });
   const dependencies = { react, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, name) => String(name) }),
     '../i18n': { t: (value, variables = {}) => value.replace(/\{(\w+)\}/g, (all, key) => variables[key] ?? all), useI18n() {}, formatDate: String },
-    '../lib/api': { api: { getAccessToken: () => state.token } }, '../lib/federated-work-api': { FederatedWorkClient: Client },
+    '../lib/api': { api: { getAccessToken: () => state.token, getCurrentUserId: () => 'member' } }, '../lib/federated-work-api': { FederatedWorkClient: Client },
+    './FederatedDocumentComments': {FederatedDocumentComments:'peer-document-comments'}, './EncryptedWorkInput': { EncryptedWorkInput: 'EncryptedWorkInput' }, './EncryptedWorkPanel': { EncryptedWorkPanel: 'encrypted-work-panel' }, './ReviewedResourceCopilot': { ReviewedResourceCopilot: 'reviewed-resource-copilot' },
     '../lib/calendar': { expandCalendarOccurrences: () => [] }, '../styles/federated-work.css': {},
     '../lib/collaboration-context': { useCollaborationContext: () => state.host }, './CollaborationInput': { CollaborationInput: 'CollaborationInput' } };
   const exports = {};
@@ -109,4 +110,13 @@ test('local command tools stay unavailable without an exact current encrypted sh
     f.field('shared-work-title', 'Plain encrypted writing remains available');
     f.submit(); await f.flush(); assert.equal(f.state.calls.length, 1);
   }
+});
+
+test('peer task and document inputs offer actual verified projects and other encrypted families in the same global picker',async()=>{
+ const f=fixture({host:{secure:true,channelId:'local-channel',workspaceId:'local-workspace',commandContext:{sharedWork:true}}});
+ f.view.context.work_protocols=['freecollab-federated-work/2','freecollab-encrypted-work/2'];
+ const project={...record,id:'global-peer-project',kind:'project',selected:{...revision,id:'global-peer-project',kind:'project',fields:{title:'Verified peer project',body:'Encrypted',color:'sage'}}};
+ f.view.reference_records=[project];await f.flush();f.click('New shared task');
+ const input=f.find(item=>item.type==='EncryptedWorkInput'&&item.props.id==='shared-work-title-federated-test');
+ assert.equal(input.props.channelId,'local-channel');assert.ok(input.props.candidates.some(candidate=>candidate.id==='global-peer-project'&&candidate.resource_kind==='project'&&candidate.label==='Verified peer project'));
 });

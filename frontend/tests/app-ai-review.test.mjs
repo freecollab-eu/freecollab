@@ -28,6 +28,9 @@ function fixture({ prepare } = {}) {
   const dependencies = {
     react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, key) => key }), '../lib/api': { api },
     './ScopedCollaborationInput': { ScopedCollaborationInput: 'collaboration-input' },
+    './SlackBridgePanel': { SlackBridgePanel: 'slack-bridge-panel' },
+    './SecureChannelAppCommands': { SecureChannelAppCommands: 'secure-channel-app-commands' },
+    '../lib/useScopedWritingGuard': { useScopedWritingGuard: () => () => true },
     '../lib/app-platform-api': { appPlatformApi }, '../i18n': { t: translate, useI18n: () => ({}) }, '../lib/copilot-intents': { copilotProviderHost: value => new URL(value).hostname },
     '../lib/copilot-api': { copilotApi: { status: async () => plain(status) }, prepareCopilotSource: async choice => {
       calls.push({ kind: 'prepare', choice: plain(choice) });

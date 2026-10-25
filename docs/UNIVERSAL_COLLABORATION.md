@@ -123,9 +123,20 @@ inte att varje tangenttryckning skickar en notis. Se
   nya referens-ID:n eller automatisk källöverföring. AI använder fortfarande
   sin uttryckliga granskning av källor och samtycke till extern behandling.
 - Delat arbete mellan installationer använder ett separat krypterat
-  federationsprotokoll. Där öppnar `/` lokala produktverktyg, medan deltagare
-  väljs med den verifierade Matrix-deltagarväljaren. Protokollet stöder ännu
-  inte dessa generella `@`-spann mellan installationer.
+  federationsprotokoll. `/` öppnar lokala produktverktyg; `@` använder verifierade
+  globala deltagar- och resurs-ID:n för typat delat arbete. Native-ID:n eller
+  ett namn används aldrig som en påhittad peeridentitet. Se
+  [krypterat arbete](ENCRYPTED_WORK.md) och [federationskontraktet](FEDERATED_WORK.md).
+
+## Privat kalender och ursprungligt samtal
+
+`/calendar` öppnar den egna privata kalendern i **Min arbetsdag**. Samma
+författarfält använder `/`, `@` och explicit AI-granskning. Sparade referenser
+behåller sin ursprungliga kanal. Om kalendern öppnas från en annan kanal visar
+den en verifierad **Fortsätt i kanal**-ingång, som behåller samma privata editor,
+text och referenser medan chattens sammanhang byts. Andra osparade arbeten
+behåller sina vanliga navigationsskydd. Ett nyare text-, IME-, konto- eller
+navigationsval ogiltigförklarar en äldre väntande fortsättning.
 
 ## Implementation och verifiering
 

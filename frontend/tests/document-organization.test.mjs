@@ -4,15 +4,17 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
 function fixture(encrypted=false) {
- const state={token:'actor',requests:[],encrypted,error:false,swap:false};
+ const state={token:'actor',requests:[],encryptedRequests:[],encrypted,error:false,swap:false};
  const api={getAccessToken:()=>state.token,request:async(path,options)=>{state.requests.push({path,options});return {stacks:[],placements:[],relations:[]};}};
  const exports={}; const source=readFileSync(new URL('../src/lib/document-organization-api.ts',import.meta.url),'utf8');
- vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:name=>name==='./api'?{api}:{getSecureMessaging:async()=>({handles:async()=>{if(state.error)throw Error('Binding unavailable');if(state.swap)state.token='other';return state.encrypted;}})}});
+ const encryptedApi={list:async channel=>{state.encryptedRequests.push(['list',channel]);return {supported:true,documents:[],stacks:[],placements:[],relations:[],message_references:[],stack_comments:[],comments_incomplete:false};},createStack:async(...args)=>{state.encryptedRequests.push(['create',...args]);return {id:args[2],title:args[1]};},previewMessage:async(...args)=>{state.encryptedRequests.push(['preview',...args]);return {id:args[1],channel_id:args[0],text:'Verified encrypted text'};}};
+ vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:name=>name==='./api'?{api}:name==='./encrypted-document-organization-api'?{encryptedDocumentOrganizationApi:encryptedApi}:{getSecureMessaging:async()=>({handles:async()=>{if(state.error)throw Error('Binding unavailable');if(state.swap)state.token='other';return state.encrypted;}})}});
  return {...exports,state};
 }
-test('encrypted channels expose an explicit unsupported capability and never send stack titles or native organization requests',async()=>{
- const f=fixture(true);assert.equal((await f.documentOrganizationApi.list('private')).supported,false);
- await assert.rejects(f.documentOrganizationApi.createStack('private','Private project','id'),/not yet available/);assert.equal(f.state.requests.length,0);
+test('encrypted channels delegate organization through the encrypted adapter without native plaintext requests',async()=>{
+ const f=fixture(true),view=await f.documentOrganizationApi.list('private');assert.equal(view.supported,true);assert.equal(view.content_mode,'matrix');
+ const made=await f.documentOrganizationApi.createStack('private','Private project','id');assert.equal(made.title,'Private project');
+ assert.deepEqual(f.state.encryptedRequests,[['list','private'],['create','private','Private project','id']]);assert.equal(f.state.requests.length,0);
 });
 test('failed binding and account switch fail closed before a metadata request',async()=>{
  for(const reason of ['error','swap']){const f=fixture();f.state[reason]=true;await assert.rejects(f.documentOrganizationApi.createStack('room','Keep private','id'));assert.equal(f.state.requests.length,0);}
@@ -38,5 +40,5 @@ test('comment-grounded proposals cite only the selected page current comments an
 test('saving a reviewed message includes exact source digest and target creation generation and encrypted preview never falls back',async()=>{
  const f=fixture();await f.documentOrganizationApi.saveMessage('room',{id:'stack',generation:'a'.repeat(32)},{id:'message',expected_text_sha256:'b'.repeat(64)},'request-id');
  assert.deepEqual(JSON.parse(f.state.requests[0].options.body),{id:'request-id',message_id:'message',expected_text_sha256:'b'.repeat(64),stack_generation:'a'.repeat(32)});
- const encrypted=fixture(true);await assert.rejects(encrypted.documentOrganizationApi.previewMessage('room','message'),/not yet available/);assert.equal(encrypted.state.requests.length,0);
+ const encrypted=fixture(true);assert.equal((await encrypted.documentOrganizationApi.previewMessage('room','message')).text,'Verified encrypted text');assert.deepEqual(encrypted.state.encryptedRequests,[['preview','room','message']]);assert.equal(encrypted.state.requests.length,0);
 });

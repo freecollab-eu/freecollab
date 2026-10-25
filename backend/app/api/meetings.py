@@ -83,6 +83,8 @@ def list_meetings(channel_id: str, user=Depends(get_current_user), session=Depen
 @router.post("/channels/{channel_id}/meetings", status_code=201)
 def create_meeting(channel_id: str, data: Empty, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
     account_limit(session, "meeting-create", user.id, 12, 3600)
+    from ..services.media_capture import lock_actor_scope
+    lock_actor_scope(session, channel_id, user.id)
     service.cleanup_meetings(session)
     lock_channel_writes(session, channel_id)
     recheck_actor(session, user.id)
@@ -107,8 +109,25 @@ def create_meeting(channel_id: str, data: Empty, user=Depends(get_current_user),
     return {"meeting": service.public_meeting(meeting), "participant": service.public_participant(participant), "meeting_token": token}
 
 
+@router.get("/channels/{channel_id}/meetings/{meeting_id}")
+def get_channel_meeting(channel_id: str, meeting_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    require_channel_member(session, channel_id, user.id)
+    meeting = session.get(Meeting, meeting_id)
+    if meeting and meeting.channel_id == channel_id:
+        return {**service.public_meeting(service.live_meeting(session, meeting_id)), "transport": "mesh"}
+    from ..models.sfu import SFURoom
+    from ..services import sfu
+    room = session.get(SFURoom, meeting_id)
+    if room and room.channel_id == channel_id:
+        return sfu.public(sfu.active_room(session, meeting_id))
+    raise HTTPException(404, "Meeting not found")
+
+
 @router.post("/meetings/{meeting_id}/join")
 def join_meeting(meeting_id: str, data: Empty, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+    from ..services.media_capture import lock_actor_scope
+    initial = service.live_meeting(session, meeting_id)
+    lock_actor_scope(session, initial.channel_id, user.id)
     meeting = service.live_meeting(session, meeting_id, locked=True)
     recheck_actor(session, user.id)
     participant, token = service.native_participant(session, meeting, user, credentials.credentials)

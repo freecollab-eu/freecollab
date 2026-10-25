@@ -92,7 +92,7 @@ def supervise(api_command, worker_commands, *, ready_url, startup_timeout=90, st
             raise RuntimeError("API readiness deadline exceeded")
         for command in worker_commands:
             children.append(subprocess.Popen(command, start_new_session=True))
-        print("FreeCollab Railway: API ready; both queue workers started.", flush=True)
+        print(f"FreeCollab Railway: API ready; {len(worker_commands)} queue workers started.", flush=True)
         while not stopping:
             if any(child.poll() is not None for child in children):
                 raise RuntimeError("A runtime child exited")
@@ -125,7 +125,9 @@ def main():
         return 1
     api = [sys.executable, "-m", "uvicorn", "app.main:socket_app", "--host", "::", "--port", str(port),
            "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", trusted, "--no-access-log"]
-    workers = [[sys.executable, "-m", "app.services.integration_worker"], [sys.executable, "-m", "app.services.mail"]]
+    workers = [[sys.executable, "-m", "app.services.integration_worker"],
+               [sys.executable, "-m", "app.services.mail"],
+               [sys.executable, "-m", "app.services.ai_runtime_worker"]]
     # Railway private networking uses IPv6. Uvicorn's single-process asyncio
     # listener on :: is IPv6-only, so its own readiness probe must use ::1 too.
     return supervise(api, workers, ready_url=f"http://[::1]:{port}/ready")

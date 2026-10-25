@@ -1,5 +1,7 @@
 # Funktionsgranskning: inbäddning, SDK, distribution och drift
 
+**Aktuell komplettering: 2026-10-25, granskningsgrenen `design/open-studio`.** Äldre commit-/datumhänvisningar nedan avser den ursprungliga granskningen. Statusraderna ovanför historikavsnitten har uppdaterats för faktisk ny kod; [validering](../VALIDATION.md) skiljer körd källa från kundens externa acceptans.
+
 Granskad 2026-10-23 på `design/open-studio`. [Huvudförteckningen](../FEATURE_AUDIT.md)
 skiljer nuvarande kod från publicerad release och lokala demoexempel.
 
@@ -17,7 +19,7 @@ skiljer nuvarande kod från publicerad release och lokala demoexempel.
 | Railway-installation | Implementerad konfiguration, [guide](../../RAILWAY_DEPLOY.md), [website Dockerfile](../../frontend/website/Dockerfile). | Exakt tjänst/repo/build måste verifieras vid deployment. En publicerad statisk demo är inte en uppdaterad produkt-API-tjänst. |
 | Enkel/multiprocessdrift | Implementerat, [skalningsavtal](../SCALING.md), [shared runtime](../../backend/app/services/shared_runtime.py), [tester](../../backend/tests/test_valkey_runtime.py). | Standard en API-process. Fler kräver hela TLS-Valkey- och delad lagringskonfigurationen. Inga obegränsade kapacitetslöften. |
 | S3-kompatibla native-filer | Implementerat, [lagring](../OBJECT_STORAGE.md), [backend](../../backend/app/services/storage.py), [tester](../../backend/tests/test_s3_storage.py). | Kundägd tjänst, privata buckets och retention-/backupval; extern driftacceptans separat. |
-| Workerdiagnostik och femton grupper | Implementerat, korrigerat här, [API](../../backend/app/api/operations.py), [UI](../../frontend/src/components/OperationsPanel.tsx). | [Grupptester](../../backend/tests/test_operations_worker_groups.py), [driftavtal](../INTEGRATION_OPERATIONS.md). Verkliga lagrade tillstånd/förfallotider, inklusive profilbildsrensning; ingen läsning av sekretesspayload. |
+| Workerdiagnostik och arton grupper | Implementerat | [Operations API](../../backend/app/api/operations.py), [UI](../../frontend/src/components/OperationsPanel.tsx) och verkliga köer för AI-runtime, Slack-livebridge och opaka krypterade arbetsnotiser. | Faktiska tillstånd, förfallotider och separata worker-heartbeats. Ingen läsning av privata innehållspayloads. |
 | Hälsa/readiness/metrics | Implementerat, [main](../../backend/app/main.py), [diagnostik](../../backend/app/services/operational_security.py), [avtal](../DEPLOYMENT_READINESS.md). | Installationsadmin krävs för privata kontroller. Heartbeat eller SMTP-config bevisar inte leverans/SLA/restore. |
 | Backup/återställning | Implementerat operatörsverktyg och isolerade tester, [driftavtal](../OPERATIONS.md). | Egna nycklar, offsitekopiering och faktisk separat restore måste operatören verifiera. Native-retention raderar inte backups eller mottagares Matrixkopior. |
 | Ren publik historik | Repo-/leveransregel: endast Kris Ledel som författare och committer, inga Co-authored-by. [Repo](https://github.com/freecollab-eu/freecollab). | Denna granskning sker på reviewbranch. Ingen omskrivning av skyddad main eller befintliga releasetaggar. |

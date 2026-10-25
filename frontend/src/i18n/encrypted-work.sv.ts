@@ -1,0 +1,28 @@
+import type { Catalog } from './core';
+const sv: Catalog = {
+  'This change is too large. Shorten the text or save fewer workflow steps.':'Ändringen är för stor. Korta texten eller spara färre steg i arbetsflödet.',
+  'This change is too large. Shorten the text before sharing.':'Ändringen är för stor. Korta texten innan du delar den.',
+  'Referenced material':'Refererat material',
+  'This shared view is synchronized across both installations. Each organization keeps its own installation settings and provider credentials.':'Denna gemensamma vy synkroniseras mellan båda installationerna. Varje organisation behåller sina egna inställningar och inloggningsuppgifter för leverantörer.',
+  'Projects, feed, decisions, collections and workflows':'Projekt, flöde, beslut, samlingar och arbetsflöden',
+  'Encrypted collaborative work':'Krypterat samarbete','Verified device encryption':'Verifierad enhetskryptering','One room for shared work.':'Ett rum för gemensamt arbete.',
+  'Content stays encrypted between the current participants’ verified devices.':'Innehållet förblir krypterat mellan de aktuella deltagarnas verifierade enheter.',
+  'Collections':'Samlingar','Files and links':'Filer och länkar','Workflow runs':'Körningar av arbetsflöden','Document organization':'Dokumentordning','Work type':'Typ av arbete','New item':'Nytt objekt',
+  'Encrypted items':'Krypterade objekt','Edit encrypted item':'Redigera krypterat objekt','Encrypted item':'Krypterat objekt','Encrypted changes saved.':'De krypterade ändringarna har sparats.',
+  'Encrypted work could not be refreshed.':'Det krypterade arbetet kunde inte uppdateras.','The encrypted work account or room changed.':'Kontot eller rummet för det krypterade arbetet ändrades.',
+  'Choose the version to keep. Saving records an explicit merge of the current versions.':'Välj vilken version som ska behållas. När du sparar registreras en uttrycklig sammanslagning av de aktuella versionerna.',
+  'Collection items':'Innehåll i samlingen','Choose an item':'Välj ett objekt','Item unavailable in this view':'Objektet är inte tillgängligt i denna vy','No project':'Inget projekt','Color':'Färg','Comment on':'Kommentera','Resolved':'Löst',
+  'Reviewed steps':'Granskade steg','Step {number}':'Steg {number}','Step title':'Stegets rubrik','Step text':'Stegets text','Add step':'Lägg till steg','Remove step':'Ta bort steg',
+  'Run reviewed steps':'Kör granskade steg','Continue on this device':'Fortsätt på denna enhet','Cancel run':'Avbryt körning','Pause':'Pausa',
+  '{done} of {total} steps acknowledged':'{done} av {total} steg bekräftade',
+  'Execution uses a verified device. Closing the app pauses future steps; acknowledged changes remain shared.':'Körningen sker på en verifierad enhet. Om appen stängs pausas kommande steg; bekräftade ändringar förblir delade.',
+  'The reviewed encrypted workflow steps were completed.':'De granskade stegen i det krypterade arbetsflödet har slutförts.',
+  'Review organization versions':'Granska versioner av dokumentordningen',
+  'Document organization changes are applied in the document workspace. Review competing versions here before returning to that workspace.':'Ändringar av dokumentordningen görs i dokumentarbetsytan. Granska konkurrerande versioner här innan du återgår dit.',
+  'Upload encrypted file':'Ladda upp krypterad fil','Download encrypted file':'Hämta krypterad fil','Encrypted file selected.':'Krypterad fil vald.',
+  'The encrypted file is uploaded. Save its shared link.':'Den krypterade filen har laddats upp. Spara dess delade länk.','HTTPS link':'HTTPS-länk','Open HTTPS link':'Öppna HTTPS-länk',
+  'This encrypted file is no longer available.':'Den krypterade filen är inte längre tillgänglig.','This encrypted reference is no longer available.':'Den krypterade referensen är inte längre tillgänglig.','This participant is no longer available.':'Deltagaren är inte längre tillgänglig.',
+  'Version history':'Versionshistorik','Complete checklist item':'Slutför checklistpunkt','Checklist item':'Checklistpunkt','Mention or reference':'Omnämnande eller referens',
+  'Use / for tools and @ for verified people and shared material.':'Använd / för verktyg och @ för verifierade personer och delat material.',
+};
+export default sv;

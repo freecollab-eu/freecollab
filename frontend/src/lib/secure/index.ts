@@ -3,6 +3,8 @@ import { CryptoEvent } from 'matrix-js-sdk/lib/crypto-api/CryptoEvent';
 import { decodeRecoveryKey } from 'matrix-js-sdk/lib/crypto-api/recovery-key';
 import { storageKeyFor, loadPendingNotices, savePendingNotices } from './device-store';
 import { sendOrResumeEncryptedTransaction } from './transaction-retry';
+import { EncryptedPublishGuards, type SecurePublishOptions } from './publish-guard';
+export type { SecurePublishOptions } from './publish-guard';
 import { encryptedMessageContent, encryptedContentReferences, prepareMessageReferences, type ReferenceResolution } from './message-content';
 import type { MessageReference } from '../message-references';
 import { APIError, type Message, type Reaction, type ReadReceipt } from '../api';
@@ -20,6 +22,7 @@ const channelDetails = new Map<string, ChannelMetadata>();
 const legacyMetadataOrder = new Map<string, { time: number; id: string }>();
 let generation = 0;
 const transactionEpochs = new WeakMap<MatrixClient, Map<string, string>>();
+const publicationGuards = new WeakMap<MatrixClient, EncryptedPublishGuards>();
 interface RevokedDevice { user_id: string; matrix_user_id: string; device_id: string }
 const revokedDevices = new Map<string, RevokedDevice>();
 const deviceKey = (user: string, device: string) => user + '\0' + device;
@@ -180,7 +183,7 @@ async function writeChannelMetadata(channelId: string, name: string, description
 async function refreshBindings() { const rows = await request<SecureBinding[]>('/secure/channels'); bindings = new Map(rows.map(row => [row.channel_id, row])); bindingsLoaded = true; return rows; }
 async function ensureSession(): Promise<MatrixClient> {
   const token = configuration?.getAccessToken(); if (!token) throw new Error('Sign in to unlock encrypted channels.');
-  if (ownerToken !== token) { generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }
+  if (ownerToken !== token) { generation++; if (client) { transactionEpochs.delete(client); publicationGuards.get(client)?.stop(); } client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }
   if (client) return client; if (starting) return starting;
   const attempt = generation;
   const assertCurrent = (c?: MatrixClient) => { if (generation !== attempt || configuration?.getAccessToken() !== token) { c?.stopClient(); throw new Error("The signed-in account changed."); } };
@@ -193,7 +196,8 @@ async function ensureSession(): Promise<MatrixClient> {
       if (generation !== attempt || configuration?.getAccessToken() !== token || ownerToken !== token) throw new Error('The signed-in encryption session changed.');
       const epoch = transactionEpochs.get(c)?.get(decodeURIComponent(match[1]) + '\0' + decodeURIComponent(match[2]));
       const headers = new Headers(init?.headers); if (epoch) headers.set('X-FreeCollab-Membership-Epoch', epoch);
-      return fetch(input, { ...init, headers });
+      let guards = publicationGuards.get(c); if (!guards) { guards = new EncryptedPublishGuards(); publicationGuards.set(c, guards); }
+      return guards.send(decodeURIComponent(match[1]), decodeURIComponent(match[2]), init?.body, init?.signal || undefined, signal => fetch(input, { ...init, headers, signal }));
     }, logger: quietLogger, timelineSupport: true, disableVoip: true, baseUrl: new URL(configuration!.baseUrl, location.origin).href.replace(/\/$/, ''), userId: auth.user_id, deviceId: auth.device_id, accessToken: auth.access_token, cryptoCallbacks: { getSecretStorageKey: async ({ keys }) => { if (attempt !== generation || token !== configuration?.getAccessToken()) return null; if (!secretStorageKey) return null; for (const id of Object.keys(keys)) if (await c.secretStorage.checkKey(secretStorageKey, keys[id])) return [id, secretStorageKey]; throw new Error('The recovery key does not match this account.'); } } });
     c.on(CryptoEvent.KeyBackupSessionsRemaining, remaining => { backupRemaining.set(c, remaining); });
     const storageKey = await storageKeyFor(auth.user_id + ':' + auth.device_id);
@@ -252,7 +256,7 @@ async function requireVerifiedRecipients(channelId: string, room: ReturnType<Mat
       throw new Error('Verify a joined device for ' + member.name + ' before sending encrypted content.');
   }
 }
-async function sendEvent(channelId: string, type: string, content: Record<string, unknown>, transactionId?: string) {
+async function sendEvent(channelId: string, type: string, content: Record<string, unknown>, transactionId?: string, options: SecurePublishOptions = {}) {
   const token = configuration?.getAccessToken(), activeClient = await ensureSession(), attempt = generation;
   const assertCurrent = () => { if (generation !== attempt || configuration?.getAccessToken() !== token || client !== activeClient) throw new Error('The signed-in encryption session changed.'); };
   const { c, room, roomId, membershipEpoch, federatedOperators } = await roomFor(channelId, true);
@@ -262,7 +266,14 @@ async function sendEvent(channelId: string, type: string, content: Record<string
   if (!membershipEpoch) throw new Error('Encrypted membership snapshot is unavailable.');
   if (!room) throw new Error('The encrypted room is unavailable.');
   assertCurrent();
-  const result = await sendOrResumeEncryptedTransaction(c, room, roomId, type, content, transaction, membershipEpoch, async existing => {
+  let guards = publicationGuards.get(c); if (!guards) { guards = new EncryptedPublishGuards(); publicationGuards.set(c, guards); }
+  const release = guards.register(roomId, transaction, {...options, ...(options.authorize ? {authorize:async () => {
+    assertCurrent(); const fresh = await roomFor(channelId, true); assertCurrent();
+    if (fresh.c !== c || fresh.roomId !== roomId || fresh.membershipEpoch !== membershipEpoch) throw new Error('The encrypted publishing membership changed.');
+    await options.authorize!(); assertCurrent();
+  }} : {})}, assertCurrent);
+  try {
+    const result = await sendOrResumeEncryptedTransaction(c, room, roomId, type, content, transaction, membershipEpoch, async existing => {
     assertCurrent();
     let epochs = transactionEpochs.get(c);
     if (!epochs) { epochs = new Map(); transactionEpochs.set(c, epochs); }
@@ -273,6 +284,7 @@ async function sendEvent(channelId: string, type: string, content: Record<string
   });
   assertCurrent();
   return result;
+  } finally { release(); }
 }
 
 async function getMessages(channelId: string, before?: string, limit = 100, rootsOnly = false): Promise<Message[]> {
@@ -461,5 +473,5 @@ export const secureMessaging = {
   async verifyDevice(device: SecureDevice, fingerprint: string) { const c = await ensureSession(); await refreshRevocations(); if (revokedDevices.has(deviceKey(device.matrix_user_id, device.device_id))) throw new Error('This encryption device was removed.'); const info = await c.getCrypto()!.getUserDeviceInfo([device.matrix_user_id], true), current = info.get(device.matrix_user_id)?.get(device.device_id); if (!current || current.getFingerprint() !== fingerprint.replace(/\s/g, '')) throw new Error('Fingerprint mismatch. Verify it through a separate trusted channel.'); await c.getCrypto()!.setDeviceVerified(device.matrix_user_id, device.device_id, true); for (const [channelId, title] of names) { const binding = bindings.get(channelId); if (binding?.room_id && c.getRoom(binding.room_id)?.getMember(device.matrix_user_id)?.membership === 'join') await sendEvent(channelId, METADATA, { name: title }); } },
   async recoveryStatus() { const c = await ensureSession(); await hydrateRecoveryMetadata(c); return { ready: !!await c.secretStorage.getKey() && !pendingRecovery, unlocked: !!secretStorageKey && !pendingRecovery, device_id: c.getDeviceId(), fingerprint: (await c.getCrypto()!.getOwnDeviceKeys()).ed25519 }; },
   async getDecryptedEvent(channelId: string, eventId: string) { const { c, room } = await roomFor(channelId), timeline = await c.getEventTimeline(room.getUnfilteredTimelineSet(), eventId), e = timeline?.getEvents().find(item => item.getId() === eventId); if (!e || !e.isEncrypted()) throw new Error('Encrypted event not found.'); await c.decryptEventIfNeeded(e); if (e.isDecryptionFailure()) throw new Error('Verify this device or unlock recovery to read this event.'); return e; },
-  stop() { clearTimeout(noticeTimer); noticeTimer = undefined; notices.clear(); noticesOwner = null; pendingRecovery = null; generation++; if (client) transactionEpochs.delete(client); client?.stopClient(); client = null; starting = null; ownerToken = null; bindingsLoaded = false; bindings.clear(); names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; },
+  stop() { clearTimeout(noticeTimer); noticeTimer = undefined; notices.clear(); noticesOwner = null; pendingRecovery = null; generation++; if (client) { transactionEpochs.delete(client); publicationGuards.get(client)?.stop(); } client?.stopClient(); client = null; starting = null; ownerToken = null; bindingsLoaded = false; bindings.clear(); names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; },
 };

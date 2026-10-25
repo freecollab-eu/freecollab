@@ -104,10 +104,10 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 results['honest_configuration_required_no_provider_calls_without_key']=True
                 stage='native owner config encrypted key named agent and explicit opt-in'
                 panel.get_by_text('Provider and agent settings',exact=True).click()
-                panel.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);panel.get_by_label('Model',exact=True).fill('fixture-chat');panel.get_by_label('Provider API key',exact=True).fill(KEY);panel.get_by_label('Enable this workspace provider').check()
+                panel.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);panel.locator('.fc-copilot-settings').get_by_label('Model',exact=True).fill('fixture-chat');panel.locator('.fc-copilot-settings').get_by_label('Provider API key',exact=True).fill(KEY);panel.get_by_label('Enable this workspace provider').check()
                 panel.get_by_label('Agent name',exact=True).fill('planner');panel.get_by_label('Agent instructions',exact=True).fill('Summarize the selected source and propose one task.')
-                panel.get_by_label('Allow approved native task creation').check();panel.get_by_label('Current password',exact=True).fill(PASSWORD);panel.get_by_role('button',name='Save provider and agents',exact=True).click()
-                expect(panel.get_by_label('I opt in to this provider configuration for my account.')).to_be_visible();expect(panel.get_by_label('Provider API key',exact=True)).to_have_value('')
+                panel.get_by_label('Allow approved native task creation').check();panel.locator('.fc-copilot-settings').get_by_label('Current password',exact=True).fill(PASSWORD);panel.get_by_role('button',name='Save provider and agents',exact=True).click()
+                expect(panel.get_by_label('I opt in to this provider configuration for my account.')).to_be_visible();expect(panel.locator('.fc-copilot-settings').get_by_label('Provider API key',exact=True)).to_have_value('')
                 panel.get_by_label('I opt in to this provider configuration for my account.').check();expect(panel.get_by_role('heading',name='Private conversation',exact=True)).to_be_visible()
                 assert not requests;results['fresh_auth_configured_named_agent_key_cleared_and_per_user_opt_in']=True
                 stage='quick actions preserve the draft context and disclosure without provider calls'
@@ -282,18 +282,18 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 provider=setup.get_by_role('region',name='AI Copilot',exact=True)
                 preset=provider.get_by_role('combobox',name=re.compile(r'^AI provider preset'));expect(preset).to_be_visible()
                 expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value(endpoint)
-                provider.get_by_label('Provider API key',exact=True).fill(KEY);provider.get_by_label('Current password',exact=True).fill(PASSWORD);provider.get_by_label('Authenticator or recovery code',exact=True).fill('123456')
+                provider.locator('.fc-copilot-settings').get_by_label('Provider API key',exact=True).fill(KEY);provider.locator('.fc-copilot-settings').get_by_label('Current password',exact=True).fill(PASSWORD);provider.locator('.fc-copilot-settings').get_by_label('Authenticator or recovery code',exact=True).fill('123456')
                 before=len(writes);provider_calls=len(requests);saved=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
                 preset.select_option('xai-grok')
                 expect(preset.locator('option:checked')).to_have_text('Grok · xAI')
                 expect(provider.get_by_label('Chat completions endpoint',exact=True)).to_have_value('https://api.x.ai/v1/chat/completions')
-                expect(provider.get_by_label('Model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
-                for label in ('Provider API key','Current password','Authenticator or recovery code'):expect(provider.get_by_label(label,exact=True)).to_have_value('')
+                expect(provider.locator('.fc-copilot-settings').get_by_label('Model',exact=True)).to_have_value('grok-4.20-0309-non-reasoning')
+                for label in ('Provider API key','Current password','Authenticator or recovery code'):expect(provider.locator('.fc-copilot-settings').get_by_label(label,exact=True)).to_have_value('')
                 expect(provider.get_by_role('button',name='Save provider and agents',exact=True)).to_be_disabled()
                 current=helpers.api(base,'GET','/workspaces/'+workspace['id']+'/copilot',owner)
                 assert current['provider']==saved['provider'] and current['config_revision']==saved['config_revision'] and current['provider']['endpoint']==endpoint
                 assert len(writes)==before and len(requests)==provider_calls and not any(url.startswith('https://api.x.ai/') for url in urls)
-                provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.get_by_label('Model',exact=True).fill('fixture-chat')
+                provider.get_by_label('Chat completions endpoint',exact=True).fill(endpoint);provider.locator('.fc-copilot-settings').get_by_label('Model',exact=True).fill('fixture-chat')
                 expect(setup.get_by_role('button',name='Discard changes and return to preparation',exact=True)).to_have_count(0)
                 integrations.get_by_role('button',name='Close integrations',exact=True).click()
                 work_area=open_conversation_work(page,'copilot')

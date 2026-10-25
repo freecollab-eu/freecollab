@@ -8,8 +8,16 @@ const FILE_EVENT = 'eu.freecollab.file';
 const MAX_SIZE = 50 * 1024 * 1024;
 const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'text/plain', 'application/json', ...FILE_EXPERIENCE_TYPES, 'application/vnd.oasis.opendocument.text', 'application/vnd.oasis.opendocument.spreadsheet', 'application/vnd.oasis.opendocument.presentation']);
 interface Receipt { file: ManagedFile; fingerprint: string }
-interface FileIndex { files: ManagedFile[]; receipts: Map<string, Receipt>; deleted: Set<string> }
+interface FileIndex { files: ManagedFile[]; receipts: Map<string, Receipt>; deleted: Set<string>; recordingFailures: Map<string, unknown> }
 function check(signal?: AbortSignal) { if (signal?.aborted) throw new DOMException('Transfer cancelled.', 'AbortError'); }
+async function verifyRecording(channelId: string, event: MatrixEvent) {
+  const content = event.getContent();
+  if (content.meeting_capture !== undefined || typeof content.request_id === 'string' && content.request_id.startsWith('fc-capture-file-')) {
+    if (!content.meeting_capture || typeof content.meeting_capture !== 'object' || Array.isArray(content.meeting_capture)
+        || !String(content.request_id).startsWith('fc-capture-file-') || JSON.stringify(content.meeting_capture).length > 16384) throw new Error('The encrypted recording consent proof is invalid.');
+    await (await import('../meeting-capture-proof')).verifyEncryptedRecordingFile(channelId, event);
+  }
+}
 const accountId = (sender: string) => /^@fc_([^:]+):/.exec(sender)?.[1];
 const domainOf = (sender: string) => sender.slice(sender.indexOf(':') + 1);
 
@@ -48,7 +56,7 @@ async function index(channelId: string, signal?: AbortSignal): Promise<FileIndex
     if (token === room.oldState.paginationToken) break;
   }
   check(signal);
-  const events = await secureMessaging.events(channelId), files: ManagedFile[] = [], receipts = new Map<string, Receipt>();
+  const events = await secureMessaging.events(channelId), files: ManagedFile[] = [], receipts = new Map<string, Receipt>(), recordingFailures = new Map<string, unknown>();
   const documents = new Map<string, ManagedFile>(), deleted = new Set<string>();
   for (const event of events) {
     if (event.getType() !== FILE_EVENT || event.getRoomId() !== roomId || !event.isEncrypted() || event.isRedacted() || !event.getId()?.startsWith('$')) continue;
@@ -58,6 +66,7 @@ async function index(channelId: string, signal?: AbortSignal): Promise<FileIndex
       if (typeof content.document_id === 'string' && documents.get(content.document_id)?.document_owner_id === owner) deleted.add(content.document_id);
       continue;
     }
+    try { await verifyRecording(channelId, event); check(signal); } catch (error) { check(signal); recordingFailures.set(event.getId()!, error); continue; }
     const file = asFile(channelId, event, domain, federatedPeerServer);
     if (!file || deleted.has(file.document_id!)) continue;
     const previous = documents.get(file.document_id!);
@@ -66,7 +75,7 @@ async function index(channelId: string, signal?: AbortSignal): Promise<FileIndex
     if (typeof content.request_id === 'string' && typeof content.fingerprint === 'string') receipts.set(`${owner}:${content.request_id}`, { file, fingerprint: content.fingerprint });
   }
   for (const file of files) file.version_count = documents.get(file.document_id!)!.version_number;
-  return { files: files.filter(file => !deleted.has(file.document_id!)), receipts, deleted };
+  return { files: files.filter(file => !deleted.has(file.document_id!)), receipts, deleted, recordingFailures };
 }
 
 async function fingerprint(channelId: string, documentId: string | undefined, file: File, bytes: ArrayBuffer) {
@@ -110,6 +119,9 @@ export const secureFileProvider: ChannelFileProvider = {
   },
   async upload(channelId, file, options) {
     check(options.signal);
+    if (options.meetingCaptureProof && (!options.requestId?.startsWith('fc-capture-file-') || !options.beforePublish)
+        || options.requestId?.startsWith('fc-capture-file-') && (!options.meetingCaptureProof || !options.beforePublish)) throw new Error('Recording files require a current consent proof and publication review.');
+    if (options.meetingCaptureProof && JSON.stringify(options.meetingCaptureProof).length > 16384) throw new Error('The recording consent proof exceeds its bound.');
     if (file.size > MAX_SIZE) throw new Error('Maximum file size is 50 MB.');
     if (!allowedTypes.has(file.type)) throw new Error('This file type is not supported.');
     const { c, roomId } = await secureMessaging.roomFor(channelId, true), owner = accountId(c.getUserId()!);
@@ -140,14 +152,16 @@ export const secureFileProvider: ChannelFileProvider = {
     check(options.signal); options.onProgress?.(85);
     const documentId = options.documentId || `${owner}:${requestId}`, version = versions.reduce((max, row) => Math.max(max, row.version_number || 1), 0) + 1;
     const metadata = { document_id: documentId, owner_id: owner, version_number: version, request_id: requestId, fingerprint: hash,
-      name: file.name, content_type: file.type, size: file.size, file: { ...encrypted.info, url: uploaded.content_uri } };
-    const result = await secureMessaging.sendEvent(channelId, FILE_EVENT, metadata, `file-${requestId}`);
+      name: file.name, content_type: file.type, size: file.size, file: { ...encrypted.info, url: uploaded.content_uri },
+      ...(options.meetingCaptureProof ? {meeting_capture:options.meetingCaptureProof} : {}) };
+    const result = await secureMessaging.sendEvent(channelId, FILE_EVENT, metadata, requestId.startsWith('fc-capture-file-') ? requestId : `file-${requestId}`, {authorize:options.beforePublish,signal:options.signal});
     check(options.signal);
     // A retried Matrix transaction may return its original event. Acknowledge
     // only that authenticated event, rather than claiming the new bytes arrived.
     const event = await secureMessaging.getDecryptedEvent(channelId, result.event_id), actual = asFile(channelId, event, domainOf(c.getUserId()!));
     if (!actual || event.getRoomId() !== roomId || event.getContent().fingerprint !== hash || event.getContent().request_id !== requestId) throw new Error('The encrypted upload confirmation could not be verified. Refresh and retry safely.');
-    const confirmed = (await index(channelId, options.signal)).files.find(row => row.id === actual.id);
+    const confirmation = await index(channelId, options.signal), confirmed = confirmation.files.find(row => row.id === actual.id);
+    if (confirmation.recordingFailures.has(actual.id)) throw confirmation.recordingFailures.get(actual.id);
     if (!confirmed) throw new Error('Another version completed first, or this document was deleted. Refresh and choose the file again.');
     check(options.signal); options.onProgress?.(100); return confirmed;
   },
@@ -159,6 +173,7 @@ export const secureFileProvider: ChannelFileProvider = {
     // Re-read the authenticated room event; injected locators and keys are ignored.
     const event = await secureMessaging.getDecryptedEvent(file.channel_id, stored.id), actual = asFile(file.channel_id, event, domainOf(c.getUserId()!), federatedPeerServer);
     if (!actual?.secure_url || event.getRoomId() !== roomId) throw new Error('Encrypted attachment metadata is unavailable.');
+    await verifyRecording(file.channel_id, event); check(options.signal);
     const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(actual.secure_url);
     if (!parsed) throw new Error('Invalid encrypted attachment locator.');
     const response = await fetch(c.getHomeserverUrl() + '/_matrix/client/v1/media/download/' + encodeURIComponent(parsed[1]) + '/' + encodeURIComponent(parsed[2]), { headers: { Authorization: 'Bearer ' + c.getAccessToken() }, signal: options.signal });

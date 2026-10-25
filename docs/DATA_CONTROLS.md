@@ -57,3 +57,50 @@ monotonic while the channel exists, so retention cannot revive an old editor's
 compare-and-set token. Account closure keeps the usual disabled opaque author
 stub for shared authored records, including these new records; it does not erase
 other participants' shared content.
+
+## Collaboration module privacy
+
+Exports include only the requester's private calendar and AI runs/usage within
+the authorized workspace/selection. Cross-channel AI context is omitted unless
+every formal source channel is selected and still authorized. Collection pointers
+are resolved under current resource access. Captures, live Slack mappings,
+foreground app delivery and encrypted-work discovery contribute bounded metadata;
+credentials, payload copies, recording bytes and decrypted Matrix content are not
+exported through those metadata projections. Private progress and consent rows
+are limited to the requester. Nested feature records count toward the archive cap.
+
+Retention stops while an AI run uses a selected channel as either its target or
+a formal RAG source, a live Slack bridge or queued writer remains active, or a
+recording/caption capture has not stopped. A foreground disclosure still within
+its bounded delivery window also blocks purge; an interrupted receipt older than
+90 seconds becomes permanently uncertain and is never resent automatically.
+
+Purging a native source invalidates matching copied AI context, including private
+runs targeting another conversation, and anonymizes its numeric usage receipt.
+Newer unrelated private runs remain. AI usage is never refunded by content or
+account erasure: outstanding reservations become conservatively charged unknown
+usage, and financial counts remain after account or empty personal-workspace
+erasure with identity/workspace links removed. No prompt or output remains in
+those receipts.
+
+Source erasure removes derived local semantic caches and the configured internal
+OpenSearch vector mirror under the channel write fence. A configured mirror
+erasure failure leaves the purge incomplete. Collection pointers disappear with
+their source; retained collection members protect their containing collection.
+Slack timestamp mappings retain permanent content-free tombstones, so signed
+replays or fresh edits cannot reconstruct an erased native post after resume.
+Consumed recording publication receipts likewise retain erased-clip tombstones;
+they are not reusable upload authority. Stopped capture metadata is eligible only
+after every retained publication and AI authorization window is older than the
+cutoff. No cleanup recalls a copy already disclosed to an external recipient.
+
+Account closure additionally stops capture/Slack grants, wipes personal calendar,
+AI keys/consents/results and private encrypted-work progress, and preserves only
+shared opaque publication authority and anonymous financial/idempotency receipts.
+The existing app-platform credential and private-draft cleanup remains part of
+the same transaction.
+
+Regression coverage: `backend/tests/test_collaboration_privacy.py` runs actual
+owner export ZIPs, confirmation-bound purges and account closure with enforced
+foreign keys, source-aware AI guards, nonrefundable anonymous usage, provider
+failure handling and permanent capture/Slack erasure authority.

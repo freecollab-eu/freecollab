@@ -16,6 +16,9 @@ export interface FileTransferOptions {
   onProgress?: (percent: number) => void;
   documentId?: string;
   requestId?: string;
+  meetingCapture?: { receiptId: string; clipId: string };
+  meetingCaptureProof?: Record<string, unknown>;
+  beforePublish?: () => void | Promise<void>;
 }
 
 /** Secure implementations own encryption/decryption and authenticated metadata. */
@@ -69,6 +72,10 @@ function uploadNative(channelId: string, file: File, options: FileTransferOption
     xhr.responseType = 'json';
     if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
     if (options.requestId) xhr.setRequestHeader('Idempotency-Key', options.requestId);
+    if (options.meetingCapture) {
+      xhr.setRequestHeader('X-Meeting-Capture-Receipt', options.meetingCapture.receiptId);
+      xhr.setRequestHeader('X-Meeting-Capture-Clip-ID', options.meetingCapture.clipId);
+    }
     const cancel = () => xhr.abort();
     const cleanup = () => { settled = true; options.signal?.removeEventListener('abort', cancel); };
     options.signal?.addEventListener('abort', cancel, { once: true });
@@ -104,7 +111,10 @@ export async function listChannelFiles(channelId: string): Promise<ManagedFile[]
 export async function uploadChannelFile(channelId: string, file: File, options: FileTransferOptions = {}): Promise<ManagedFile> {
   const provider = await providerFor(channelId);
   if (options.signal?.aborted) throw abortError();
-  return provider ? provider.upload(channelId, file, options) : uploadNative(channelId, file, options);
+  if (provider) return provider.upload(channelId, file, options);
+  await options.beforePublish?.();
+  if (options.signal?.aborted) throw abortError();
+  return uploadNative(channelId, file, options);
 }
 
 export async function downloadChannelFile(file: ManagedFile, options: Pick<FileTransferOptions, 'signal'> = {}): Promise<Blob> {

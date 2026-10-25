@@ -15,7 +15,7 @@ Create a project from your repository/fork. Select each service's repository roo
 | `frontend` | `frontend` / `/frontend/railway.json` | None | Only public HTTPS app service; target port 8080 |
 | `matrix`, optional | `scripts` / `/scripts/railway-matrix.json` | Independent volume at `/data` | Private port 8008; no public domain/federation |
 
-The backend Railway image runs **one API plus both existing queue workers in the same service**. Railway volumes cannot be shared between services; a separate integration worker would not see uploads, exports or files awaiting erasure. The supervisor waits for database-aware API readiness before starting integration/mail workers. Any child exit stops all children and fails the service for Railway restart. SIGTERM allows 30 seconds to stop before killing/reaping stragglers; allow at least that platform grace period.
+The backend Railway image runs **one API plus three independent workers: integrations, mail and durable AI runs, in the same service**. Railway volumes cannot be shared between services; a separate integration worker would not see uploads, exports or files awaiting erasure. The supervisor waits for database-aware API readiness before starting the workers. Any child exit stops all children and fails the service for Railway restart. SIGTERM allows 30 seconds to stop before killing/reaping stragglers; allow at least that platform grace period.
 
 Keep one backend replica. Disable overlapping active deployments, autoscaling and sleep/scale-to-zero for this stateful service. Presence and some request limits are process-local. Plan a short maintenance window and verify Railway's current volume/deployment behavior before an upgrade; do not run a second backend against the same database/volume as a zero-downtime workaround.
 
@@ -83,7 +83,7 @@ The existing bootstrap refuses changed homeserver identity. Back up its SQLite/c
 
 Configure your verified sender/SMTP credentials privately, then select `MAIL_DELIVERY_MODE=smtp` with verified STARTTLS or implicit TLS. The existing mail worker is already supervised. See [Integration operations](docs/INTEGRATION_OPERATIONS.md) for SPF/DKIM/DMARC and an explicit operator-inbox test; SMTP acceptance does not prove inbox placement.
 
-Register the intended native operator, then through trusted backend access run `python -m app.cli bootstrap-admin --email operator@your-company.example`. Enable MFA and inspect Operations for both worker heartbeats/storage/queue state. Passive public checks:
+Register the intended native operator, then through trusted backend access run `python -m app.cli bootstrap-admin --email operator@your-company.example`. Enable MFA and inspect Operations for all three worker heartbeats/storage/queue state. The AI lane is active only when the operator enables AI. Passive public checks:
 
 ```bash
 python scripts/pilot-preflight.py https://app.your-company.example \
@@ -98,7 +98,7 @@ The optional token is an independent scoped `OPERATIONS_METRICS_TOKEN` in an own
 
 Retain the exact source commit/image release, all content/legacy keys, JWT/account keys, customer credential state and Matrix identity before upgrades. SQLModel creates additive tables, not arbitrary schema migrations. Enable Railway database/volume backups for your plan; database-only recovery omits files/Matrix identity, and volume-only recovery omits permissions/history. Independent live snapshots are not automatically application-consistent. Schedule a maintenance window: stop the whole backend supervisor and Matrix, then coordinate PostgreSQL and relevant volume backups at the same recovery point. Keep private variable/key recovery material independently controlled.
 
-Test a **fresh isolated Railway environment**, with public access/SMTP/outbound workers held off until reviewed. The supervisor normally starts both workers; for a drill use a reviewed API-only command at uid 10001 with the same private volume configuration, or inspect the offline restore before starting. Compare original file bytes, historical content, authorizations, queues and retained Matrix/client decryption. Never test by overwriting the source service.
+Test a **fresh isolated Railway environment**, with public access/SMTP/outbound workers held off until reviewed. The supervisor normally starts all three workers; for a drill use a reviewed API-only command at uid 10001 with the same private volume configuration, or inspect the offline restore before starting. Keep the AI lane off so restored grants cannot disclose retained sources automatically. Compare original file bytes, historical content, authorizations, queues and retained Matrix/client decryption. Never test by overwriting the source service.
 
 Railway backup/export availability, off-host transfer and fresh-environment restore still need verification in the selected project. Existing `pilot-backup.py`, `pilot-restore.py`, `backup-seal.py` support local Compose, not arbitrary Railway snapshots or managed volumes. Do not manufacture a Compose manifest or claim a sealed complete backup from a database snapshot. Linux/Compose operators can use the optional [scheduled sealed off-host kit](docs/PILOT_OPERATIONS.md), which reuses the existing tools.
 

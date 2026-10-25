@@ -13,7 +13,7 @@ from pydantic import SecretStr
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app import database
-from app.api import auth, chat_productivity, messages, push
+from app.api import auth, chat_productivity, messages, push, content_completion, meetings, media_capture, app_platform, slack_livebridge
 from app.config import settings
 from app.database import get_session
 from app.main import app as _registered_models  # Register every additive FK table.
@@ -79,6 +79,11 @@ def demo(tmp_path, monkeypatch):
     app.include_router(messages.router)
     app.include_router(chat_productivity.router)
     app.include_router(push.router)
+    app.include_router(content_completion.router)
+    app.include_router(meetings.router)
+    app.include_router(media_capture.router)
+    app.include_router(app_platform.router)
+    app.include_router(slack_livebridge.router)
     app.add_middleware(boundary.PublicDemoBoundaryMiddleware)
     calls = []
     @app.post("/demo/session")
@@ -118,8 +123,8 @@ def test_default_product_has_no_demo_policy_interception(demo, monkeypatch):
     "/auth/register", "/auth/login", "/account/verification/request", "/account/password",
     "/account/mfa/setup", "/admin/users", "/workspaces/room/oidc/test",
     "/workspaces/room/copilot/config", "/workspaces/room/cloud-files/connections",
-    "/workspaces/room/webhooks", "/channels/room/meetings", "/meetings/room/join",
-    "/meeting-access/room/signal", "/channels/room/calendar/provider-delivery",
+    "/workspaces/room/webhooks", "/meetings/room/invites", "/meeting-access/room/guest",
+    "/meeting-access/room/resume", "/meetings/sfu/room/capture", "/channels/room/calendar/provider-delivery",
     "/office-edit/session/secret/file.docx", "/channels/room/file-experience/file/office-sessions",
     "/secure/unlock", "/_matrix/client/v3/register", "/native-clients/connect", "/push/subscribe",
     "/operations/security", "/operations/metrics", "/workspaces/room/data-controls/export",
@@ -133,6 +138,75 @@ def test_external_or_installation_actions_never_reach_handlers(demo, path):
     assert "public sample" in response.json()["detail"]
     assert response.headers["Cache-Control"] == "private, no-store"
     assert calls == []
+
+
+def test_actual_sample_calendar_collections_and_semantic_search_stay_visit_scoped(demo):
+    client, _, people, _ = demo
+    first, other = people
+    path = f"/workspaces/{first['workspace']}/personal-calendar"
+    fields = {"title": "My sample appointment", "description": "Private example", "location": "",
+        "starts_at": "2026-11-02T09:00:00Z", "ends_at": "2026-11-02T10:00:00Z",
+        "timezone": "UTC", "all_day": False, "reminder_minutes": None, "external_uid": None}
+    saved = client.post(path, headers=first["headers"], json={"id": "own-example", "fields": fields})
+    assert saved.status_code == 200, saved.text
+    assert client.get(path, headers=first["headers"]).json()[0]["fields"]["description"] == "Private example"
+    assert client.get(path, headers=other["headers"]).status_code == 403
+    collections = f"/channels/{first['channel']}/content-collections"
+    saved = client.post(collections, headers=first["headers"], json={"id": "sample-materials", "title": "Sample materials", "items": []})
+    assert saved.status_code == 201, saved.text
+    assert client.get(collections, headers=other["headers"]).status_code == 403
+    search = client.post(f"/workspaces/{first['workspace']}/semantic-search", headers=first["headers"], json={"query": "planning"})
+    assert search.status_code == 200, search.text
+    assert search.json()["items"] == []
+    assert client.post(f"/workspaces/{first['workspace']}/semantic-search", headers=other["headers"], json={"query": "planning"}).status_code == 403
+
+
+def test_actual_sample_app_metadata_is_readable_without_external_dispatch(demo, monkeypatch):
+    client, _, people, _ = demo
+    first, other = people
+    def forbidden(*_args, **_kwargs): raise AssertionError('Sample metadata must not call an external provider')
+    monkeypatch.setattr(slack_livebridge.service, 'slack_request', forbidden)
+    path = f"/workspaces/{first['workspace']}"
+    assert client.get(path + '/apps/catalog', headers=first['headers']).status_code == 200
+    assert client.get(path + '/apps', headers=first['headers']).json()['installations'] == []
+    local = path + f"/channels/{first['channel']}"
+    for suffix, field in (('/apps/cards', 'cards'), ('/apps/commands', 'commands'), ('/apps/ai/drafts', 'drafts'), ('/apps/ai/recaps', 'schedules'), ('/slack-bridges', 'bridges')):
+        result = client.get(local + suffix, headers=first['headers'])
+        assert result.status_code == 200, result.text
+        assert result.json()[field] == []
+        assert client.get(local + suffix, headers=other['headers']).status_code == 403
+    assert client.get(local + '/slack-bridges', headers=first['headers']).json()['public_example'] is True
+    for suffix in ('/apps', '/apps/catalog'):
+        assert client.get(path + suffix, headers=other['headers']).status_code == 403
+    # Metadata visibility must not enable installation or external command writes.
+    assert client.post(path + '/apps', headers=first['headers'], json={}).status_code == 403
+    assert client.post(local + '/apps/commands/example', headers=first['headers'], json={}).status_code == 403
+
+
+def test_actual_sample_meeting_capture_and_capabilities_belong_to_one_visit(demo):
+    client, _, people, _ = demo
+    first, other = people
+    joined = client.post(f"/channels/{first['channel']}/meetings", headers=first["headers"], json={})
+    assert joined.status_code == 201, joined.text
+    state = joined.json(); meeting = state["meeting"]["id"]
+    own = {**first["headers"], "X-Meeting-Token": state["meeting_token"]}
+    assert client.get(f"/meeting-access/{meeting}/poll", headers=own).status_code == 200
+    # Even a known foreign capability cannot bypass the public visit boundary.
+    stolen = {**other["headers"], "X-Meeting-Token": state["meeting_token"]}
+    assert client.get(f"/meeting-access/{meeting}/poll", headers=stolen).status_code == 403
+    capture_path = f"/meetings/mesh/{meeting}/capture"
+    created = client.post(capture_path, headers=first["headers"], json={})
+    assert created.status_code == 201, created.text
+    capture = created.json()["capture"]
+    body = {"capture_id": capture["id"], "generation": capture["generation"], "action": "start"}
+    started = client.post(capture_path + "/control", headers=first["headers"], json=body)
+    assert started.status_code == 200, started.text
+    assert started.json()["capture"]["state"] == "recording"
+    stopped = client.post(capture_path + "/control", headers=first["headers"], json={**body, "action": "stop"})
+    assert stopped.status_code == 200, stopped.text
+    assert stopped.json()["publication_receipt"]
+    assert client.get(capture_path, headers=other["headers"]).status_code in {403, 404}
+    assert client.post(f"/meetings/{meeting}/end", headers=first["headers"], json={}).status_code == 200
 
 
 def test_actual_native_product_handlers_retain_identity_and_membership_checks(demo):

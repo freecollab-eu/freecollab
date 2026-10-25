@@ -1,5 +1,13 @@
 # Production AI Copilot
 
+The product also includes [native model profiles and durable reviewed runs](AI_RUNTIME.md):
+multiple model recipients, personal encrypted keys, bounded plans/handoffs,
+usage budgets, registered web search/HTTP reads and a shared execution timeline.
+The original foreground/conversation API below remains compatible; its calls
+share the same budget ledger. See [orchestration](AI_ORCHESTRATION.md) for the
+native queue and encrypted foreground boundaries and [AI surfaces](AI_SURFACES.md)
+for the writer, reader and reviewed execution controls.
+
 Production assistance is an opt-in integration. The public [product demo](PRODUCT_DEMO.md) uses the same components and API with temporary sample accounts, but its AI provider is disabled; it does not fabricate model replies. It has no provider key by default and makes no AI request merely by opening its controls. An installation operator must set `COPILOT_ENABLED=true`, a personal workspace owner must configure a provider with fresh password/MFA, and each member must explicitly opt in to that exact provider configuration. Changes to the destination, key, model or agents invalidate earlier consent.
 
 The earlier anonymous Groq demo endpoints have been retired. `ENABLE_DEMO_AI` is
@@ -11,7 +19,7 @@ production inference uses the authenticated, reviewed Copilot or Apps & automati
 
 Open **Workspace tools → AI Copilot → Provider and agent settings**. Enter the complete public HTTPS443 OpenAI-compatible **chat completions** endpoint, model and your API key. For example, `https://api.openai.com/v1/chat/completions` with a compatible model such as `gpt-4o-mini`. Set the desired workspace enable flag and save with the owner's personal password and current authenticator/recovery code if enabled. Existing keys are never returned; leaving the key blank retains the current key only for the same destination endpoint. Changing the endpoint requires a new explicitly supplied key so an existing hidden key cannot be forwarded to another destination. Provider URLs must have no user information, fragments or query credentials. Arbitrary ports, loopback/private addresses and private DNS answers are refused.
 
-This release implements the OpenAI chat-completions protocol with `stream:true`, `max_tokens:2048`, a single choice and optional function tools. A provider must implement that contract. The streaming parser accepts xAI's documented intermediate `end_turn` marker without treating it as completion: a final `stop` or `tool_calls` and `[DONE]` are still required. Azure deployment-specific headers and Anthropic's native messages protocol are not claimed to be supported. Use a compatible gateway only when its privacy and retention policy meets your requirements.
+The legacy foreground endpoint implements OpenAI chat-completions with `stream:true`, `max_tokens:2048`, one choice and optional function tools. Its streaming parser accepts xAI's intermediate `end_turn` marker without treating it as completion: a final `stop` or `tool_calls` and `[DONE]` remain required. Named model profiles additionally implement native Anthropic, Azure, Gemini and Ollama protocols; configure them through the [runtime](AI_RUNTIME.md), including reviewed API version and personal/workspace credential source.
 
 The connection guide includes **Grok · xAI**, filling `https://api.x.ai/v1/chat/completions` and `grok-4.20-0309-non-reasoning`. The model remains editable. This dated, non-reasoning model is documented by xAI with function calling and fits the existing bounded request contract; choosing a reasoning model does not extend FreeCollab's thirty-second transport deadline or 2,048-token request limit. See xAI's [model documentation](https://docs.x.ai/developers/models/grok-4.20-0309-non-reasoning) and [Chat Completions reference](https://docs.x.ai/developers/rest-api-reference/inference/chat-completions). An xAI API account/key is required; a Grok chat subscription is separate. Selecting the preset only edits the unsaved draft and clears typed destination credentials. The actual saved xAI hostname/model appear in the same request warnings after configuration and member opt-in. This is another choice for the workspace's single provider, with no automatic provider switching. Compatibility is based on the documented protocol and private synthetic-provider tests, without a live xAI API acceptance test.
 
@@ -23,7 +31,7 @@ Add up to eight named agents with bounded instructions and optional fixed tools.
 
 **Propose a task** can return a cited text draft when no task tool is available. Real native task creation still requires the configured tool, an explicitly selected authorized project, current grants and the separate **Approve and create task** action. Secure channels do not gain a native task-creation tool.
 
-Before sending, an inline notice shows the saved provider hostname, configured model and selected-source count, and explains prompt/history disclosure, possible provider API charges, the provider's retention terms and the need to review AI output. The warning uses the saved configuration rather than unsaved endpoint edits and never displays an API key or credential-bearing URL. A ChatGPT or other chat subscription is not an API connection; a provider API key and that provider's API account are required. This remains workspace-owner configuration with individual member consent, without separate personal provider accounts or new native provider adapters.
+Before sending, an inline notice shows the saved provider hostname, configured model and selected-source count, and explains prompt/history disclosure, possible provider API charges, retention terms and output review. The notice uses saved configuration and never displays an API key or credential-bearing URL. A chat subscription is not an API account. Named runtime profiles support personal keys, native provider protocols and explicit recipients for every planned step; old configuration does not silently opt members into those destinations.
 
 The existing per-request provider disclosure and additional secure-content acknowledgment remain required. Quick actions do not check those boxes, select extra sources, send a prompt or approve a task.
 

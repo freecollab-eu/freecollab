@@ -22,6 +22,23 @@ work views. Restoring a minimized reading page focuses that visible page rather
 than its hidden textarea. See [the everyday flow](FLOW_FIRST_UX.md) and
 [work-area views](WORKSPACE_MODES.md).
 
+## Passage comments
+
+Select a synchronized passage in the editor or plain-text reading page and choose
+**Comment on selected passage**. The comment retains the original quote and two
+Yjs relative positions tied to this document's body and synchronized source
+sequence. Positions follow concurrent insertions rather than fixed character
+numbers. **View passage** resolves them in the same pooled live Yjs session.
+Changed or removed passages are described explicitly; the original quote stays
+in the immutable comment. This creates no second writer and does not alter the
+document or erase history.
+
+Anchors are bounded (2,000-character quote, canonical relative-position bytes,
+valid document ID/sequence). Native anchors live inside the existing encrypted
+comment payload. Matrix comments encrypt the anchor with their comment event;
+the native sidecar accepts only the opaque event reference. A foreign/future
+native anchor or plaintext Matrix anchor is rejected.
+
 ## Access and storage
 
 Every read checks current channel and workspace membership. Each mutation takes
@@ -130,8 +147,20 @@ page comments. A message action reviews the current source before saving a
 reference; no text copy is stored. Moves have their own compare-and-set revision and Undo preserves later
 Yjs edits. Stack creation generations reject stale requests after an ID is
 recreated. See [DOCUMENT_ORGANIZATION.md](DOCUMENT_ORGANIZATION.md) for the protocol,
-permissions, limits, export/retention and native-only scope. The public example
+permissions, limits, export/retention and the separate native/encrypted contracts. The public example
 installation uses these same APIs with isolated temporary accounts and real
-sample records. Encrypted channels retain flat
-collaborative pages/comments/revisions; encrypted organization is explicitly
-unsupported and never uses a native plaintext fallback.
+sample records. Encrypted channels use the verified encrypted-work organization
+adapter for stacks, placements, relations and saved messages; native organization
+routes continue to reject secure plaintext. Native secure pages retain their
+pooled collaborative editor, comments and revisions, without a second writer or
+plaintext fallback.
+
+Federated peer pages use their actual verified Yjs reader/editor. Their passage
+comments use the same relative-position anchor format inside encrypted generic
+comment events. The client verifies the actual peer document, quote and update
+count before publishing; comment text, target, anchor and selected reference IDs
+remain immutable. Only the verified comment creator can resolve/reopen it.
+Reconstructing an anchor from the verified Yjs snapshot is read-only and creates
+no second synchronization writer. Organization can place/relate these actual
+peer pages; opening one dispatches its canonical encrypted resource identity and
+never fabricates a native document lookup.

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
+const publishGuards = {};
+vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/secure/publish-guard.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {exports:publishGuards,DOMException,AbortController,TextEncoder,crypto:globalThis.crypto});
 const transactionRetry = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/secure/transaction-retry.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: transactionRetry });
 const channelMetadata = {};
@@ -41,7 +43,7 @@ function fixture({ joined = false, allowed = true, status = 'active', federated 
     'matrix-js-sdk/lib/crypto-api/recovery-key': {},
     './device-store': { storageKeyFor: async () => new Uint8Array(32), loadPendingNotices: async () => [] },
     '../api': { APIError: class extends Error {} },
-    './transaction-retry': transactionRetry,
+    './transaction-retry': transactionRetry, './publish-guard':publishGuards,
     '../channel-metadata': channelMetadata,
     './message-content': messageContent,
   };

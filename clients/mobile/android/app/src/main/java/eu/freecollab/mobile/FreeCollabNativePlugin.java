@@ -24,7 +24,41 @@ public class FreeCollabNativePlugin extends Plugin {
     private long deadline;
     private final Handler timer = new Handler(Looper.getMainLooper());
     private Runnable timeout;
+    private String pendingLink;
+    private String pendingLinkGeneration;
     private static final String CALLBACK = "freecollab://native/complete";
+
+    private void acceptLink(Uri uri) {
+        String configured = origin(Uri.parse(getBridge().getConfig().getServerUrl()));
+        if (uri == null || configured == null || !configured.equals(origin(uri)) || !"/open".equals(uri.getPath())
+                || uri.getFragment() != null || uri.toString().length() > 2048) return;
+        java.util.Set<String> allowed = new java.util.HashSet<>(java.util.Arrays.asList("workspace_id","channel_id","kind","item_id","project_id"));
+        for (String key : uri.getQueryParameterNames()) if (!allowed.contains(key) || uri.getQueryParameters(key).size() != 1) return;
+        for (String key : new String[]{"workspace_id","channel_id","kind","item_id"}) if (uri.getQueryParameter(key) == null) return;
+        pendingLink = uri.toString();
+        pendingLinkGeneration = java.util.UUID.randomUUID().toString();
+    }
+
+    @Override
+    public void load() { acceptLink(getActivity().getIntent().getData()); }
+
+    @PluginMethod
+    public void getPendingLink(PluginCall call) {
+        if (installation() == null) { call.reject("The installation changed."); return; }
+        JSObject result = new JSObject(); if (pendingLink != null) { result.put("url", pendingLink); result.put("generation", pendingLinkGeneration); } call.resolve(result);
+    }
+
+    @PluginMethod
+    public void clearPendingLink(PluginCall call) {
+        if (installation() == null) { call.reject("The installation changed."); return; }
+        if (pendingLink != null && pendingLink.equals(call.getString("url")) && pendingLinkGeneration.equals(call.getString("generation"))) {
+            pendingLink = null;
+            pendingLinkGeneration = null;
+            Uri previous = getActivity().getIntent().getData();
+            if (previous != null && "/open".equals(previous.getPath())) getActivity().getIntent().setData(null);
+        }
+        call.resolve();
+    }
 
     private String origin(Uri uri) {
         if (uri == null || !"https".equals(uri.getScheme()) || uri.getEncodedAuthority() == null
@@ -82,6 +116,7 @@ public class FreeCollabNativePlugin extends Plugin {
     @Override
     protected void handleOnNewIntent(Intent intent) {
         Uri uri = intent.getData();
+        if (uri != null && "https".equals(uri.getScheme())) { acceptLink(uri); return; }
         if (uri == null || pending == null || !"freecollab".equals(uri.getScheme())
             || !"native".equals(uri.getHost()) || !"/complete".equals(uri.getPath())
             || uri.getFragment() != null || !state.equals(uri.getQueryParameter("state"))) return;

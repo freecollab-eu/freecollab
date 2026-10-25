@@ -55,6 +55,30 @@ class AppJob(SQLModel, table=True):
     delivered_at: datetime | None = None
 
 
+class WorkflowAppReceipt(SQLModel, table=True):
+    run_id: str = Field(primary_key=True, foreign_key="workflowrun.id")
+    step_index: int = Field(primary_key=True)
+    app_job_id: str = Field(foreign_key="appjob.id")
+
+
+class AppForegroundReceipt(SQLModel, table=True):
+    """Content-free authority for a single explicitly disclosed secure action."""
+    __table_args__ = (UniqueConstraint("installation_id", "request_id"),)
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    installation_id: str = Field(foreign_key="appinstallation.id", index=True)
+    generation: int
+    channel_id: str = Field(foreign_key="channel.id", index=True)
+    actor_id: str = Field(foreign_key="user.id")
+    command: str
+    request_id: str
+    request_digest: str
+    status: str = "processing"
+    http_status: int | None = None
+    failure: str | None = None
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    finished_at: datetime | None = None
+
+
 class AppCallback(SQLModel, table=True):
     installation_id: str = Field(primary_key=True, foreign_key="appinstallation.id")
     event_id: str = Field(primary_key=True)

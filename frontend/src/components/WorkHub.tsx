@@ -20,6 +20,7 @@ import { ExternalMeetingsPanel } from './ExternalMeetingsPanel';
 import { ChannelSyncNotice } from './ChannelSyncNotice';
 import { ChannelApps } from './ChannelApps';
 import { FederatedWorkPanel } from './FederatedWorkPanel';
+import { EncryptedWorkPanel } from './EncryptedWorkPanel';
 import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
 import type { WorkHubTab } from '../lib/work-hub-view';
 import { useCollaborationContext } from '../lib/collaboration-context';
@@ -28,7 +29,7 @@ import '../styles/work-hub.css';
 
 export type { WorkHubTab } from '../lib/work-hub-view';
 export interface ConversationResourceSelection { kind: 'document' | 'task' | 'decision'; id: string; projectId?: string | null; title?: string }
-interface Props { instanceId?: string; closeController?: { current: (() => void) | null }; presentation?: 'dialog' | 'flow'; layoutActions?: ConversationWorkLayoutActions; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; onActiveResourceChange?: (resource: ConversationResourceSelection | null) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
+interface Props { instanceId?: string; closeController?: { current: (() => void) | null }; presentation?: 'dialog' | 'flow'; layoutActions?: ConversationWorkLayoutActions; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; onActiveResourceChange?: (resource: ConversationResourceSelection | null) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; initialSharedResourceId?: string; initialSharedResourceKind?: string; initialFeedId?: string; initialWorkflowRunId?: string; initialWorkflowId?: string; initialMeetingId?: string; initialClipId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -53,12 +54,13 @@ function documentDraftFromMessage(message: Message): ComposerWorkDraft {
   return { key: message.id, title, text, ...(references.length ? { field_references: { body: references, ...(titleReferences.length ? { title: titleReferences } : {}) } } : {}) };
 }
 
-export function WorkHub({ instanceId, closeController, presentation = 'dialog', layoutActions, sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, onActiveResourceChange, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
+export function WorkHub({ instanceId, closeController, presentation = 'dialog', layoutActions, sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, onActiveResourceChange, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, initialSharedResourceId, initialSharedResourceKind, initialFeedId, initialWorkflowRunId, initialWorkflowId, initialMeetingId, initialClipId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const navigationContext = useCollaborationContext();
   const surfaceId = navigationContext?.surfaceId;
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
+  const [sharedMode, setSharedMode] = useState<'local' | 'federated' | null>(null);
   const [contextChecked, setContextChecked] = useState(!channel.secure);
   const visibleTabs = tabs.filter(item => item.id !== 'shared-work' || sharedWork);
   const selectedView = useRef(onTabChange); selectedView.current = onTabChange;
@@ -68,13 +70,14 @@ export function WorkHub({ instanceId, closeController, presentation = 'dialog', 
   useEffect(() => {
     const token = api.getAccessToken(), abort = new AbortController();
     let live = true;
-    setSharedWork(false); setContextChecked(!channel.secure);
+    setSharedWork(false); setSharedMode(null); setContextChecked(!channel.secure);
     if (!channel.secure) return () => { live = false; abort.abort(); };
     const timer = window.setTimeout(() => abort.abort(), 10000);
-    void api.request<{protocol: string; channel_id: string; connection_id: string}>(`/connect/federation/channels/${encodeURIComponent(channel.id)}/work-context`, { signal: abort.signal }).then(context => {
+    void api.request<{protocol: string; channel_id: string; connection_id: string; mode: 'local' | 'federated'}>(`/channels/${encodeURIComponent(channel.id)}/encrypted-work/context`, { signal: abort.signal }).then(context => {
       if (live && token === api.getAccessToken()) {
-        const eligible = context.protocol === 'freecollab-federated-work/1' && context.channel_id === channel.id && /^[a-f0-9]{32}$/.test(context.connection_id);
-        setSharedWork(eligible); if (!eligible && initialTab === 'shared-work') setTab('tasks');
+        const eligible = context.protocol === 'freecollab-federated-work/1' && context.channel_id === channel.id && /^[a-f0-9]{32}$/.test(context.connection_id)
+          && (context.mode === 'local' || context.mode === 'federated');
+        setSharedWork(eligible); setSharedMode(eligible ? context.mode : null); if (!eligible && initialTab === 'shared-work') setTab('tasks');
       }
     }).catch(() => { if (live && token === api.getAccessToken() && initialTab === 'shared-work') setTab('tasks'); }).finally(() => {
       clearTimeout(timer); if (live && token === api.getAccessToken()) setContextChecked(true);
@@ -141,21 +144,21 @@ export function WorkHub({ instanceId, closeController, presentation = 'dialog', 
       }}>{visibleTabs.map(({ id, label, icon: Icon }) => <button key={id} id={surfaceElementId(`work-tab-${id}`)} type="button" role="tab" tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} aria-controls={surfaceElementId(`work-panel-${id}`)} onClick={() => select(id)}><Icon size={16} /><span>{t(label)}</span></button>)}</nav></>}
       <div className={flow ? "fc-conversation-work-body" : "fc-work-hub-body"}>
         {!contextChecked && <p role="status" className="fc-account-muted">{t('Checking channel collaboration…')}</p>}
-        {sharedWork && tab !== 'shared-work' && ['tasks', 'documents', 'workflows', 'feed'].includes(tab) && <p className="fc-account-muted">{t('These tools belong to this installation. Use Shared work for tasks, calendar and documents shared across the connection.')}</p>}
+        {sharedWork && sharedMode === 'federated' && tab !== 'shared-work' && ['tasks', 'documents', 'workflows', 'feed'].includes(tab) && <p className="fc-account-muted">{t('These tools belong to this installation. Use Shared work for tasks, calendar and documents shared across the connection.')}</p>}
         {contextChecked && tab !== 'meetings' && <div key={`${actor}:${channel.id}:${tab}`} role={flow ? undefined : "tabpanel"} id={surfaceElementId(`work-panel-${tab}`)} aria-labelledby={flow ? undefined : surfaceElementId(`work-tab-${tab}`)}>
-          {tab === 'shared-work' && sharedWork && <FederatedWorkPanel channelId={channel.id} onPendingChange={onSharedPending} />}
-          {tab === 'feed' && <ActivityFeedPanel {...props} onPendingChange={onFeedPending} />}
+          {tab === 'shared-work' && sharedWork && (sharedMode === 'local' ? <EncryptedWorkPanel channelId={channel.id} initialResourceId={initialSharedResourceId} initialResourceKind={initialSharedResourceKind} onPendingChange={onSharedPending} /> : <FederatedWorkPanel channelId={channel.id} initialResourceId={initialSharedResourceId} initialResourceKind={initialSharedResourceKind} onPendingChange={onSharedPending} />)}
+          {tab === 'feed' && <ActivityFeedPanel {...props} focusPostId={initialFeedId} onPendingChange={onFeedPending} />}
           {tab === 'copilot' && <CopilotPanel {...props} isAdmin={dataAdmin && unrestricted} />}
           {tab === 'cloud' && <><ChannelSyncNotice channelId={channel.id} kind="files" /><CloudFilesPicker workspaceId={workspaceId} channelId={channel.id} /></>}
           {tab === 'external-meetings' && <ExternalMeetingsPanel {...props} isAdmin={integrationAdmin && unrestricted && channel.role === 'admin'} />}
           {tab === 'tasks' && <ProjectTasksPanel key={initialCommandDraft?.key || 'tasks'} {...props} presentation={flow ? "flow" : "full"} initialProjectId={initialProjectId} focusTaskId={focusTaskId} initialDraft={!focusTaskId ? initialCommandDraft : undefined} sourceMessage={sourceMessage} onPendingChange={onTaskPending} onSelectedTask={onSelectedTask} onOpenMessage={onRevealMessage ? (_channelId, messageId) => onRevealMessage(messageId) : undefined} onTaskSaved={row => onResourceSaved?.({ kind: "task", id: row.id, projectId: row.project_id, title: row.fields?.title })} />}
           {tab === 'documents' && <SharedDocumentsPanel key={initialCommandDraft?.key || 'documents'} {...props} presentation={flow ? "flow" : "full"} initialDraft={!initialDocumentId && !initialStackId ? initialCommandDraft || (flow && sourceMessage ? documentDraftFromMessage(sourceMessage) : undefined) : undefined} onSelectedDocument={onSelectedDocument} onCreatedDocument={row => onResourceSaved?.({ kind: "document", id: row.id, title: row.title })} initialDocumentId={initialDocumentId} initialStackId={initialStackId} onPendingChange={onDocumentPending} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage ? id => { if (flow || mayLeaveDocument()) onRevealMessage(id); } : undefined} />}
-          {tab === 'workflows' && <WorkflowsPanel {...props} />}
+          {tab === 'workflows' && (channel.secure ? <EncryptedWorkPanel channelId={channel.id} initialKind="workflow" initialResourceId={initialWorkflowRunId || initialWorkflowId} initialResourceKind={initialWorkflowRunId ? "workflow-run" : initialWorkflowId ? "workflow" : undefined} onPendingChange={onSharedPending} /> : <WorkflowsPanel {...props} focusRunId={initialWorkflowRunId} focusDefinitionId={initialWorkflowId} />)}
           {tab === 'apps' && <ChannelApps workspaceId={workspaceId} channelId={channel.id} />}
           {tab === 'data' && <DataControlsPanel {...props} isAdmin={dataAdmin && unrestricted} />}
           {tab === 'mobile' && <MobileSettings />}
         </div>}
-        {meetingOpened && <div hidden={tab !== 'meetings'} role={flow ? undefined : "tabpanel"} id={surfaceElementId("work-panel-meetings")} aria-labelledby={flow ? undefined : surfaceElementId("work-tab-meetings")}><MeetingsPanel key={`${actor}:${channel.id}`} {...props} /></div>}
+        {meetingOpened && <div hidden={tab !== 'meetings'} role={flow ? undefined : "tabpanel"} id={surfaceElementId("work-panel-meetings")} aria-labelledby={flow ? undefined : surfaceElementId("work-tab-meetings")}><MeetingsPanel key={`${actor}:${channel.id}`} {...props} focusMeetingId={initialMeetingId} focusClipId={initialClipId} /></div>}
       </div>
       <footer className={flow ? "fc-conversation-work-footer" : "fc-work-hub-footer"}><ShieldCheck size={15} /><span>{channel.secure ? t("Messages, tasks and documents use verified device encryption.") : t("Your current channel and workspace permissions apply.")}</span><button type="button" className="fc-button" onPointerDown={flow && layoutActions ? layoutActions.onBeforeViewChange : undefined} onClick={flow && layoutActions ? layoutActions.onMinimize : close}>{t("Back to conversation")}</button></footer>
     </section>

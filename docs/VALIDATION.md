@@ -1,5 +1,56 @@
 # FreeCollab validation record
 
+## Integrated feature completion — 2026-10-25
+
+This record concerns the `design/open-studio` review branch, following
+`6111ef7`. It does not describe the older Railway deployment, protected `main`
+or a published release. The [feature inventory](FEATURE_AUDIT.md) links each
+implemented product path and its operating boundary.
+
+The completion adds durable AI execution, model profiles, personal keys,
+budgets, reviewed planning and registered read tools; contextual writing/reading
+assistance; collections, anchored comments, semantic retrieval and a private
+calendar; typed encrypted/federated work; installed app commands, workflow app
+steps and a live Slack bridge; consented device recording, local captions,
+meeting assistance, signed desktop updates and verified mobile links. Product
+and sample retain the same components and API; sample accounts have separate
+lifetimes and cannot disclose content to external providers.
+
+| Verification | Accepted evidence and limits |
+| --- | --- |
+| Frontend and production bundles | **835/835 Node tests passed**, no skips; TypeScript plus application, embedded, widget, website and demo production builds passed. Runtime inputs remained unchanged during that check. The subsequent narrow meeting-discovery refresh has separate sample/TSC evidence; CI rebuilds the exact committed source. |
+| Exhaustive backend coverage | Four file shards collected 2,659 cases. All eight initial failures were reconciled to passing targeted receipts: three runner key-environment conflicts, four stale queue expectations, and one fixture watching a later upload lock. Subsequent argument/media cases reconciled 2,666 unique cases at that snapshot: 2,665 passing and one conditional OpenSearch case. Later changes have explicit focused receipts below; this is not represented as an unchanged-source full rerun. |
+| Final capture and demo policy | **87 passed**: complete demo boundary 62, meeting AI 2, capture policy 20 and clips 3. Actual secure-enable invalidates active/stopped capture receipts. Unknown legacy mode denies publication; Matrix captures cannot fall back to plaintext after a mode change. Caption audiences require explicit review. |
+| PostgreSQL concurrency | **3 actual API/SQL races passed**: consent withdrawal during private blob I/O prevents upload publication; account closure waits for personal-key insertion and then erases it; late AI completion after closure settles only anonymous numeric usage. Ordinary reused test fixtures explicitly choose SQLite and are not described as PostgreSQL coverage. |
+| Contextual AI | **14 actual component/API/worker checks**, including seven owned TLS model requests and one registered TLS read; 72 targeted Node tests and 9 shared-writing browser checks. These use explicit synthetic provider fixtures, without customer accounts. |
+| Product navigation | **27 actual full-App/API checks**, 723 real API requests, unchanged recorded source inputs: exact resource destinations, private calendar CRUD/export, retained original-channel editor/reference continuation, dirty guards, input/IME and account-ABA cancellation. |
+| Content and search | 68 backend and 82 Node checks; 8 actual component/API groups. Separate **5-case OpenSearch 2.19.1** acceptance used real authenticated, hostname-verified TLS and eight inherited proxy tunnels. Provider-free semantic retrieval and explicit relation persistence also ran in the real UI. |
+| Installed apps and privacy | Exact literal arguments: 43 backend checks; privacy: 34; portable actual review/full-Chat paths: 7 and 6 groups. Actual **14-group trusted Matrix/app acceptance** covers separate disclosures, pinned HTTPS, exact Unicode/whitespace, content-free receipts, no native plaintext outbox and separately approved peer-decryptable response. Real customer Slack delivery was not attempted. |
+| Encrypted/federated work | **17 actual groups** across two independent TLS-federating Synapse installations and Rust browser crypto: typed work, global references, peer Yjs, stacks/relations/collections, selected-passage comments, forged resolution rejection, opaque native indexes and current revocation. The isolated mode explicitly excludes the separately covered media/app stages and retained legacy regression. |
+| Current encrypted message sources | **12 actual two-Synapse groups** verify a trusted edit, reject stale stack review and save the current peer-readable excerpt. A subsequent code-unit tie comparator has 19 focused passing regressions and TypeScript; its exact isolated delta is recorded without relabeling the earlier transport witness. |
+| Encrypted meetings and caption consent | **20 actual groups passed** on two independent Synapse installations, Rust crypto and an owned TCP TURN relay. Real bidirectional RTP, React all-device consent, pause/resume/stop, a genuine nine-second delayed receipt, actual WebM peer decryption/decoding, terminal-event and forged/omitted-consent rejection, positive encrypted captions, held Rust encryption followed by withdrawal and no HTTP send, retry/reload refusal, opacity and both revocation paths. Recorded runtime inputs, including the production homeserver generator, remained unchanged. |
+| Product sample and recovery | **7 actual full sample groups passed**: member Bearer/capability handling, automatic quota-bounded recording/upload/playback, immediate leave after publication, a genuine retention failure with downloadable audio and explicit discard, a held upload with bounded leave/private notice and last-draft cleanup, and no retained-account storage access. The final optional meeting-list auth-cancellation predicate tightening is recorded as the sole copied/current-source delta and separately typechecked. |
+| Local captions | **11 actual pinned Whisper/Worker/WASM checks** plus 8 drain/race state tests: real 48 kHz audio input, known synthetic speech, resampling, backpressure, partial/final speech, active-audio timing, bounded timeout and immediate abort without late captions or audio uploads. |
+| Private homeserver configuration | **3 actual initializer-process tests passed**: bounded collaboration rates, preserved operator override, retained security settings and refusal to rewrite a different homeserver identity. The accepted real media proof uses this production generator, without a fixture-only rate override. |
+| Reverse proxies and native operations | Both actual Nginx configurations passed 21 protected core checks, 48 including logging-positive controls and upstream failure. Actual association JSON, strict routing, protected API denial and forwarding/privacy behavior ran against the product router. AI backup/restore orchestration passed **80 fake-only tests**; no real backup or offsite restore is claimed. |
+
+Fresh isolated evidence is kept under `gap-completion-20261025/`, including
+commands, before/after hashes, JUnit, accepted reports and failed/interrupted
+attempts. Different overlapping suites are not added together as a unique total.
+Older receipts remain bound to their original inputs. In particular, the earlier
+17-group legacy Copilot receipt predates the adjacent Chat stack shortcut change;
+it is retained as historical evidence rather than relabeled unchanged.
+
+[CI](../.github/workflows/ci.yml) runs the new real AI/content/navigation/app/sample
+and caption proofs, with separate encrypted work/app/media jobs. Release builds
+depend on these jobs. Public encrypted artifacts contain only allowlisted final
+reports; private diagnostics, raw logs and fixture credentials are excluded.
+
+Customer OAuth/SSO and Office programs, actual vendor accounts, public DNS/TLS,
+SMTP delivery, store signing, physical mobile behavior, capacity and offsite
+restore remain operator acceptance tasks. They require the installation's own
+configuration. No synthetic receiver or protocol test marks them as completed.
+
 ## Personal source navigation across workspaces — 2026-10-25
 
 CI for `e31934d` passed frontend, all four backend shards, native artifacts and

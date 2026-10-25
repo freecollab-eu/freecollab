@@ -143,6 +143,8 @@ def _channel_records(session, name, channel_ids):
 
 
 def _active_automation(session, channels):
+    from .collaboration_privacy import assert_purge_idle
+    assert_purge_idle(session, channels)
     for name in ("remotesyncconnection", "workflowdefinition"):
         table = _table(name)
         if table is not None and _records(session, name, and_(table.c.channel_id.in_(channels), table.c.enabled == True)):
@@ -172,7 +174,8 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
         table = _table(name)
         current = {_json(_pk(table, row)): row for row in plan.get(name, [])}
         for row in rows:
-            if "channel_id" in row and row["channel_id"] not in channel_ids:
+            from .collaboration_privacy import DERIVED_CROSS_CHANNEL_TABLES
+            if "channel_id" in row and row["channel_id"] not in channel_ids and name not in DERIVED_CROSS_CHANNEL_TABLES:
                 raise HTTPException(409, "A retained cross-channel dependency prevents erasure")
             current[_json(_pk(table, row))] = row
         plan[name] = list(current.values())
@@ -366,6 +369,8 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
     if mapping is not None and connections and local_ids:
         add("remotesyncitem", _records(session, mapping.name, and_(mapping.c.connection_id.in_(_ids(connections)), mapping.c.local_id.in_(local_ids))))
     # Delete only known dependents; unknown future FK models fail closed below.
+    from .collaboration_privacy import extend_plan, RETENTION_DEPENDENTS
+    extend_plan(session, plan, channel_ids, cutoff, add)
     # A conversation routing reference is not a hold on either resource. Its
     # own age or an authorized source/target purge can remove the reference.
     add("conversationworkreference", [row for row in _channel_records(session, "conversationworkreference", channel_ids) if _old(row, cutoff)])
@@ -373,6 +378,7 @@ def build_plan(session, workspace_id, actor_id, channel_ids, cutoff):
         "remotesyncfilestate", "decisionrevision", "integrationcontentrevision", "calendarattendee", "shareddocumentupdate", "shareddocumentsnapshot",
         "shareddocumentcomment", "shareddocumentplacement", "shareddocumentrelation", "shareddocumentstackreference", "conversationworkreference", "workflowvote", "workflowactivity", "workflownotice", "pushdelivery", "nativepushdelivery", "remotesyncconflict", "slackimportmessage", "slackimportdetail",
         "calendarproviderpublication", "calendarproviderjob", "nativecallsession", "nativecallconsent"}
+    allowed_dependents |= RETENTION_DEPENDENTS
     expanded = True
     while expanded:
         before = sum(map(len, plan.values()))
@@ -733,6 +739,8 @@ def export_data(session, job, request):
             EnterpriseSearchConnection.workspace_id == job.workspace_id,
             EnterpriseSearchConnection.user_id == job.requested_by)).all()]
     exported["pilot_feedback"] = export_pilot_feedback(session, job.workspace_id, job.requested_by)
+    from .collaboration_privacy import export_additions
+    exported.update(export_additions(session, job.workspace_id, channel_ids, job.requested_by))
     # No password/hash/key/session/IdP or remote-provider credential table enters
     # this explicit profile projection.
     memberships = _records(session, "workspacemember", WorkspaceMember.__table__.c.workspace_id == job.workspace_id)
@@ -759,6 +767,9 @@ def export_data(session, job, request):
         "Matrix records contain opaque references; this archive contains no client-held message keys or decrypted Matrix history.",
         "Provider copies, other members' device caches and old backups are separate retention domains.",
         "Workspace feedback includes only the requester's voluntary reports and private notes."]
+    from .collaboration_privacy import record_count
+    if record_count(exported) > MAX_ROWS:
+        raise HTTPException(413, "Export is too large; select fewer channels")
     total_bytes = len(_json(exported).encode())
     if total_bytes > MAX_BYTES: raise HTTPException(413, "Export exceeds the bounded archive size")
     return exported, records.get("file", []), total_bytes
@@ -796,6 +807,8 @@ def apply_plan(session, job, plan):
     from .enterprise_governance import assert_purge_allowed
     request = json.loads(unseal_private(job.encrypted_request, "data-job", job.id))
     assert_purge_allowed(session, job.workspace_id, request["channel_ids"])
+    from .collaboration_privacy import apply_pre_delete
+    apply_pre_delete(session, plan)
     # Explicit PK plans + reverse dependency order preserve live FK integrity.
     files = _ids(plan.get("file", []))
     imports = _table("cloudfileimport")
@@ -817,7 +830,7 @@ def apply_plan(session, job, plan):
             key = _pk(authority, row)
             session.execute(delete(authority).where(and_(*(authority.c[name] == value for name, value in key.items()))))
     for table in reversed(SQLModel.metadata.sorted_tables):
-        if table.name == "meetingparticipantauthority": continue
+        if table.name in {"meetingparticipantauthority", "slackbridgemessage", "airun", "airunstep", "airunsource", "airunapproval"}: continue
         for row in plan.get(table.name, []):
             key = _pk(table, row)
             session.execute(delete(table).where(and_(*(table.c[name] == value for name, value in key.items()))))

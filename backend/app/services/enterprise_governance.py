@@ -165,11 +165,7 @@ def enforce_native_content(session, channel_id, actor_id, text, *, surface="mess
     return warnings
 
 
-def enforce_native_file(session, channel_id, actor_id, filename, content_type, content):
-    lock_channel_writes(session, channel_id)
-    policies = _policies(session, channel_id, "file")
-    if not policies:
-        return []
+def _native_file_text(policies, content_type, content):
     # Bounded UTF-8 text is scanned. Binary/PDF/archive/OCR is explicitly outside
     # this engine; an enabled block_uninspectable_files policy fails closed.
     text = None
@@ -181,7 +177,25 @@ def enforce_native_file(session, channel_id, actor_id, filename, content_type, c
             pass
     if text is None and any(row.action == "block" and row.block_uninspectable_files for row in policies):
         raise HTTPException(423, "Workspace policy blocks files whose contents cannot be inspected")
-    return enforce_native_content(session, channel_id, actor_id, filename + "\n" + (text or ""), surface="file")
+    return text or ""
+
+
+def native_file_allowed(session, channel_id, filename, content_type, content):
+    """Pure preflight before private blob I/O; no locks, audit or commit."""
+    policies = _policies(session, channel_id, "file")
+    if not policies:
+        return True
+    text = _native_file_text(policies, content_type, content)
+    return native_content_allowed(session, channel_id, filename + "\n" + text, surface="file")
+
+
+def enforce_native_file(session, channel_id, actor_id, filename, content_type, content):
+    lock_channel_writes(session, channel_id)
+    policies = _policies(session, channel_id, "file")
+    if not policies:
+        return []
+    text = _native_file_text(policies, content_type, content)
+    return enforce_native_content(session, channel_id, actor_id, filename + "\n" + text, surface="file")
 
 
 def enforce_native_document(session, channel_id, actor_id, fields, *, opaque_update=False):

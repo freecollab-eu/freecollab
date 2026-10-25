@@ -66,23 +66,59 @@ required; no model service or customer credentials are bundled. The public
 product demo uses these same controls with AI disabled, so it produces no
 model answer.
 
+## All-content collections
+
+A native document stack can also contain references to binary files, external
+links, pages, messages, projects, tasks, feeds, decisions, calendar events, clips
+and workflows. **Add material** chooses actual accessible resources. Originals,
+ACLs and histories stay in their original location; removing a reference does
+not delete content. These collections do not move attachments between channels
+or provide Office rich-text coauthoring. AI grouping proposes reviewed resource
+IDs; only explicit approval creates a collection, after a fresh source/version
+check. No provider-invented ID can become a resource pointer.
+
+`/channels/{channel_id}/content-collections` lists or atomically creates a title
+and up to 100 distinct typed pointers. Native collections reuse the existing
+stack identity. Add/remove uses `expected_version` and immutable `generation`;
+every write takes the channel lock and resolves current canonical resources.
+A task's supplied parent must match its actual project. Deleted/replaced or
+unauthorized items become unavailable references. A nonempty collection cannot
+be deleted. Pointer metadata is included in authorized exports and FK-ordered
+retention; no copied message/document body is stored in a collection.
+
 ## Encryption and scope
 
-Stacks and relations are currently native-channel features. Native stack titles
-are encrypted at rest in a purpose-bound envelope including channel, stack ID
-and immutable generation. Page IDs, placement, generation, versions, author IDs,
-timestamps and saved relation pairs are server-visible routing metadata.
-This is not end-to-end encryption.
+Native stack titles use a purpose-bound envelope including channel, stack ID
+and immutable generation. Page IDs, placements, generations, versions, author IDs,
+timestamps and saved relation/resource pairs remain server-visible routing
+metadata. This native mode is encryption at rest.
 
-The organization API returns `409` in preparing or active encrypted channels.
-The client displays the unsupported capability explicitly and sends no native
-stack title or organization request. Existing Matrix-encrypted collaborative
-pages, comments and named revisions remain available as a flat list. There is no
-plaintext fallback and no claim that encrypted document organization is complete.
+Encrypted channels use the verified encrypted-work protocol for stacks,
+placements, relations and saved message references. The client keeps a bounded
+organization aggregate inside encrypted Matrix events; no native organization
+title/body sidecar is sent. Nested stack authors have immutable full Matrix
+identities and author namespaces. Rename/delete is allowed only for the creator
+or an exact publication-time administrator receipt bound to the verified event
+sender and room. A later role promotion cannot authorize an older edit. Missing
+receipts fall back to creator-only validation; invalid nested changes are
+quarantined while valid ancestry remains readable.
 
-The feature organizes FreeCollab shared pages within one channel. It does not
-create binary-file folders, move attachments between channels, group external
-provider files or provide rich-text/Office document coauthoring.
+Saved encrypted messages retain the original room event ID. Their previews read
+the complete bounded replacement history and independently verify each edit's
+device, original author, exact target and replacement text. The latest verified
+edit supplies the excerpt and edit timestamp. At most 100 edit candidates are
+accepted; incomplete, redacted or unverified history blocks the preview instead
+of falling back to an older body. Saving checks that text again after loading the
+current organization and rejects a changed review before publishing a pointer.
+
+Independent concurrent changes merge by item. Competing edits to the same item
+show verified versions for explicit review; prior revisions remain in history.
+An unauthorized merge cannot delete another author's independent stack. Native
+secure pages use their existing pooled Yjs editor, not a duplicate writer.
+Generic encrypted collections organize verified native/peer resources alongside
+these page stacks. Peer document links open the actual federated Yjs reader.
+Unverified, locked or conflicting resources never receive fabricated native IDs
+or a plaintext fallback.
 
 ## Protocol and bounds
 
@@ -127,3 +163,22 @@ unverifiable title envelope instead of emitting its ciphertext.
   product flow, persistence, two-member conflict, explicit related-page navigation,
   pending comment draft retention and 320px layout. No live external provider or
   Matrix acceptance is implied by this native-only proof.
+
+## Automatic local connection proposals
+
+On a selected page, opt into **Automatically suggest document connections on this
+device**. A real local LSA worker derives a low-rank corpus from currently visible
+page titles and unresolved comments, then refreshes proposals when that context
+changes. It runs without an AI provider or network disclosure. The exact corpus
+is described in the UI; it does not claim to have read page bodies, hidden
+comments or private channels. At least four pages are required for this semantic
+mode. Its nonsecret opt-in preference is account/device scoped; embedded memory
+sessions keep the preference in memory.
+
+Proposals cite actual visible comments and exclude existing relations, foreign
+channels and archived/unavailable pages. The user must choose **Save relation**;
+no background worker moves or links a document. The existing explicit shared-word
+suggestions remain separately explained. Model-assisted semantic grouping and
+reviewed collection creation use the configured AI/runtime path with their own
+provider/disclosure review. None of these flows silently reparent comments or
+claim autonomous background LLM writes.

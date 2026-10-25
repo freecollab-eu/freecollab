@@ -57,6 +57,10 @@ config.update({
     "listeners": [{"port": 8008, "tls": False, "type": "http", "x_forwarded": False,
                    "resources": [{"names": ["client", "federation"] if federation_domains else ["client"], "compress": False}]}],
 })
+# Synapse's human-message default (0.2/s, burst10) also throttles encrypted
+# document updates, meeting signaling and captions. Keep a bounded per-user
+# collaboration allowance, while preserving an operator's explicit policy.
+config.setdefault("rc_message", {"per_second": 10, "burst_count": 100})
 if os.environ.get("MATRIX_DATABASE_HOST"):
     config["database"] = {"name": "psycopg2", "args": {
         "host": os.environ["MATRIX_DATABASE_HOST"], "port": int(os.environ.get("MATRIX_DATABASE_PORT", "5432")),

@@ -56,6 +56,13 @@ services:
       CLOUD_FILES_ENABLED: ${CLOUD_FILES_ENABLED:-false}
       EXTERNAL_MEETINGS_ENABLED: ${EXTERNAL_MEETINGS_ENABLED:-false}
       COPILOT_ENABLED: ${COPILOT_ENABLED:-false}
+      FREECOLLAB_AI_PRIVATE_ORIGINS: ${FREECOLLAB_AI_PRIVATE_ORIGINS:-[]}
+      FREECOLLAB_AI_TOOL_PRIVATE_ORIGINS: ${FREECOLLAB_AI_TOOL_PRIVATE_ORIGINS:-[]}
+      NATIVE_APPLICATION_ID: ${NATIVE_APPLICATION_ID:-}
+      NATIVE_APPLE_TEAM_ID: ${NATIVE_APPLE_TEAM_ID:-}
+      NATIVE_ANDROID_CERT_SHA256: ${NATIVE_ANDROID_CERT_SHA256:-}
+      MEETING_CAPTION_MODEL: ${MEETING_CAPTION_MODEL:-onnx-community/whisper-tiny}
+      MEETING_CAPTION_MODEL_BASE: ${MEETING_CAPTION_MODEL_BASE:-}
       PUSH_ENABLED: ${PUSH_ENABLED:-false}
       PUSH_VAPID_PRIVATE_KEY: ${PUSH_VAPID_PRIVATE_KEY:-}
       PUSH_VAPID_SUBJECT: ${PUSH_VAPID_SUBJECT:-}
@@ -78,6 +85,12 @@ services:
       MEETINGS_SFU_API_SECRET: ${MEETINGS_SFU_API_SECRET:-}
       MEETINGS_SFU_MAX_PARTICIPANTS: ${MEETINGS_SFU_MAX_PARTICIPANTS:-100}
       ENTERPRISE_SEARCH_ENABLED: ${ENTERPRISE_SEARCH_ENABLED:-true}
+      SEMANTIC_OPENSEARCH_URL: ${SEMANTIC_OPENSEARCH_URL:-}
+      SEMANTIC_OPENSEARCH_INDEX: ${SEMANTIC_OPENSEARCH_INDEX:-freecollab-semantic-v1}
+      SEMANTIC_OPENSEARCH_USERNAME: ${SEMANTIC_OPENSEARCH_USERNAME:-}
+      SEMANTIC_OPENSEARCH_PASSWORD: ${SEMANTIC_OPENSEARCH_PASSWORD:-}
+      SEMANTIC_OPENSEARCH_CA_BUNDLE: ${SEMANTIC_OPENSEARCH_CA_BUNDLE:-}
+      SEMANTIC_OPENSEARCH_TIMEOUT: ${SEMANTIC_OPENSEARCH_TIMEOUT:-8}
       ENTERPRISE_VAULT_URL: ${ENTERPRISE_VAULT_URL:-}
       ENTERPRISE_VAULT_TOKEN: ${ENTERPRISE_VAULT_TOKEN:-}
       ENTERPRISE_VAULT_MOUNT: ${ENTERPRISE_VAULT_MOUNT:-transit}
@@ -164,6 +177,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 12
+
+  ai-runtime-worker:
+    image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}
+    # Independent lane: a slow model request must not hold reminders or app jobs.
+    command: ["python", "-m", "app.services.ai_runtime_worker"]
+    environment: *backend_environment
+    volumes:
+      - files:/data/files
+    depends_on:
+      backend:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    restart: unless-stopped
 
   integration-worker:
     image: ${FREECOLLAB_IMAGE_PREFIX:-freecollab}-backend:${FREECOLLAB_IMAGE_TAG:-pilot}

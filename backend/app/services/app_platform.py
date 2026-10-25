@@ -11,15 +11,16 @@ import re
 import secrets
 import time
 from types import SimpleNamespace
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import urlsplit
 
 from fastapi import HTTPException
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 from sqlalchemy import and_, delete, func, or_, update
 from sqlmodel import select
 
 from ..models.app_platform import AppAIDraft, AppCard, AppInstallation, AppJob, AppRevision, ChannelRecapSchedule
+from ..models.account_security import AccountSecurity
 from ..models.channel import Channel
 from ..models.message import Message
 from ..models.user import User
@@ -45,11 +46,25 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True, str_strip_whitespace=True)
 
 
+# Declaration metadata is normalized; explicitly reviewed content is literal.
+ReviewedArgument = Annotated[str, StringConstraints(strip_whitespace=False)]
+
+
 class Argument(Strict):
     name: str = Field(pattern=r"^[a-z][a-z0-9_]{0,31}$")
     label: str = Field(min_length=1, max_length=80)
     required: bool = True
     max_length: int = Field(default=2000, ge=1, le=8000)
+    type: Literal["text", "number", "boolean", "choice"] = "text"
+    choices: list[str] = Field(default_factory=list, max_length=30)
+
+    @model_validator(mode="after")
+    def typed(self):
+        if len(set(self.choices)) != len(self.choices) or any(not value or len(value) > self.max_length for value in self.choices):
+            raise ValueError("Choose unique bounded argument choices")
+        if (self.type == "choice") != bool(self.choices):
+            raise ValueError("Only a choice argument has a nonempty choice list")
+        return self
 
 
 class Command(Strict):
@@ -79,6 +94,7 @@ class Manifest(Strict):
     description: str = Field(min_length=1, max_length=400)
     scopes: list[Literal["commands:invoke", "cards:write", "actions:write"]] = Field(min_length=1, max_length=3)
     commands: list[Command] = Field(default_factory=list, max_length=8)
+    secure_foreground: bool = False
 
     @model_validator(mode="after")
     def coherent(self):
@@ -88,6 +104,8 @@ class Manifest(Strict):
             raise ValueError("Commands require commands:invoke")
         if any(row.protocol != "signed-webhook" for row in self.commands) and "actions:write" not in self.scopes:
             raise ValueError("Provider write actions require actions:write")
+        if self.secure_foreground and "cards:write" in self.scopes:
+            raise ValueError("Secure foreground apps cannot publish plaintext card callbacks")
         return self
 
 
@@ -117,9 +135,17 @@ class Invocation(Strict):
     request_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,80}$")
     channel_id: str = Field(min_length=1, max_length=128)
     command: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
-    arguments: dict[str, str] = Field(default_factory=dict)
+    arguments: dict[str, ReviewedArgument] = Field(default_factory=dict)
     confirm: bool
     disclose_to_app: bool
+    expected_generation: int = Field(ge=1)
+
+    @model_validator(mode="before")
+    @classmethod
+    def reviewed_generation(cls, value):
+        if isinstance(value, dict) and "expected_generation" not in value:
+            raise ValueError("Reload and review the current installed command and recipient, then send its expected_generation")
+        return value
 
 
 class CardField(Strict):
@@ -181,7 +207,7 @@ def channels(row):
     return json.loads(row.channel_ids_json)
 
 
-def native_channel(session, workspace_id, channel_id, user_id):
+def native_channel(session, workspace_id, channel_id, user_id, *, allow_secure=False):
     require_workspace_member(session, workspace_id, user_id)
     actor = session.get(User, user_id, populate_existing=True)
     if not actor or actor.is_blocked:
@@ -191,22 +217,22 @@ def native_channel(session, workspace_id, channel_id, user_id):
     if not mapping or mapping.workspace_id != workspace_id or not channel or channel.type in {"direct", "group_direct"}:
         raise HTTPException(404, "Choose a native workspace channel")
     require_channel_member(session, channel_id, user_id)
-    if is_secure_channel(session, channel_id):
+    if is_secure_channel(session, channel_id) and not allow_secure:
         raise HTTPException(409, "Apps and recurring AI do not receive encrypted-channel plaintext. Use explicitly reviewed context in the trusted-device copilot.")
 
 
-def install_grants(session, workspace_id, user_id, channel_ids):
+def install_grants(session, workspace_id, user_id, channel_ids, *, allow_secure=False):
     require_unrestricted(session)
     webhooks.require_grants(session, workspace_id, user_id, channel_ids)
     for channel_id in channel_ids:
-        native_channel(session, workspace_id, channel_id, user_id)
+        native_channel(session, workspace_id, channel_id, user_id, allow_secure=allow_secure)
 
 
 def allowed_installation(session, row):
     if not row or not row.enabled or row.revoked_at:
         return False
     try:
-        install_grants(session, row.workspace_id, row.granted_by, channels(row))
+        install_grants(session, row.workspace_id, row.granted_by, channels(row), allow_secure=manifest_for(row).secure_foreground)
         return True
     except HTTPException:
         return False
@@ -227,13 +253,21 @@ def cancel_pending(session, row):
         .values(status="cancelled", failure="Installation revoked or changed", claim_token=None, encrypted_payload=""))
 
 
+def lock_invoking_account(session, user_id):
+    """Use the same actor-first order as account erasure and shared AI usage."""
+    session.execute(update(User).where(User.id == user_id).values(name=User.name))
+    session.execute(update(AccountSecurity).where(AccountSecurity.user_id == user_id)
+        .values(auth_version=AccountSecurity.auth_version))
+
+
 def save_installation(session, workspace_id, user_id, data, row=None):
+    lock_invoking_account(session, user_id)
     lock_workspace(session, workspace_id)
     for channel_id in sorted(data.channel_ids):
         lock_channel_writes(session, channel_id)
     session.expire_all()
     recheck_actor(session, user_id)
-    install_grants(session, workspace_id, user_id, data.channel_ids)
+    install_grants(session, workspace_id, user_id, data.channel_ids, allow_secure=data.manifest.secure_foreground)
     normalized, origin = webhooks.validate_destination(data.endpoint)
     # A provider token must never be attached to an arbitrary recipe URL.
     parts = urlsplit(normalized)
@@ -256,7 +290,7 @@ def save_installation(session, workspace_id, user_id, data, row=None):
         row = session.get(AppInstallation, row.id, populate_existing=True)
         if row.revoked_at or row.generation != data.expected_generation or row.app_id != data.manifest.app_id:
             raise HTTPException(409, "Installation changed; reload before granting a new version")
-        install_grants(session, workspace_id, user_id, channels(row))
+        install_grants(session, workspace_id, user_id, channels(row), allow_secure=manifest_for(row).secure_foreground)
         cancel_pending(session, row)
         row.generation += 1
     else:
@@ -290,6 +324,18 @@ def arguments_for(command, arguments):
         value = arguments.get(name, "")
         if not isinstance(value, str) or len(value) > field.max_length or "\x00" in value or field.required and not value.strip():
             raise HTTPException(422, "An installed command argument is missing or too long")
+        if value and field.type == "number":
+            from decimal import Decimal, InvalidOperation
+            import math
+            try:
+                if (not re.fullmatch(r"[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?", value)
+                        or not Decimal(value).is_finite() or not math.isfinite(float(value))): raise ValueError()
+            except (InvalidOperation, ValueError):
+                raise HTTPException(422, "Enter a finite number for this installed argument") from None
+        if value and field.type == "boolean" and value not in {"true", "false"}:
+            raise HTTPException(422, "Use true or false for this installed argument")
+        if value and field.type == "choice" and value not in field.choices:
+            raise HTTPException(422, "Choose an installed argument value")
     result = {name: arguments.get(name, "") for name in definitions}
     if command.protocol in {"google.calendar-event", "microsoft.calendar-event"}:
         try:
@@ -306,6 +352,8 @@ def arguments_for(command, arguments):
 def queue_invocation(session, row, actor_id, data):
     if not data.confirm or not data.disclose_to_app:
         raise HTTPException(422, "Review and explicitly approve the exact arguments shared with this app")
+    if data.expected_generation != row.generation:
+        raise HTTPException(409, "The installed app changed; review its current command and recipient")
     native_channel(session, row.workspace_id, data.channel_id, actor_id)
     if not allowed_installation(session, row) or data.channel_id not in channels(row):
         raise HTTPException(403, "App is not currently granted to this channel")
@@ -521,10 +569,9 @@ def ai_context(session, workspace_id, channel_id, owner_id):
 
 
 def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=None):
-    lock_workspace(session, workspace_id)
-    lock_channel_writes(session, channel_id)
-    session.expire_all()
-    recheck_actor(session, owner_id)
+    # Match the common provider budget/account-erasure lock order before an
+    # AIUsage row takes its invoking-account foreign-key reference.
+    copilot.grant(session, workspace_id, channel_id, owner_id, lock=True)
     config = ai_context(session, workspace_id, channel_id, owner_id)
     if data.expected_config_revision != config.revision:
         raise HTTPException(409, "Provider configuration changed; review the current destination before sending")
@@ -572,9 +619,20 @@ def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=N
         instructions += (' Return ONLY JSON {"actions":[{"installation_id":"...","command":"...","arguments":{"field":"value"}}]}.'
                          ' Propose one to three actions from this exact catalog, never execute them: ' + dump(app_specs))
     provider, revision = copilot.config_fields(config), config.revision
+    draft_id = secrets.token_hex(16)
+    messages = [{"role": "system", "content": instructions}, {"role": "user", "content": data.prompt + "\nSELECTED UNTRUSTED CONTEXT:\n" + selected_context}]
+    # Legacy app drafts and recurring recaps share the same reservations and
+    # usage timeline as foreground/durable Copilot, rather than bypass budgets.
+    from . import ai_runtime
+    ledger_id, runtime_provider = ai_runtime.reserve_external_call(session, workspace_id, channel_id, owner_id,
+        "app-draft:" + draft_id, provider, messages, expected_revision=revision, max_tokens=2048)
     session.commit()
-    answer = (complete or copilot.completion)(provider, {"model": provider.model, "stream": True, "max_tokens": 2048, "n": 1,
-        "messages": [{"role": "system", "content": instructions}, {"role": "user", "content": data.prompt + "\nSELECTED UNTRUSTED CONTEXT:\n" + selected_context}]})
+    try:
+        answer = (complete or copilot.completion)(provider, {"model": provider.model, "stream": True, "max_tokens": 2048, "n": 1, "messages": messages})
+    except Exception:
+        ai_runtime.settle(session, ledger_id, runtime_provider, sent=True); session.commit()
+        raise
+    ai_runtime.settle(session, ledger_id, runtime_provider, answer.get("usage")); session.commit()
     lock_workspace(session, workspace_id)
     lock_channel_writes(session, channel_id)
     session.expire_all()
@@ -617,7 +675,7 @@ def generate_draft(session, workspace_id, channel_id, owner_id, data, complete=N
                 result["actions"] = safe
         except (ValueError, TypeError, KeyError, StopIteration):
             raise HTTPException(502, "AI proposal exceeded the reviewed schema or destination; no action was executed") from None
-    row = AppAIDraft(workspace_id=workspace_id, channel_id=channel_id, owner_id=owner_id, kind=data.kind,
+    row = AppAIDraft(id=draft_id, workspace_id=workspace_id, channel_id=channel_id, owner_id=owner_id, kind=data.kind,
         provider_revision=revision, encrypted_result="")
     row.encrypted_result = seal_private(dump(result), "app-ai-draft", row.id)
     session.add(row)

@@ -79,6 +79,8 @@ def status(user=Depends(require_admin), session=Depends(get_session)):
             "enabled": integration_worker_required(integration_queues),
         },
         "integration_queues": integration_queues,
+        "ai_runtime_worker": {**worker_status(session, name="ai-runtime"),
+            "enabled": bool(settings.copilot_enabled and not settings.demo_instance)},
     }
 
 
@@ -145,6 +147,8 @@ def metrics(user=Depends(require_metrics_access), session=Depends(get_session)):
     integration_queues = integration_queue_status(session)
     integration_worker = worker_status(session, name="integrations")
     integrations_enabled = integration_worker_required(integration_queues)
+    ai_worker = worker_status(session, name="ai-runtime")
+    ai_enabled = bool(settings.copilot_enabled and not settings.demo_instance)
     lines = [
         "# HELP freecollab_mail_configured Whether configured mail delivery is usable.",
         "# TYPE freecollab_mail_configured gauge",
@@ -164,6 +168,12 @@ def metrics(user=Depends(require_metrics_access), session=Depends(get_session)):
         "# HELP freecollab_integrations_worker_healthy Whether the integration worker polled in the last 180 seconds.",
         "# TYPE freecollab_integrations_worker_healthy gauge",
         f"freecollab_integrations_worker_healthy {int(integration_worker['status'] == 'healthy')}",
+        "# HELP freecollab_ai_runtime_enabled Whether the independent AI lane is enabled for this installation.",
+        "# TYPE freecollab_ai_runtime_enabled gauge",
+        f"freecollab_ai_runtime_enabled {int(ai_enabled)}",
+        "# HELP freecollab_ai_runtime_worker_healthy Whether the actual AI worker polled in the last 180 seconds.",
+        "# TYPE freecollab_ai_runtime_worker_healthy gauge",
+        f"freecollab_ai_runtime_worker_healthy {int(ai_worker['status'] == 'healthy')}",
         "# HELP freecollab_integration_queue_records Retained jobs, connections, schedules or maintenance records by worker group and state.",
         "# TYPE freecollab_integration_queue_records gauge",
         *[f'freecollab_integration_queue_records{{queue="{name}",status="{status}"}} {count}'

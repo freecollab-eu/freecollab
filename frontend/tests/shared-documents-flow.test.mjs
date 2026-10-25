@@ -25,14 +25,14 @@ function fixture(component = 'SharedDocumentsPanel') {
   visit(tree);
   const state = { credential: 'actor', userId: 'member', generation: 1, pending: false, emissions: [], confirmed: 0, confirm: false, errors: [], values: {}, organizationBusy: false };
   const pending = { current: { yjs: false, create: false, comment: false, snapshot: false, organization: false, organizationBusy: false, busy: false } };
-  const drafts = { current: { create: false, rename: false, relation: false, source: false, busy: false } };
-  const context = { exports: {}, pending, drafts, Object, owner: { current: 'actor' }, generation: { current: 1 },
+  const drafts = { current: { create: false, rename: false, relation: false, source: false, busy: false, collections: false } };
+  const context = { exports: {}, pending, drafts, Object, collectionState: {current: {pending: new Map(), busy: new Map()}}, setCollectionBusy() {}, owner: { current: 'actor' }, generation: { current: 1 },
     mutation: { current: false }, pendingCallback: { current: value => { state.pending = value; state.emissions.push(value); } },
     busyCallback: { current: value => state.organizationBusy = value },
     api: { getAccessToken: () => state.credential, getCurrentUserId: () => state.userId }, current: request => request === context.generation.current && context.owner.current === state.credential,
     window: { confirm: () => { state.confirmed++; return state.confirm; }, matchMedia: () => ({ matches: false }) }, t: value => value, describe: failure => failure.message, message: failure => failure.message,
     setError: value => state.errors.push(value), setNotice: () => {}, setBusy: () => {},
-    newTitle: '', newBody: '', surfaceId: 'primary', fieldId: name => name, setNewTitleReferences() {}, setNewBodyReferences() {}, setCommentReferences() {}, commentReferenceDraft: { current: [] }, commentDraft: { current: '' }, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio', previewRef: { current: false }, readingPage: { current: null },
+    newTitle: '', newBody: '', surfaceId: 'primary', fieldId: name => name, setNewTitleReferences() {}, setNewBodyReferences() {}, setCommentReferences() {}, commentReferenceDraft: { current: [] }, commentDraft: { current: '' }, commentAnchor: null, commentAnchorRef: {current: null}, setCommentAnchor() {}, revisionDraft: { current: '' }, createId: { current: null }, renaming: { title: 'Original' }, flow: true, workspaceId: 'studio', previewRef: { current: false }, readingPage: { current: null },
   };
   const navigation = {};
   vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/conversation-navigation.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, {
@@ -297,7 +297,17 @@ test('actual document input callbacks retain selected IDs and a same-label repla
   const replacement = [{ ...chosen[0], id: 'other-peer' }];
   f.context.commentReferenceDraft.current = replacement;
   release(); await saving;
-  assert.deepEqual(written, ['channel', 'doc', 'Ask @Peer', chosen]);
+  assert.deepEqual(written, ['channel', 'doc', 'Ask @Peer', chosen, undefined]);
   assert.equal(clears, 0, 'a newer selection with identical visible text is still unsaved work');
   assert.equal(f.state.pending, true);
+});
+
+test('an in-flight material collection blocks parent organization writes before React renders', async () => {
+  const f = fixture('SharedDocumentOrganization'); let writes = 0;
+  f.context.collectionState.current.busy.set('actual-stack:child', true);
+  await f.run(async () => { writes++; });
+  assert.equal(writes, 0);
+  f.context.collectionState.current.busy.set('actual-stack:child', false);
+  await f.run(async () => { writes++; });
+  assert.equal(writes, 1);
 });

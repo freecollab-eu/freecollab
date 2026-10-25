@@ -1,8 +1,9 @@
 """Bounded collaborative document transport and immutable named revisions."""
 from datetime import datetime
+import base64
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Response
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import select
@@ -64,16 +65,38 @@ class SnapshotInput(StrictInput):
         return self
 
 
+class CommentAnchor(StrictInput):
+    version: int = Field(default=1, ge=1, le=1)
+    document_id: str = Field(pattern=r'^[A-Za-z0-9_-]{1,80}$')
+    field: str = Field(default='body', pattern=r'^body$')
+    start_relative: str = Field(min_length=4, max_length=4096)
+    end_relative: str = Field(min_length=4, max_length=4096)
+    quote: str = Field(min_length=1, max_length=2000)
+    source_sequence: int = Field(ge=1)
+
+    @field_validator('start_relative', 'end_relative')
+    @classmethod
+    def canonical_position(cls, value):
+        try:
+            raw = base64.b64decode(value, validate=True)
+            if not 1 <= len(raw) <= 2048 or base64.b64encode(raw).decode() != value:
+                raise ValueError()
+        except (ValueError, TypeError):
+            raise ValueError('Use bounded canonical Yjs relative positions') from None
+        return value
+
+
 class CommentInput(StrictInput):
     id: str = Field(pattern=r"^[A-Za-z0-9_-]{1,80}$")
     text: str | None = Field(default=None, min_length=1, max_length=2000)
     references: list[ReferenceInput] | None = Field(default=None, max_length=50)
+    anchor: CommentAnchor | None = None
     matrix_event_id: str | None = Field(default=None, min_length=1, max_length=1024)
 
     @model_validator(mode="after")
     def mode(self):
         if self.matrix_event_id:
-            if self.text is not None or self.references is not None:
+            if self.text is not None or self.references is not None or self.anchor is not None:
                 raise ValueError("Encrypted comments accept only an event reference")
         elif self.text is None or not self.text.strip():
             raise ValueError("Write a comment")
@@ -228,6 +251,10 @@ def comment(channel_id: str, document_id: str, data: CommentInput, background_ta
     document, _ = service.writable_document(session, channel_id, document_id, actor, credentials.credentials)
     secure = service.validate_mode(session, channel_id, actor, data.matrix_event_id, credentials.credentials)
     fields = None if secure else {"text": data.text.strip()}
+    if fields and data.anchor:
+        if data.anchor.document_id != document.id or data.anchor.source_sequence > document.update_count:
+            raise HTTPException(409, 'The comment passage belongs to a different or unsynchronized document')
+        fields['anchor'] = data.anchor.model_dump()
     if fields and data.references:
         leading = len(data.text[:len(data.text) - len(data.text.lstrip())].encode("utf-16-le")) // 2
         maximum = len(fields["text"].encode("utf-16-le")) // 2

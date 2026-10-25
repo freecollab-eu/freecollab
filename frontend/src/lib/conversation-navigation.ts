@@ -42,10 +42,13 @@ export function registerConversationNavigationGuard(owner: ConversationNavigatio
 }
 
 /** Call before user navigation mutates any selection, editor key or focus. */
-export function mayLeaveConversationWork(surfaceId?: string): boolean {
+export function mayLeaveConversationWork(surfaceId?: string, retainedSurfaceId?: string): boolean {
   for (const [key, guard] of guards) {
     if (!current(guard.owner)) { guards.delete(key); continue; }
     if (surfaceId !== undefined && guard.owner.surfaceId !== surfaceId) continue;
+    // A caller may retain one mounted, authorized surface while navigating
+    // its context. Every other surface still owns its normal leave decision.
+    if (retainedSurfaceId !== undefined && guard.owner.surfaceId === retainedSurfaceId) continue;
     if (checking.has(guard)) return false;
     let allowed = false;
     checking.add(guard);

@@ -66,8 +66,15 @@ def main():
             multipart = (f'--{boundary}\r\nContent-Disposition: form-data; name="file"; filename="fixture.txt"\r\nContent-Type: text/plain\r\n\r\n'.encode() + content + f"\r\n--{boundary}--\r\n".encode())
             file_id = request(base, "POST", f"/files/channels/{channel}", token=token, body=multipart, content_type="multipart/form-data; boundary=" + boundary)["id"]
             helper("pilot-backup.py", backup, "--env-file", source_env, "--project", project)
+            manifest = json.loads((backup / "manifest.json").read_text())
+            assert manifest["images"]["ai-runtime-worker"] == manifest["images"]["backend"]
+            assert "ai-runtime-worker" in manifest["running_services"]
+            source_running = compose(source_env, project, "ps", "--status", "running", "--services", profiles=["*"], capture_output=True, text=True).stdout.split()
+            assert set(source_running) & set(manifest["images"]) == set(manifest["running_services"])
             created_target = True
             helper("pilot-restore.py", backup, "--env-file", target_env, "--project", target, "--port", args.port + 1)
+            target_running = compose(target_env, target, "ps", "--status", "running", "--services", profiles=["*"], capture_output=True, text=True).stdout.split()
+            assert "ai-runtime-worker" not in target_running
             restored_token = request(restored, "POST", "/auth/login", payload=credentials)["access_token"]
             history = request(restored, "GET", f"/messages/channels/{channel}", token=restored_token)
             assert history[0]["content"] == "Encrypted content after restore"

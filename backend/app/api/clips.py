@@ -9,6 +9,7 @@ from ..models.clips import ChannelClip
 from ..models.file import File
 from ..services.auth import get_current_user, security
 from ..services import shared_documents as content
+from ..services import media_capture as capture_service
 from .files import file_metadata
 from ..services.field_references import ReferencedFields, require_field_reference_targets
 
@@ -42,6 +43,7 @@ class ClipInput(ReferencedFields):
     duration: float | None = Field(default=None, gt=0, le=300)
     transcript: str | None = Field(default=None, max_length=30000)
     captions: list[Caption] | None = Field(default=None, max_length=300)
+    publication_receipt: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
 
     @model_validator(mode="before")
     @classmethod
@@ -82,12 +84,25 @@ def list_clips(channel_id: str, user=Depends(get_current_user), session=Depends(
     return [public(session, row) for row in rows]
 
 
+@router.get("/{clip_id}")
+def get_clip(channel_id: str, clip_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    content.require_channel_member(session, channel_id, user.id)
+    row = session.get(ChannelClip, clip_id)
+    if not row or row.channel_id != channel_id:
+        raise HTTPException(404, "Clip not found")
+    return public(session, row)
+
+
 @router.post("", status_code=201)
 def create_clip(channel_id: str, data: ClipInput, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+    capture_service.lock_actor_scope(session, channel_id, user.id)
     content.locked_member(session, channel_id, user.id, credentials.credentials)
     secure = content.validate_mode(session, channel_id, user.id, data.matrix_event_id, credentials.credentials)
-    fields = None if secure else data.model_dump(mode="json", exclude={"id", "matrix_event_id", "file_id"}, exclude_none=True)
+    fields = None if secure else data.model_dump(mode="json", exclude={"id", "matrix_event_id", "file_id", "publication_receipt"}, exclude_none=True)
     checksum = content.fingerprint({"file_id": data.file_id, "fields": fields}, data.matrix_event_id)
+    if data.publication_receipt:
+        from ..services.media_capture import authorize_publication
+        authorize_publication(session, data.publication_receipt, channel_id, user.id, data.id)
     previous = session.get(ChannelClip, data.id)
     if previous:
         if previous.channel_id != channel_id:
@@ -121,6 +136,7 @@ def create_clip(channel_id: str, data: ClipInput, user=Depends(get_current_user)
 
 @router.delete("/{clip_id}")
 def delete_clip(channel_id: str, clip_id: str, user=Depends(get_current_user), credentials=Depends(security), session=Depends(get_session)):
+    capture_service.lock_actor_scope(session, channel_id, user.id)
     member = content.locked_member(session, channel_id, user.id, credentials.credentials)
     row = session.get(ChannelClip, clip_id)
     if not row or row.channel_id != channel_id:
@@ -129,6 +145,8 @@ def delete_clip(channel_id: str, clip_id: str, user=Depends(get_current_user), c
         raise HTTPException(403, "Only the author or channel administrator can remove this clip")
     from ..services.enterprise_governance import assert_deletion_allowed
     assert_deletion_allowed(session, channel_id, author_id=row.created_by)
+    from ..services.collaboration_privacy import tombstone_erased_clips
+    tombstone_erased_clips(session, [row.id])
     session.delete(row)
     session.commit()
     return {"deleted": True, "media_retained": True}

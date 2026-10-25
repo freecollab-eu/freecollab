@@ -2,10 +2,12 @@ import * as Y from 'yjs';
 import { MatrixEvent, type MatrixClient } from 'matrix-js-sdk';
 import { api } from './api';
 import { getSecureMessaging } from './secure-client';
-import { authorNamespace, matrixIdentity, parseRevision, reduceWorkRevisions, resourceIdValid, validateSharedFields, WORK_DOCUMENT_PART, WORK_DOCUMENT_UPDATE, WORK_PROTOCOL, WORK_REVISION, type SharedDocumentFields, type SharedTaskFields, type SharedWorkFields, type SharedWorkKind, type VerifiedWorkEvent, type WorkContext, type WorkRecord, type WorkRevision } from './federated-work-model';
-import { decodeWorkUpdate, encodeWorkUpdate, replaceWorkText, validateWorkDocument, type FederatedDocumentState } from './federated-work-document';
+import { authorNamespace, matrixIdentity, parseRevision, reduceWorkRevisions, resourceIdValid, validateSharedFields, WORK_DOCUMENT_PART, WORK_DOCUMENT_UPDATE, WORK_PROTOCOL, WORK_PROTOCOL_V2, WORK_REVISION, type SharedDocumentFields, type SharedTaskFields, type SharedWorkFields, type SharedWorkKind, type VerifiedWorkEvent, type WorkContext, type WorkRecord, type WorkRevision } from './federated-work-model';
+import { decodeWorkUpdate, encodeWorkUpdate, replaceWorkText, setWorkDocumentReferences, validateWorkDocument, type FederatedDocumentState } from './federated-work-document';
+import { addedEncryptedReferences, encryptedReferenceTexts, rebaseEncryptedReferences, validateEncryptedReferences, type EncryptedFieldReferences } from './encrypted-work-references';
 import { pendingWorkPointers, pointerSessionDigest, removeWorkPointer, storeWorkPointer, type PendingWorkPointer } from './federated-work-pointers';
 import { acceptableWorkEncryptionOrigin } from './federated-work-trust';
+import { ENCRYPTED_WORK_PROTOCOL, ENCRYPTED_WORK_REVISION, parseEncryptedRevision, reduceEncryptedRevisions, type EncryptedWorkRecord, type EncryptedWorkRevision } from './encrypted-work-model';
 
 export * from './federated-work-model';
 export type { FederatedDocumentState } from './federated-work-document';
@@ -19,8 +21,9 @@ interface Dependencies {
   secure?: typeof getSecureMessaging;
   reconstruct?: (initial: string, updates: Array<{ id: string; update_base64: string }>) => Promise<FederatedDocumentState>;
 }
-export interface SharedWorkSnapshot { context: WorkContext; records: WorkRecord[]; warnings: string[]; pending_pointers: number; quarantined_event_ids: string[] }
-class CandidateFault extends Error {}
+export interface SharedWorkSnapshot { context: WorkContext; records: WorkRecord[]; reference_records?:EncryptedWorkRecord[]; warnings: string[]; pending_pointers: number; quarantined_event_ids: string[] }
+export class CandidateFault extends Error {}
+class SharedWorkDraftError extends Error {}
 export class FederatedWorkResourceError extends Error { constructor(readonly resourceId: string, message: string) { super(message); this.name = 'FederatedWorkResourceError'; } }
 const base = (channel: string) => '/connect/federation/channels/' + encodeURIComponent(channel);
 const MAX_EVENTS = 4000, MAX_PLAIN_BYTES = 8 * 1024 * 1024;
@@ -39,11 +42,11 @@ function reconstructInWorker(initial: string, updates: Array<{ id: string; updat
     worker.onerror = () => { finish(); reject(new Error('Encrypted document reconstruction could not run on this device.')); };
   });
 }
-function validateContext(value: WorkContext, channelId: string) {
-  if (value.protocol !== WORK_PROTOCOL || !/^[a-f0-9]{32}$/.test(value.connection_id) || value.channel_id !== channelId || typeof value.room_id !== 'string' || !value.room_id.startsWith('!') || !matrixIdentity(value.matrix_user_id) || value.matrix_user_id.split(':', 2)[1] !== value.local_server || typeof value.peer_server !== 'string' || value.peer_server === value.local_server || !Array.isArray(value.members) || value.members.length > 200 || value.members.some(member => !matrixIdentity(member.matrix_user_id) || ![value.local_server, value.peer_server].includes(member.matrix_user_id.split(':', 2)[1]) || typeof member.name !== 'string' || member.name.length > 200) || !value.members.some(member => member.matrix_user_id === value.matrix_user_id)) throw new Error('The current encrypted shared-work scope could not be verified.');
+export function validateContext(value: WorkContext & {mode?: string}, channelId: string) {
+  if (value.protocol !== WORK_PROTOCOL || !/^[a-f0-9]{32}$/.test(value.connection_id) || value.channel_id !== channelId || typeof value.room_id !== 'string' || !value.room_id.startsWith('!') || !matrixIdentity(value.matrix_user_id) || value.matrix_user_id.split(':', 2)[1] !== value.local_server || typeof value.peer_server !== 'string' || (value.mode === 'local' ? value.peer_server !== value.local_server : value.peer_server === value.local_server) || !Array.isArray(value.members) || value.members.length > 200 || value.members.some(member => !matrixIdentity(member.matrix_user_id) || ![value.local_server, value.peer_server].includes(member.matrix_user_id.split(':', 2)[1]) || typeof member.name !== 'string' || member.name.length > 200) || !value.members.some(member => member.matrix_user_id === value.matrix_user_id)) throw new Error('The current encrypted shared-work scope could not be verified.');
   return value;
 }
-async function trustedEvent(c: MatrixClient, context: WorkContext, pointer: Pointer, revoked: Set<string>): Promise<VerifiedWorkEvent> {
+export async function trustedEvent(c: MatrixClient, context: WorkContext, pointer: Pointer, revoked: Set<string>): Promise<VerifiedWorkEvent> {
   const raw = await c.fetchRoomEvent(context.room_id, pointer.matrix_event_id).catch(error => { if (error?.httpStatus === 404) throw new CandidateFault('The indexed event is unavailable.'); throw error; }), event = new MatrixEvent(raw);
   await c.decryptEventIfNeeded(event).catch(() => { throw new CandidateFault('The indexed event could not be decrypted.'); });
   const sender = event.getSender();
@@ -58,16 +61,19 @@ async function trustedEvent(c: MatrixClient, context: WorkContext, pointer: Poin
   // rejected, independently of a cached manual device verification flag.
   if (!acceptableWorkEncryptionOrigin(encryption)) throw new CandidateFault('A shared-work event has an untrusted encryption origin.');
   const curve = event.getSenderKey(), ed = event.getClaimedEd25519Key();
-  let trusted = false;
-  if (sender === c.getUserId() && !revoked.has(sender + '\0' + c.getDeviceId())) { const own = await crypt.getOwnDeviceKeys(); trusted = own.curve25519 === curve && own.ed25519 === ed; }
+  let trusted = false, verifiedDevice: string | undefined;
+  if (sender === c.getUserId() && !revoked.has(sender + '\0' + c.getDeviceId())) { const own = await crypt.getOwnDeviceKeys(); trusted = own.curve25519 === curve && own.ed25519 === ed; if (trusted) verifiedDevice = c.getDeviceId() || undefined; }
   if (!trusted) {
     const devices = await crypt.getUserDeviceInfo([sender], true);
-    for (const [id, device] of devices.get(sender) || []) if (!revoked.has(sender + '\0' + id) && device.getIdentityKey() === curve && device.getFingerprint() === ed && (await crypt.getDeviceVerificationStatus(sender, id))?.isVerified()) { trusted = true; break; }
+    for (const [id, device] of devices.get(sender) || []) if (!revoked.has(sender + '\0' + id) && device.getIdentityKey() === curve && device.getFingerprint() === ed && (await crypt.getDeviceVerificationStatus(sender, id))?.isVerified()) {
+      if (verifiedDevice && verifiedDevice !== id) throw new CandidateFault('This encrypted event has an ambiguous verified device identity.');
+      trusted = true; verifiedDevice = id;
+    }
   }
   if (!trusted) throw new CandidateFault('Verify the author’s exact encryption device before applying shared work.');
   const content = event.getContent();
   if (!content || typeof content !== 'object' || Array.isArray(content) || new TextEncoder().encode(JSON.stringify(content)).length > 48 * 1024) throw new CandidateFault('A shared-work event exceeds its content bound.');
-  return { event_id: pointer.matrix_event_id, sender, timestamp: event.getTs(), type: event.getType(), content };
+  return { event_id: pointer.matrix_event_id, sender, sender_device_id: verifiedDevice, timestamp: event.getTs(), type: event.getType(), content };
 }
 
 export class FederatedWorkClient {
@@ -76,6 +82,8 @@ export class FederatedWorkClient {
   private readonly secure: typeof getSecureMessaging;
   private readonly reconstruct: NonNullable<Dependencies['reconstruct']>;
   private readonly owner: string | null;
+  private readonly actor: string | null;
+  private readonly invalidate = () => this.stop();
   private binding = '';
   private localCursor = 0;
   private remoteCursor = 0;
@@ -88,12 +96,13 @@ export class FederatedWorkClient {
   private usable = false;
   constructor(readonly channelId: string, dependencies: Dependencies = {}) {
     this.request = dependencies.request || ((path, options) => api.request(path, options));
-    this.token = dependencies.token || (() => api.getAccessToken()); this.owner = this.token();
+    this.token = dependencies.token || (() => api.getAccessToken()); this.owner = this.token(); this.actor = api.getCurrentUserId();
     this.secure = dependencies.secure || getSecureMessaging; this.reconstruct = dependencies.reconstruct || reconstructInWorker;
+    if (typeof window !== 'undefined') { window.addEventListener('freecollab:auth-changed', this.invalidate); window.addEventListener('freecollab:session-expired', this.invalidate); }
   }
-  stop() { this.stopped = true; this.usable = false; this.pointers.clear(); this.events.clear(); this.pending.clear(); this.latest = null; }
-  hasCurrentScope() { return this.usable && !this.stopped && Boolean(this.owner) && this.owner === this.token(); }
-  private current() { if (this.stopped || !this.owner || this.owner !== this.token()) throw new Error('The signed-in shared-work account changed.'); }
+  stop() { this.stopped = true; this.usable = false; this.pointers.clear(); this.events.clear(); this.pending.clear(); this.latest = null; if (typeof window !== 'undefined') { window.removeEventListener('freecollab:auth-changed', this.invalidate); window.removeEventListener('freecollab:session-expired', this.invalidate); } }
+  hasCurrentScope() { return this.usable && !this.stopped && Boolean(this.owner) && this.owner === this.token() && this.actor === api.getCurrentUserId(); }
+  private current() { if (this.stopped || !this.owner || this.owner !== this.token() || this.actor !== api.getCurrentUserId()) throw new Error('The signed-in shared-work account changed.'); }
   private async context() {
     this.current(); const context = validateContext(await this.request<WorkContext>(base(this.channelId) + '/work-context'), this.channelId); this.current();
     const binding = context.connection_id + '\0' + context.room_id + '\0' + context.matrix_user_id;
@@ -122,11 +131,11 @@ export class FederatedWorkClient {
       if (++passes > 41) throw new Error('Encrypted shared work exceeds its bounded discovery pages.');
       const page = await this.request<IndexPage>(base(this.channelId) + '/work-index?local_after=' + this.localCursor + '&remote_after=' + this.remoteCursor); this.current();
       if (page.connection_id !== context.connection_id) throw new Error('The encrypted work index changed connection.');
-      for (const [source, after] of [[page.local, this.localCursor], [page.remote, this.remoteCursor]] as const) {
+      for (const [source, after, sourceServer] of [[page.local, this.localCursor,context.local_server], [page.remote, this.remoteCursor,context.peer_server]] as const) {
         if (!source || source.connection_id !== context.connection_id || source.status !== 'active' || !Array.isArray(source.items) || source.items.length > 50 || !Number.isSafeInteger(source.next_after) || source.next_after < after || typeof source.has_more !== 'boolean') throw new Error('The current shared-work index is invalid.');
         let previous = after;
         for (const row of source.items) {
-          if (!Number.isSafeInteger(row.sequence) || row.sequence <= previous || !row.matrix_event_id?.startsWith('$') || row.matrix_event_id.length > 1024 || !matrixIdentity(row.matrix_user_id)) throw new Error('An encrypted work pointer is invalid.');
+          if (!Number.isSafeInteger(row.sequence) || row.sequence <= previous || !row.matrix_event_id?.startsWith('$') || row.matrix_event_id.length > 1024 || !matrixIdentity(row.matrix_user_id)||row.matrix_user_id.split(':',2)[1]!==sourceServer) throw new Error('An encrypted work pointer is invalid.');
           const known = this.pointers.get(row.matrix_event_id);
           if (known && known.matrix_user_id !== row.matrix_user_id) throw new Error('A shared-work pointer changed authenticated author.');
           this.pointers.set(row.matrix_event_id, row); previous = row.sequence;
@@ -144,7 +153,7 @@ export class FederatedWorkClient {
     if (!Array.isArray(revocations.revoked_devices) || revocations.revoked_devices.length > 20000 || revocations.revoked_devices.some(row => !matrixIdentity(row.matrix_user_id) || typeof row.device_id !== 'string' || !row.device_id || row.device_id.length > 128)) throw new Error('The current shared-work device revocation snapshot is invalid.');
     const revoked = new Set(revocations.revoked_devices.map(row => row.matrix_user_id + '\0' + row.device_id));
     if (revoked.has(context.matrix_user_id + '\0' + c.getDeviceId())) throw new Error('This shared-work encryption device was removed.');
-    const revisions: WorkRevision[] = [], warnings: string[] = [], quarantined = new Set<string>(), rejectedByResource = new Map<string, string[]>(); let bytes = 0;
+    const revisions: WorkRevision[] = [], referenceRevisions:EncryptedWorkRevision[]=[], warnings: string[] = [], quarantined = new Set<string>(), rejectedByResource = new Map<string, string[]>(); let bytes = 0;
     this.events.clear();
     for (const pointer of this.pointers.values()) {
       let event: VerifiedWorkEvent;
@@ -153,8 +162,9 @@ export class FederatedWorkClient {
       this.current();
       bytes += new TextEncoder().encode(JSON.stringify(event.content)).length;
       if (bytes > MAX_PLAIN_BYTES) throw new Error('The decrypted shared-work view exceeds its device memory bound.');
+      if(event.type===ENCRYPTED_WORK_REVISION){if(context.work_protocols?.includes(ENCRYPTED_WORK_PROTOCOL)){try{referenceRevisions.push(await parseEncryptedRevision(event,context));}catch{quarantined.add(event.event_id);}}continue;}
       if (![WORK_REVISION, WORK_DOCUMENT_UPDATE, WORK_DOCUMENT_PART].includes(event.type)) continue;
-      if (event.content.protocol !== WORK_PROTOCOL || event.content.connection_id !== context.connection_id || !resourceIdValid(event.content.id, context.connection_id)) { quarantined.add(event.event_id); continue; }
+      if (!(event.content.protocol === WORK_PROTOCOL || event.content.protocol === WORK_PROTOCOL_V2 && context.work_protocols?.includes(WORK_PROTOCOL_V2)) || event.content.connection_id !== context.connection_id || !resourceIdValid(event.content.id, context.connection_id)) { quarantined.add(event.event_id); continue; }
       if (event.type === WORK_REVISION) {
         try { revisions.push(await parseRevision(event, context)); }
         catch {
@@ -175,14 +185,23 @@ export class FederatedWorkClient {
     }
     for (const row of records) { if (row.invalid.length) warnings.push('A shared resource contains unresolved or invalid revision ancestry.'); if (row.conflicts) warnings.push('Concurrent shared-work revisions need explicit review.'); }
     if (quarantined.size) warnings.push('Some indexed events are quarantined. This view contains available verified history and may be incomplete.');
-    this.current(); this.usable = true; this.latest = { context, records, warnings, pending_pointers: this.pending.size, quarantined_event_ids: [...quarantined] }; return this.latest;
+    const finalContext = await this.context(); this.current();
+    if (JSON.stringify(context.members) !== JSON.stringify(finalContext.members) || JSON.stringify(context.work_protocols) !== JSON.stringify(finalContext.work_protocols)) throw new Error('The current shared-work authority changed. Refresh before continuing.');
+    const finalRevocations = await this.request<typeof revocations>('/secure/devices/revocations?channel_id=' + encodeURIComponent(this.channelId)); this.current();
+    if (JSON.stringify(finalRevocations) !== JSON.stringify(revocations)) throw new Error('The current shared-work device authority changed. Refresh before continuing.');
+    const reference_records=reduceEncryptedRevisions(referenceRevisions).filter(row=>!row.invalid.length&&!row.conflicts&&!row.selected.archived&&row.kind!=='organization');
+    this.usable = true; this.latest = { context: finalContext, records, reference_records, warnings, pending_pointers: this.pending.size, quarantined_event_ids: [...quarantined] }; return this.latest;
   }
   private async publish(context: WorkContext, type: string, content: Record<string, unknown>) {
-    try { return await this.publishConfirmed(context, type, content); } catch (error) { this.usable = false; throw error; }
+    try { return await this.publishConfirmed(context, type, content); } catch (error) { if(!(error instanceof SharedWorkDraftError))this.usable = false; throw error; }
   }
   private async publishConfirmed(context: WorkContext, type: string, content: Record<string, unknown>) {
+    const payload={protocol: context.work_protocols?.includes(WORK_PROTOCOL_V2) ? WORK_PROTOCOL_V2 : WORK_PROTOCOL, connection_id: context.connection_id, ...content};
+    if(new TextEncoder().encode(JSON.stringify(payload)).length>48*1024)throw new SharedWorkDraftError('This change is too large. Shorten the text before sharing.');
     this.current(); const secure = await this.secure(); this.current();
-    const result = await secure.sendEvent(this.channelId, type, { protocol: WORK_PROTOCOL, connection_id: context.connection_id, ...content }, 'shared-work-' + crypto.randomUUID()); this.current();
+    const fresh = await this.context(); this.current();
+    if (JSON.stringify(fresh.members) !== JSON.stringify(context.members) || JSON.stringify(fresh.work_protocols) !== JSON.stringify(context.work_protocols)) throw new Error('The shared-work publishing authority changed. Refresh before saving.');
+    const result = await secure.sendEvent(this.channelId, type, payload, 'shared-work-' + crypto.randomUUID()); this.current();
     const digest = await pointerSessionDigest(this.owner!); this.current();
     const pending: PendingWorkPointer = { key: context.matrix_user_id + ':' + digest + ':' + result.event_id, owner: context.matrix_user_id, session_digest: digest, channel_id: this.channelId, connection_id: context.connection_id, matrix_event_id: result.event_id, created_at: Date.now() };
     this.pending.set(result.event_id, pending);
@@ -191,7 +210,9 @@ export class FederatedWorkClient {
   }
   async save(kind: SharedWorkKind, fields: SharedWorkFields, previous?: WorkRecord, mergeParents?: string[], archived = false) {
     const view = await this.load(); this.current();
-    const normalized = validateSharedFields(kind, fields);
+    const normalized = validateSharedFields(kind, fields, view.context.work_protocols?.includes(WORK_PROTOCOL_V2) ? WORK_PROTOCOL_V2 : WORK_PROTOCOL, view.context.connection_id);
+    if ('references' in normalized) { const known=view.records.find(row=>row.id===previous?.id&&row.kind===kind),prior=known?.selected.fields;
+      await this.validateReferences(view,addedEncryptedReferences(prior?encryptedReferenceTexts(prior as unknown as Record<string,unknown>):{},prior&&'references' in prior?prior.references:undefined,encryptedReferenceTexts(normalized as unknown as Record<string,unknown>),normalized.references)); }
     if (kind === 'task') { const assignee = (normalized as SharedTaskFields).assignee_matrix_id; if (assignee && !view.context.members.some(member => member.matrix_user_id === assignee)) throw new Error('Choose a current shared-channel participant.'); }
     let parents: string[] = [], id: string;
     if (previous) {
@@ -211,9 +232,22 @@ export class FederatedWorkClient {
     if (!record || !record.history.some(row => row.event_id === eventId)) throw new Error('The encrypted revision acknowledgement could not be verified.');
     return record;
   }
-  async createDocument(title: string) {
+  private async validateReferences(view: SharedWorkSnapshot, references?: EncryptedFieldReferences) {
+    const values = Object.values(references || {}).flat();
+    if (values.some(ref => ref.kind === 'participant' && !view.context.members.some(member => member.matrix_user_id === ref.id))) throw new Error('Choose a current verified room participant.');
+    const unknown = values.filter(ref => ref.kind === 'resource' && !view.records.some(row => row.id === ref.id && (!ref.resource_kind || row.kind === ref.resource_kind) && !row.invalid.length && !row.conflicts && !row.selected.archived));
+    if (unknown.length || values.some(ref => ref.kind === 'message')) {
+      const { EncryptedWorkClient, verifyEncryptedRoomEvent } = await import('./encrypted-work-api'); this.current();
+      if (unknown.length) { const generic = new EncryptedWorkClient(this.channelId); try { const snapshot = await generic.load(); this.current(); if (snapshot.context.connection_id !== view.context.connection_id || snapshot.context.room_id !== view.context.room_id || unknown.some(ref => !snapshot.records.some(row => row.id === ref.id && (!ref.resource_kind || row.kind === ref.resource_kind) && !row.invalid.length && !row.conflicts && !row.selected.archived))) throw new Error('The selected encrypted resource is no longer available.'); } finally { generic.stop(); } }
+      for (const ref of values.filter(ref => ref.kind === 'message')) { await verifyEncryptedRoomEvent(this.channelId, ref.id, { requireCurrentParticipant: false }); this.current(); }
+    }
+  }
+  async createDocument(title: string, references?: EncryptedFieldReferences) {
+    const view = await this.load(); this.current();
+    if (references && !view.context.work_protocols?.includes(WORK_PROTOCOL_V2)) throw new Error('Both installations must support encrypted document references.');
+    await this.validateReferences(view, references);
     const doc = new Y.Doc();
-    try { doc.getText('title').insert(0, title.trim()); doc.getText('body'); validateWorkDocument(doc); return await this.save('document', { title: title.trim(), initial_update_base64: encodeWorkUpdate(Y.encodeStateAsUpdate(doc)) }); }
+    try { doc.getText('title').insert(0, title); doc.getText('body'); if (references) setWorkDocumentReferences(doc, references, view.context.connection_id); validateWorkDocument(doc); return await this.save('document', { title, initial_update_base64: encodeWorkUpdate(Y.encodeStateAsUpdate(doc)) }); }
     finally { doc.destroy(); }
   }
   private async documentUpdates(record: WorkRecord) {
@@ -244,18 +278,26 @@ export class FederatedWorkClient {
     return updates.sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
   }
   async document(record: WorkRecord): Promise<FederatedDocumentState> {
-    this.current(); if (!this.latest) await this.load();
+    this.current(); await this.load();
     if (!this.hasCurrentScope()) throw new Error('Refresh current shared-work access before opening a document.');
     const current = this.latest?.records.find(row => row.id === record.id);
     if (!current || current.kind !== 'document' || current.conflicts || current.invalid.length) throw new FederatedWorkResourceError(record.id, 'A verified, complete and conflict-free shared document is required.');
     let state: FederatedDocumentState;
     try { state = await this.reconstruct((current.selected.fields as SharedDocumentFields).initial_update_base64, await this.documentUpdates(current)); }
     catch (error) { this.current(); current.invalid.push(current.root_event_id); throw new FederatedWorkResourceError(record.id, error instanceof Error ? error.message : 'The shared document could not be reconstructed.'); }
-    this.current(); return state;
+    this.current();
+    if (state.references) { if (!this.latest?.context.work_protocols?.includes(WORK_PROTOCOL_V2)) throw new FederatedWorkResourceError(record.id, 'This document requires encrypted reference support.'); validateEncryptedReferences({ title: state.title, body: state.body }, state.references, this.latest.context.connection_id); }
+    return state;
   }
-  async saveDocument(record: WorkRecord, original: FederatedDocumentState, title: string, body: string) {
+  async saveDocument(record: WorkRecord, original: FederatedDocumentState, title: string, body: string, references?: EncryptedFieldReferences) {
+    const initialView = await this.load(); this.current();
+    const nextReferences = references || Object.fromEntries((['title', 'body'] as const).map(field => [field, rebaseEncryptedReferences(original[field], field === 'title' ? title : body, original.references?.[field] || [])]));
+    const normalized = validateEncryptedReferences({ title, body }, nextReferences, initialView.context.connection_id);
+    if (normalized && !initialView.context.work_protocols?.includes(WORK_PROTOCOL_V2)) throw new Error('Both installations must support encrypted document references.');
+    const verifiedOriginal=await this.document(record); this.current();
+    await this.validateReferences(this.latest!,addedEncryptedReferences({title:verifiedOriginal.title,body:verifiedOriginal.body},verifiedOriginal.references,{title,body},normalized));
     const baseDoc = new Y.Doc(); let update: Uint8Array;
-    try { Y.applyUpdate(baseDoc, decodeWorkUpdate(original.update_base64, 512 * 1024)); const vector = Y.encodeStateVector(baseDoc); replaceWorkText(baseDoc, 'title', title); replaceWorkText(baseDoc, 'body', body); validateWorkDocument(baseDoc); update = Y.encodeStateAsUpdate(baseDoc, vector); }
+    try { Y.applyUpdate(baseDoc, decodeWorkUpdate(original.update_base64, 512 * 1024)); const vector = Y.encodeStateVector(baseDoc); replaceWorkText(baseDoc, 'title', title); replaceWorkText(baseDoc, 'body', body); if (normalized || original.references) setWorkDocumentReferences(baseDoc, normalized, initialView.context.connection_id); validateWorkDocument(baseDoc); update = Y.encodeStateAsUpdate(baseDoc, vector); }
     finally { baseDoc.destroy(); }
     if (update.length <= 2) return original;
     const view = await this.load(); const current = view.records.find(row => row.id === record.id);

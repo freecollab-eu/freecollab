@@ -9,7 +9,7 @@ const source = readFileSync(new URL('../src/lib/secure/files.ts', import.meta.ur
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
 const previewHelpers = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/file-preview.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: previewHelpers, File });
-function fixture({ peerServer } = {}) {
+function fixture({ peerServer, recordingVerifier } = {}) {
   const exports = {}, events = [], media = new Map(), transactions = new Map(), uploads = [], downloads = [];
   const control = { owner: 'owner', failAfterSend: false, upload: null };
   function event(content, sender = '@fc_owner:local.test', id = '$' + crypto.randomUUID()) {
@@ -24,7 +24,8 @@ function fixture({ peerServer } = {}) {
     } };
   const secureMessaging = { handles: async () => true, roomFor: async channel => ({ c, room: { oldState: {} }, roomId: channel === 'channel' ? '!room:local.test' : '!other-room:local.test', federatedPeerServer: peerServer }),
     events: async () => events,
-    sendEvent: async (channel, type, content, transactionId) => {
+    sendEvent: async (channel, type, content, transactionId, options) => {
+      control.publication = {transactionId,options};
       if (transactionId && transactions.has(transactionId)) return { event_id: transactions.get(transactionId) };
       const item = event(content, c.getUserId()); events.push(item);
       if (transactionId) transactions.set(transactionId, item.getId());
@@ -33,7 +34,7 @@ function fixture({ peerServer } = {}) {
     },
     getDecryptedEvent: async (channel, id) => { const item = events.find(e => e.getId() === id); if (!item) throw new Error('missing event'); return item; },
   };
-  vm.runInNewContext(compiled, { exports, require: name => name === 'matrix-encrypt-attachment' ? { encryptAttachment, decryptAttachment } : name === '../file-preview' ? previewHelpers : { secureMessaging },
+  vm.runInNewContext(compiled, { exports, require: name => name === 'matrix-encrypt-attachment' ? { encryptAttachment, decryptAttachment } : name === '../file-preview' ? previewHelpers : name === '../meeting-capture-proof' ? {verifyEncryptedRecordingFile:recordingVerifier || (async()=>{throw Error('unverified recording');})} : { secureMessaging },
     crypto, TextEncoder, Uint8Array, Blob, File, DOMException, AbortController,
     fetch: async (url, options) => { downloads.push({ url, options }); return new Response(media.get(decodeURIComponent(url.split('/').at(-1))) || new Uint8Array([1])); } });
   return { provider: exports.secureFileProvider, verifyReferences: exports.verifiedSecureFileReferenceIds, getReference: exports.getVerifiedSecureFileReference, events, media, uploads, downloads, event, control };
@@ -139,4 +140,28 @@ test('only an explicitly bound peer domain may supply remote encrypted files and
   assert.equal(await (await provider.download(remote)).text(), 'private attachment bytes');
   await assert.rejects(provider.delete(remote), /owner/);
   await assert.rejects(provider.upload('channel', file(), { ...opts(), documentId: remote.document_id }), /owner/);
+});
+
+
+test('capture key publication requires current foreground review, reserved transaction and encrypted proof',async()=>{
+ const f=fixture({recordingVerifier:async()=>{}}),proof={protocol:'test-fixture-proof',generation:1},authorize=async()=>{},controller=new AbortController();
+ await assert.rejects(f.provider.upload('channel',file(),{requestId:'fc-capture-file-one'}),/consent proof/);
+ await assert.rejects(f.provider.upload('channel',file(),{requestId:'plain',meetingCaptureProof:proof,beforePublish:authorize}),/consent proof/);
+ assert.equal(f.uploads.length,0);
+ const row=await f.provider.upload('channel',file(),{requestId:'fc-capture-file-one',meetingCaptureProof:proof,beforePublish:authorize,signal:controller.signal});
+ assert.equal(f.control.publication.transactionId,'fc-capture-file-one');assert.equal(f.control.publication.options.authorize,authorize);assert.equal(f.control.publication.options.signal,controller.signal);
+ assert.deepEqual(JSON.parse(JSON.stringify(f.events[0].getContent().meeting_capture)),proof);assert.equal(row.filename,'private-name.txt');
+});
+test('recording indexes and downloads quarantine missing or rejected proof without exposing the file key',async()=>{
+ const f=fixture(),template={document_id:'owner:recording',owner_id:'owner',version_number:1,request_id:'fc-capture-file-one',fingerprint:'a',name:'recording.webm',content_type:'video/webm',size:10,file:{url:'mxc://local.test/cipher',hashes:{sha256:'hash'},iv:'iv',key:{k:'secret',kty:'oct'},v:'v2'}};
+ f.events.push(f.event(template));assert.equal((await f.provider.list('channel')).length,0);
+ f.events[0]=f.event({...template,meeting_capture:{protocol:'forged'}});assert.equal((await f.provider.list('channel')).length,0);
+ await assert.rejects(f.provider.download({id:f.events[0].getId(),channel_id:'channel'}),/no longer available/);assert.equal(f.downloads.length,0);
+});
+
+test('a published recording with rejected consent stays quarantined and reports its actual verification failure',async()=>{
+ const rejection=new Error('The recorded participant withdrew consent.'),f=fixture({recordingVerifier:async()=>{throw rejection;}});
+ await assert.rejects(f.provider.upload('channel',file(),{requestId:'fc-capture-file-rejected',meetingCaptureProof:{protocol:'test-fixture-proof'},beforePublish:async()=>{}}),error=>error===rejection);
+ assert.equal(f.events.length,1);assert.equal((await f.provider.list('channel')).length,0);
+ assert.equal(f.downloads.length,0);
 });

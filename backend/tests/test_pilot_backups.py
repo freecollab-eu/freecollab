@@ -218,3 +218,158 @@ def test_s3_restore_refuses_old_archives_before_docker_or_target_mutations(tmp_p
         runpy.run_path(str(Path(__file__).resolve().parents[2] / "scripts/pilot-restore.py"), run_name="__main__")
     assert error.value.code == 1 and not target.exists() and calls == []
     assert "Automatic S3 cold restore is not supported" in capsys.readouterr().err
+
+
+def test_ai_manifest_preserves_legacy_format_and_requires_the_backend_image(tmp_path):
+    backup = tmp_path / "backup"
+    manifest = fixture_backup(backup)
+    manifest["images"]["ai-runtime-worker"] = manifest["images"]["backend"]
+    manifest["running_services"].append("ai-runtime-worker")
+    (backup / "manifest.json").write_text(json.dumps(manifest))
+    assert helpers.check_backup(backup) == manifest
+    manifest["images"]["ai-runtime-worker"] = "sha256:" + "c" * 64
+    (backup / "manifest.json").write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match="backed-up backend image"):
+        helpers.check_backup(backup)
+
+
+@pytest.mark.parametrize("resume_ai,present,was_running", [
+    (False, True, True), (True, True, True), (True, True, False),
+    (False, True, False), (True, False, False), (False, False, False),
+])
+def test_real_restore_orchestration_quarantines_ai_and_pins_its_backend_image(
+        tmp_path, monkeypatch, capsys, resume_ai, present, was_running):
+    backup = tmp_path / "backup"
+    manifest = fixture_backup(backup)
+    with (backup / "pilot.env").open("a") as stream:
+        stream.write("COPILOT_ENABLED=true\n")
+    manifest["sha256"]["pilot.env"] = helpers.file_hash(backup / "pilot.env")
+    if present:
+        manifest["images"]["ai-runtime-worker"] = manifest["images"]["backend"]
+    if was_running:
+        manifest["running_services"].append("ai-runtime-worker")
+    (backup / "manifest.json").write_text(json.dumps(manifest))
+    calls, image_overrides, private_config = [], [], {}
+    module = ModuleType("pilot_common")
+    module.__dict__.update({key: value for key, value in vars(helpers).items() if not key.startswith("__")})
+    module.assert_fresh_project = lambda _: None
+    module.write_env = lambda path, values: private_config.update(values)
+    module.docker = lambda *args, **kwargs: None
+    def compose(env, project, *args, **kwargs):
+        calls.append((args, kwargs))
+        image_overrides.append(json.loads(Path(kwargs["extra_file"]).read_text()))
+    module.compose = compose
+    monkeypatch.setitem(sys.modules, "pilot_common", module)
+    command = ["pilot-restore.py", str(backup), "--project", "owned-ai-restore", "--env-file", str(tmp_path / "restored.env")]
+    if resume_ai:
+        command.append("--resume-ai")
+    monkeypatch.setattr(sys, "argv", command)
+    runpy.run_path(str(helpers.ROOT / "scripts/pilot-restore.py"), run_name="__main__")
+    startup, options = next(call for call in calls if "--no-build" in call[0])
+    assert ("ai-runtime-worker" in startup) == (resume_ai and was_running)
+    assert "mail-worker" not in startup and "integration-worker" not in startup
+    assert ("integrations" in options["profiles"]) == present
+    assert private_config["COPILOT_ENABLED"] == "true"  # Quarantine execution, retain configuration.
+    if present:
+        assert all(item["services"]["ai-runtime-worker"]["image"] == item["services"]["backend"]["image"] for item in image_overrides)
+    else:
+        assert all("ai-runtime-worker" not in item["services"] for item in image_overrides)
+    output = capsys.readouterr().out
+    assert ("AI worker remains stopped" in output) == (was_running and not resume_ai)
+    assert ("AI worker was not running" in output) == (resume_ai and not was_running)
+
+
+def test_restore_rejects_mismatched_ai_image_before_any_target_mutation(tmp_path, monkeypatch):
+    backup = tmp_path / "backup"
+    manifest = fixture_backup(backup)
+    manifest["images"]["ai-runtime-worker"] = "sha256:" + "c" * 64
+    (backup / "manifest.json").write_text(json.dumps(manifest))
+    calls = []
+    module = ModuleType("pilot_common")
+    module.__dict__.update({key: value for key, value in vars(helpers).items() if not key.startswith("__")})
+    def forbidden(*args, **kwargs):
+        calls.append(args)
+        raise AssertionError("Invalid AI image must fail before target mutation")
+    module.assert_fresh_project = module.compose = module.docker = module.write_env = forbidden
+    monkeypatch.setitem(sys.modules, "pilot_common", module)
+    monkeypatch.setattr(sys, "argv", ["pilot-restore.py", str(backup), "--project", "owned-ai-restore", "--env-file", str(tmp_path / "never.env"), "--resume-ai"])
+    with pytest.raises(ValueError, match="backed-up backend image"):
+        runpy.run_path(str(helpers.ROOT / "scripts/pilot-restore.py"), run_name="__main__")
+    assert calls == [] and not (tmp_path / "never.env").exists()
+
+
+def cold_backup_scenario(tmp_path, monkeypatch, *, was_running, fail_dump=False, wrong_ai_image=False):
+    source = tmp_path / "source.env"
+    source.write_text("POSTGRES_USER=fixture\nPOSTGRES_DB=fixture\nPOSTGRES_PASSWORD=fixture\nJWT_SECRET=fixture\nMESSAGE_ENCRYPTION_KEYS=fixture\n")
+    source.chmod(0o600)
+    output = tmp_path / "cold"
+    images = {name: "sha256:" + "a" * 64 for name in ("backend", "frontend", "db", "ai-runtime-worker", "mail-worker")}
+    if wrong_ai_image:
+        images["ai-runtime-worker"] = "sha256:" + "c" * 64
+    running = ["db", "backend", "frontend"] + (["ai-runtime-worker"] if was_running else [])
+    calls = []
+    module = ModuleType("pilot_common")
+    module.__dict__.update({key: value for key, value in vars(helpers).items() if not key.startswith("__")})
+    def compose(env, project, *args, **kwargs):
+        calls.append(("compose", args))
+        if args[0] == "ps":
+            if "--status" in args:
+                return SimpleNamespace(stdout="\n".join(running))
+            return SimpleNamespace(stdout="owned-" + args[-1] if args[-1] in images else "")
+        if args[0] in {"stop", "start"}:
+            return SimpleNamespace(stdout="")
+        if args[0] == "exec":
+            if fail_dump:
+                raise RuntimeError("Owned dump fixture failure")
+            kwargs["stdout"].write(b"owned synthetic database dump")
+            return SimpleNamespace(stdout="")
+        raise AssertionError("Unexpected Compose fixture command")
+    def docker(*args, **kwargs):
+        calls.append(("docker", args))
+        if args[0] == "inspect":
+            return SimpleNamespace(stdout=images[args[-1].removeprefix("owned-")])
+        if args[:2] == ("volume", "ls"):
+            return SimpleNamespace(stdout="owned-files" if args[-1].endswith("_files$") else "")
+        if args[0] == "run":
+            with tarfile.open(fileobj=kwargs["stdout"], mode="w") as archive:
+                info = tarfile.TarInfo("files/owned.txt"); info.size = 5
+                archive.addfile(info, BytesIO(b"owned"))
+            return SimpleNamespace(stdout="")
+        raise AssertionError("Unexpected Docker fixture command")
+    module.compose, module.docker = compose, docker
+    monkeypatch.setitem(sys.modules, "pilot_common", module)
+    monkeypatch.setattr(sys, "argv", ["pilot-backup.py", str(output), "--env-file", str(source), "--project", "owned-ai-backup"])
+    return output, calls, lambda: runpy.run_path(str(helpers.ROOT / "scripts/pilot-backup.py"), run_name="__main__")
+
+
+@pytest.mark.parametrize("was_running", [False, True])
+@pytest.mark.parametrize("fail_dump", [False, True])
+def test_cold_backup_fences_and_restarts_only_previously_running_ai_even_after_failure(tmp_path, monkeypatch, was_running, fail_dump):
+    output, calls, run = cold_backup_scenario(tmp_path, monkeypatch, was_running=was_running, fail_dump=fail_dump)
+    if fail_dump:
+        with pytest.raises(RuntimeError, match="Owned dump"):
+            run()
+    else:
+        run()
+        manifest = helpers.check_backup(output)
+        assert manifest["images"]["ai-runtime-worker"] == manifest["images"]["backend"]
+        assert ("ai-runtime-worker" in manifest["running_services"]) == was_running
+    stops = [args for kind, args in calls if kind == "compose" and args[0] == "stop"]
+    starts = [args for kind, args in calls if kind == "compose" and args[0] == "start"]
+    assert len(stops) == len(starts) == 1
+    assert ("ai-runtime-worker" in stops[0]) == was_running
+    assert ("ai-runtime-worker" in starts[0]) == was_running
+    assert "db" not in stops[0] and "db" not in starts[0]
+    assert "mail-worker" not in stops[0] and "mail-worker" not in starts[0]
+    positions = {name: next(index for index, (kind, args) in enumerate(calls) if kind == "compose" and args[0] == name) for name in ("stop", "exec", "start")}
+    assert positions["stop"] < positions["exec"] < positions["start"]
+
+
+def test_cold_backup_refuses_ai_image_mismatch_before_stopping_any_writer(tmp_path, monkeypatch, capsys):
+    output, calls, run = cold_backup_scenario(tmp_path, monkeypatch, was_running=True, wrong_ai_image=True)
+    with pytest.raises(SystemExit) as error:
+        run()
+    assert error.value.code == 1
+    assert not any(kind == "compose" and args[0] in {"stop", "start", "exec"} for kind, args in calls)
+    assert not (output / "manifest.json").exists()
+    assert "No writers were stopped" in capsys.readouterr().err

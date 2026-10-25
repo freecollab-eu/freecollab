@@ -64,6 +64,8 @@ function fixture(kind, props = {}) {
     '../lib/activity-feed-api': { activityFeedApi: { identifier: () => 'new-feed-id', posts: async () => ({ items: state.feedPosts, next_before_id: null, following: [] }), detail: async () => ({ post: state.feedPosts[0], comments: state.comments, votes: [], reactions: [] }), savePost: async (_, fields) => { state.calls.push({ kind: 'feed', fields: plain(fields) }); }, saveComment: async (_, __, fields) => { state.calls.push({ kind: 'comment', fields: plain(fields) }); } } },
     '../lib/files-api': { listChannelFiles: async () => [], downloadChannelFile: async () => new Blob() },
     '../lib/conversation-navigation': { registerConversationNavigationGuard: (owner, canLeave) => { const guard = { owner, canLeave }; state.guards.push(guard); return () => state.guards.splice(state.guards.indexOf(guard), 1); } },
+    // These behavior fixtures pass no feed/workflow target. Actual target leases and DOM focus have separate navigation proofs.
+    '../lib/useResourceTargetFocus': { useResourceTargetFocus: () => {} },
     '../lib/useModalFocus': { useModalFocus: (_, __, active = true) => { state.modalActive = active; } },
     './ContextualCopilot': { ContextualCopilot: 'copilot' }, './VersionProofs': { VersionProofs: 'proofs' },
     '../lib/chat-productivity': { chatProductivity: {} },

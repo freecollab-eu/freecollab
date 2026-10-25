@@ -21,6 +21,7 @@ from ..models.workspace import WorkspaceChannel, WorkspaceMember
 from ..services import connect_federation as federation
 from ..services import federated_work
 from ..models.federated_work import FederatedWorkPointer
+from ..models import encrypted_work as encrypted_work_models  # noqa: F401 -- register additive opaque receipt tables
 from ..services.auth import get_current_user
 from ..services.workspaces import require_workspace_admin, lock_workspace
 from ..services.request_guard import recheck_actor
@@ -204,6 +205,14 @@ def handle_wire(session, operation, peer, payload):
         if not connection or connection.peer_origin != peer:
             raise HTTPException(404, "Federated connection not found")
         return federated_work.page(session, connection, payload["after"], payload["limit"])
+    if operation == "work-authority":
+        if set(payload) != {"connection_id", "event_id"} or not isinstance(payload.get("connection_id"), str) or not isinstance(payload.get("event_id"), str) or not payload["event_id"].startswith("$") or len(payload["event_id"]) > 1024:
+            raise HTTPException(422, "Invalid encrypted authority request")
+        connection = session.get(FederatedConnection, payload["connection_id"])
+        if not connection or connection.peer_origin != peer or connection.status != "active" or not federation.authority_valid(session, connection):
+            raise HTTPException(403, "Current bilateral authority is required")
+        from ..services.encrypted_work import authority_payload
+        return authority_payload(session, connection.channel_id, payload["event_id"], issuer=federation.settings.matrix_server_name)
     if set(payload) != {"connection_id"} or not isinstance(payload["connection_id"], str):
         raise HTTPException(422, "Invalid federation connection request")
     connection = session.get(FederatedConnection, payload["connection_id"])
@@ -223,7 +232,7 @@ def handle_wire(session, operation, peer, payload):
 
 @router.post("/wire/{operation}")
 async def wire(operation: str, request: Request, response: Response, session=Depends(get_session)):
-    if operation not in {"accept", "roster", "revoke", "work-index"}:
+    if operation not in {"accept", "roster", "revoke", "work-index", "work-authority"}:
         raise HTTPException(404, "Unsupported federation operation")
     raw = bytearray()
     async for block in request.stream():
@@ -414,6 +423,9 @@ def work_context(channel_id: str, user=Depends(get_current_user), session=Depend
     if not account or not account.provisioned:
         raise HTTPException(409, "Start this device's encrypted messaging before opening shared work")
     return {"protocol": "freecollab-federated-work/1", "connection_id": connection.id,
+        "work_protocols": [value for value in federation.WORK_PROTOCOLS
+            if value in remote.get("work_protocols", ["freecollab-federated-work/1"])],
+        "room_protocols": [value for value in federation.ROOM_PROTOCOLS if value in remote.get("room_protocols", [])],
         "channel_id": channel_id, "workspace_id": connection.workspace_id, "room_id": binding.matrix_room_id,
         "matrix_user_id": account.matrix_user_id, "local_server": account.matrix_user_id.split(":", 1)[1],
         "peer_server": federation.peer_server_for_channel(session, channel_id),
@@ -462,6 +474,11 @@ def publish_work_pointer(channel_id: str, body: WorkPointer,
         raise HTTPException(409, "This installation's encrypted work index reached its supported event limit")
     row = FederatedWorkPointer(connection_id=connection.id, matrix_event_id=body.matrix_event_id,
         matrix_user_id=event["sender"], published_by=user.id)
+    from ..services.encrypted_work import record_authority
+    record_authority(session, channel_id, {**event, "event_id": body.matrix_event_id}, user.id)
     session.add(row)
+    session.flush()
+    from ..services.encrypted_work import notify_local
+    notify_local(session, channel_id, row.sequence, user.id)
     session.commit()
     return {"sequence": row.sequence, "matrix_event_id": row.matrix_event_id}

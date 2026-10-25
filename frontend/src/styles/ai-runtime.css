@@ -1,0 +1,31 @@
+.fc-ai-runtime { min-width: 0; margin: 1.5rem 0; padding-top: 1.25rem; border-top: 1px solid var(--fc-border); color: var(--fc-text); font-size: var(--fc-detail-size); line-height: 1.65; }
+.fc-ai-runtime > header, .fc-ai-run > header { display: flex; gap: .75rem; align-items: start; justify-content: space-between; }
+.fc-ai-runtime h4, .fc-ai-runtime h5 { font: 450 1.15rem/1.4 var(--fc-heading-font); margin: 0; }
+.fc-ai-runtime p { margin: .6rem 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.fc-ai-runtime fieldset { min-width: 0; margin: 1rem 0; padding: 1rem 0; border: 0; border-top: 1px solid var(--fc-border); }
+.fc-ai-runtime legend { padding: 0 .35rem 0 0; font-weight: 600; }
+.fc-ai-runtime label { display: flex; flex-direction: column; gap: .35rem; margin: .75rem 0; min-width: 0; }
+.fc-ai-runtime label:has(input[type=checkbox]) { flex-direction: row; align-items: start; gap: .6rem; }
+.fc-ai-runtime input:not([type=checkbox]), .fc-ai-runtime select, .fc-ai-runtime textarea { width: 100%; box-sizing: border-box; min-width: 0; min-height: 44px; padding: .6rem .7rem; background: var(--fc-surface); color: inherit; border: 1px solid var(--fc-border); border-radius: calc(var(--fc-radius) * .65); font: inherit; }
+.fc-ai-runtime input[type=checkbox] { margin-top: .3rem; width: 17px; height: 17px; accent-color: var(--fc-accent); flex-shrink: 0; }
+.fc-ai-runtime details { margin: .8rem 0; }
+.fc-ai-runtime summary { cursor: pointer; min-height: 44px; align-content: center; }
+.fc-ai-runtime .fc-button { display: inline-flex; align-items: center; gap: .45rem; margin: .25rem .4rem .25rem 0; min-height: 44px; white-space: normal; }
+.fc-ai-runtime aside, .fc-ai-budget, .fc-ai-recipient, .fc-ai-group-preview { padding: .9rem 1rem; margin: .8rem 0; background: var(--fc-accent-soft); border-radius: calc(var(--fc-radius) * .7); }
+.fc-ai-budget, .fc-ai-recipient { display: grid; gap: .4rem; }
+.fc-ai-runtime small { color: var(--fc-muted); font-size: var(--fc-caption-size); }
+.fc-ai-source-list { max-height: 280px; overflow: auto; overscroll-behavior: contain; }
+.fc-ai-source-list > label { padding: .6rem 0; border-bottom: 1px solid var(--fc-border); }
+.fc-ai-source-list span { min-width: 0; overflow-wrap: anywhere; }
+.fc-ai-run, .fc-ai-result { padding: 1rem 0; border-top: 1px solid var(--fc-border); }
+.fc-ai-run ol { display: grid; gap: .8rem; padding-left: 1.5rem; }
+.fc-ai-run li > span, .fc-ai-run li > small { display: block; }
+.fc-ai-result > div { padding: .8rem 0; border-top: 1px solid var(--fc-border); }
+.fc-ai-profile-actions { display: flex; flex-wrap: wrap; gap: .4rem; }
+.fc-ai-runtime [role=alert] { color: var(--fc-danger); }
+@media(max-width:420px) { .fc-ai-runtime > header { flex-wrap: wrap; } .fc-ai-runtime .fc-button { max-width: 100%; } }
+.fc-ai-plan-step, .fc-ai-execution { padding: .8rem 0; border-top: 1px solid var(--fc-border); }
+.fc-ai-execution { display: grid; gap: .35rem; }
+.fc-ai-runtime pre { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; }
+
+.fc-ai-runtime small, .fc-ai-runtime strong, .fc-ai-runtime li, .fc-ai-runtime label span { min-width: 0; overflow-wrap: anywhere; }

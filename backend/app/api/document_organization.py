@@ -14,6 +14,7 @@ from sqlmodel import select
 from ..database import get_session
 from ..models.shared_documents import SharedDocument, SharedDocumentComment
 from ..models.document_organization import SharedDocumentStack, SharedDocumentPlacement, SharedDocumentRelation, SharedDocumentStackReference
+from ..models.content_completion import ContentCollectionItem
 from ..services.auth import get_current_user, security
 from ..services import shared_documents as service
 from ..services.chat_notifications import require_native_channel
@@ -185,7 +186,8 @@ def delete_stack(channel_id: str, stack_id: str, expected_version: int = Query(g
     member = native_member(session, channel_id, actor, credentials.credentials)
     row = stack_for(session, channel_id, stack_id); manage_stack(row, member, actor)
     if row.version != expected_version or row.generation != expected_generation: raise HTTPException(409, 'The stack changed; reload before trying again')
-    if (session.exec(select(SharedDocumentPlacement).where(SharedDocumentPlacement.stack_id == row.id)).first()
+    if (session.exec(select(ContentCollectionItem).where(ContentCollectionItem.stack_id == row.id)).first()
+            or session.exec(select(SharedDocumentPlacement).where(SharedDocumentPlacement.stack_id == row.id)).first()
             or session.exec(select(SharedDocumentStackReference).where(SharedDocumentStackReference.stack_id == row.id)).first()):
         raise HTTPException(409, 'Move every document, including archived documents, and remove saved messages before deleting this stack')
     session.delete(row); commit(session)

@@ -19,6 +19,7 @@ from ..config import settings
 from ..models.channel import ChannelMember
 from ..models.notification import Notification, NotificationPreference
 from ..models.user import User
+from ..models.app_platform import AppInstallation, AppJob, WorkflowAppReceipt
 from ..models.workspace import WorkspaceChannel
 from ..models.workflow import (WorkflowActivity, WorkflowDefinition, WorkflowNotice,
                               WorkflowRevision, WorkflowRun, WorkflowVote)
@@ -45,7 +46,7 @@ class Conditions(BaseModel):
 
 class Step(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
-    kind: Literal["approval", "notify", "create_task"]
+    kind: Literal["approval", "notify", "create_task", "app_command"]
     recipients: list[str] = Field(default_factory=list, max_length=50)
     quorum: int = Field(default=1, ge=1, le=20)
     reminder_minutes: int = Field(default=60, ge=1, le=10080)
@@ -54,6 +55,11 @@ class Step(BaseModel):
     escalation_recipients: list[str] = Field(default_factory=list, max_length=20)
     project_id: str | None = Field(default=None, min_length=1, max_length=128)
     task_title: str | None = Field(default=None, min_length=1, max_length=200)
+    installation_id: str | None = Field(default=None, min_length=1, max_length=128)
+    command: str | None = Field(default=None, pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    expected_generation: int | None = Field(default=None, ge=1)
+    arguments: dict[str, str] = Field(default_factory=dict)
+    disclose_to_app: bool = False
 
     @field_validator("recipients", "escalation_recipients")
     @classmethod
@@ -75,6 +81,15 @@ class Step(BaseModel):
                 raise ValueError("Task creation does not add approvers")
         elif self.project_id or self.task_title:
             raise ValueError("Task fields belong to a task action")
+        if self.kind == "app_command":
+            if not self.installation_id or not self.command or not self.expected_generation or not self.disclose_to_app:
+                raise ValueError("Select a current installed command and explicitly approve its future arguments")
+            if self.recipients or self.escalation_recipients:
+                raise ValueError("App commands do not add approvers")
+            if len(self.arguments) > 8 or sum(len(key) + len(value) for key, value in self.arguments.items()) > 64000:
+                raise ValueError("App command arguments exceed their bound")
+        elif self.installation_id or self.command or self.expected_generation or self.arguments or self.disclose_to_app:
+            raise ValueError("App fields belong to an installed command action")
         if self.kind != "approval" and self.escalation_recipients:
             raise ValueError("Only approvals support escalation")
         return self
@@ -155,7 +170,7 @@ def current_person(session, channel_id, user_id):
 def validate_fields(session, workspace_id, channel_id, fields):
     if secure_channel(session, channel_id) and fields.trigger == "file_uploaded":
         raise HTTPException(409, "Encrypted attachment contents are not classified by the workflow server. Use manual, task, document or decision metadata.")
-    if secure_channel(session, channel_id) and (fields.conditions.status or any(s.kind == "create_task" for s in fields.steps)):
+    if secure_channel(session, channel_id) and (fields.conditions.status or any(s.kind in {"create_task", "app_command"} for s in fields.steps)):
         raise HTTPException(409, "Encrypted channels support metadata triggers, generic notices and approvals; content rules and server-created tasks are unavailable")
     for step in fields.steps:
         for user_id in set(step.recipients + step.escalation_recipients):
@@ -166,6 +181,15 @@ def validate_fields(session, workspace_id, channel_id, fields):
             project = session.get(ProjectBoard, step.project_id)
             if not project or project.channel_id != channel_id or project.archived:
                 raise HTTPException(404, "Choose an active project from this channel")
+        if step.kind == "app_command":
+            from . import app_platform
+            row = session.get(AppInstallation, step.installation_id)
+            if (not row or row.workspace_id != workspace_id or row.generation != step.expected_generation
+                    or channel_id not in app_platform.channels(row) or not app_platform.allowed_installation(session, row)):
+                raise HTTPException(409, "Choose a currently granted app installation and review its generation")
+            command = next((value for value in app_platform.manifest_for(row).commands if value.name == step.command), None)
+            if not command: raise HTTPException(404, "Workflow command is not installed")
+            app_platform.arguments_for(command, step.arguments)
 
 
 def definition_fields(session, definition, revision=None):
@@ -199,6 +223,13 @@ def finish(session, run, status, *, reason=None, now=None):
     run.status, run.failure = status, reason
     run.finished_at = run.updated_at = now
     run.lease_expires_at = None
+    if status != "completed":
+        receipts = session.exec(select(WorkflowAppReceipt).where(WorkflowAppReceipt.run_id == run.id)).all()
+        for receipt in receipts:
+            job = session.get(AppJob, receipt.app_job_id)
+            if job and job.status in {"pending", "processing"}:
+                job.status, job.failure, job.claim_token, job.encrypted_payload = "cancelled", "Workflow stopped", None, ""
+                session.add(job)
     activity(session, run, reason or status, now=now)
     session.add(run)
 
@@ -217,7 +248,7 @@ def _trim_history(session, channel_id):
         WorkflowRun.status.in_(TERMINAL)).order_by(WorkflowRun.finished_at, WorkflowRun.id).limit(100)).all()
     if not obsolete:
         raise HTTPException(429, "Workflow queue is full. Complete or cancel pending runs before retrying.")
-    for model in (WorkflowNotice, WorkflowVote, WorkflowActivity):
+    for model in (WorkflowNotice, WorkflowVote, WorkflowActivity, WorkflowAppReceipt):
         session.exec(delete(model).where(model.run_id.in_(obsolete)))
     session.exec(delete(WorkflowRun).where(WorkflowRun.id.in_(obsolete)))
 
@@ -329,7 +360,7 @@ def _process_run(session, run, definition, fields, now):
     if not grant_valid(session, definition):
         finish(session, run, "cancelled", reason="grant_revoked", now=now)
         return
-    if secure_channel(session, run.channel_id) and (fields.trigger == "file_uploaded" or fields.conditions.status or any(s.kind == "create_task" for s in fields.steps)):
+    if secure_channel(session, run.channel_id) and (fields.trigger == "file_uploaded" or fields.conditions.status or any(s.kind in {"create_task", "app_command"} for s in fields.steps)):
         finish(session, run, "cancelled", reason="encryption_mode_changed", now=now)
         return
     # Maximum five steps makes loops impossible; generated tasks never enqueue
@@ -353,6 +384,28 @@ def _process_run(session, run, definition, fields, now):
             activity(session, run, "task_created", now=now)
             _advance(run, now)
             continue
+        if step.kind == "app_command":
+            from . import app_platform
+            try:
+                row = session.get(AppInstallation, step.installation_id, populate_existing=True)
+                if not row or row.workspace_id != run.workspace_id:
+                    raise HTTPException(404, "Workflow app is unavailable")
+                job = app_platform.queue_invocation(session, row, definition.granted_by,
+                    app_platform.Invocation(request_id="wf_" + sha256((run.id + ":" + str(run.step_index)).encode()).hexdigest(),
+                        channel_id=run.channel_id, command=step.command, arguments=step.arguments,
+                        expected_generation=step.expected_generation, confirm=True, disclose_to_app=step.disclose_to_app))
+                receipt = session.get(WorkflowAppReceipt, (run.id, run.step_index))
+                if not receipt:
+                    session.flush(); session.add(WorkflowAppReceipt(run_id=run.id, step_index=run.step_index, app_job_id=job.id))
+                    activity(session, run, "app_command_queued", now=now)
+                if job.status == "delivered":
+                    activity(session, run, "app_command_delivered", now=now); _advance(run, now); continue
+                if job.status in {"failed", "uncertain", "cancelled"}:
+                    finish(session, run, "failed", reason="app_delivery_" + job.status, now=now); return
+                run.status, run.due_at, run.lease_expires_at, run.updated_at = "waiting_external", now + timedelta(seconds=5), None, now
+                session.add(run); return
+            except HTTPException:
+                finish(session, run, "cancelled", reason="app_configuration_or_grant_changed", now=now); return
         people = eligible(session, run, step)
         if len(people) < step.quorum:
             finish(session, run, "cancelled", reason="approval_membership_changed", now=now)
@@ -400,12 +453,12 @@ def run_pending(session, limit=10, *, now=None):
         return 0
     now = now or datetime.utcnow()
     available = or_(WorkflowRun.lease_expires_at.is_(None), WorkflowRun.lease_expires_at <= now)
-    ids = session.exec(select(WorkflowRun.id).where(WorkflowRun.status.in_(["queued", "processing", "waiting_approval"]),
+    ids = session.exec(select(WorkflowRun.id).where(WorkflowRun.status.in_(["queued", "processing", "waiting_approval", "waiting_external"]),
         WorkflowRun.due_at <= now, available).order_by(WorkflowRun.due_at, WorkflowRun.id).limit(min(max(limit, 1), 25))).all()
     processed = 0
     for identifier in ids:
         claimed = session.exec(update(WorkflowRun).where(WorkflowRun.id == identifier,
-            WorkflowRun.status.in_(["queued", "processing", "waiting_approval"]), WorkflowRun.due_at <= now, available).values(
+            WorkflowRun.status.in_(["queued", "processing", "waiting_approval", "waiting_external"]), WorkflowRun.due_at <= now, available).values(
                 status="processing", lease_expires_at=now + timedelta(seconds=LEASE_SECONDS), attempts=WorkflowRun.attempts + 1))
         session.commit()
         if claimed.rowcount != 1:
@@ -507,6 +560,9 @@ def run_data(session, run, *, viewer_id=None):
         "due_at": run.due_at, "deadline_at": run.deadline_at, "reminder_count": run.reminder_count,
         "escalated": run.escalated, "failure": run.failure, "created_at": run.created_at,
         "finished_at": run.finished_at, "may_vote": may_vote,
+        "external_actions": [{"step_index": receipt.step_index, "job_id": receipt.app_job_id,
+            "status": job.status if (job := session.get(AppJob, receipt.app_job_id)) else "unavailable"}
+            for receipt in session.exec(select(WorkflowAppReceipt).where(WorkflowAppReceipt.run_id == run.id)).all()],
         "votes": [{"user_id": v.user_id, "step_index": v.step_index, "choice": v.choice, "created_at": v.created_at,
                    "matrix_event_id": v.matrix_event_id,
                    **(native_vote_fields(v, run) if not secure_channel(session, run.channel_id) else {"note": None}),

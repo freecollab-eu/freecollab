@@ -274,11 +274,13 @@ def closure_state(session, user):
             for table in service.SQLModel.metadata.sorted_tables:
                 for fk in table.foreign_keys:
                     if fk.column.table.name == "workspace" and table.name not in permitted:
-                        if table.name in {"pilotfeedback", "enterprisesearchconnection"}:
+                        if table.name in {"pilotfeedback", "enterprisesearchconnection", "personalcalendarevent", "aipersonalkey", "aiprofileconsent", "aiusage"}:
                             # Own optional reports/personal search credentials
                             # are erased in this closure. Another participant's
                             # private records still protect the workspace.
                             if service._records(session, table.name, (fk.parent == member.workspace_id) & (table.c.user_id != user.id)): empty = False
+                        elif table.name in {"aimodelprofile", "aireadtool", "aibudget"}:
+                            pass  # Empty personal-workspace policy is erased explicitly below.
                         elif table.name == "slackimport":
                             imports = service._records(session, table.name, fk.parent == member.workspace_id)
                             own_imports = [row["id"] for row in imports if row["actor_id"] == user.id]
@@ -364,6 +366,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     if snapshot["fingerprint"] != data.preview_fingerprint: raise HTTPException(409, "Account dependencies changed; refresh the erasure preview")
     if not snapshot["can_erase_identity"]:
         raise HTTPException(409, "Transfer organization/workspace/channel ownership and finish data jobs before erasing this identity")
+    from ..services.collaboration_privacy import assert_account_cleanup_allowed
+    assert_account_cleanup_allowed(session, actor.id)
     from ..services.matrix_bridge import remove_secure_member
     for identifier in sorted(channel_ids): remove_secure_member(session, identifier, actor.id)
     recheck_actor(session, actor.id)
@@ -430,6 +434,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "copilotconversation", "user_id", [actor.id])
     from ..services.app_platform import close_account_resources
     close_account_resources(session, actor.id)
+    from ..services.collaboration_privacy import close_account_resources as close_collaboration_resources
+    close_collaboration_resources(session, actor.id)
     for name in ("copilotconsent", "copilotactivity", "cloudfileoauthattempt", "externalmeetingoauthattempt", "cloudfileimport", "activityfeedfollow", "activityfeedread"):
         _delete_rows(session, name, "user_id", [actor.id])
     _delete_rows(session, "activityfeedfollow", "target_id", [actor.id])
@@ -507,6 +513,8 @@ def close_account(data: ClosureInput, user=Depends(get_current_user), credential
     _delete_rows(session, "workspacemember", "user_id", [actor.id])
     _delete_rows(session, "personalworkspace", "user_id", [actor.id])
     for workspace_id in snapshot["empty_personal_workspaces"]:
+        from ..services.collaboration_privacy import cleanup_empty_workspace
+        cleanup_empty_workspace(session, workspace_id)
         for name in ("workspaceretentionpolicy", "workspaceidentitypolicy"):
             _delete_rows(session, name, "workspace_id", [workspace_id])
         _delete_rows(session, "workspace", "id", [workspace_id])

@@ -6,12 +6,12 @@ import { projectTasksApi } from './project-tasks-api';
 import { clipsApi, type ChannelClip } from './clips-api';
 export interface CopilotAgent { name: string; instructions: string; tools: string[] }
 export interface CopilotConversation { id: string; channel_id: string; secure: boolean; revision: number }
-export interface CopilotSource { kind: 'message' | 'file' | 'shared_document' | 'clip'; id: string; text?: string; event_ids?: string[]; revision?: number; expected_text_sha256?: string }
+export interface CopilotSource { kind: 'message' | 'file' | 'shared_document' | 'clip' | 'resource'; id: string; text?: string; event_ids?: string[]; revision?: number; expected_text_sha256?: string; reference?: string }
 export interface CopilotCitation extends CopilotSource { citation: string; fingerprint: string }
 export interface CopilotTurn { id: string; prompt: string; text: string; agent: string; ephemeral: boolean; revision?: number; citations: CopilotCitation[]; proposals: { id: string; tool: string; project_id: string; title: string; description: string }[]; tool_results: { tool: string; sources: string[] }[] }
 export interface CopilotState { globally_enabled: boolean; configured: boolean; config_revision: number; provider: { endpoint: string; model: string } | null; agents: CopilotAgent[]; consented: boolean; conversations: CopilotConversation[]; role: string }
 export interface ContextChoice { key: string; source: CopilotSource; label: string; preview: string; message?: Message; file?: ManagedFile; document?: SharedDocumentRecord; clip?: ChannelClip }
-export interface CopilotSourceReference { kind: 'message' | 'shared_document'; id: string }
+export interface CopilotSourceReference { kind: 'message' | 'shared_document' | 'file' | 'clip'; id: string }
 const path = (workspace: string) => '/workspaces/' + encodeURIComponent(workspace) + '/copilot';
 const json = (data: unknown, method = 'POST') => ({ method, body: JSON.stringify(data) });
 export const copilotApi = {
@@ -43,7 +43,7 @@ export async function loadCopilotChoices(channel: string): Promise<{ choices: Co
 }
 /** Resolve reviewed inline targets independently of the central picker's display caps. */
 export async function loadCopilotReferencedChoices(channel: string, refs: readonly CopilotSourceReference[]): Promise<{ choices: ContextChoice[]; secure: boolean }> {
-  if (refs.length > 8 || refs.some(ref => !ref || !['message', 'shared_document'].includes(ref.kind) || typeof ref.id !== 'string' || !ref.id || ref.id.length > 1024)
+  if (refs.length > 8 || refs.some(ref => !ref || !['message', 'shared_document', 'file', 'clip'].includes(ref.kind) || typeof ref.id !== 'string' || !ref.id || ref.id.length > 1024)
     || new Set(refs.map(ref => ref.kind + ':' + ref.id)).size !== refs.length) throw new Error('Choose up to eight unique sources.');
   const selected = refs.map(ref => ({ ...ref })), token = api.getAccessToken();
   const current = () => { if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.'); };
@@ -51,6 +51,10 @@ export async function loadCopilotReferencedChoices(channel: string, refs: readon
   const secureClient = await getSecureMessaging(); current();
   const secure = await secureClient.handles(channel); current();
   const documents = selected.some(ref => ref.kind === 'shared_document') ? await sharedDocumentsApi.list(channel) : [];
+  current();
+  const files = selected.some(ref => ref.kind === 'file') ? await listChannelFiles(channel) : [];
+  current();
+  const clips = selected.some(ref => ref.kind === 'clip') ? await clipsApi.list(channel) : [];
   current();
   let encryptedMessages: Message[] = [];
   const messageRefs = selected.filter(ref => ref.kind === 'message');
@@ -67,6 +71,16 @@ export async function loadCopilotReferencedChoices(channel: string, refs: readon
     encryptedMessages = await secureClient.getMessages(channel); current();
   }
   const choices = await Promise.all(selected.map(async (ref: CopilotSourceReference): Promise<ContextChoice> => {
+    if (ref.kind === 'file') {
+      const matches = files.filter(file => file.id === ref.id), file = matches[0];
+      if (matches.length !== 1 || file.channel_id !== channel || file.size > 12000 || !['text/plain', 'application/json'].includes(file.content_type)) throw unavailable();
+      return { key: 'file:' + ref.id, source: { ...ref }, label: file.filename, preview: file.filename, file };
+    }
+    if (ref.kind === 'clip') {
+      const matches = clips.filter(clip => clip.id === ref.id), clip = matches[0];
+      if (matches.length !== 1 || clip.channel_id !== channel || clip.resolution_error || !clip.fields?.transcript) throw unavailable();
+      return { key: 'clip:' + ref.id, source: { ...ref }, label: clip.fields.title, preview: (clip.fields.title + '\n' + clip.fields.transcript).slice(0, 12000), clip };
+    }
     if (ref.kind === 'shared_document') {
       const matches = documents.filter(document => document.id === ref.id);
       const document = matches[0];
@@ -91,7 +105,11 @@ export async function prepareCopilotSource(choice: ContextChoice, channel: strin
   const token = api.getAccessToken();
   if (choice.clip) {
     if (choice.clip.resolution_error || !choice.clip.fields?.transcript || secure && !choice.clip.matrix_event_id) throw new Error('Select an available clip transcript.');
-    return { ...choice.source, ...(secure ? { text: (choice.clip.fields.title + '\n' + choice.clip.fields.transcript).slice(0, 12000), event_ids: [choice.clip.matrix_event_id!] } : {}) };
+    const text = choice.clip.fields.title + '\n' + choice.clip.fields.transcript;
+    if (text.length > 12000) throw new Error('Select a passage from this transcript. Its full text exceeds the AI source limit; nothing was sent.');
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
+    return { ...choice.source, text, expected_text_sha256: Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join(''), ...(secure ? { event_ids: [choice.clip.matrix_event_id!] } : {}) };
   }
   if (choice.message) {
     if (secure) return { ...choice.source, text: choice.message.content, event_ids: [choice.message.id] };
@@ -102,9 +120,11 @@ export async function prepareCopilotSource(choice: ContextChoice, channel: strin
   if (choice.file) {
     const blob = await downloadChannelFile(choice.file);
     if (blob.size > 12000) throw new Error('Select a text file of at most 12 KB.');
-    const text = new TextDecoder('utf-8', { fatal: true }).decode(await blob.arrayBuffer());
+    const text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await blob.arrayBuffer());
     if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
-    return { ...choice.source, ...(secure ? { text, event_ids: [choice.file.id] } : {}) };
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text));
+    if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
+    return { ...choice.source, text, expected_text_sha256: Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join(''), ...(secure ? { event_ids: [choice.file.id] } : {}) };
   }
   if (!choice.document) throw new Error('Selected context is unavailable.');
   const document = new SharedDocumentSession(channel, choice.document);
@@ -113,7 +133,8 @@ export async function prepareCopilotSource(choice: ContextChoice, channel: strin
     const verified = document.state();
     if (!verified.ready || verified.locked || verified.error) throw new Error('Wait for a verified, available document before selecting AI context.');
     const title = document.doc.getText('title').toString(), body = document.doc.getText('body').toString();
-    const text = (title + '\n' + body).slice(0, 12000);
+    const text = title + '\n' + body;
+    if (text.length > 12000) throw new Error('Select a passage from this document. Its full text exceeds the AI source limit; nothing was sent.');
     if (token !== api.getAccessToken()) throw new Error('The signed-in account changed.');
     if (secure && !document.metadata.summary_event_id) throw new Error('The encrypted document reference is unavailable.');
     return { ...choice.source, text, revision: document.metadata.version, ...(secure ? { event_ids: [document.metadata.summary_event_id!] } : {}) };

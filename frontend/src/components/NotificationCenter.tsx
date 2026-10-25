@@ -87,12 +87,15 @@ export function NotificationCenter({ onClose, onOpenMessage }: NotificationCente
     const notificationOwner=api.getAccessToken();
     if (!notification.read && !await markAsRead(notification.id)) return;
     if(notificationOwner!==api.getAccessToken())return;
-    if (['activity_feed_post', 'workflow_run'].includes(notification.entity_type || '') && notification.channel_id) {
+    if (['activity_feed_post', 'workflow_run', 'encrypted_work'].includes(notification.entity_type || '') && notification.channel_id) {
       const token = api.getAccessToken(); setMarking(notification.id); setError('');
       try {
         const channel = await api.getChannel(notification.channel_id);
         if (token !== api.getAccessToken()) return;
-        window.dispatchEvent(new CustomEvent('freecollab:open-workspace-tools', { detail: { channel, tab: notification.entity_type === 'activity_feed_post' ? 'feed' : 'workflows' } })); onClose?.();
+        window.dispatchEvent(new CustomEvent('freecollab:open-workspace-tools', { detail: { channel,
+          tab: notification.entity_type === 'activity_feed_post' ? 'feed' : notification.entity_type === 'encrypted_work' ? 'shared-work' : 'workflows',
+          ...(notification.entity_type !== 'encrypted_work' ? { resourceId: notification.entity_id || undefined, resourceKind: notification.entity_type === 'workflow_run' ? 'workflow-run' : 'feed' } : {}),
+        } })); onClose?.();
       } catch (failure) { if (token === api.getAccessToken()) setError(failure instanceof Error ? failure.message : t('This conversation is unavailable.')); }
       finally { if (token === api.getAccessToken()) setMarking(''); }
       return;

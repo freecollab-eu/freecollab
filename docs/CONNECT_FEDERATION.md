@@ -179,8 +179,7 @@ Native server-side search, bots, DLP and export do not gain Matrix plaintext.
 
 The **Shared work** tab adds encrypted cross-installation tasks, calendar series
 and Yjs text documents. Each installation keeps opaque event pointers; verified
-clients derive the shared view from the same encrypted room. Native local task,
-calendar/provider and document records retain their own installation scope.
+clients derive the shared view from the same encrypted room. Negotiated version 2 adds projects, feeds, decisions, collections, file links, comments and reviewed device-owned workflows. The existing document workspace uses encrypted organization/collection adapters. Native local records retain their own IDs; shared room resources keep globally named IDs and open in their exact resource flow. Provider credentials and installation settings remain local.
 See [FEDERATED_WORK.md](FEDERATED_WORK.md) for collaboration semantics, explicit
 conflict handling, storage bounds, key recovery and availability limitations.
 
@@ -208,3 +207,12 @@ The proof cleans only its own containers/network/processes/data and writes its
 bounded result to `.freecollab/proof-results/connect-federation-browser-013.json`.
 Customer DNS, public TLS routing/firewalls, real customer IdP login, physical
 clients and production capacity remain installation-specific acceptance checks.
+
+
+## Negotiated capabilities and publication authority
+
+Signed roster responses advertise bounded `work_protocols` and `room_protocols` lists. An older peer with no list supports `freecollab-federated-work/1` only. Clients intersect current signed capabilities before publishing new schemas. `freecollab-federated-work/2` adds global selected references and anchored document links; `freecollab-encrypted-work/2` carries typed additional resources; `freecollab-work-authority/1` permits publication-time role receipts. Unknown operations are rejected. `freecollab-matrix-meeting/1` identifies the actual device signaling protocol, not a server decryption capability.
+
+Each work-pointer publication records the current local actor role under the channel/actor write fence, bound to the verified Matrix event, sender and room. The authenticated receipt endpoint and signed peer `work-authority` operation expose only that opaque historical authority. A later role change cannot make an earlier member-authored event an admin action. Legacy events without receipts stay creator-only. Remote operator status alone grants no content or moderation permission.
+
+The integration worker polls only bounded opaque index pages. Its coalesced notifications contain no resource title/body and respect current grants and notification preferences. Operations reports pending/scheduled/failed metadata; user erasure deletes private progress while preserving shared opaque history with a null local publisher. Channel purge removes the associated encrypted index/authority rows.

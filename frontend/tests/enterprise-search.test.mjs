@@ -17,6 +17,7 @@ function fixture({ secure = false } = {}) {
       state.secureCalls++; return {title:'Private title',text:'Private decrypted spruce',sequence:1};}},
     './project-tasks-api':{projectTasksApi:{projects:async()=>[],tasks:async()=>[]}},
     './activity-feed-api':{activityFeedApi:{posts:async()=>({items:[],next_before_id:null})}},
+    './encrypted-search-sources':{additionalEncryptedSources:async()=>({items:[],skipped:[],complete:true})},
     './files-api':{listChannelFiles:async()=>[],downloadChannelFile:async()=>{throw Error('Unexpected download');}},
   };
   const source=readFileSync(new URL('../src/lib/enterprise-search.ts',import.meta.url),'utf8');

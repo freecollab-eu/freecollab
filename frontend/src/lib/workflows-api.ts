@@ -6,9 +6,11 @@ import type { SSOReauthentication } from './integrations-api';
 
 export type WorkflowTrigger = 'manual' | 'file_uploaded' | 'document_created' | 'decision_updated' | 'task_updated';
 export interface WorkflowStep {
-  kind: 'approval' | 'notify' | 'create_task'; recipients: string[]; quorum: number;
+  kind: 'approval' | 'notify' | 'create_task' | 'app_command'; recipients: string[]; quorum: number;
   reminder_minutes: number; timeout_minutes: number; max_reminders: number; escalation_recipients: string[];
   project_id: string | null; task_title: string | null;
+  installation_id?: string | null; command?: string | null; expected_generation?: number | null;
+  arguments?: Record<string, string>; disclose_to_app?: boolean;
 }
 export interface WorkflowFields {
   name: string; trigger: WorkflowTrigger;
@@ -30,6 +32,7 @@ export interface WorkflowRun {
   due_at: string; deadline_at: string | null; reminder_count: number; escalated: boolean;
   failure: string | null; created_at: string; finished_at: string | null; may_vote: boolean; votes: WorkflowVote[];
   activity?: { kind: string; step_index: number; actor_id: string | null; created_at: string }[];
+  external_actions?: { step_index: number; job_id: string; status: string }[];
 }
 export interface WorkflowList { enabled: boolean; secure_channel: boolean; can_manage: boolean; definitions: WorkflowDefinition[] }
 export interface WorkflowRevision { revision: number; created_by: string; created_at: string; fields: WorkflowFields }

@@ -59,7 +59,7 @@ def invoke(platform, made, **changes):
     command = made["installation"]["manifest"]["commands"][0]
     arguments = {row["name"]: "Explicit " + row["name"] for row in command["arguments"]}
     data = {"request_id": "request_12345", "channel_id": "room", "command": command["name"], "arguments": arguments,
-            "confirm": True, "disclose_to_app": True}
+            "expected_generation": made["installation"]["generation"], "confirm": True, "disclose_to_app": True}
     data.update(changes)
     return platform[0].post(PREFIX + "/" + made["installation"]["id"] + "/commands", headers=platform[2]["member"], json=data)
 

@@ -21,6 +21,11 @@ from ..models.file import File
 from ..models.file_version import FileDocument, FileVersion
 from ..models.project_tasks import ProjectBoard, TaskCard
 from ..models.shared_documents import SharedDocument, SharedDocumentUpdate
+from ..models.message import Message
+from ..models.collaboration import Decision, DecisionRevision
+from ..models.clips import ChannelClip
+from ..models.integration_content import IntegrationContent, IntegrationContentRevision
+from ..models.workflow import WorkflowDefinition
 from . import activity_feed, project_tasks, shared_documents
 from .access import require_channel_member
 from .account_security import seal_private, unseal_private
@@ -34,7 +39,9 @@ MAX_SOURCES = 200
 MAX_SOURCE_BYTES = 2 * 1024 * 1024
 MAX_RESPONSE_CHARS = 1500000
 KINDS = {"document": SharedDocument, "project": ProjectBoard, "task": TaskCard,
-         "feed": ActivityFeedPost, "file-content": File}
+         "feed": ActivityFeedPost, "file-content": File, "message": Message,
+         "decision": Decision, "clip": ChannelClip, "linked-document": IntegrationContent,
+         "calendar": IntegrationContent, "workflow": WorkflowDefinition}
 
 
 def authorize(session, channel_id, actor_id):
@@ -67,9 +74,65 @@ def reference(actor_id, item):
         "enterprise-search-source", actor_id)
 
 
+def message_visible(session, row):
+    seen = {row.id}
+    parent_id = row.parent_id
+    for _ in range(32):
+        if not parent_id:
+            return True
+        if parent_id in seen:
+            return False
+        seen.add(parent_id)
+        parent = session.get(Message, parent_id, populate_existing=True)
+        if not parent or parent.deleted or parent.channel_id != row.channel_id:
+            return False
+        parent_id = parent.parent_id
+    return False
+
+
 def source(session, channel_id, kind, row):
     title, text, truncated, parent = "", "", False, None
-    if kind == "document":
+    if kind == 'decision':
+        from ..api.decisions import revision_data
+        revision = session.exec(select(DecisionRevision).where(DecisionRevision.decision_id == row.id).order_by(DecisionRevision.revision.desc()).limit(1)).first()
+        if not revision:
+            raise HTTPException(404, 'Decision has no current content')
+        if revision.content_mode != 'server':
+            raise HTTPException(409, 'Decision content is device-only')
+        fields = revision_data(session, row, revision)
+        title, text = fields['title'], fields['content']
+    elif kind == 'clip':
+        if row.content_mode != 'server':
+            raise HTTPException(409, 'Clip content is device-only')
+        fields = shared_documents.open_payload(session, channel_id, 'clip', row.id, row.id, row.encrypted_payload)
+        title, text = fields['title'], fields.get('transcript', '')
+    elif kind in ('linked-document', 'calendar'):
+        expected = 'documents' if kind == 'linked-document' else 'calendar'
+        if row.kind != expected:
+            raise HTTPException(404, 'Content kind does not match')
+        from ..api.integrations_content import latest_revision, serialize
+        revision = latest_revision(session, row.id)
+        if not revision or revision.deleted:
+            raise HTTPException(404, 'Content is no longer current')
+        if revision.content_mode != 'server':
+            raise HTTPException(409, 'Integration content is device-only')
+        fields = serialize(session, row, revision)['fields']
+        title = fields['title']
+        text = fields.get('notes', '') if kind == 'linked-document' else '\n'.join(fields.get(key, '') for key in ('description', 'location', 'starts_at', 'ends_at'))
+    elif kind == 'workflow':
+        from .workflow import definition_fields
+        fields = definition_fields(session, row)
+        title, text = fields.name, fields.trigger + '\n' + '\n'.join((step.task_title or '') for step in fields.steps)
+    elif kind == "message":
+        if row.deleted or not message_visible(session, row):
+            raise HTTPException(404, "Message or its parent is unavailable")
+        from .crypto import decrypt_message
+        try:
+            text = decrypt_message(row.content, channel_id) if row.encrypted else row.content
+        except Exception:
+            raise HTTPException(409, "Message could not be read") from None
+        title, parent = text.splitlines()[0][:160] if text else "Message", row.parent_id
+    elif kind == "document":
         if row.archived: raise HTTPException(404, "Document archived")
         updates = session.exec(select(SharedDocumentUpdate).where(SharedDocumentUpdate.document_id == row.id)
             .order_by(SharedDocumentUpdate.sequence).limit(1001)).all()
@@ -126,22 +189,32 @@ def source(session, channel_id, kind, row):
             truncated = len(text) > 100000; text = text[:100000]
         else: raise HTTPException(422, "File has no supported passive text extractor")
     result = {"id": row.id, "channel_id": channel_id, "kind": kind, "title": title, "text": text,
-        "created_by": getattr(row, "created_by", getattr(row, "uploader_id", "")),
+        "created_by": getattr(row, "created_by", getattr(row, "uploader_id", getattr(row, "author_id", ""))),
         "created_at": row.created_at.isoformat(), "parent_id": parent, "truncated": truncated}
+    result["source_revision"] = row_revision(row, session)
     result["version"] = fingerprint({**result, "revision": getattr(row, "revision", None),
         "updates": getattr(row, "update_count", None)})
-    result["source_revision"] = row_revision(row)
     return result
 
 
-def row_revision(row):
+def row_revision(row, session=None):
+    extra = None
+    if session is not None and isinstance(row, Decision):
+        latest = session.exec(select(DecisionRevision).where(DecisionRevision.decision_id == row.id).order_by(DecisionRevision.revision.desc()).limit(1)).first()
+        extra = [latest.revision, latest.content_mode] if latest else None
+    if session is not None and isinstance(row, IntegrationContent):
+        latest = session.exec(select(IntegrationContentRevision).where(IntegrationContentRevision.item_id == row.id).order_by(IntegrationContentRevision.revision.desc()).limit(1)).first()
+        extra = [latest.revision, latest.deleted, latest.content_mode] if latest else None
     return fingerprint({"revision": getattr(row, "revision", None), "updates": getattr(row, "update_count", None),
-        "archived": getattr(row, "archived", False), "updated_at": getattr(row, "updated_at", None), "id": row.id})
+        "archived": getattr(row, "archived", False), "updated_at": getattr(row, "updated_at", None),
+        "edited_at": getattr(row, "edited_at", None), "deleted": getattr(row, "deleted", False),
+        'current_revision': getattr(row, 'current_revision', None), 'extra': extra, 'parent_id': getattr(row, 'parent_id', None), 'message_content': row.content if isinstance(row, Message) else None, "id": row.id})
 
 
 def still_current(session, item):
     row = session.get(KINDS[item["kind"]], item["id"], populate_existing=True)
-    if not row or row.channel_id != item["channel_id"] or row_revision(row) != item["source_revision"]: return False
+    if not row or row.channel_id != item["channel_id"] or row_revision(row, session) != item["source_revision"]: return False
+    if item["kind"] == "message" and not message_visible(session, row): return False
     if item["kind"] == "file-content":
         version = session.get(FileVersion, row.id)
         document = session.get(FileDocument, version.document_id, populate_existing=True) if version else None
@@ -193,19 +266,35 @@ def sources(session, channel_id, actor_id):
         "engine": "current-sources", "persistent_plaintext_index": False}
 
 
-def resolve(session, actor_id, encrypted_reference):
+def resolve(session, actor_id, encrypted_reference, *, commit=True):
     try:
         claim = json.loads(unseal_private(encrypted_reference, "enterprise-search-source", actor_id))
         if claim["actor"] != actor_id or claim["expires"] < datetime.utcnow().timestamp(): raise ValueError()
-        model = KINDS[claim["kind"]]
+        KINDS[claim["kind"]]
     except Exception: raise HTTPException(404, "Search citation expired or unavailable") from None
-    authorize(session, claim["channel"], actor_id)
-    row = session.get(model, claim["id"], populate_existing=True)
-    if not row or row.channel_id != claim["channel"]: raise HTTPException(404, "Search source unavailable")
-    item = source(session, claim["channel"], claim["kind"], row)
-    if item["version"] != claim["version"]: raise HTTPException(409, "This source changed; refresh search")
-    if not allowed(session, claim["channel"], item): raise HTTPException(403, "Source is restricted by policy")
-    session.commit(); session.expire_all(); authorize(session, claim["channel"], actor_id)
+    return resolve_canonical(session, actor_id, claim['kind'], claim['id'], claim['channel'], claim['version'], commit=commit)
+
+
+def resolve_canonical(session, actor_id, kind, identifier, channel_id, version, *, commit=False):
+    """Internal durable-job descriptor resolver; no public expiry bypass route.
+
+    Queue owners must derive this descriptor from a fresh actor-bound citation,
+    seal it in the authorized job, and retain its exact version commitment.
+    Current membership, native mode, source version and governance remain live.
+    """
+    model = KINDS.get(kind)
+    if model is None or not isinstance(identifier, str) or not isinstance(version, str):
+        raise HTTPException(404, 'Search source unavailable')
+    authorize(session, channel_id, actor_id)
+    row = session.get(model, identifier, populate_existing=True)
+    if not row or row.channel_id != channel_id: raise HTTPException(404, "Search source unavailable")
+    item = source(session, channel_id, kind, row)
+    if item["version"] != version: raise HTTPException(409, "This source changed; refresh search")
+    if not allowed(session, channel_id, item): raise HTTPException(403, "Source is restricted by policy")
+    if commit:
+        session.commit()
+    session.expire_all(); authorize(session, channel_id, actor_id)
     if not still_current(session, item): raise HTTPException(409, "This source changed; refresh search")
+    if not allowed(session, channel_id, item): raise HTTPException(403, "Source is restricted by policy")
     item["reference"] = reference(actor_id, item)
     return item

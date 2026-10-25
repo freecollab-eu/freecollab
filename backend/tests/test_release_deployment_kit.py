@@ -190,12 +190,16 @@ def alive(pid):
     except ProcessLookupError: return False
 
 
-def supervisor_fixture(tmp_path, *, exit_worker=False, startup_timeout=5):
+def supervisor_fixture(tmp_path, *, exit_worker=False, startup_timeout=5, worker_count=1, exiting_worker=0):
     port = unused_port()
     api_pid, worker_pid = tmp_path / "api.pid", tmp_path / "worker.pid"
     api_code = "from http.server import BaseHTTPRequestHandler,HTTPServer;import os;from pathlib import Path;Path(" + repr(str(api_pid)) + ").write_text(str(os.getpid()))\nclass H(BaseHTTPRequestHandler):\n def do_GET(self):\n  self.send_response(200);self.end_headers();self.wfile.write(b'{\"status\":\"ready\"}')\n def log_message(self,*a):pass\nHTTPServer(('127.0.0.1'," + str(port) + "),H).serve_forever()"
-    worker_code = "import os,time;from pathlib import Path;Path(" + repr(str(worker_pid)) + ").write_text(str(os.getpid()));time.sleep(" + (".3" if exit_worker else "60") + ")"
-    code = "import importlib.util;spec=importlib.util.spec_from_file_location('runtime'," + repr(str(ROOT / "backend/railway/runtime.py")) + ");m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);raise SystemExit(m.supervise(" + repr([sys.executable, "-c", api_code]) + ", [" + repr([sys.executable, "-c", worker_code]) + "],ready_url='http://127.0.0.1:" + str(port) + "/ready',startup_timeout=" + str(startup_timeout) + ",stop_timeout=.5))"
+    workers = []
+    for index in range(worker_count):
+        marker = worker_pid if index == 0 else tmp_path / ("worker-" + str(index) + ".pid")
+        worker_code = "import os,time;from pathlib import Path;Path(" + repr(str(marker)) + ").write_text(str(os.getpid()));time.sleep(" + (".3" if exit_worker and index == exiting_worker else "60") + ")"
+        workers.append([sys.executable, "-c", worker_code])
+    code = "import importlib.util;spec=importlib.util.spec_from_file_location('runtime'," + repr(str(ROOT / "backend/railway/runtime.py")) + ");m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m);raise SystemExit(m.supervise(" + repr([sys.executable, "-c", api_code]) + ", " + repr(workers) + ",ready_url='http://127.0.0.1:" + str(port) + "/ready',startup_timeout=" + str(startup_timeout) + ",stop_timeout=.5))"
     process = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return process, api_pid, worker_pid
 
@@ -219,6 +223,31 @@ def test_supervisor_sigterm_drains_and_reaps_all_children(tmp_path):
         assert not alive(int(api_pid.read_text())) and not alive(int(worker_pid.read_text()))
     finally:
         if process.poll() is None: process.terminate(); process.wait(timeout=5)
+
+
+def test_third_ai_worker_exit_reaps_api_and_both_other_queues(tmp_path):
+    process, api_pid, worker_pid = supervisor_fixture(tmp_path, worker_count=3, exit_worker=True, exiting_worker=2)
+    try:
+        stdout, stderr = process.communicate(timeout=10)
+        assert process.returncode == 1 and b"runtime unavailable" in stderr
+        assert b"3 queue workers started" in stdout
+        for marker in (api_pid, worker_pid, tmp_path / "worker-1.pid", tmp_path / "worker-2.pid"):
+            assert marker.exists() and not alive(int(marker.read_text()))
+    finally:
+        if process.poll() is None: process.terminate(); process.wait(timeout=5)
+
+
+def test_runtime_main_registers_independent_ai_lane_with_existing_workers(monkeypatch):
+    observed = []
+    monkeypatch.setenv("PORT", "8123")
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "127.0.0.1,::1")
+    monkeypatch.setattr(runtime, "prepare_storage", lambda: None)
+    monkeypatch.setattr(runtime.os, "umask", lambda _: None)
+    monkeypatch.setattr(runtime, "supervise", lambda api, workers, **kw: (observed.append((api, workers, kw)) or 0))
+    assert runtime.main() == 0
+    api, workers, options = observed[0]
+    assert [command[2] for command in workers] == ["app.services.integration_worker", "app.services.mail", "app.services.ai_runtime_worker"]
+    assert options["ready_url"] == "http://[::1]:8123/ready"
 
 
 def test_api_startup_deadline_never_starts_workers_and_reaps_api(tmp_path):
@@ -270,23 +299,23 @@ def test_real_railway_runtime_starts_existing_workers_on_private_database(tmp_pa
                MESSAGE_ENCRYPTION_ACTIVE_KEY_ID="test", MESSAGE_ENCRYPTION_KEY_FILE=str(tmp_path / "content.key"),
                MAIL_DELIVERY_MODE="disabled", MAIL_FILE_PATH=str(tmp_path / "mail"), MATRIX_ENABLED="false", OIDC_ENABLED="false",
                WEBHOOKS_ENABLED="false", SYNC_ENABLED="false", OTRUST_ENABLED="false", PUSH_ENABLED="false", CLOUD_FILES_ENABLED="false",
-               EXTERNAL_MEETINGS_ENABLED="false", COPILOT_ENABLED="false", PORT=str(port), FORWARDED_ALLOW_IPS="127.0.0.1,::1", PYTHONPATH=str(ROOT / "backend"))
+               EXTERNAL_MEETINGS_ENABLED="false", COPILOT_ENABLED="true", PORT=str(port), FORWARDED_ALLOW_IPS="127.0.0.1,::1", PYTHONPATH=str(ROOT / "backend"))
     log = (tmp_path / "runtime.log").open("w")
     (tmp_path / "runtime.log").chmod(0o600)
     process = subprocess.Popen([sys.executable, str(ROOT / "backend/railway/runtime.py")], env=env, cwd=ROOT / "backend", stdout=log, stderr=subprocess.STDOUT)
     children = []
     try:
-        def both_heartbeats():
+        def all_heartbeats():
             assert process.poll() is None, "Private runtime exited"
             try:
                 with sqlite3.connect(tmp_path / "runtime.db") as db:
-                    return {row[0] for row in db.execute("select name from workerheartbeat")} >= {"mail", "integrations"}
+                    return {row[0] for row in db.execute("select name from workerheartbeat")} >= {"mail", "integrations", "ai-runtime"}
             except sqlite3.OperationalError: return False
-        wait_for(both_heartbeats, timeout=25)
+        wait_for(all_heartbeats, timeout=25)
         assert process.poll() is None, "Private runtime lost a child; inspect its owned fixture log"
         # Some managed kernels omit /proc/.../children (CHECKPOINT_RESTORE).
         children = [int(value) for value in subprocess.run(["ps", "--ppid", str(process.pid), "-o", "pid="], check=True, capture_output=True, text=True).stdout.split()]
-        assert len(children) == 3
+        assert len(children) == 4
         process.terminate(); process.wait(timeout=35)
         assert process.returncode == 0 and all(not alive(pid) for pid in children)
     finally:

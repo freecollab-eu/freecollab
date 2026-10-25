@@ -408,11 +408,137 @@ jobs:
           path: /tmp/freecollab-secure-*.log
           retention-days: 7
 
+  completion-e2e:
+    name: Integrated AI, content, apps and capture
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      BACKEND_PYTHON: python
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies and disposable test tools
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          PY
+          npm ci --prefix frontend
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends nginx libflite1
+      - name: Verify native links through both actual reverse proxies
+        run: python frontend/tests/nginx-native-links.py --nginx /usr/sbin/nginx --mime-types /etc/nginx/mime.types --report "$RUNNER_TEMP/freecollab-completion/nginx/report.json"
+      - name: Verify contextual AI, reviewed tools and real runtime execution
+        env:
+          AI_SURFACE_REPORT: ${{ runner.temp }}/freecollab-completion/ai/report.json
+        run: python frontend/tests/ai-surface-browser.py
+      - name: Verify content collections, semantic retrieval and anchored comments
+        env:
+          CONTENT_COMPLETION_REPORT: ${{ runner.temp }}/freecollab-completion/content/report.json
+        run: python frontend/tests/content-completion-browser.py
+      - name: Verify retained private calendar and exact product resource navigation
+        env:
+          FLOW_COMPLETION_REPORT: ${{ runner.temp }}/freecollab-completion/flow/report.json
+        run: python frontend/tests/flow-completion-browser.py
+      - name: Verify installed app review and the actual Chat command paths
+        env:
+          INSTALLED_APP_REVIEW_REPORT: ${{ runner.temp }}/freecollab-completion/app-review/report.json
+          INSTALLED_APP_CHAT_REPORT: ${{ runner.temp }}/freecollab-completion/app-chat/report.json
+        run: |
+          python frontend/tests/installed-app-command-browser.py
+          python frontend/tests/installed-app-chat-browser.py
+      - name: Verify sample capture, actual upload, playback and storage isolation
+        env:
+          MEETING_CAPTURE_PROOF_REPORT: ${{ runner.temp }}/freecollab-completion/capture/report.json
+        run: python frontend/tests/meeting-capture-browser.py
+      - name: Prepare verified local speech model and verify final caption drain
+        run: |
+          python scripts/prepare-whisper-model.py --directory "$RUNNER_TEMP/freecollab-whisper-model"
+          python frontend/tests/continuous-captions-browser.py --model-directory "$RUNNER_TEMP/freecollab-whisper-model" --report "$RUNNER_TEMP/freecollab-completion/captions/report.json"
+      - name: Retain scoped completion evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integrated-completion-proofs
+          path: ${{ runner.temp }}/freecollab-completion/**/report.json
+          if-no-files-found: warn
+          retention-days: 7
+
+  completion-secure-e2e:
+    name: Independent encrypted ${{ matrix.stage }} acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        stage: [v2, apps, media, stack-source]
+    env:
+      ENVIRONMENT: test
+      BACKEND_PYTHON: python
+      FREECOLLAB_PROOF_RUN_LABEL: ci-${{ matrix.stage }}
+      FREECOLLAB_PROOF_REPORT_DIR: ${{ runner.temp }}/freecollab-matrix-proof
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked client and independently owned federation fixtures
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          PY
+          npm ci --prefix frontend
+          docker pull ghcr.io/element-hq/synapse@sha256:97665cd4539dcf107c69fb6afdb720e1d1c9c09fb2b5701fb13d6c33b22cd8f0
+      - name: Install private TCP relay for actual encrypted media
+        if: matrix.stage == 'media'
+        run: |
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
+          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends coturn
+          echo "MEETINGS_TEST_TURN_BINARY=$(command -v turnserver)" >> "$GITHUB_ENV"
+      - name: Verify actual trusted devices across two separate installations
+        run: python frontend/tests/encrypted-work-browser.py --${{ matrix.stage }}-only
+      - name: Retain scoped encrypted acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: encrypted-${{ matrix.stage }}-completion-proofs
+          path: ${{ runner.temp }}/freecollab-matrix-proof/browser-ci-${{ matrix.stage }}.json
+          if-no-files-found: warn
+          retention-days: 7
+
   # Build Docker image
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, product-e2e, secure-e2e]
+    needs: [backend-test, frontend-test, product-e2e, secure-e2e, completion-e2e, completion-secure-e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
 
     steps:

@@ -11,15 +11,17 @@ import '../styles/panels-files.css';
 import { SafeFilePreview } from './SafeFilePreview';
 import { FileExperiencePanel } from './FileExperiencePanel';
 import { canPreviewExpanded } from '../lib/file-preview';
+import { ReviewedResourceCopilot } from './ReviewedResourceCopilot';
 
 const imageTypes = new Set(['image/jpeg', 'image/png', 'image/gif', 'image/webp']);
 export const canPreviewFile = (file: ManagedFile) => imageTypes.has(file.content_type) || file.content_type === 'application/pdf' || canPreviewExpanded(file);
 
-function PdfPage({ document, page }: { document: PDFDocumentProxy; page: number }) {
+function PdfPage({ document, page, sourceKey, owner, onVerifiedText }: { document: PDFDocumentProxy; page: number; sourceKey: string; owner: string | null; onVerifiedText?: (key: string, text: string, owner: string | null) => void }) {
   useI18n();
   const canvas = useRef<HTMLCanvasElement>(null);
   const [error, setError] = useState('');
   const [rendering, setRendering] = useState(true);
+  const textCallback = useRef(onVerifiedText); textCallback.current = onVerifiedText;
   useEffect(() => {
     let stopped = false;
     let cancel: (() => void) | undefined;
@@ -34,11 +36,19 @@ function PdfPage({ document, page }: { document: PDFDocumentProxy; page: number 
       element.width = Math.ceil(viewport.width); element.height = Math.ceil(viewport.height);
       const render = pdfPage.render({ canvas: element, viewport });
       cancel = () => render.cancel();
-      try { await render.promise; if (!stopped) setRendering(false); }
+      try {
+        await render.promise;
+        if (!stopped) setRendering(false);
+        // Text extraction is optional; a valid rendered page remains usable.
+        try {
+          const content = await pdfPage.getTextContent();
+          if (!stopped) textCallback.current?.(sourceKey, content.items.map(item => 'str' in item ? item.str : '').join(' '), owner);
+        } catch { /* A scanned or unsupported text layer has no AI text to disclose. */ }
+      }
       finally { pdfPage.cleanup(); }
     }).catch(err => { if (!stopped) { setError(err instanceof Error ? err.message : t("This page could not be displayed.")); setRendering(false); } });
     return () => { stopped = true; cancel?.(); };
-  }, [document, page]);
+  }, [document, page, sourceKey, owner]);
   return <div className="fc-pdf-page" aria-busy={rendering}>{rendering && <p role="status">{t("Rendering page…")}</p>}{error && <p role="alert">{t("Unable to preview this page. Download the PDF to open it.")}</p>}<canvas ref={canvas} aria-label={t("PDF page {value0}", { value0: String(page) })} role="img" hidden={!!error} /></div>;
 }
 
@@ -55,6 +65,17 @@ export function FilePreview({ file, onClose, onVersionSaved }: { file: ManagedFi
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
   const [downloading, setDownloading] = useState(false);
+  const [verifiedText, setVerifiedText] = useState<{ key: string; owner: string | null; text: string } | null>(null);
+  const pdfOwner = useRef<string | null>(null);
+  const fileKey = file.channel_id + ':' + file.id;
+  const textKey = file.content_type === 'application/pdf' ? fileKey + ':' + page : fileKey;
+  const currentText = verifiedText?.key === textKey && verifiedText.owner === api.getAccessToken() ? verifiedText.text : '';
+  useEffect(() => {
+    setVerifiedText(null);
+    const clear = () => { pdfOwner.current = null; setVerifiedText(null); };
+    window.addEventListener('freecollab:auth-changed', clear);
+    return () => window.removeEventListener('freecollab:auth-changed', clear);
+  }, [fileKey]);
   const download = async () => {
     if (downloading) return;
     const token = api.getAccessToken(); setDownloading(true);
@@ -68,16 +89,18 @@ export function FilePreview({ file, onClose, onVersionSaved }: { file: ManagedFi
     finally { if (token === api.getAccessToken()) setDownloading(false); }
   };
   useEffect(() => {
+    const owner = api.getAccessToken();
     let stopped = false;
     let localUrl: string | undefined;
     let destroyPdf: (() => Promise<void>) | undefined;
     const controller = new AbortController();
+    const current = () => !stopped && owner === api.getAccessToken();
     setLoading(true); setError(''); setPage(1); setPdf(null); setUrl('');
     if (canPreviewExpanded(file)) { setLoading(false); return () => { controller.abort(); }; }
     void (async () => {
       if (!canPreviewFile(file)) throw new Error(t("Preview is unavailable for this file type."));
       const blob = await downloadChannelFile(file, { signal: controller.signal });
-      if (stopped) return;
+      if (!current()) return;
       if (blob.size > 50 * 1024 * 1024) throw new Error(t("This file is too large to preview."));
       // Force the authenticated allowlisted media type; never inline HTML or SVG.
       const typed = new Blob([blob], { type: file.content_type });
@@ -85,29 +108,30 @@ export function FilePreview({ file, onClose, onVersionSaved }: { file: ManagedFi
       setUrl(localUrl);
       if (file.content_type === 'application/pdf') {
         const [pdfjs, worker] = await Promise.all([import('pdfjs-dist'), import('pdfjs-dist/build/pdf.worker.min.mjs?url')]);
-        if (stopped) return;
+        if (!current()) return;
         pdfjs.GlobalWorkerOptions.workerSrc = worker.default;
         const data = new Uint8Array(await typed.arrayBuffer());
-        if (stopped) return;
+        if (!current()) return;
         // PDF.js 6 renders canvas operators without evaluating document scripts.
         const task = pdfjs.getDocument({ data,
           useSystemFonts: true, stopAtErrors: true, maxImageSize: 16_000_000,
           disableAutoFetch: true, disableStream: true });
         destroyPdf = () => task.destroy();
         const document = await task.promise;
-        if (stopped) { await task.destroy(); return; }
-        setPdf(document);
+        if (!current()) { await task.destroy(); return; }
+        pdfOwner.current = owner; setPdf(document);
       }
-      if (!stopped) setLoading(false);
-    })().catch(err => { if (!stopped && !wasCancelled(err)) { setError(err instanceof Error ? err.message : t("Unable to open this file.")); setLoading(false); } });
+      if (current()) setLoading(false);
+    })().catch(err => { if (current() && !wasCancelled(err)) { setError(err instanceof Error ? err.message : t("Unable to open this file.")); setLoading(false); } });
     return () => { stopped = true; controller.abort(); if (localUrl) URL.revokeObjectURL(localUrl); void destroyPdf?.(); };
   }, [file.id, file.channel_id]);
 
   return createPortal(<ModalContinuationProvider modalId={modal.modalId}><div ref={dialog} hidden={modal.parked} style={modal.parked ? { display: 'none' } : undefined} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("Preview {value0}", { value0: String(file.filename) })} className="fc-file-preview-layer" onMouseDown={event => { if (event.target === event.currentTarget) close(); }}>
     <section className="fc-file-preview">
       <header><div><span className="fc-kicker">{file.content_type === 'application/pdf' ? t("PDF preview") : imageTypes.has(file.content_type) ? t("Image preview") : t("File preview")} {t(" · Version ")}{file.version_number || 1}</span><h2>{file.filename}</h2></div><button type="button" data-autofocus className="fc-icon-button" aria-label={t("Close file preview")} onClick={close}><X size={20} /></button></header>
-      <div className="fc-file-preview-content" aria-busy={loading}>{loading && <p role="status" className="fc-file-preview-status"><span className="fc-panel-spinner" />{t("Opening file…")}</p>}{error && <p role="alert" className="fc-alert">{error}</p>}{!loading && !error && (canPreviewExpanded(file) ? <SafeFilePreview file={file} /> : pdf ? <PdfPage document={pdf} page={page} /> : url && <img src={url} alt={file.filename} onError={() => setError(t("This image could not be displayed. Download it to open it."))} onLoad={event => { if (event.currentTarget.naturalWidth * event.currentTarget.naturalHeight > 32_000_000) setError(t("This image is too large to preview. Download it to open it.")); }} />)}</div>
+      <div className="fc-file-preview-content" aria-busy={loading}>{loading && <p role="status" className="fc-file-preview-status"><span className="fc-panel-spinner" />{t("Opening file…")}</p>}{error && <p role="alert" className="fc-alert">{error}</p>}{!loading && !error && (canPreviewExpanded(file) ? <SafeFilePreview file={file} onVerifiedText={setVerifiedText} /> : pdf ? <PdfPage document={pdf} page={page} sourceKey={textKey} owner={pdfOwner.current} onVerifiedText={(key, text, owner) => setVerifiedText({ key, owner, text })} /> : url && <img src={url} alt={file.filename} onError={() => setError(t("This image could not be displayed. Download it to open it."))} onLoad={event => { if (event.currentTarget.naturalWidth * event.currentTarget.naturalHeight > 32_000_000) setError(t("This image is too large to preview. Download it to open it.")); }} />)}</div>
       <div className="fc-file-experience-scroll"><FileExperiencePanel key={`${file.channel_id}:${file.id}`} file={file} onVersionSaved={onVersionSaved} leaveController={writingLeave} /></div>
+      {!!currentText && !loading && !error && <ReviewedResourceCopilot channelId={file.channel_id} label={file.filename + " · " + t("File contents")} snapshot={JSON.stringify([file.id, file.version_number, file.content_type, page, currentText])} text={currentText} sourceRefs={file.size <= 12000 && ["text/plain", "application/json"].includes(file.content_type) ? [{ kind: "file", id: file.id }] : undefined} />}
       <footer>{pdf ? <div className="fc-pdf-pagination"><button type="button" className="fc-icon-button" aria-label={t("Previous PDF page")} disabled={page <= 1} onClick={() => setPage(value => value - 1)}><ChevronLeft size={17} /></button><span aria-live="polite">{t("Page ")}{page} {t(" of ")}{pdf.numPages}</span><button type="button" className="fc-icon-button" aria-label={t("Next PDF page")} disabled={page >= pdf.numPages} onClick={() => setPage(value => value + 1)}><ChevronRight size={17} /></button></div> : <span>{file.encrypted ? t("Decrypted on this device.") : t("Available to channel members.")}</span>}{url ? <a href={url} download={file.filename} className="fc-button fc-panel-button"><Download size={14} />{t("Download")}</a> : <button type="button" className="fc-button fc-panel-button" disabled={downloading} onClick={() => void download()}><Download size={14} />{t("Download")}</button>}</footer>
     </section>
   </div></ModalContinuationProvider>, document.body);

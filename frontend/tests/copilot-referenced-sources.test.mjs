@@ -12,7 +12,7 @@ const message = (id = 'old-message', overrides = {}) => ({ id, channel_id: 'chan
 const document = (id, overrides = {}) => ({ id, channel_id: 'channel', title: id, version: 3, archived: false, ...overrides });
 const event = (overrides = {}) => ({ getId: () => '$old', getRoomId: () => '!approved:example.test', getType: () => 'm.room.message', isEncrypted: () => true, isRedacted: () => false, isDecryptionFailure: () => false, getOriginalContent: () => ({}), ...overrides });
 
-function fixture({ secure = false, documents = [], native = message(), canonical = [], encryptedEvent = event(), eventFailure, crypto = webcrypto } = {}) {
+function fixture({ secure = false, documents = [], native = message(), canonical = [], encryptedEvent = event(), eventFailure, files = [], clips = [], fileBody = 'Reviewed file text', crypto = webcrypto } = {}) {
   let token = 'original-account', requestHandler = async () => native;
   const calls = [], exports = {};
   const api = { getAccessToken: () => token, request: async path => { calls.push(['native', path]); return requestHandler(path); }, getMessages: async () => { throw new Error('Inline lookup must not read the capped native message inventory'); } };
@@ -25,11 +25,11 @@ function fixture({ secure = false, documents = [], native = message(), canonical
   const unused = () => { throw new Error('Inline lookup must not read unselected files, clips or projects'); };
   const dependencies = {
     './api': { api }, './secure-client': { getSecureMessaging: async () => secureClient },
-    './files-api': { downloadChannelFile: unused, listChannelFiles: unused },
+    './files-api': { downloadChannelFile: async file => { calls.push(['download', file.id]); return new Blob([fileBody]); }, listChannelFiles: async channel => { calls.push(['files', channel]); return files; } },
     './shared-documents-api': { sharedDocumentsApi: { list: async channel => { calls.push(['documents', channel]); return documents; } } },
-    './project-tasks-api': { projectTasksApi: { projects: unused } }, './clips-api': { clipsApi: { list: unused } },
+    './project-tasks-api': { projectTasksApi: { projects: unused } }, './clips-api': { clipsApi: { list: async channel => { calls.push(['clips', channel]); return clips; } } },
   };
-  vm.runInNewContext(compiled, { exports, require: name => { assert.ok(name in dependencies, name); return dependencies[name]; }, Set, encodeURIComponent, crypto, TextEncoder, Uint8Array });
+  vm.runInNewContext(compiled, { exports, require: name => { assert.ok(name in dependencies, name); return dependencies[name]; }, Set, encodeURIComponent, crypto, TextEncoder, TextDecoder, Uint8Array });
   return { ...exports, calls, changeActor: () => { token = 'different-account'; }, setRequest: fn => { requestHandler = fn; } };
 }
 
@@ -126,9 +126,53 @@ test('missing, archived, wrong-channel and unresolved shared documents fail with
 });
 
 test('duplicate, excessive and unsupported references are rejected before any reads', async () => {
-  for (const refs of [Array.from({ length: 9 }, (_, id) => ({ kind: 'message', id: String(id) })), [{ kind: 'message', id: 'same' }, { kind: 'message', id: 'same' }], [{ kind: 'file', id: 'not-inline' }], [{ kind: 'message', id: '' }]]) {
+  for (const refs of [Array.from({ length: 9 }, (_, id) => ({ kind: 'message', id: String(id) })), [{ kind: 'message', id: 'same' }, { kind: 'message', id: 'same' }], [{ kind: 'task', id: 'not-inline' }], [{ kind: 'message', id: '' }]]) {
     const h = fixture();
     await assert.rejects(h.loadCopilotReferencedChoices('channel', refs), /eight unique sources/);
     assert.deepEqual(h.calls, []);
   }
+});
+
+test('an exact text file loads only the selected file inventory and hashes the actual reviewed bytes', async () => {
+  const file = { id: 'selected-file', channel_id: 'channel', filename: 'notes.txt', size: 25, content_type: 'text/plain' };
+  const h = fixture({ files: [file], fileBody: 'Actual reviewed åäö 🪴' });
+  const loaded = await h.loadCopilotReferencedChoices('channel', [{ kind: 'file', id: file.id }]);
+  const source = await h.prepareCopilotSource(loaded.choices[0], 'channel', false);
+  assert.deepEqual(plain(source), { kind: 'file', id: file.id, text: 'Actual reviewed åäö 🪴', expected_text_sha256: createHash('sha256').update('Actual reviewed åäö 🪴').digest('hex') });
+  assert.deepEqual(h.calls, [['handles', 'channel'], ['files', 'channel'], ['download', file.id]]);
+});
+
+test('exact file references reject other channels, binary types and oversized contents before disclosure', async () => {
+  const file = { id: 'f', channel_id: 'channel', filename: 'notes.txt', size: 25, content_type: 'text/plain' };
+  for (const change of [{ channel_id: 'other' }, { content_type: 'image/png' }, { size: 12001 }]) {
+    const h = fixture({ files: [{ ...file, ...change }] });
+    await assert.rejects(h.loadCopilotReferencedChoices('channel', [{ kind: 'file', id: file.id }]), /unavailable/);
+    assert.ok(!h.calls.some(([kind]) => kind === 'download'));
+  }
+  const h = fixture({ files: [file], fileBody: 'x'.repeat(12001) });
+  const loaded = await h.loadCopilotReferencedChoices('channel', [{ kind: 'file', id: file.id }]);
+  await assert.rejects(h.prepareCopilotSource(loaded.choices[0], 'channel', false), /at most 12 KB/);
+});
+
+test('clip AI uses the exact resolved transcript and refuses silent truncation or an unverified secure event', async () => {
+  const clip = { id: 'c', channel_id: 'channel', fields: { title: 'Reviewed clip', transcript: 'Actual transcript' }, matrix_event_id: '$clip' };
+  const h = fixture({ clips: [clip] });
+  const loaded = await h.loadCopilotReferencedChoices('channel', [{ kind: 'clip', id: 'c' }]);
+  const prepared = await h.prepareCopilotSource(loaded.choices[0], 'channel', true);
+  assert.equal(prepared.text, 'Reviewed clip\nActual transcript');
+  assert.deepEqual(plain(prepared.event_ids), ['$clip']);
+  assert.equal(prepared.expected_text_sha256, createHash('sha256').update(prepared.text).digest('hex'));
+  await assert.rejects(h.prepareCopilotSource({ ...loaded.choices[0], clip: { ...clip, matrix_event_id: null } }, 'channel', true), /available clip/);
+  await assert.rejects(h.prepareCopilotSource({ ...loaded.choices[0], clip: { ...clip, fields: { ...clip.fields, transcript: 'x'.repeat(12000) } } }, 'channel', false), /Select a passage/);
+  assert.deepEqual(h.calls, [['handles', 'channel'], ['clips', 'channel']]);
+});
+
+
+test('file source hashes preserve a UTF-8 BOM exactly as the canonical server reader does', async () => {
+  const file = { id: 'bom-file', channel_id: 'channel', filename: 'bom.txt', size: 14, content_type: 'text/plain' };
+  const body = '\uFEFFåäö text', h = fixture({ files: [file], fileBody: body });
+  const loaded = await h.loadCopilotReferencedChoices('channel', [{ kind: 'file', id: file.id }]);
+  const prepared = await h.prepareCopilotSource(loaded.choices[0], 'channel', false);
+  assert.equal(prepared.text, body);
+  assert.equal(prepared.expected_text_sha256, createHash('sha256').update(body).digest('hex'));
 });

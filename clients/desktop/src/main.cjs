@@ -1,12 +1,14 @@
 'use strict';
-const { app, BrowserWindow, Menu, ipcMain, session, dialog, shell, desktopCapturer } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, session, dialog, shell, desktopCapturer, net } = require('electron');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { deploymentOrigin, sameOrigin, externalUrl, partitionFor, trustedSender } = require('./policy.cjs');
 const { browserSignIn } = require('./sign-in.cjs');
 const { PermissionGrants } = require('./permissions.cjs');
+const { createDesktopUpdater } = require('./update-controller.cjs');
 let window, origin = null, pendingSignIn = null, signInAbort = null;
+const desktopUpdates = createDesktopUpdater({ app, dialog, net, getWindow: () => window });
 const setupUrl = pathToFileURL(path.join(__dirname, 'setup.html')).href;
 const configuredSessions = new Set();
 async function askExternal(value) {
@@ -98,9 +100,12 @@ async function start() {
   try { address = deploymentOrigin(JSON.parse(await fs.readFile(path.join(app.getPath('userData'), 'installation.json'), 'utf8')).origin); } catch { /* First launch uses the explicit setup form. */ }
   try { await createWindow(address); }
   catch { await createWindow(); }
+  await desktopUpdates.ready();
+  desktopUpdates.start();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     ...(process.platform === 'darwin' ? [{ role: 'appMenu' }] : []),
-    { label: 'FreeCollab', submenu: [{ label: 'Choose another installation…', click: () => void createWindow() }, { role: 'quit' }] },
+    { label: 'FreeCollab', submenu: [{ label: 'Choose another installation…', click: () => void createWindow() },
+      { label: 'Check for updates…', click: () => void desktopUpdates.check(true) }, { role: 'quit' }] },
     { role: 'editMenu' }, { role: 'viewMenu' }, { role: 'windowMenu' },
   ]));
 }

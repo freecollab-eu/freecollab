@@ -1,3 +1,5 @@
+import { ReviewedResourceCopilot } from './ReviewedResourceCopilot';
+import { useResourceTargetFocus } from '../lib/useResourceTargetFocus';
 import { useScopedWritingGuard, type WritingLeaveController } from '../lib/useScopedWritingGuard';
 import { ScopedCollaborationInput as CollaborationInput } from './ScopedCollaborationInput';
 import { FieldReferenceText } from './FieldReferenceText';
@@ -14,7 +16,7 @@ import { CalendarAvailabilityFinder, CalendarEventPlanning } from './CalendarPla
 import { ChannelSyncNotice } from './ChannelSyncNotice';
 import '../styles/integration-content.css';
 
-interface Props { workspaceId?: string; leaveController?: WritingLeaveController; instanceId?: string; channelId: string; isAdmin?: boolean }
+interface Props { workspaceId?: string; leaveController?: WritingLeaveController; instanceId?: string; channelId: string; isAdmin?: boolean; focusEventId?: string }
 interface Editor { id: string; previous?: CalendarRecord; fields: CalendarFields }
 interface ImportItem { id: string; fields: CalendarFields }
 const localZone = () => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
@@ -48,7 +50,7 @@ function download(rows: Array<{ id: string; fields: CalendarFields }>, name: str
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function CalendarPanel({ workspaceId, leaveController, instanceId, channelId, isAdmin = false }: Props) {
+export function CalendarPanel({ workspaceId, leaveController, instanceId, channelId, isAdmin = false, focusEventId }: Props) {
   useI18n();
   const writingInstanceId = useId();
   const fieldId = (name: string) => instanceId ? instanceId + "-" + name : name;
@@ -75,6 +77,16 @@ export function CalendarPanel({ workspaceId, leaveController, instanceId, channe
   else if (editorBaseline.current?.id !== editor.id) editorBaseline.current = { id: editor.id, value: JSON.stringify(editor.fields) };
   const editorDirty = !!editor && JSON.stringify(editor.fields) !== editorBaseline.current?.value;
   useScopedWritingGuard(channelId, editorDirty, !!busy, { workspaceId, leaveController });
+  const targetRegion = useRef<HTMLElement>(null);
+  useResourceTargetFocus(targetRegion, channelId, 'calendar', focusEventId, !loading, async (id, sourceCurrent) => {
+    const request = generation.current;
+    const revisions = await documentCalendarApi.history<CalendarFields>(channelId, 'calendar', id);
+    if (!sourceCurrent() || !current(request)) return false;
+    const row = [...revisions].sort((a, b) => b.revision - a.revision)[0];
+    if (!row || row.id !== id || row.channel_id !== channelId || row.deleted) return false;
+    setRows(previous => [row, ...previous.filter(item => item.id !== id)]);
+    return true;
+  });
   async function load(request = generation.current) {
     setLoading(true); setError('');
     try { const result = await documentCalendarApi.calendar(channelId); if (current(request)) setRows(result); }
@@ -164,7 +176,7 @@ export function CalendarPanel({ workspaceId, leaveController, instanceId, channe
       ends_at: checked ? f.ends_at.slice(0, 10) : f.ends_at + 'T10:00' } });
   }
   const sorted = [...rows].sort((a, b) => (a.fields ? Date.parse(a.fields.starts_at) : Infinity) - (b.fields ? Date.parse(b.fields.starts_at) : Infinity));
-  return <section className="fc-integration-content" aria-label={t("Channel calendar")}>
+  return <section ref={targetRegion} className="fc-integration-content" aria-label={t("Channel calendar")}>
     <ChannelSyncNotice channelId={channelId} kind="calendar" />
     <div className="fc-integration-content-heading"><div><h3>{t("Make room for what’s next.")}</h3><p>{t("Plan channel events and exchange them with calendar apps through ICS. Reminders run in the calendar app after you add the event.")}</p></div><button className="fc-icon-button" type="button" aria-label={t("Refresh calendar events")} disabled={!!busy} onClick={() => void load()}><RefreshCw size={16} /></button></div>
     {error && <div className="fc-integration-content-error" role="alert">{error}<button type="button" className="fc-text-button" onClick={() => void load()}>{t("Reload calendar")}</button></div>}
@@ -190,9 +202,10 @@ export function CalendarPanel({ workspaceId, leaveController, instanceId, channe
       <label htmlFor={fieldId("integration-calendar-reminder")}>{t("Reminder in your calendar app")}</label><select id={fieldId("integration-calendar-reminder")} className="fc-input" value={editor.fields.reminder_minutes === null ? '' : String(editor.fields.reminder_minutes)} disabled={!!busy} onChange={event => setEditor({ ...editor, fields: { ...editor.fields, reminder_minutes: event.target.value === '' ? null : Number(event.target.value) } })}><option value="">{t("No reminder")}</option>{[0, 5, 15, 30, 60, 1440, 10080, ...(editor.fields.reminder_minutes !== null ? [editor.fields.reminder_minutes] : [])].filter((value, index, list) => list.indexOf(value) === index).sort((a, b) => a - b).map(value => <option key={value} value={value}>{value === 0 ? t("At start time") : value % 1440 === 0 ? t(value === 1440 ? '{count} day before' : '{count} days before', { count: value / 1440 }) : t("{value0} minutes before", { value0: String(value) })}</option>)}</select>
       <button className="fc-button fc-button-primary" type="submit" disabled={!!busy}>{busy === 'save' && <Loader2 size={15} className="fc-integration-spinner" />}{t("Save calendar event")}</button>
     </form>}
-    {loading ? <p className="fc-integration-content-loading" role="status"><Loader2 size={16} className="fc-integration-spinner" />{t("Loading calendar events…")}</p> : !rows.length ? <div className="fc-integration-content-empty"><CalendarDays size={26} /><p>{t("Bring team plans and the conversation together.")}</p></div> : <ul className="fc-integration-content-list">{sorted.map(row => <li key={row.id} className="fc-integration-content-card">
+    {loading ? <p className="fc-integration-content-loading" role="status"><Loader2 size={16} className="fc-integration-spinner" />{t("Loading calendar events…")}</p> : !rows.length ? <div className="fc-integration-content-empty"><CalendarDays size={26} /><p>{t("Bring team plans and the conversation together.")}</p></div> : <ul className="fc-integration-content-list">{sorted.map(row => <li key={row.id} tabIndex={-1} data-resource-kind="calendar" data-resource-id={row.id} className="fc-integration-content-card">
       {row.fields ? <><div className="fc-integration-content-meta"><span>{row.fields.all_day ? t("All-day event") : t("Calendar event")}</span><span>{t("Version ")}{row.revision}</span></div><h4><FieldReferenceText value={row.fields.title} references={row.fields.field_references?.title} channelId={channelId} /></h4><p className="fc-integration-content-caption">{dateLabel(row.fields)}</p>{row.fields.location && <p className="fc-integration-content-caption"><FieldReferenceText value={row.fields.location} references={row.fields.field_references?.location} channelId={channelId} /></p>}{row.fields.description && <p className="fc-integration-content-detail"><FieldReferenceText value={row.fields.description} references={row.fields.field_references?.description} channelId={channelId} /></p>}<div className="fc-integration-content-actions"><button type="button" className="fc-text-button" onClick={() => download([{ id: row.id, fields: row.fields! }], 'freecollab-event.ics')}><Download size={14} />{t("Download ICS")}</button><button type="button" className="fc-text-button" onClick={() => window.open(calendarComposeUrl('google', row.fields!), '_blank', 'noopener,noreferrer')}>{t("Google Calendar")}</button><button type="button" className="fc-text-button" onClick={() => window.open(calendarComposeUrl('outlook', row.fields!), '_blank', 'noopener,noreferrer')}>{t("Outlook Calendar")}</button></div></> : <p className="fc-integration-content-caption">{row.resolution_error || t("Unlock recovery to read this calendar event.")}</p>}
       <div className="fc-integration-content-actions"><button type="button" className="fc-text-button" disabled={!!busy} onClick={() => void showHistory(row)}><History size={14} />{t("History")}</button>{(isAdmin || row.created_by === api.getCurrentUserId()) && <>{row.fields && <button type="button" className="fc-text-button" disabled={!!busy} onClick={() => { setEditor(editing(row)); setError(''); }}><Pencil size={14} />{t("Edit")}</button>}<button type="button" className="fc-text-button" disabled={!!busy} onClick={() => setRemoving(row.id)}><Trash2 size={14} />{t("Remove")}</button></>}</div>
+      {row.fields && <ReviewedResourceCopilot workspaceId={workspaceId} channelId={channelId} label={row.fields.title} snapshot={JSON.stringify([row.id, row.revision, row.fields])} text={JSON.stringify(row.fields)} />}
       {row.fields && <CalendarEventPlanning row={row} isAdmin={isAdmin} onChanged={saved => setRows(previous => previous.map(item => item.id === saved.id ? saved : item))} />}
       {removing === row.id && <div className="fc-integration-content-confirm"><p>{t("Remove this event from the channel?")}</p><button className="fc-button" type="button" disabled={!!busy} onClick={() => setRemoving('')}>{t("Keep event")}</button><button className="fc-button" type="button" disabled={!!busy} onClick={() => void remove(row)}>{t("Remove event")}</button></div>}
       {history?.id === row.id && <ol className="fc-integration-content-history" aria-label={t("Calendar event history")}>{history.rows.map(revision => <li key={revision.revision}><span>{t("Version ")}{revision.revision} · {new Date(revision.revised_at).toLocaleString(currentLocale())}</span><strong>{revision.deleted ? t("Event removed") : revision.fields ? <FieldReferenceText value={revision.fields.title} references={revision.fields.field_references?.title} channelId={channelId} /> : revision.resolution_error || t("Encrypted revision unavailable")}</strong>{revision.fields && <small>{dateLabel(revision.fields)}</small>}</li>)}</ol>}

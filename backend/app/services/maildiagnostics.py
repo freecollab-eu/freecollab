@@ -21,6 +21,9 @@ from ..models.workflow import WorkflowRun
 from ..models.data_control import DataControlJob
 from ..models.push import PushDelivery
 from ..models.app_platform import AppJob, ChannelRecapSchedule
+from ..models.ai_runtime import AIRun
+from ..models.slack_livebridge import SlackBridgeJob
+from ..models import encrypted_work, connect_federation  # noqa: F401 -- register opaque queue graph before schema creation
 from ..models.calendar_delivery import CalendarProviderJob
 from ..models.chat_productivity import MessageReminder, ScheduledMessage
 from ..models.native_calls import NativeCallDevice
@@ -103,7 +106,7 @@ def worker_status(session, now: datetime | None = None, *, name: str = "mail") -
 
 
 def record_worker_heartbeat(session, *, name: str = "mail") -> None:
-    if name not in {"mail", "integrations"}:
+    if name not in {"mail", "integrations", "ai-runtime"}:
         raise ValueError("Unknown operational worker")
     row = session.get(WorkerHeartbeat, name) or WorkerHeartbeat(name=name)
     row.last_seen_at = datetime.utcnow()
@@ -215,6 +218,30 @@ def integration_queue_status(session, now: datetime | None = None) -> dict:
         "pending": _count(session, AvatarErasure),
         "oldest_pending_seconds": _pending_age(first, now),
     }
+    for name, model, states in (
+        ("slack-livebridge", SlackBridgeJob, ("pending", "processing", "delivered", "failed", "uncertain", "cancelled")),
+        ("ai-runtime", AIRun, ("queued", "running", "awaiting_review", "completed", "failed", "cancelled")),
+    ):
+        counts = session.exec(select(model.status, func.count(model.id)).group_by(model.status)).all()
+        values = {state: int(count) for state, count in counts}
+        if name == "ai-runtime":
+            values["pending"] = values.pop("queued", 0)
+            values["processing"] = values.pop("running", 0)
+            states = ("pending", "processing", "awaiting_review", "completed", "failed", "cancelled")
+        else:
+            values["scheduled"] = _count(session, SlackBridgeJob, SlackBridgeJob.status == "pending", SlackBridgeJob.next_attempt_at > now)
+            values["pending"] = max(0, values.get("pending", 0) - values["scheduled"])
+            states = (*states, "scheduled")
+        result[name] = {state: values.get(state, 0) for state in states}
+        if name == "ai-runtime":
+            first = session.exec(select(func.min(AIRun.updated_at)).where(AIRun.status.in_(["queued", "running"]))).one()
+        else:
+            due = session.exec(select(func.min(SlackBridgeJob.next_attempt_at)).where(SlackBridgeJob.status == "pending", SlackBridgeJob.next_attempt_at <= now)).one()
+            processing = session.exec(select(func.min(SlackBridgeJob.claimed_at)).where(SlackBridgeJob.status == "processing")).one()
+            first = min((value for value in (due, processing) if value), default=None)
+        result[name]["oldest_pending_seconds"] = _pending_age(first, now)
+    from .encrypted_work import queue_status as encrypted_queue_status
+    result["encrypted-work"] = encrypted_queue_status(session)
     return result
 
 
@@ -229,10 +256,10 @@ def _pending_age(first, now) -> int:
 def integration_worker_required(queues: dict) -> bool:
     """Feature flags plus persisted work from the worker's always-on local groups."""
     if any(getattr(settings, name, False) for name in ("webhooks_enabled", "otrust_enabled", "sync_enabled",
-        "workflows_enabled", "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled")):
+        "workflows_enabled", "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled", "connect_federation_enabled")):
         return True
     return any(queues.get(group, {}).get(state, 0) for group in
-        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup")
+        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "slack-livebridge")
         for state in ("pending", "processing", "scheduled", "notification_pending"))
 
 

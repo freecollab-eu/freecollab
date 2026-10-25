@@ -412,7 +412,7 @@ def test_installed_calendar_actions_use_invoking_persons_oauth_and_never_blind_r
     assert installed.status_code==201,installed.text
     app_id=installed.json()["installation"]["id"]
     invoke=path+"/"+app_id+"/commands"
-    data={"request_id":"calendar-action-123","channel_id":"a","command":"create-event","arguments":{
+    data={"request_id":"calendar-action-123","expected_generation":installed.json()["installation"]["generation"],"channel_id":"a","command":"create-event","arguments":{
         "title":"Reviewed private event","start":"2026-12-01T10:00:00+01:00","end":"2026-12-01T11:00:00+01:00"},"confirm":True,"disclose_to_app":True}
     assert oauth.client.post(invoke,headers=headers(oauth,"peer"),json=data).status_code==409
     initiated=start(oauth,provider,purpose="calendar-action",config={},installation_id=app_id,installation_generation=1)
@@ -447,7 +447,7 @@ def calendar_app(oauth):
     app_id=created.json()["installation"]["id"]
     initiated=start(oauth,purpose="calendar-action",config={},installation_id=app_id,installation_generation=1)
     assert initiated.status_code==200 and "provider_connected=" in complete(oauth,initiated).headers["location"]
-    data={"request_id":"immutable-consent-action","channel_id":"a","command":"create-event","arguments":{
+    data={"request_id":"immutable-consent-action","expected_generation":created.json()["installation"]["generation"],"channel_id":"a","command":"create-event","arguments":{
         "title":"Approved for original provider account","start":"2026-12-01T10:00:00Z","end":"2026-12-01T11:00:00Z"},
         "confirm":True,"disclose_to_app":True}
     return app_id,initiated.json()["grant_id"],data
@@ -713,7 +713,7 @@ def test_actual_https_installed_calendar_write_uses_exact_personal_consent(oauth
     consent=start(oauth,provider,purpose="calendar-action",config={},installation_id=app_id,installation_generation=1)
     assert consent.status_code==200 and "provider_connected=" in complete(oauth,consent).headers["location"]
     queued=oauth.client.post("/workspaces/wa/apps/"+app_id+"/commands",headers=headers(oauth,"peer"),json={
-        "request_id":"tls-calendar-action","channel_id":"a","command":"create-event","arguments":{
+        "request_id":"tls-calendar-action","expected_generation":installed.json()["installation"]["generation"],"channel_id":"a","command":"create-event","arguments":{
             "title":"Explicit TLS calendar event","start":"2026-12-01T10:00:00Z","end":"2026-12-01T11:00:00Z"},
         "confirm":True,"disclose_to_app":True})
     assert queued.status_code==202,queued.text

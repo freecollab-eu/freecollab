@@ -50,6 +50,20 @@ test('closing one retained card checks all of its guards and preserves dirty sib
   assert.equal(calls.at(-1), 'b-draft');
 });
 
+test('continuing the retained private calendar preserves only its own draft and checks every departing sibling', () => {
+  const f = fixture(), calls = []; let otherDirty = true;
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'my-day' }, () => { calls.push('private-draft'); return false; });
+  f.navigation.registerConversationNavigationGuard({ ...f.owner(), surfaceId: 'document-a' }, () => { calls.push('other-draft'); return !otherDirty; });
+  f.navigation.registerConversationNavigationGuard(f.owner(), () => { calls.push('global'); return true; });
+  assert.equal(f.navigation.mayLeaveConversationWork(undefined, 'my-day'), false);
+  assert.deepEqual(calls, ['other-draft']);
+  otherDirty = false;
+  assert.equal(f.navigation.mayLeaveConversationWork(undefined, 'my-day'), true);
+  assert.deepEqual(calls, ['other-draft', 'other-draft', 'global']);
+  assert.equal(f.navigation.mayLeaveConversationWork(), false);
+  assert.equal(calls.at(-1), 'private-draft', 'Ordinary navigation must still guard that calendar draft.');
+});
+
 test('scoped checks permanently prune revoked siblings and never transfer mutated owner identity', () => {
   const f = fixture(), owner = { ...f.owner(), surfaceId: 'document-a' };
   let calls = 0;

@@ -15,3 +15,12 @@
 .fc-collaboration-status { position: absolute; top: .6rem; right: .6rem; max-width: 100%; padding: .3rem .5rem; background: var(--fc-surface); color: var(--fc-muted); font-size: var(--fc-caption-size); pointer-events: none; }
 .fc-collaboration-error { margin: .3rem 0; color: var(--fc-danger, var(--fc-text)); font-size: var(--fc-detail-size); }
 @media (forced-colors: active) { .fc-collaboration-popup > .fc-slash-commands { border-color: CanvasText; } }
+
+.fc-writing-ai { min-width: 0; }
+.fc-writing-ai-entry { display: inline-flex; align-items: center; gap: .4rem; min-height: 36px; padding: .3rem .5rem; margin-top: .25rem; border: 0; border-radius: calc(var(--fc-radius) * .6); color: var(--fc-muted); background: transparent; font: inherit; font-size: var(--fc-caption-size); cursor: pointer; }
+.fc-writing-ai-entry:hover, .fc-writing-ai-entry:focus-visible, .fc-writing-ai-entry[aria-expanded=true] { color: var(--fc-accent); background: var(--fc-accent-soft); }
+.fc-writing-ai-entry:focus-visible { outline: 2px solid var(--fc-accent); outline-offset: 2px; }
+.fc-writing-ai-entry:disabled { opacity: .45; cursor: not-allowed; }
+.fc-writing-ai-limit { margin: .35rem 0; color: var(--fc-muted); font-size: var(--fc-caption-size); }
+.fc-writing-ai .fc-contextual-copilot-card { max-width: 100%; }
+@media (hover: hover) { .fc-collaboration-input:not(:focus-within):not(:hover) .fc-writing-ai-entry:not([aria-expanded=true]) { opacity: .55; } }

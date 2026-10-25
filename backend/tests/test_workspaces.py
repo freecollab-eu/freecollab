@@ -348,6 +348,17 @@ def test_native_write_and_secure_enable_share_one_history_fence(workspace_team, 
             assert release.wait(timeout=5), "Test did not release secure transaction"
     monkeypatch.setattr(native_api, "lock_channel_writes", hold_native)
     monkeypatch.setattr(secure_messaging, "lock_channel_writes", hold_secure)
+    if kind == "upload":
+        # Upload publication now obtains User/Auth/Workspace fences before its
+        # channel fence. Observe that real attempt before it can block on the
+        # secure starter's workspace transaction; keep the native hold at the
+        # actual channel fence and preserve both final history outcomes below.
+        actor_lock = files.lock_upload_actor
+        def observe_upload_actor(session, channel_id, actor_id):
+            if first == "secure":
+                contender.set()
+            return actor_lock(session, channel_id, actor_id)
+        monkeypatch.setattr(files, "lock_upload_actor", observe_upload_actor)
     def native_request():
         if kind == "message":
             return client.post("/messages/channels/shared", headers=headers["owner"], json={"content": "Acknowledged native message"})

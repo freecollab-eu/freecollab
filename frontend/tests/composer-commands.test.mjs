@@ -22,6 +22,58 @@ const context = { hasChannel: true, hasWorkspace: true, secure: false, channelTy
 const parse = (value, selectedAction, changes = {}) => parseComposerCommand(value, { ...context, ...changes }, selectedAction);
 const plain = value => JSON.parse(JSON.stringify(value));
 
+const installed = (installation, app = 'courtyard', name = 'publish') => ({
+  key: `${installation}:${name}`, installation_id: installation, app_id: app, app_name: app,
+  generation: 3, origin: 'https://apps.example', name, description: 'Publish a reviewed update',
+  arguments: [{ name: 'text', label: 'Text', required: true, max_length: 2000, type: 'text' }],
+});
+
+test('installed commands preserve typed arguments for an explicit reviewed invocation', () => {
+  const command = installed('installation-a');
+  const result = parse('/courtyard:publish text="A quiet 🧭 update"', undefined, { installedCommands: [command] });
+  assert.equal(result.status, 'ready');
+  assert.equal(result.command.id, 'app:installation-a:publish');
+  assert.deepEqual(plain(result.intent), { kind: 'app-command', key: command.key, generation: 3, argumentText: 'text="A quiet 🧭 update"' });
+  assert.match(composerCommandUsage(result.command), /text=/);
+});
+
+test('unique installed shortcuts work while ambiguous names require selecting the actual installation', () => {
+  const first = installed('a'), second = installed('b', 'another');
+  assert.equal(parse('/publish text="One"', undefined, { installedCommands: [first] }).intent.key, first.key);
+  assert.equal(parse('/publish text="One"', undefined, { installedCommands: [first, second] }).status, 'menu');
+  const chosen = parse('/publish text="One"', 'app:b:publish', { installedCommands: [first, second] });
+  assert.equal(chosen.intent.key, second.key);
+  assert.equal(parse('/task A real native task', undefined, { installedCommands: [installed('c', 'other', 'task')] }).intent.kind, 'task');
+});
+
+test('duplicate installed namespaces never choose an installation or send multiline arguments as a literal message', () => {
+  const first = installed('a'), second = { ...installed('b'), origin: 'https://second.example.org' };
+  const catalogue = { installedCommands: [first, second] };
+  const text = '/courtyard:publish text="One\nprivate argument"';
+  const ambiguous = parse(text, undefined, catalogue);
+  assert.equal(ambiguous.status, 'menu'); assert.equal(ambiguous.intent, undefined); assert.equal(ambiguous.command, undefined);
+  assert.equal(ambiguous.arguments, 'text="One\nprivate argument"');
+  assert.equal(isComposerCommandDraft(text, { ...context, ...catalogue }), true);
+  const selected = parse(text, 'app:b:publish', catalogue);
+  assert.equal(selected.intent.key, second.key); assert.equal(selected.intent.generation, second.generation);
+  const entries = slash.getSlashCommands({ ...context, ...catalogue });
+  assert.notEqual(entries.find(row => row.installedApp?.key === first.key).description, entries.find(row => row.installedApp?.key === second.key).description);
+});
+
+test('installed catalogue cannot expose commands in another or encrypted conversation', () => {
+  const command = installed('a');
+  for (const gate of [{ secure: true }, { channelType: 'direct' }, { hasChannel: false }, { hasWorkspace: false }]) {
+    const result = parse('/courtyard:publish text="One"', undefined, { installedCommands: [command], ...gate });
+    assert.equal(result.status, 'unknown'); assert.equal(result.command, undefined);
+  }
+});
+
+test('long registered namespaces remain usable without expanding the unknown command limit', () => {
+  const command = installed('a', 'a'.repeat(90));
+  assert.equal(parse(`/${command.app_id}:${command.name} text="One"`, undefined, { installedCommands: [command] }).status, 'ready');
+  assert.equal(parse('/' + 'x'.repeat(81)).status, 'invalid');
+});
+
 function picked(value, label, id, kind = 'document', from = 0) {
   const start = value.indexOf(label, from);
   assert.ok(start >= 0);

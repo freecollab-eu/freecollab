@@ -4,12 +4,12 @@ The **Shared work** tab in Workspace tools adds tasks, calendar series and text
 documents to an active cross-installation Connect channel. It uses the channel's
 existing Matrix E2EE room and verified devices. Both organizations keep their own
 accounts, SSO, workspace membership, administrators and databases. A remote
-participant is never enrolled as a local workspace member.
+participant is never enrolled as a local workspace member. Local directory groups
+and group identifiers remain under their installation's authority. Cross-installation
+`@` references bind verified Matrix participants or exact typed room resources;
+they do not synchronize group directories or inherit remote SSO grants.
 
-This tab is a shared, client-derived view. Native task projects, local document
-indexes, provider calendar synchronization, workflows and activity feeds retain
-their existing local scope. The UI labels that distinction. It does not silently
-create local native copies that look shared.
+This is a shared, client-derived view. Negotiated version 2 adds projects, project-linked tasks, feeds, decisions, collections, file links, resource comments and reviewed device-owned workflows in the same encrypted room. Existing installation-local records keep their own IDs; cross-installation resources open through their verified room namespace. Provider synchronization, credentials and administrative settings remain local. See [encrypted work](ENCRYPTED_WORK.md) for the version 2 contract and the document workspace adapter.
 
 ## Customer setup
 
@@ -31,7 +31,7 @@ device keys through the supported device backup/recovery process.
 * Create and edit tasks from either installation, with title, description,
   status, priority, due date, checklist and an explicitly selected current
   participant. Assignees carry full Matrix identities, including homeserver;
-  foreign numeric or local-only user IDs are not reinterpreted.
+  foreign numeric or local-only user IDs are not reinterpreted. Version 2 `/` tools and `@` selection use the same input flow with exact verified global participant/resource IDs. Document links use Yjs relative anchors, so concurrent text insertion moves links without resolving labels as identities.
 * Create and edit calendar events, including IANA time zones, all-day dates,
   finite daily/weekly/monthly recurrence and skipped occurrence exceptions.
   Occurrence calculations use the same DST-aware calendar model as native work.
@@ -109,7 +109,7 @@ Matrix acknowledgement is followed by an opaque pointer publication. If the API
 receipt is lost, the client retries the same event ID, which is idempotent. A
 small IndexedDB outbox retains only event references and session/owner binding;
 it retains no work content or raw bearer token. Retries require the same current
-signed-in session and current channel grant. Signing out clears this outbox.
+signed-in session and current channel grant. Signing out clears the in-memory retry view; another signed-in session cannot replay its session-bound receipts.
 
 This is not an atomic cross-database transaction or an exactly-once delivery
 guarantee. A browser crash before the Matrix acknowledgement is known, lost local

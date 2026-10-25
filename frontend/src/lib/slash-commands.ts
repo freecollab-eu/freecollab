@@ -1,4 +1,5 @@
 import { t } from '../i18n/core';
+import type { InstalledAppCommand } from './installed-app-commands';
 
 export type SlashAction =
   | 'document' | 'task' | 'decision' | 'meetings' | 'files' | 'members' | 'groups' | 'channel'
@@ -6,7 +7,8 @@ export type SlashAction =
   | 'cloud' | 'external-meetings' | 'apps' | 'copilot' | 'data' | 'mobile' | 'shared-work'
   | 'schedule' | 'focus' | 'appearance' | 'account' | 'my-day' | 'integrations'
   | 'direct-message' | 'new-channel' | 'channels' | 'secure-settings' | 'status'
-  | 'notifications' | 'get-started' | 'feedback' | 'admin';
+  | 'notifications' | 'get-started' | 'feedback' | 'admin' | 'personal-calendar'
+  | `app:${string}`;
 
 export interface SlashCommand {
   id: SlashAction;
@@ -16,6 +18,8 @@ export interface SlashCommand {
   description: string;
   group: 'conversation' | 'personal' | 'workspace';
   keywords: string;
+  /** Current channel catalogue metadata; invocation still needs explicit review. */
+  installedApp?: InstalledAppCommand;
 }
 
 export interface SlashContext {
@@ -29,6 +33,7 @@ export interface SlashContext {
   hasAdmin: boolean;
   /** True only after verifying this channel's federated-work context. */
   sharedWork?: boolean;
+  installedCommands?: readonly InstalledAppCommand[];
 }
 
 interface Definition extends SlashCommand {
@@ -75,6 +80,7 @@ const definitions: readonly Definition[] = [
   { id: 'data', command: 'data', label: 'Data & retention', description: 'Review workspace exports, retention and data controls.', group: 'workspace', keywords: 'data export retention governance archive privacy lagring arkiv dataskydd bevarande gallring', available: context => channelWork(context) && context.nativeSession && context.workspaceRole === 'owner' },
   { id: 'admin', command: 'admin', label: 'Administration', description: 'Manage this FreeCollab installation.', group: 'workspace', keywords: 'admin administration installation system administrator hantera administrera', available: context => context.hasAdmin && context.nativeSession && !context.embedded },
   { id: 'my-day', command: 'my-day', label: 'My day', description: 'Your assigned work, reminders and things to return to.', group: 'personal', keywords: 'my day today personal assigned reminder min dag idag tilldelat personligt', available: workspaceNavigation },
+  { id: 'personal-calendar', command: 'calendar', label: 'Your private calendar', description: 'Your own events, recurrence and calendar export.', group: 'personal', keywords: 'private personal calendar event recurrence kalender privat personlig handelse aterkommande', available: workspaceNavigation },
   { id: 'notifications', command: 'notifications', label: 'Your notifications', description: 'Mentions, replies and updates waiting for you.', group: 'personal', keywords: 'notification inbox mention reply update notis notiser avisering aviseringar inkorg svar', available: context => context.hasWorkspace },
   { id: 'status', command: 'status', label: 'Set your status', description: 'Let teammates know your availability.', group: 'personal', keywords: 'status presence availability away busy online tillganglighet narvaro upptagen borta', available: context => context.hasWorkspace },
   { id: 'mobile', command: 'mobile', label: 'Mobile & offline', description: 'Your device, encrypted outbox and offline preferences.', group: 'personal', keywords: 'mobile offline device outbox push install mobil enhet utkorg avisering', available: () => true },
@@ -96,9 +102,22 @@ export function getSlashQuery(value: string): string | null {
 /** Searches local feature metadata only; never reads or sends conversation text. */
 export function getSlashCommands(context: SlashContext, query = ''): SlashCommand[] {
   const normalized = normalize(query.replace(/^\//, ''));
-  return definitions.filter(item => !item.available || item.available(context)).map((item, index) => {
+  const installedCounts = new Map<string, number>();
+  for (const item of context.installedCommands || []) {
+    const namespace = normalize(`${item.app_id}:${item.name}`);
+    installedCounts.set(namespace, (installedCounts.get(namespace) || 0) + 1);
+  }
+  const installed: Definition[] = channelWork(context) && !isDirect(context)
+    ? (context.installedCommands || []).filter(item => !context.secure || item.supports_secure_foreground === true).map(item => ({
+      id: `app:${item.key}` as SlashAction, command: `${item.app_id}:${item.name}`,
+      label: `${item.app_name}: ${item.name}`, description: (installedCounts.get(normalize(`${item.app_id}:${item.name}`)) || 0) > 1
+        ? `${item.description} · ${item.origin} · ${item.installation_id.slice(0, 8)}` : item.description,
+      group: 'conversation', keywords: `${item.app_id} ${item.app_name} ${item.name} ${item.description}`,
+      installedApp: item,
+    })) : [];
+  return [...definitions, ...installed].filter(item => !item.available || item.available(context)).map((item, index) => {
     const description = item.id === 'cloud' && context.secure ? 'Share encrypted links to your provider files.' : item.description;
-    const command: SlashCommand = { id: item.id, command: item.command, label: t(item.label), description: t(description), group: item.group, keywords: item.keywords };
+    const command: SlashCommand = { id: item.id, command: item.command, label: item.installedApp ? item.label : t(item.label), description: item.installedApp ? description : t(description), group: item.group, keywords: item.keywords, ...(item.installedApp ? { installedApp: item.installedApp } : {}) };
     const shortcut = normalize(item.command);
     const label = normalize(command.label);
     const original = normalize(item.label);

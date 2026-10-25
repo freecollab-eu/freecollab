@@ -1,55 +1,123 @@
 # AI orchestration
 
-FreeCollab needs an inbuilt layer that controls AI requests, context, tools and approvals. Much of that layer already exists. The next step is to make its execution state consistent across existing flows before adding bounded multi-step runs or model routing. A separate autonomous-agent service is not required for the current product.
+FreeCollab contains a bounded execution layer in the normal product: reviewed
+model profiles, native durable runs/steps, cancellation/resume, worker recovery,
+multiple-model handoffs, actual usage and shared budgets. See the runnable
+[AI runtime contract](AI_RUNTIME.md), [API](../backend/app/api/ai_runtime.py),
+[worker](../backend/app/services/ai_runtime_worker.py),
+[state models](../backend/app/models/ai_runtime.py) and
+[provider protocols](../backend/app/services/ai_providers.py).
+The actual writer, source selection, planner and review UI is documented in
+[AI surfaces](AI_SURFACES.md).
 
-This document describes implemented behavior and a proposed next slice. It does not enable new tools, providers, background access or automatic writes.
+## Reviewed execution
 
-## Implemented today
+A user selects real sources or writing, an operation, actual model recipients
+and their revisions. Disclosure identifies each endpoint/model and possible API
+charges. A bounded planner can propose up to three steps from the reviewed model
+catalog; the proposal executes nothing until separately reviewed and started.
+Each step explicitly selects its operation, model profile and instruction. The
+previous result is bounded handoff context. A changed profile never silently
+routes work to another provider.
 
-| Flow | Existing execution and limits | Code |
-| --- | --- | --- |
-| Copilot conversation | Checks actor/channel grants, exact provider-revision consent and request disclosure; resolves only selected sources; selects a configured `@agent`; makes one synchronous provider completion; validates citations and tool output; rechecks grants, sources and consent before publishing the answer. | [Turn handler](../backend/app/api/copilot.py#L146), [source validation](../backend/app/services/copilot.py#L118) |
-| Fixed Copilot tools | `context_sources` lists only selected citation IDs. `create_task` proposes a task for one explicitly selected native project. There is no arbitrary HTTP, code execution, source discovery or model-to-model delegation tool. At most two returned tool calls are parsed. | [Tool definitions](../backend/app/services/copilot.py#L285), [bounded parser](../backend/app/services/copilot.py#L228), [dispatch](../backend/app/api/copilot.py#L213) |
-| Native task approval | A separate explicit approval revalidates access/configuration/sources and uses a transactional approval receipt plus a deterministic task key. Repeated approval returns the same task. Secure channels cannot use this tool. | [Approval handler](../backend/app/api/copilot.py#L244), [task creation](../backend/app/services/project_tasks.py#L160) |
-| Private AI drafts | The app platform generates cited summaries, manual notify/approval workflows, or one to three proposals from explicitly selected installed-app command schemas. It reuses the workspace provider, validates output and stores the private result encrypted. AI receives command schemas, not app credentials. | [Draft generation](../backend/app/services/app_platform.py#L505), [validation and persistence](../backend/app/services/app_platform.py#L574) |
-| Approved draft execution | Separate human approval publishes a summary card, installs a reviewed workflow with password/MFA, or queues exactly reviewed cross-app commands. App generation changes invalidate proposals. Approval and resource creation/queueing commit together. | [Draft approval](../backend/app/api/app_platform.py#L268) |
-| Recurring private recaps | Explicitly enabled 1–168 hour schedules use a durable five-minute claim, current provider revision/consent and at most the eight most recent new native messages in the time window. Failures pause the schedule; stopping it during a request discards the draft. Publication always needs human approval. | [Schedule consent](../backend/app/api/app_platform.py#L338), [recap execution](../backend/app/services/app_platform.py#L637), [worker batch](../backend/app/services/integration_worker.py#L22) |
+Operations are draft, summarize, answer, compare, group and task_plan. Grouping
+returns proposals containing only selected IDs; normal collection/document
+writes remain separately reviewed. Task proposals use the selected native
+project and deterministic transactional approval receipts. A model cannot choose
+an arbitrary URL, run code or execute an unapproved write.
 
-The immediate Copilot flow persists `processing`, `complete` or `failed` turns, request digests, configuration revision and approval receipts. This provides idempotency and bounded concurrency for a conversation. It is not a generic resumable AI job: the HTTP handler performs the completion, and an interrupted processing turn is marked failed when a later request finds it stale. See [Copilot models](../backend/app/models/copilot.py#L31) and [pending-turn handling](../backend/app/api/copilot.py#L153).
+The worker claims one step, reserves its conservative token/cost allowance and
+commits before networking. Current session authority, membership, profile/key,
+consent, original source version and content policy are checked before and after
+calls. Claim tokens/generations reject late answers after cancellation. Native
+run content is purpose-encrypted; stored authority contains verified claim
+metadata and a session digest, never a raw bearer token.
 
-There is one provider endpoint and model per workspace. Named agents vary instructions and allowed tools; they do not have separate models. The current contract is public HTTPS443 OpenAI-compatible Chat Completions with Bearer authentication, streamed response validation, one choice and `max_tokens:2048`. The transport has a thirty-second deadline and no automatic retry. There are no personal per-user AI key stores, native Anthropic/Azure adapters or private-network model connections in this implementation. See [provider model](../backend/app/services/copilot.py#L48) and [transport](../backend/app/services/copilot.py#L261).
+A lease lasts180seconds; a transport call has a30second deadline. There are at
+most three steps and two explicitly reviewed attempts per step. An expired
+processing lease becomes failed/uncertain and is not automatically billed again.
+Resume reauthorizes the current sources and recipients and requires acknowledgment
+when a previous attempt may have incurred a charge. Cancellation stops future
+steps and stale publication; it cannot recall data already disclosed.
 
-The authenticated app also offers in-place help for messages, channel recaps, main/thread drafts, shared documents and project/task descriptions. Each foreground request binds the reviewed provider revision, selected source snapshots and target; its private one-off conversation receives no central history and is cleared after completion. Applying text is a separate guarded action in the current editor, including an explicitly synchronized edit when appending to a shared document. It does not approve provider tool proposals or execute an autonomous plan. See [in-place assistance](COPILOT.md#in-place-assistance).
+## One current execution view
 
-The public [product demo](PRODUCT_DEMO.md) uses these same product components
-and API with temporary native sample data. It does not maintain a second AI
-workflow or return template answers as model output. External AI is deliberately
-unconfigured in the public instance, and the ordinary UI shows its actual state.
-This still does not add production run persistence, model routing or worker
-execution; those gaps remain below.
+The authenticated `/copilot/runtime/executions` read model combines actual states
+from native runs, foreground Copilot turns, private app-AI drafts, recurring
+recaps, workflows and app-command outbox. It includes permission-checked run/step
+metadata, source-engine identifiers and numeric usage, without decrypting source
+or answer text merely to browse. Domain engines retain their real transactional
+claims and write approvals; the projection does not fabricate runs or pretend
+one engine executed another engine's work. Existing foreground Copilot and app
+AI/recap calls use the same usage reservations as named runtime profiles.
 
-## What remains planned
+## Sources, RAG and registered reads
 
-The existing flows have separate state models. They do not yet provide a common AI run/step timeline, cancellation/resume for general Copilot work, configurable model profiles/routing, a bounded multi-step planner, provider token/cost accounting or a workspace AI spending budget. Existing request/response limits and account rate limits are useful bounds, but are not a monetary spending limit.
+Semantic retrieval returns actual authorized native records. The user reviews
+and selects them before disclosure. Sources in other channels require an
+additional cross-channel acknowledgment and remain within the same workspace;
+their original ACL, version and content policy are rechecked. The server never
+indexes decrypted end-to-end-encrypted content.
 
-The workflow engine and integration worker already provide durable claims, waiting approvals, retries and idempotent side effects for their own supported operations. Their existence does not make arbitrary AI runs durable. Reuse their lease, generation, grant-recheck and outbox patterns; keep their current domain boundaries and single-replica operating assumptions. See [workflow execution](../backend/app/services/workflow.py#L397) and [integration worker](../backend/app/services/integration_worker.py#L1).
+Public search references retain their ten-minute lifetime. A queued run derives
+and seals a canonical resource descriptor/version from a fresh reference, then
+reauthorizes that actual record during recovery. It does not depend on keeping
+an expired capability alive or on silently retaining revoked access.
 
-## Ordered next slice
+Registered JSON web search and HTTP-read tools use a separate recipient warning,
+current tool revision and explicit query disclosure. Owners configure exact
+endpoints and response schemas. Search returns actual bounded citations and
+excerpts; generic HTTP reads use GET. Model-selected URLs, arbitrary code and
+unreviewed HTTP writes are not executable operations. Results remain ephemeral
+until the user explicitly selects them for a later model request.
 
-1. **Share the policy and dispatch path.** Extract a small internal orchestration service used by the existing Copilot and AI-draft handlers. Keep the current provider contract and fixed, typed operation catalog. Each operation must declare its validated arguments, selected context, destination, required grants and whether it creates a preview or requires write approval. Add entries only with an implemented handler, UI review and tests; do not introduce a generic execute-code/HTTP tool.
-2. **Deliver one end-to-end durable native draft.** Use one existing draft operation to introduce typed run/step state, an API status view and a real worker consumer together. Bind the run to actor, channel, provider revision, selected source fingerprints and destination. Cover queued/running/awaiting-review/completed/failed/cancelled states, claim expiry and current-grant checks. Use a bounded AI worker lane so long provider calls do not delay the existing serial integration batches. Persist only necessary encrypted native material and metadata. Cancellation stops future steps and prevents publishing stale output; it cannot retract information already sent to a provider.
-3. **Add approved workspace model profiles.** Initially map the existing saved provider/model to the default profile. Introduce additional profiles only alongside usable configuration, selection and execution. Resolve the actual endpoint/model before disclosure, bind consent to the selected configuration and show that recipient in the existing request warning. Never silently fail over to another provider. This does not add personal keys or claim native support for a new protocol.
-4. **Add one bounded recipe before general planning.** For example: summarize selected sources, then propose a next task as a private preview. Start with one provider call; add a second call only with an explicit maximum step/call count, total deadline, token reservation and attempt budget. A model may propose validated steps from the fixed catalog; the server controls scope and transitions. Separate write approval remains mandatory, including revalidation of the exact reviewed arguments and destination.
-5. **Make recovery and cost visible.** Reuse deterministic operation keys and transactional receipts for local writes; preserve app-outbox uncertain-delivery/manual-review semantics. A crashed or timed-out provider call may already have incurred a charge, so retries need their own bounded policy and must not be described as exactly-once billing. Show run status, expected API use and available usage data; label monetary estimates and missing provider usage honestly. Enforce local attempt/token budgets and, where required, combine them with provider-side spending controls.
+## Models, credentials and budgets
 
-The first useful delivery is steps 1–2 for a single native draft, with review, cancellation and worker-recovery tests. Multiple providers, agent handoffs and unrestricted autonomous planning are outside that slice.
+Named profiles implement native OpenAI-compatible/xAI, Anthropic Messages, Azure
+Chat Completions, Gemini GenerateContent and Ollama Chat. Profiles have their own
+instructions, model, endpoint and revision. A user's personal key is sealed for
+that user/profile/revision and never returned. Multiple profiles may run
+concurrently and may participate in one reviewed plan.
 
-## Disclosure and encrypted-content boundaries
+Public HTTPS443 is the default. Private model and registered read destinations
+require exact operator-owned origin allowlists. Fresh DNS/IP pinning, inherited
+proxy settings, normal TLS, bounded bodies and no redirects/failover/retries
+remain in force. Metadata/link-local, multicast and unspecified destinations are
+forbidden even when an origin is mistakenly listed.
 
-The Copilot UI already shows the actual saved provider hostname/model, selected-source count, API-charge/subscription distinction, retention terms and output fallibility before sending. Quick actions only prepare the user's existing draft. They do not send it, add sources, grant consent or approve a write. Future orchestration must preserve these [request warnings and guards](COPILOT.md#quick-actions-and-request-warnings) and extend the preview to each additional recipient or execution destination.
+Monthly budgets reserve a conservative UTF-8 input/output bound before sending.
+Actual reported usage settles it; absent or uncertain usage consumes the
+reservation and remains marked unknown. Monetary prices/caps are estimates in
+USD microdollars, not provider invoices or exactly-once billing guarantees.
+Private-history removal cannot refund usage. Account/channel erasure removes
+private job content and anonymizes numeric usage so an in-flight call cannot
+resurrect content or silently replenish the workspace budget. Provider-side
+controls are still needed for a contractual external spending ceiling.
 
-Secure Copilot requests remain an explicitly disclosed foreground exchange: a trusted device selects and decrypts sources, then sends only that reviewed material through the server relay to the chosen provider. Those disclosed copies leave E2EE. Secure prompt/answer plaintext must not enter persistent run/step payloads, worker queues, retry snapshots, searchable traces or server-side scheduled recaps. Secure answers remain ephemeral, and a new request needs a new secure-content acknowledgment. Device reconnect/resume must not reconstruct undisclosed plaintext from a server job.
+## Encrypted content and recording consent
 
-Persistent AI drafts, app commands and recurring recaps currently reject E2EE channels and direct-message channel types. Preserve that boundary when adding worker execution; supporting secure foreground suggestions does not authorize recurring access. See [native-channel guard](../backend/app/services/app_platform.py#L184) and [secure Copilot behavior](COPILOT.md#end-to-end-encrypted-channels).
+Secure AI is an explicitly disclosed foreground exchange from the trusted
+device. Responses and reviewed step handoffs stay in device memory. No secure
+plaintext enters the native queue, retries, shared history or server index.
+Numeric usage contains no prompt/source/answer. Device-only source catalogs
+constrain grouping output, but do not claim server verification of encrypted
+record contents; the trusted device rechecks each actual source before every
+step and apply operation. Closing/changing scope stops subsequent device steps.
 
-Verification of any new slice must include changed/revoked consent or grants during a provider call, changed sources/destination before approval, duplicate/reclaimed jobs, uncertain remote delivery, cancellation, bounded calls/budgets, zero unapproved writes and zero persisted secure plaintext. Private synthetic-provider proofs verify the implementation contract; live acceptance of each customer provider remains a separate check.
+Native recording summaries may use a captured future-source grant. Recording
+generation, actual profile/provider, participant consent, bounded segment/expiry
+and the immutable clip are validated before enqueue and around execution. A
+server-derived request ID permits one job per recording generation/clip. Revoked
+consent cannot authorize a later provider call. This does not permit background
+decryption of secure media.
+
+## Verification
+
+[Runtime regressions](../backend/tests/test_ai_runtime.py) exercise actual
+API/SQL claims, delayed calls, cancellation/revocation/source changes, budgets,
+uncertain recovery, idempotent approval, canonical RAG recovery, registered-read
+schema/recipient changes and ephemeral secure completion. Six owned HTTPS
+fixtures exercise native protocol headers, JSON framing and usage with normal
+certificate verification. These test the implementation contract; customer
+provider credentials, model availability and billing remain live configuration
+and acceptance responsibilities.

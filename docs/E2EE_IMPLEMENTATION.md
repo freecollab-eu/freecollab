@@ -15,6 +15,15 @@ The initializer generates independent signing, legacy content, account-factor an
 
 Choose the Matrix server name before creating accounts and keep it unchanged. The supplied Synapse SQLite profile is intended for a small, single-server installation; use the bootstrap's PostgreSQL settings and test the database/backup procedure before scaling it. The supported FreeCollab API still uses one replica. Production also requires HTTPS/WSS and the SMTP/account settings in [AUTH_SESSIONS.md](AUTH_SESSIONS.md).
 
+The private homeserver initializer supplies a bounded per-user `rc_message`
+allowance of 10 events/second with a burst of 100, preserving any explicit
+operator setting. Encrypted Yjs changes, meeting negotiation, heartbeats and
+captions share this allowance with chat. Synapse's human-message default of
+0.2 events/second and a burst of 10 can throttle these ordinary combined flows.
+An independently managed homeserver needs an appropriate equivalent policy;
+size it with actual clients and capacity. Registration, current gateway access,
+room membership and application limits remain enforced.
+
 For an existing pilot, retain its content keys and database. Add an independent `ACCOUNT_SECURITY_KEY` as described in the account runbook. Generate a new random Matrix registration secret, add `MATRIX_ENABLED=true`, a stable `MATRIX_SERVER_NAME` and `MATRIX_REGISTRATION_SHARED_SECRET` to the private configuration, then start the `secure` profile. Existing history is not automatically re-encrypted. Create new secure channels for new content.
 
 ## First encrypted conversation

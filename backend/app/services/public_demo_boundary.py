@@ -43,6 +43,7 @@ def assert_public_demo_safe_configuration():
         "native_push_apns_private_key", "meetings_turn_secret", "meetings_sfu_api_key",
         "meetings_sfu_api_secret", "enterprise_vault_token", "s3_access_key_id",
         "s3_secret_access_key", "s3_session_token", "operations_metrics_token",
+        "semantic_opensearch_url", "semantic_opensearch_username", "semantic_opensearch_password", "semantic_opensearch_ca_bundle",
     )
     for name in secrets:
         value = getattr(settings, name, None)
@@ -58,6 +59,7 @@ def assert_public_demo_safe_configuration():
 _READ = (
     r"/mentions/channels/" + _ID + r"/(?:members|suggestions|groups)",
     r"/channels/" + _ID + r"/conversation-work",
+    r"/channels/" + _ID + r"/content-collections",
     r"/users/" + _ID + r"/avatar",
     r"/auth/me", r"/auth/users/" + _ID + r"/public-key", r"/account/(?:security|sessions)",
     r"/workspaces", r"/workspaces/" + _ID + r"(?:/members|/logo)?",
@@ -73,6 +75,11 @@ _READ = (
     r"/secure/(?:status|channels)",
     r"/notifications(?:/unread-count|/preferences|/channels/" + _ID + r"/settings)?",
     r"/bookmarks", r"/channels/" + _ID + r"/(?:pins|decisions|meetings|clips|scheduled-messages|reminders)",
+    r"/channels/" + _ID + r"/(?:meetings|clips)/" + _ID,
+    r"/channels/" + _ID + r"/meeting-media-configuration",
+    r"/channels/" + _ID + r"/meeting-captures/" + _ID + r"/(?:segments|publications)/" + _ID,
+    r"/meetings/mesh/" + _ID + r"/capture",
+    r"/meeting-access/" + _ID + r"/(?:poll|capture)",
     r"/decisions/" + _ID + r"(?:/revisions)?", r"/reminders/" + _ID + r"/target",
     r"/channels/" + _ID + r"/shared-documents(?:/" + _ID + r"/(?:updates|comments|snapshots))?",
     r"/channels/" + _ID + r"/shared-document-organization(?:/message-preview/" + _ID + r")?",
@@ -82,12 +89,20 @@ _READ = (
     r"/channels/" + _ID + r"/calendar/" + _ID + r"/attendees",
     r"/workspaces/" + _ID + r"/connection-setup",
     r"/workspaces/" + _ID + r"/copilot",
+    r"/workspaces/" + _ID + r"/copilot/runtime(?:/(?:tools|executions)|/runs/" + _ID + r")?",
+    r"/workspaces/" + _ID + r"/personal-calendar",
+    r"/workspaces/" + _ID + r"/apps(?:/catalog)?",
+    r"/workspaces/" + _ID + r"/channels/" + _ID + r"/apps/(?:commands|cards|ai/(?:drafts|recaps))",
+    r"/workspaces/" + _ID + r"/channels/" + _ID + r"/slack-bridges",
     r"/workspaces/" + _ID + r"/channels/" + _ID + r"/workflows(?:/runs/history|/runs/" + _ID + r"|/" + _ID + r"/revisions)?",
 )
 _WRITE = {
     "POST": (
         r"/mentions/channels/" + _ID + r"/(?:groups|references/resolve)",
         r"/channels/" + _ID + r"/conversation-work",
+        r"/channels/" + _ID + r"/content-collections(?:/" + _ID + r"/items)?",
+        r"/workspaces/" + _ID + r"/semantic-search",
+        r"/workspaces/" + _ID + r"/personal-calendar",
         r"/auth/logout", r"/channels", r"/direct-messages", r"/group-conversations",
         r"/messages/channels/" + _ID, r"/threads/messages/" + _ID + r"/reply",
         r"/mobile/offline/channels/" + _ID + r"/messages",
@@ -95,6 +110,11 @@ _WRITE = {
         r"/files/(?:channels/" + _ID + r"|" + _ID + r"/versions)",
         r"/channels/" + _ID + r"/file-experience/" + _ID + r"/comments",
         r"/channels/" + _ID + r"/(?:pins|decisions|clips|reminders|scheduled-messages)", r"/bookmarks",
+        r"/channels/" + _ID + r"/meetings",
+        r"/meetings/" + _ID + r"/(?:join|end|participants/" + _ID + r"/(?:admit|remove))",
+        r"/meeting-access/" + _ID + r"/(?:ready|signal|leave|capture/consent)",
+        r"/meetings/mesh/" + _ID + r"/capture(?:/(?:consent|control|caption))?",
+        r"/channels/" + _ID + r"/meeting-captures/" + _ID + r"/(?:publication|ai/revoke)",
         r"/decisions/" + _ID + r"/revisions", r"/notifications/(?:read-all|" + _ID + r"/read)",
         r"/channels/" + _ID + r"/shared-documents(?:/" + _ID + r"/(?:updates|comments|snapshots))?",
         r"/channels/" + _ID + r"/shared-document-organization/(?:stacks(?:/" + _ID + r"/message-references)?|relations)",
@@ -123,6 +143,8 @@ _WRITE = {
     "DELETE": (
         r"/mentions/channels/" + _ID + r"/groups/" + _ID,
         r"/channels/" + _ID + r"/conversation-work/" + _ID,
+        r"/channels/" + _ID + r"/content-collections/" + _ID + r"/items",
+        r"/workspaces/" + _ID + r"/personal-calendar/" + _ID,
         r"/demo/session", r"/scheduled-messages/" + _ID,
         r"/messages/" + _ID, r"/files/" + _ID,
         r"/reactions/messages/" + _ID + r"/[^/]{1,32}",
@@ -205,6 +227,33 @@ def _actor(scope) -> _Actor:
             raise HTTPException(401, EXPIRED)
         visit = get_active_demo_visit(session, user.id, visit_id=visit_id)
         return _Actor(user.id, visit.id)
+
+
+def _meeting_actor(scope, actor: _Actor):
+    """Sample capabilities belong to this visit's authenticated participant."""
+    if not scope.get("path", "").startswith("/meeting-access/"):
+        return
+    from .auth import token_digest
+    from ..models.meetings import Meeting, MeetingParticipant
+    from ..models.public_demo import PublicDemoVisit
+    from ..models.workspace import WorkspaceChannel
+    meeting_id = scope["path"].split("/")[2]
+    headers = [value for key, value in scope.get("headers", []) if key.lower() == b"x-meeting-token"]
+    if len(headers) != 1 or not 32 <= len(headers[0]) <= 256:
+        raise HTTPException(403, "This sample meeting is unavailable")
+    try:
+        token = headers[0].decode("ascii")
+    except UnicodeError:
+        raise HTTPException(403, "This sample meeting is unavailable") from None
+    with Session(database.engine) as session:
+        visit = session.get(PublicDemoVisit, actor.visit_id)
+        meeting = session.get(Meeting, meeting_id)
+        participant = session.exec(select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting_id,
+            MeetingParticipant.user_id == actor.user_id, MeetingParticipant.credential_hash == token_digest(token))).first()
+        if (not visit or not meeting or not participant or participant.kind != "member"
+                or not session.exec(select(WorkspaceChannel).where(WorkspaceChannel.workspace_id == visit.workspace_id,
+                    WorkspaceChannel.channel_id == meeting.channel_id)).first()):
+            raise HTTPException(403, "This sample meeting is unavailable")
 
 
 def reserve_public_demo_mutation(visit_id: str, size: int):
@@ -305,6 +354,7 @@ class PublicDemoBoundaryMiddleware:
                 replay, _ = await _buffer_body(scope, receive, 1024)
                 return await self.app(scope, replay, send)
             actor = _actor(scope)
+            _meeting_actor(scope, actor)
             if method == "DELETE" and path == "/demo/session":
                 # Leaving/resetting must remain possible after an edit budget
                 # is exhausted. Revocation does not create more sample content.

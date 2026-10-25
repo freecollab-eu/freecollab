@@ -5,10 +5,10 @@ import { projectTasksApi } from './project-tasks-api';
 import { activityFeedApi } from './activity-feed-api';
 import { downloadChannelFile, listChannelFiles } from './files-api';
 
-export type SearchKind = 'document' | 'project' | 'task' | 'feed' | 'file-content';
+export type SearchKind = 'document' | 'project' | 'task' | 'feed' | 'file-content' | 'message' | 'decision' | 'calendar' | 'clip' | 'workflow' | 'linked-document';
 export interface SearchSource { id: string; channel_id: string; kind: SearchKind; title: string; text: string;
   created_by: string; created_at: string; parent_id: string | null; truncated: boolean; version: string;
-  reference?: string; secure?: boolean }
+  reference?: string; secure?: boolean; encrypted_resource?: boolean; encrypted_kind?: string }
 export interface SearchSources { items: SearchSource[]; complete: boolean; skipped: { kind: string; id: string; status: number }[] }
 export interface SearchFilters { channelId?: string; author?: string; after?: string; before?: string; kind?: string; documentId?: string }
 export interface SearchConnection { id: string; name: string; provider: 'google' | 'microsoft' | 'custom'; revision: number; config: Record<string, string>; scope: string }
@@ -107,6 +107,9 @@ export async function loadSearchSources(channel: Channel, signal?: AbortSignal):
       if (truncated) complete = false;
     } catch (error) { current(owner, signal); skipped.push({kind:'file-content', id:file.id, status:422}); }
   }
+  const additional = await (await import('./encrypted-search-sources')).additionalEncryptedSources(channel, signal); current(owner, signal);
+  for (const source of additional.items) if (!items.some(row => row.id === source.id && row.kind === source.kind)) add(source);
+  skipped.push(...additional.skipped); complete &&= additional.complete;
   return { items, skipped, complete: complete && !skipped.length };
 }
 
@@ -114,7 +117,7 @@ export async function verifySearchSource(source: SearchSource, channel: Channel,
   const owner = api.getAccessToken();
   if (source.reference && !source.secure) {
     const result = await api.request<SearchSource>('/search/resolve', { method: 'POST', signal, body: JSON.stringify({ reference: source.reference }) });
-    current(owner, signal); return result;
+    current(owner, signal); if (result.channel_id !== channel.id || result.id !== source.id || result.kind !== source.kind || result.version !== source.version) throw new Error('This source changed or moved. Refresh search.'); return result;
   }
   // Re-fetch current membership and verify the current encrypted revision.
   const latest = await loadSearchSources(channel, signal); current(owner, signal);

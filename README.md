@@ -2,11 +2,15 @@
 
 # FreeCollab
 
-**Current implementation audit (2026-10-23, review branch):**
+**Current implementation audit (2026-10-25, review branch):**
 [Feature status, code, tests and remaining gaps](docs/FEATURE_AUDIT.md).
-This branch adds real channel details, native document stacks and message
-references, derived stack discussions and reviewed inline stack AI. The audit
-also corrects presence, thread history, app-AI consent and worker diagnostics.
+This branch connects universal commands and references to retained work,
+document collections, semantic retrieval, a private calendar and verified
+encrypted collaboration. It adds reviewed AI profiles and durable orchestration,
+installed app commands, live Slack bridging and consented local meeting capture.
+See [AI surfaces](docs/AI_SURFACES.md), [AI runtime](docs/AI_RUNTIME.md),
+[content organization](docs/DOCUMENT_ORGANIZATION.md),
+[apps](docs/APP_PLATFORM.md) and [meetings](docs/MEETINGS.md).
 These changes are not yet a published release. The demo runs the actual product
 with isolated example accounts and data; the website shows a capture of that app.
 

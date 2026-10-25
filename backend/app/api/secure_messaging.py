@@ -6,7 +6,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 from sqlmodel import select
-from sqlalchemy import update
+from sqlalchemy import delete, update
 import httpx
 from ..config import settings
 from ..database import get_session
@@ -226,6 +226,14 @@ def enable_channel(channel_id: str, user=Depends(get_current_user), session=Depe
                 or has_native_product_history(session, channel_id)):
             raise HTTPException(409, "Create a new empty channel for end-to-end encryption")
         binding = SecureChannel(channel_id=channel_id, created_by=user.id)
+        # Native semantic caches must not outlive the switch to device-only
+        # encrypted work, including an empty-channel index built before enable.
+        from ..models.content_completion import ChannelSemanticIndex
+        from ..services.semantic_opensearch import purge_channel as purge_semantic_channel
+        purge_semantic_channel(session, channel_id)
+        session.execute(delete(ChannelSemanticIndex).where(ChannelSemanticIndex.channel_id == channel_id))
+        from ..services.media_capture import invalidate_channel_captures
+        invalidate_channel_captures(session, channel_id)
         channel.name = "Encrypted channel"
         session.add(channel)
         session.add(binding)

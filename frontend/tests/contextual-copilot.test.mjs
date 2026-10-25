@@ -34,7 +34,7 @@ function fixture({ secure = false, consented = true, configured = true, refs, do
   const source = readFileSync(new URL('../src/components/ContextualCopilot.tsx', import.meta.url), 'utf8');
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX } }).outputText;
   const exports = {};
-  const dependencies = { react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, name) => name }), '../lib/api': { api }, '../i18n': { useI18n: () => ({ t: translation }) }, '../lib/copilot-intents': { copilotProviderHost: endpoint => endpoint ? new URL(endpoint).hostname : null }, '../lib/copilot-api': { copilotApi, copilotChannelIsSecure: async () => secure, loadCopilotReferencedChoices: async () => { calls.push({ kind: 'sources' }); return { choices: plain(choices), secure }; }, prepareCopilotSource: async choice => { calls.push({ kind: 'prepare', id: choice.source.id }); return choice.document ? { ...choice.source, revision: choice.document.version, text: documentText, ...(secure ? { event_ids: ['$verified'] } : {}) } : { ...choice.source, ...(secure ? { text: choice.message.content, event_ids: [choice.message.id] } : {}) }; } } };
+  const dependencies = { react: hooks, 'react/jsx-runtime': { jsx, jsxs: jsx }, 'lucide-react': new Proxy({}, { get: (_, name) => name }), '../lib/api': { api }, '../i18n': { useI18n: () => ({ t: translation }) }, '../lib/copilot-intents': { copilotProviderHost: endpoint => endpoint ? new URL(endpoint).hostname : null }, '../lib/ai-runtime-api': { aiRuntimeApi: { status: async () => { calls.push({ kind: 'runtime-status' }); return null; } }, validRuntimeState: () => false, aiProfileRecipient: value => new URL(value.endpoint).hostname, aiRunIsActive: value => ['queued', 'running'].includes(value.status), sameAIProfile: (a, b) => a.id === b.id && a.revision === b.revision }, '../lib/copilot-api': { copilotApi, copilotChannelIsSecure: async () => secure, loadCopilotReferencedChoices: async () => { calls.push({ kind: 'sources' }); return { choices: plain(choices), secure }; }, prepareCopilotSource: async choice => { calls.push({ kind: 'prepare', id: choice.source.id }); return choice.document ? { ...choice.source, revision: choice.document.version, text: documentText, ...(secure ? { event_ids: ['$verified'] } : {}) } : { ...choice.source, ...(secure ? { text: choice.message.content, event_ids: [choice.message.id] } : {}) }; } } };
   vm.runInNewContext(output, { exports, require: name => name.endsWith('.css') ? {} : dependencies[name] || (() => { throw new Error('Unexpected dependency ' + name); })(), window: { addEventListener(name, fn) { listeners.set(name, fn); }, removeEventListener(name) { listeners.delete(name); } }, crypto: { randomUUID: () => 'explicit-request-id' }, URL, Set });
   props = { workspaceId: 'workspace', channelId: 'channel', contextKey: 'exact-target-draft', contextLabel: 'This message', actions: [{ id: 'reply', label: 'Draft a reply', prompt: 'Draft a reply from the selected source.' }], sourceRefs: refs || [{ kind: document ? 'shared_document' : 'message', id: document ? 'd1' : 'm1' }], onApply: (text, key) => applied.push({ text, key }) };
   async function settle() { let idle = 0; for (let cycle = 0; cycle < 45; cycle++) { if (pending) { idle = 0; pending = false; index = 0; tree = exports.ContextualCopilot(props); for (const effect of effects.splice(0)) effect(); } for (let microtask = 0; microtask < 20; microtask++) await Promise.resolve(); if (!pending && !effects.length) { if (++idle >= 4) return; } else idle = 0; } throw new Error('Fixture did not settle'); }
@@ -48,7 +48,7 @@ function fixture({ secure = false, consented = true, configured = true, refs, do
 
 test('opening inline AI makes no provider request, reuse of central history, consent change or write', async () => {
   const h = fixture({ consented: false }); await h.open();
-  assert.deepEqual(h.calls.map(call => call.kind), ['status', 'sources', 'prepare']);
+  assert.deepEqual(h.calls.map(call => call.kind), ['status', 'sources', 'runtime-status', 'prepare']);
   assert.equal(h.applied.length, 0); assert.ok(h.text().includes('api.customer.example')); assert.ok(h.text().includes('reviewed-model'));
   await h.check('I opt in'); assert.deepEqual(h.calls.find(call => call.kind === 'consent'), { kind: 'consent', revision: 4, enabled: true });
   assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create').length, 0);
@@ -63,7 +63,7 @@ test('the entry describes its actual action while an external activation opens r
   h.setProps({ hideTrigger: true, activation: { actionId: 'reply', key: 1 } }); await h.settle();
   assert.ok(!h.nodes().some(node => node.props.className === 'fc-contextual-copilot-trigger'));
   assert.ok(h.nodes().some(node => node.type === 'h3' && node.props.children === 'Draft a reply'));
-  assert.deepEqual(h.calls.map(call => call.kind), ['status', 'sources', 'prepare']);
+  assert.deepEqual(h.calls.map(call => call.kind), ['status', 'sources', 'runtime-status', 'prepare']);
   assert.equal(h.button('Send to provider').props.disabled, true);
   assert.equal(h.applied.length, 0);
 });
@@ -278,4 +278,37 @@ test('an exact24k Unicode context sends the whole reviewed documents without tru
   const sent = h.calls.find(call => call.kind === 'send'); assert.ok(sent);
   assert.deepEqual(sent.payload.sources, [{ kind: 'message', id: 'm1' }, ...['d1', 'd2'].map(id => ({ kind: 'shared_document', id, revision: 2, text: document }))]);
   assert.ok(h.text().includes(body)); assert.ok(h.text().includes(document));
+});
+
+test('a retired provider reader/writer lease prevents AI sends and applying a previously reviewed result', async () => {
+  let current = true;
+  const h = fixture(); h.setProps({ sourceCurrent: () => current }); await h.open();
+  await h.check('Send this request');
+  current = false;
+  await h.click('Send to provider');
+  assert.equal(h.calls.filter(call => call.kind === 'send' || call.kind === 'create').length, 0);
+  current = true;
+  await h.click('Send to provider');
+  assert.ok(h.text().includes('A reviewed suggestion'));
+  current = false;
+  await h.click('Use suggestion');
+  assert.equal(h.applied.length, 0);
+});
+
+test('a resource already outside its current reader lease does not start source or AI access reads', async () => {
+  const h = fixture(); h.setProps({ sourceCurrent: () => false }); await h.open();
+  assert.equal(h.calls.length, 0);
+  assert.equal(h.applied.length, 0);
+});
+
+test('an uncertain foreground failure needs a separate possible-charge acknowledgment and fresh recipient review', async () => {
+  let attempts = 0;
+  const h = fixture({ response: async () => { if (++attempts === 1) throw new Error('Provider connection ended after disclosure.'); return { text: 'New reviewed text [S1].', proposals: [] }; } });
+  await h.open(); await h.check('Send this request'); await h.click('Send to provider');
+  assert.equal(attempts, 1); assert.equal(h.button('Send to provider').props.disabled, true);
+  assert.equal(h.button('Prepare a new AI attempt').props.disabled, true);
+  await h.check('I accept a new bounded attempt'); await h.click('Prepare a new AI attempt');
+  assert.equal(attempts, 1); assert.equal(h.button('Send to provider').props.disabled, true);
+  await h.check('Send this request'); await h.click('Send to provider');
+  assert.equal(attempts, 2); assert.ok(h.text().includes('New reviewed text')); assert.equal(h.applied.length, 0);
 });

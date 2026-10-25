@@ -1,6 +1,7 @@
 import { api } from './api';
 import { resolveProjectTaskRecord, type TaskRecord } from './project-tasks-api';
 import { resolveCalendarRecord, type CalendarRecord } from './document-calendar-api';
+import type { NativeOpenKind } from './native-links';
 
 export interface DayChannel { id: string; name: string | null; workspace_id: string; workspace_name: string; secure: boolean }
 export interface DayNotification { id: string; channel_id: string; type: string; entity_type: string | null; entity_id: string | null; created_at: string }
@@ -8,7 +9,7 @@ export interface DayReminder { id: string; channel_id: string; item_id: string; 
 export interface DaySaved { channel_id: string; item_id: string; kind: 'message' | 'matrix'; created_at: string }
 export interface MyDaySnapshot { generated_at: string; channels: DayChannel[]; tasks: TaskRecord[]; calendar: CalendarRecord[];
   notifications: DayNotification[]; reminders: DayReminder[]; saved: DaySaved[]; incomplete: boolean; locked?: number }
-export interface PersonalSource { workspace_id: string; channel_id: string; kind: 'task' | 'calendar' | 'message' | 'meeting'; item_id?: string; project_id?: string }
+export interface PersonalSource { workspace_id: string; channel_id: string; kind: NativeOpenKind | 'shared-work' | 'private-calendar-context'; item_id?: string; project_id?: string; resource_kind?: string }
 export function openPersonalSource(target: PersonalSource) { window.dispatchEvent(new CustomEvent('freecollab:open-personal-source', { detail: target })); }
 
 export async function loadMyDay(signal?: AbortSignal): Promise<MyDaySnapshot> {

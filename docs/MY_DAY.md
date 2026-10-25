@@ -6,6 +6,13 @@ days of channel calendar occurrences, unread activity, message reminders and
 unfinished saved follow-ups. It follows the account's language and appearance
 settings and supports a 320 px viewport, keyboard focus and reduced motion.
 
+**Your private calendar** in My day opens your separate persisted personal calendar.
+Create, edit or delete timed/all-day events, choose finite recurrence and export
+ICS. These events belong only to you in the selected workspace; channel members
+and administrators do not inherit access. They are separate from the channel
+agenda and shared free/busy calculation. See [PERSONAL_CALENDAR.md](PERSONAL_CALENDAR.md)
+for storage, reference-context navigation and privacy boundaries.
+
 The view covers the workspaces and channels accessible through the current
 sign-in. A customer workspace SSO session stays inside that customer's scope;
 organization administration does not grant private channel membership. Current

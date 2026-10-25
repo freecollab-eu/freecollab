@@ -15,8 +15,9 @@ function compile(path, dependencies = {}) {
   return exports;
 }
 const calendar = compile('../src/lib/calendar.ts', { './field-references': fieldReferences });
-const model = compile('../src/lib/federated-work-model.ts', { './calendar': calendar });
-const document = compile('../src/lib/federated-work-document.ts', { yjs: Y });
+const references = compile('../src/lib/encrypted-work-references.ts');
+const model = compile('../src/lib/federated-work-model.ts', { './calendar': calendar, './encrypted-work-references': references });
+const document = compile('../src/lib/federated-work-document.ts', { yjs: Y, './encrypted-work-references': references });
 const trust = compile('../src/lib/federated-work-trust.ts', { 'matrix-js-sdk/lib/crypto-api': cryptoApi });
 const connection = 'a'.repeat(32), sender = '@fc_alice:matrix.a.example.com', remote = '@fc_bob:matrix.b.example.com';
 const context = { connection_id: connection };
@@ -153,4 +154,31 @@ test('federated Yjs text replacement never splits shared high or low surrogate b
       assert.equal(reloaded.getText('title').toString(), after);
     } finally { reloaded.destroy(); }
   } finally { doc.destroy(); }
+});
+
+test('negotiated shared-work v2 retains exact global references while v1 rejects new schema fields', async () => {
+  const fields = {...task(),description:'Review with @Bob',references:{description:[{kind:'participant',id:remote,label:'Bob',start:12,end:16}]}};
+  assert.throws(()=>model.validateSharedFields('task',fields),/Unsupported/);
+  const normalized = model.validateSharedFields('task',fields,model.WORK_PROTOCOL_V2,connection);
+  assert.equal(normalized.references.description[0].id,remote);
+  const resource = connection+':'+await model.authorNamespace(sender)+':12345678-1234-4123-8123-123456789abc';
+  const candidate = await event('$v2',[],fields,sender,resource); candidate.content.protocol=model.WORK_PROTOCOL_V2;
+  await assert.rejects(model.parseRevision(candidate,{connection_id:connection}),/Invalid/);
+  const parsed=await model.parseRevision(candidate,{connection_id:connection,work_protocols:[model.WORK_PROTOCOL,model.WORK_PROTOCOL_V2]});
+  assert.equal(parsed.protocol,model.WORK_PROTOCOL_V2);
+});
+
+test('verified Yjs global reference anchors survive concurrent unicode edits and reload without label matching', () => {
+  const initial=new Y.Doc();initial.getText('title').insert(0,'Design');initial.getText('body');
+  const root=document.encodeWorkUpdate(Y.encodeStateAsUpdate(initial));
+  const a=new Y.Doc();Y.applyUpdate(a,Y.encodeStateAsUpdate(initial));
+  a.getText('body').insert(0,'Review @Bob');
+  document.setWorkDocumentReferences(a,{body:[{kind:'participant',id:remote,label:'Bob',start:7,end:11}]},connection);
+  const b=new Y.Doc();Y.applyUpdate(b,Y.encodeStateAsUpdate(a));const vector=Y.encodeStateVector(b);
+  b.getText('body').insert(0,'🪵 ');a.getText('body').insert(a.getText('body').length,' together');
+  const merged=document.reconstructWorkDocument(root,[{id:'$a',update_base64:document.encodeWorkUpdate(Y.encodeStateAsUpdate(a))},{id:'$b',update_base64:document.encodeWorkUpdate(Y.encodeStateAsUpdate(b,vector))}]);
+  assert.equal(merged.body,'🪵 Review @Bob together');assert.equal(merged.references.body[0].id,remote);assert.equal(merged.references.body[0].start,10);
+  const c=new Y.Doc();Y.applyUpdate(c,document.decodeWorkUpdate(merged.update_base64,512*1024));
+  document.replaceWorkText(c,'body','🪵 Review @Bobby together');assert.equal(document.workDocumentReferences(c),undefined);
+  for(const doc of [initial,a,b,c])doc.destroy();
 });

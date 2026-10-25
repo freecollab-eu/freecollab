@@ -12,7 +12,7 @@ from sqlalchemy import func, update
 from sqlmodel import select
 
 from ..database import get_session
-from ..models.app_platform import (AppAIDraft, AppCallback, AppCard, AppInstallation, AppJob,
+from ..models.app_platform import (AppAIDraft, AppCallback, AppCard, AppForegroundReceipt, AppInstallation, AppJob,
                                    AppRevision, ChannelRecapSchedule)
 from ..models.operations import WorkerHeartbeat
 from ..services import app_platform as service
@@ -38,10 +38,11 @@ def installation(session, workspace_id, identifier):
 
 
 def manage(session, row, user_id):
-    service.install_grants(session, row.workspace_id, user_id, service.channels(row))
+    service.install_grants(session, row.workspace_id, user_id, service.channels(row), allow_secure=service.manifest_for(row).secure_foreground)
 
 
 def lock_actor(session, workspace_id, user_id, channel_id=None):
+    service.lock_invoking_account(session, user_id)
     lock_workspace(session, workspace_id)
     if channel_id:
         lock_channel_writes(session, channel_id)
@@ -64,7 +65,7 @@ def installed(workspace_id: str, user=Depends(get_current_user), session=Depends
         accessible = []
         for channel_id in service.channels(row):
             try:
-                service.native_channel(session, workspace_id, channel_id, user.id)
+                service.native_channel(session, workspace_id, channel_id, user.id, allow_secure=service.manifest_for(row).secure_foreground)
                 accessible.append(channel_id)
             except HTTPException:
                 pass
@@ -76,6 +77,67 @@ def installed(workspace_id: str, user=Depends(get_current_user), session=Depends
     from datetime import timedelta
     ready = bool(heartbeat and heartbeat.last_seen_at > datetime.utcnow()-timedelta(seconds=90))
     return {"installations": visible, "worker_ready": ready, "delivery": "queued_until_integration_worker_runs"}
+
+
+@router.get("/workspaces/{workspace_id}/channels/{channel_id}/apps/commands")
+def composer_commands(workspace_id: str, channel_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    from ..services import app_foreground
+    secure = service.is_secure_channel(session, channel_id)
+    if secure:
+        app_foreground.secure_context(session, workspace_id, channel_id, user.id)
+    else:
+        service.native_channel(session, workspace_id, channel_id, user.id)
+    commands = []
+    rows = session.exec(select(AppInstallation).where(AppInstallation.workspace_id == workspace_id,
+        AppInstallation.enabled == True, AppInstallation.revoked_at == None).order_by(AppInstallation.id).limit(100)).all()
+    for row in rows:
+        if channel_id not in service.channels(row) or not service.allowed_installation(session, row):
+            continue
+        manifest = service.manifest_for(row)
+        if "commands:invoke" not in manifest.scopes or secure and not manifest.secure_foreground:
+            continue
+        for command in manifest.commands:
+            commands.append({"key": row.id + ":" + command.name, "installation_id": row.id,
+                "app_id": row.app_id, "app_name": manifest.name, "generation": row.generation,
+                "origin": row.origin, "supports_secure_foreground": manifest.secure_foreground,
+                "delivery": "foreground" if secure else "queued", **command.model_dump()})
+    return {"commands": commands}
+
+
+class ComposerInvocation(service.Strict):
+    request_id: str = Field(pattern=r"^[A-Za-z0-9_-]{8,80}$")
+    expected_generation: int = Field(ge=1)
+    command: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,31}$")
+    arguments: dict[str, service.ReviewedArgument] = Field(default_factory=dict)
+    confirm: bool
+    disclose_to_app: bool
+
+
+class ForegroundInvocation(ComposerInvocation):
+    disclose_decrypted_content: bool
+    matrix_device_id: str = Field(min_length=1, max_length=255)
+
+
+@router.post("/workspaces/{workspace_id}/channels/{channel_id}/apps/foreground/{installation_id}")
+def foreground_invoke(workspace_id: str, channel_id: str, installation_id: str, data: ForegroundInvocation,
+                      user=Depends(get_current_user), session=Depends(get_session)):
+    from ..services import app_foreground
+    account_limit(session, "app-command", user.id, 60, 3600)
+    lock_actor(session, workspace_id, user.id, channel_id)
+    row = installation(session, workspace_id, installation_id)
+    return app_foreground.invoke(session, row, channel_id, user.id, data)
+
+
+@router.post("/workspaces/{workspace_id}/channels/{channel_id}/apps/commands/{installation_id}", status_code=202)
+def composer_invoke(workspace_id: str, channel_id: str, installation_id: str, data: ComposerInvocation,
+                    user=Depends(get_current_user), session=Depends(get_session)):
+    account_limit(session, "app-command", user.id, 60, 3600)
+    lock_actor(session, workspace_id, user.id, channel_id)
+    row = installation(session, workspace_id, installation_id)
+    request = service.Invocation(channel_id=channel_id, **data.model_dump())
+    job = service.queue_invocation(session, row, user.id, request)
+    session.commit()
+    return service.job_data(job)
 
 
 @router.post("/workspaces/{workspace_id}/apps", status_code=201)
@@ -136,10 +198,20 @@ def invoke(workspace_id: str, installation_id: str, data: service.Invocation,
 
 @router.get("/workspaces/{workspace_id}/apps/{installation_id}/jobs")
 def jobs(workspace_id: str, installation_id: str, user=Depends(get_current_user), session=Depends(get_session)):
+    from datetime import timedelta
+    from ..services.app_foreground import receipt_data
     row = installation(session, workspace_id, installation_id)
     manage(session, row, user.id)
     rows = session.exec(select(AppJob).where(AppJob.installation_id == row.id).order_by(AppJob.created_at.desc()).limit(100)).all()
-    return {"jobs": [service.job_data(entry) for entry in rows]}
+    foreground = session.exec(select(AppForegroundReceipt).where(AppForegroundReceipt.installation_id == row.id)
+        .order_by(AppForegroundReceipt.created_at.desc()).limit(100)).all()
+    for entry in foreground:
+        if entry.status == "processing" and entry.created_at < datetime.utcnow()-timedelta(seconds=90):
+            entry.status, entry.failure, entry.finished_at = "uncertain", "Delivery outcome is unknown; inspect the recipient before another action", datetime.utcnow()
+            session.add(entry)
+    session.commit()
+    return {"jobs": sorted([service.job_data(entry) for entry in rows] + [receipt_data(entry) for entry in foreground],
+        key=lambda entry: entry["created_at"], reverse=True)[:100]}
 
 
 class Retry(service.Strict):
@@ -290,7 +362,7 @@ def approve_draft(workspace_id: str, channel_id: str, draft_id: str, data: Appro
             if installed.generation != action["generation"]:
                 raise HTTPException(409, "An app changed after this proposal; generate and review a new draft")
             job = service.queue_invocation(session, installed, user.id, service.Invocation(request_id=row.id+"_"+str(len(resources)),
-                channel_id=channel_id, command=action["command"], arguments=action["arguments"], confirm=True, disclose_to_app=True))
+                channel_id=channel_id, command=action["command"], arguments=action["arguments"], expected_generation=action["generation"], confirm=True, disclose_to_app=True))
             resources.append(job.id)
         resource = ",".join(resources)
     else:

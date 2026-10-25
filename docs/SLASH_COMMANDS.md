@@ -56,6 +56,8 @@ selection or deferred focus callback.
 | `/beslut "Vi lanserar" Godkänt efter säkerhetsgranskning.` | Proposed decision with a title and its context |
 | `/sök budget` | History search with **budget** already entered |
 | `/group "Design team" @Ada @Sam` | Group review form, with people chosen from the `@` suggestions |
+| `/calendar` | Your private calendar inside My day, separate from shared channel events |
+| `/customer.app:publish text="A reviewed update"` | The currently installed command's typed argument review; no external invocation yet |
 
 English shortcuts remain stable when the interface language changes. Swedish
 aliases include `/dokument`, `/uppgift`, `/beslut`, `/sök`, `/grupp` and
@@ -195,3 +197,27 @@ When an exact command has arguments, its suggestion stays fixed while the
 arguments are edited. Selecting an `@` reference cannot change `/task` into
 a different command under the pointer. The separate feature search remains
 available for browsing all permitted entries.
+
+## Installed app arguments
+
+The current channel catalogue supplies stable installation keys, namespace,
+schema, generation and recipient. A fully qualified `/app-id:command` or a
+unique short name opens `AppCommandWork` in the same retained work area as
+other tools. The feature browser opens a blank argument form while preserving
+an ordinary unsent message. Typed commands preserve their actual argument
+text until the current schema has validated it.
+
+Arguments use named `key=value` fields, quotes and documented escapes; the
+review converts only the installation's declared argument types. They are not
+shell commands. If more than one installation exposes the same namespace or
+short name, choose the actual installation in the menu; origin and installation
+identity distinguish it. Ambiguous multiline commands remain protected drafts
+and cannot silently become ordinary chat messages. Built-in commands retain
+their reserved meaning.
+
+The review binds schema, full installation identity and generation again,
+shows the recipient, and requires explicit disclosure/approval. Queued native
+commands receive durable idempotent receipts. An uncertain foreground result
+keeps its navigation guard and is not silently resent. Encrypted channels only
+list installations that explicitly support device-reviewed foreground disclosure;
+response publication is a separate encrypted write. See [the app contract](APP_PLATFORM.md).

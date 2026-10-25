@@ -12,7 +12,9 @@ import { CollaborationInput } from './CollaborationInput';
 import { ReferencedMessage } from './ReferencedMessage';
 import { ContextualCopilot } from './ContextualCopilot';
 import { SharedDocumentOrganization } from './SharedDocumentOrganization';
+import { createDocumentAnchor, resolveDocumentAnchor, type DocumentCommentAnchor } from '../lib/document-anchors';
 import '../styles/shared-documents.css';
+import '../styles/content-completion.css';
 
 export interface SharedDocumentDraft { title: string; text: string; key: string; field_references?: FieldReferences }
 interface Props { workspaceId: string; channelId: string; instanceId?: string; isAdmin?: boolean; presentation?: 'full' | 'flow'; initialDocumentId?: string; initialStackId?: string; initialDraft?: SharedDocumentDraft; onSelectedDocument?: (document: SharedDocumentRecord | null) => void; onCreatedDocument?: (document: SharedDocumentRecord) => void; onPendingChange?: (pending: boolean) => void; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
@@ -34,6 +36,8 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
   const [loading, setLoading] = useState(true), [showArchived, setShowArchived] = useState(false), [creating, setCreating] = useState(false), [newTitle, setNewTitle] = useState('');
   const [state, setState] = useState<DocumentState>(empty), [busy, setBusy] = useState(''), [error, setError] = useState(''), [notice, setNotice] = useState('');
   const [comments, setComments] = useState<SharedComment[]>([]), [comment, setComment] = useState(''), [commentsError, setCommentsError] = useState('');
+  const [commentAnchor, setCommentAnchor] = useState<DocumentCommentAnchor | null>(null);
+  const commentAnchorRef = useRef(commentAnchor); commentAnchorRef.current = commentAnchor;
   const [history, setHistory] = useState<SharedSnapshot[] | null>(null), [snapshotName, setSnapshotName] = useState(''), [restoring, setRestoring] = useState<SharedSnapshot | null>(null), [preview, setPreview] = useState(true);
   const [focusComment, setFocusComment] = useState<{ documentId: string; commentId: string } | null>(null);
   const [members, setMembers] = useState<Record<string, string>>({});
@@ -74,7 +78,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
   function leaveDocument() {
     if (!mayChangeDocument()) return;
     publishPending('comment', false); publishPending('snapshot', false); publishPending('organization', false);
-    setComment(''); setCommentReferences([]); setSnapshotName(''); setSelected(null); void load();
+    setComment(''); setCommentReferences([]); setCommentAnchor(null); commentAnchorRef.current = null; setSnapshotName(''); setSelected(null); void load();
   }
   function revealReadyDocument(editor: HTMLElement) {
     if (!window.matchMedia('(max-width: 999px)').matches) return;
@@ -167,10 +171,10 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
     focusedDocument.current = null;
     editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; setPreview(true);
     clearPending(); publishPending('create', !!draft && !!(draft.title.trim() || draft.text.trim()));
-    setRows([]); setSelected(null); setState(empty); setComments([]); setComment(''); setCommentReferences([]); setNewTitleReferences(draft?.field_references?.title || []); setNewBodyReferences(draft?.field_references?.body || []); setSnapshotName(''); setHistory(null); setCreating(!!draft); setNewTitle(draft?.title || ''); setNewBody(draft?.text || ''); setError(draftError); setNotice(''); setBusy('');
+    setRows([]); setSelected(null); setState(empty); setComments([]); setCommentAnchor(null); commentAnchorRef.current = null; setComment(''); setCommentReferences([]); setNewTitleReferences(draft?.field_references?.title || []); setNewBodyReferences(draft?.field_references?.body || []); setSnapshotName(''); setHistory(null); setCreating(!!draft); setNewTitle(draft?.title || ''); setNewBody(draft?.text || ''); setError(draftError); setNotice(''); setBusy('');
     void load(request, false); if (draftError) setError(draftError); setShowArchived(false);
     void api.getChannelMembers(channelId).then(result => { if (current(request)) setMembers(Object.fromEntries(result.map(row => [row.user_id, row.name]))); }).catch(() => undefined);
-    const changed = () => { ++generation.current; clearPending(); releaseSession.current?.(); releaseSession.current = null; session.current = null; selectedCallback.current?.(null); editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; setPreview(true); setRows([]); setSelected(null); setState(empty); setComments([]); setHistory(null); setNewTitle(''); setNewBody(''); setNewTitleReferences([]); setNewBodyReferences([]); setCreating(false); setComment(''); setCommentReferences([]); setSnapshotName(''); setLoading(false); };
+    const changed = () => { ++generation.current; clearPending(); releaseSession.current?.(); releaseSession.current = null; session.current = null; selectedCallback.current?.(null); editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; setPreview(true); setRows([]); setSelected(null); setState(empty); setComments([]); setCommentAnchor(null); commentAnchorRef.current = null; setHistory(null); setNewTitle(''); setNewBody(''); setNewTitleReferences([]); setNewBodyReferences([]); setCreating(false); setComment(''); setCommentReferences([]); setSnapshotName(''); setLoading(false); };
     window.addEventListener('freecollab:auth-changed', changed);
     const unload = (event: BeforeUnloadEvent) => { if (Object.values(pending.current).some(Boolean)) { event.preventDefault(); event.returnValue = ''; } };
     window.addEventListener('beforeunload', unload);
@@ -188,7 +192,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
   useEffect(() => {
     if (!selected || selected.channel_id !== channelId) return;
     const request = generation.current, documentId = selected.id, lease = acquireSharedDocumentSession(channelId, selected), controller = lease.session; session.current = controller; releaseSession.current = lease.release;
-    setState(empty); setComments([]); setComment(''); setCommentReferences([]); setCommentsError(''); setHistory(null); setRestoring(null); setPreview(editOnSelect.current !== documentId); setSnapshotName(''); setNotice('');
+    setState(empty); setComments([]); setCommentAnchor(null); commentAnchorRef.current = null; setComment(''); setCommentReferences([]); setCommentsError(''); setHistory(null); setRestoring(null); setPreview(editOnSelect.current !== documentId); setSnapshotName(''); setNotice('');
     editOnSelect.current = null; editorPosition.current = null; viewFocus.current = null; lastEditingField.current = 'body';
     publishPending('comment', false); publishPending('snapshot', false);
     const unsubscribe = controller.subscribe(next => {
@@ -229,7 +233,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
     if (!owner.current || owner.current !== api.getAccessToken() || row.channel_id !== channelId) return;
     if (selected?.id !== row.id && !mayChangeDocument()) return;
     // Do not focus a retained list from the last time this page was open.
-    if (selected?.id !== row.id) { publishPending('create', false); publishPending('comment', false); publishPending('snapshot', false); publishPending('organization', false); setCreating(false); setNewTitle(''); setNewBody(''); setNewTitleReferences([]); setNewBodyReferences([]); setComments([]); setComment(''); setCommentReferences([]); setSnapshotName(''); setCommentsError(''); }
+    if (selected?.id !== row.id) { publishPending('create', false); publishPending('comment', false); publishPending('snapshot', false); publishPending('organization', false); setCreating(false); setNewTitle(''); setNewBody(''); setNewTitleReferences([]); setNewBodyReferences([]); setComments([]); setCommentAnchor(null); commentAnchorRef.current = null; setComment(''); setCommentReferences([]); setSnapshotName(''); setCommentsError(''); }
     // An explicit source-comment target takes priority over generic first-body
     // focus, including a ready callback already queued for this document.
     if (commentId) focusedDocument.current = row.id;
@@ -251,8 +255,42 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
     await run('archive', async request => { const result = await sharedDocumentsApi.archive(row, !row.archived); if (!current(request) || selectedId.current !== row.id) return; setSelected(null); setNotice(result.archived ? t("Document archived. Its complete history remains available.") : t("Document restored.")); await load(request); });
   }
   async function addComment(event: FormEvent) {
-    event.preventDefault(); if (!selected) return; const documentId = selected.id, submitted = comment, submittedReferences = commentReferences;
-    await run('comment', async request => { await sharedDocumentsApi.comment(channelId, documentId, submitted, submittedReferences); if (!current(request) || selectedId.current !== documentId) return; if (commentDraft.current === submitted && JSON.stringify(commentReferenceDraft.current) === JSON.stringify(submittedReferences)) { commentDraft.current = ''; commentReferenceDraft.current = []; publishPending('comment', false); setComment(''); setCommentReferences([]); } await loadComments(documentId, request); });
+    event.preventDefault(); if (!selected) return; const documentId = selected.id, submitted = comment, submittedReferences = commentReferences, submittedAnchor = commentAnchor;
+    await run('comment', async request => { await sharedDocumentsApi.comment(channelId, documentId, submitted, submittedReferences, submittedAnchor || undefined); if (!current(request) || selectedId.current !== documentId) return; if (commentDraft.current === submitted && JSON.stringify(commentReferenceDraft.current) === JSON.stringify(submittedReferences) && JSON.stringify(commentAnchorRef.current) === JSON.stringify(submittedAnchor)) { commentDraft.current = ''; commentReferenceDraft.current = []; commentAnchorRef.current = null; publishPending('comment', false); setComment(''); setCommentReferences([]); setCommentAnchor(null); } await loadComments(documentId, request); });
+  }
+  function anchorSelection() {
+    if (!selected || !session.current || !state.ready || state.pending || !writable) return;
+    try {
+      let start = bodyInput.current?.selectionStart || 0, end = bodyInput.current?.selectionEnd || 0;
+      if (previewRef.current) {
+        const body = readingPage.current?.querySelector('.fc-shared-reading-body'), selection = window.getSelection();
+        if (!body || !selection?.rangeCount || body.textContent !== state.body) throw new Error('Select a passage in the document first.');
+        const range = selection.getRangeAt(0);
+        if (!body.contains(range.commonAncestorContainer)) throw new Error('Select a passage in the document first.');
+        const before = range.cloneRange(); before.selectNodeContents(body); before.setEnd(range.startContainer, range.startOffset); start = before.toString().length; end = start + range.toString().length;
+      }
+      const anchor = createDocumentAnchor(session.current.doc, selected.id, state.sequence, start, end);
+      commentAnchorRef.current = anchor; setCommentAnchor(anchor); publishPending('comment', true); setCommentsError('');
+      document.getElementById(fieldId('shared-document-comment'))?.focus();
+    } catch (failure) { setCommentsError(describe(failure)); }
+  }
+  function showAnchor(anchor: DocumentCommentAnchor) {
+    if (!selected || !session.current || !state.ready) return;
+    try {
+      const position = resolveDocumentAnchor(session.current.doc, selected.id, anchor);
+      if (!position) throw new Error('This passage was removed. Its original quote remains with the comment.');
+      const body = readingPage.current?.querySelector('.fc-shared-reading-body');
+      if (previewRef.current && body && body.textContent === state.body) {
+        const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT), range = document.createRange(); let offset = 0, node = walker.nextNode(), began = false;
+        while (node) { const length = node.textContent?.length || 0; if (!began && position.start <= offset + length) { range.setStart(node, position.start - offset); began = true; } if (began && position.end <= offset + length) { range.setEnd(node, position.end - offset); break; } offset += length; node = walker.nextNode(); }
+        if (!began || !node) throw new Error('The passage could not be selected.');
+        const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); readingPage.current?.focus({ preventScroll: true }); (range.startContainer.parentElement || body).scrollIntoView({ block: 'center' });
+      } else {
+        if (previewRef.current) { editorPosition.current = { field: 'body', value: state.body, start: position.start, end: position.end, direction: 'forward', top: 0, left: 0 }; lastEditingField.current = 'body'; changeDocumentView(false); }
+        else if (bodyInput.current) { bodyInput.current.focus({ preventScroll: true }); bodyInput.current.setSelectionRange(position.start, position.end); revealReadyDocument(bodyInput.current); }
+      }
+      setCommentsError(position.changed ? t('The passage has changed since this comment was written.') : '');
+    } catch (failure) { setCommentsError(describe(failure)); }
   }
   async function historyLoad(request = generation.current) {
     if (!selected) return; const documentId = selected.id;
@@ -323,7 +361,7 @@ export function SharedDocumentsPanel({ workspaceId, channelId, instanceId, isAdm
       {!flow && <p className="fc-shared-muted">{state.body.length.toLocaleString(currentLocale())} {t(" / 50,000 characters · Collaborative plain text and Markdown. Keep this page open while edits are waiting to sync.")}</p>}
       <details className={"fc-shared-document-options" + (flow ? " fc-document-flow-stack fc-shared-flow-options" : "")}><summary>{t('Document options')}</summary>{documentOptions}</details>
       <SharedDocumentOrganization key={channelId + ':editor:' + selected.id} workspaceId={workspaceId} channelId={channelId} instanceId={instanceId} presentation={presentation} onPendingChange={value => publishPending("organization", value)} onBusyChange={value => publishPending("organizationBusy", value)} documents={rows.map(row => row.id === selected.id ? { ...selected, title: state.title } : row)} archived={selected.archived} isAdmin={isAdmin} selected={{ ...selected, title: state.title }} members={members} pendingStackMessageId={pendingStackMessageId} onStackMessageSaved={onStackMessageSaved} onRevealMessage={onRevealMessage} onOpen={openOrganizedDocument} />
-      <section className="fc-shared-comments" aria-label={t("Document comments")}><h4><MessageSquare size={17} />{t("Comments")}</h4>{commentsError && <p className="fc-shared-danger" role="alert">{commentsError}</p>}<ul>{comments.map(row => <li id={fieldId('shared-document-comment-' + row.id)} tabIndex={-1} key={row.id} className={row.resolved ? 'is-resolved' : ''}><div><strong>{members[row.created_by] || t("Channel member")}</strong><small>{date(row.created_at)}{row.resolved ? t(" · Resolved") : ''}</small></div><p><ReferencedMessage content={row.fields.text} references={row.fields.references} channelId={channelId} workspaceId={workspaceId} secure={collaboration?.secure} onOpen={collaboration?.onOpenReference ? (reference, lease) => collaboration.onOpenReference?.(reference, undefined, lease.isCurrent, lease.element) : undefined} /></p>{writable && (row.created_by === api.getCurrentUserId() || isAdmin) && <button className="fc-shared-text-button" type="button" disabled={!!busy} onClick={() => void run('resolve', async request => { await sharedDocumentsApi.resolveComment(channelId, selected.id, row); if (current(request)) await loadComments(selected.id, request); })}>{row.resolved ? t("Reopen comment") : t("Resolve comment")}</button>}</li>)}</ul>{!comments.length && <p className="fc-shared-muted">{t("Start a discussion alongside the page.")}</p>}{writable && <form onSubmit={addComment} className="fc-shared-form"><label htmlFor={fieldId("shared-document-comment")}>{t("Add a comment")}</label><CollaborationInput id={fieldId("shared-document-comment")} contextId={inputContext("comment")} toolbar className="fc-input" rows={3} maxLength={2000} value={comment} references={commentReferences} onValueChange={(value, references) => { commentDraft.current = value; commentReferenceDraft.current = references; publishPending("comment", !!value.trim()); setComment(value); setCommentReferences(references); }} /><button className="fc-button" type="submit" disabled={!!busy || !comment.trim()}><MessageSquare size={15} />{t("Post comment")}</button></form>}</section>
+      <section className="fc-shared-comments" aria-label={t("Document comments")}><h4><MessageSquare size={17} />{t("Comments")}</h4>{commentsError && <p className="fc-shared-danger" role="alert">{commentsError}</p>}<ul>{comments.map(row => <li id={fieldId('shared-document-comment-' + row.id)} tabIndex={-1} key={row.id} className={row.resolved ? 'is-resolved' : ''}><div><strong>{members[row.created_by] || t("Channel member")}</strong><small>{date(row.created_at)}{row.resolved ? t(" · Resolved") : ''}</small></div><>{row.fields.anchor && <blockquote className="fc-document-comment-anchor"><p>{row.fields.anchor.quote}</p><button type="button" className="fc-shared-text-button" disabled={!state.ready} onClick={() => showAnchor(row.fields.anchor!)}>{t("View passage")}</button></blockquote>}</><p><ReferencedMessage content={row.fields.text} references={row.fields.references} channelId={channelId} workspaceId={workspaceId} secure={collaboration?.secure} onOpen={collaboration?.onOpenReference ? (reference, lease) => collaboration.onOpenReference?.(reference, undefined, lease.isCurrent, lease.element) : undefined} /></p>{writable && (row.created_by === api.getCurrentUserId() || isAdmin) && <button className="fc-shared-text-button" type="button" disabled={!!busy} onClick={() => void run('resolve', async request => { await sharedDocumentsApi.resolveComment(channelId, selected.id, row); if (current(request)) await loadComments(selected.id, request); })}>{row.resolved ? t("Reopen comment") : t("Resolve comment")}</button>}</li>)}</ul>{!comments.length && <p className="fc-shared-muted">{t("Start a discussion alongside the page.")}</p>}{writable && <form onSubmit={addComment} className="fc-shared-form"><button type="button" className="fc-text-button" disabled={!state.ready || !!state.pending} onMouseDown={event => event.preventDefault()} onClick={anchorSelection}>{t("Comment on selected passage")}</button>{commentAnchor && <blockquote className="fc-document-comment-anchor"><p>{commentAnchor.quote}</p><button type="button" className="fc-text-button" onClick={() => { commentAnchorRef.current = null; setCommentAnchor(null); publishPending("comment", !!comment.trim()); }}>{t("Remove passage link")}</button></blockquote>}<label htmlFor={fieldId("shared-document-comment")}>{t("Add a comment")}</label><CollaborationInput id={fieldId("shared-document-comment")} contextId={inputContext("comment")} toolbar className="fc-input" rows={3} maxLength={2000} value={comment} references={commentReferences} onValueChange={(value, references) => { commentDraft.current = value; commentReferenceDraft.current = references; publishPending("comment", !!value.trim() || !!commentAnchorRef.current); setComment(value); setCommentReferences(references); }} /><button className="fc-button" type="submit" disabled={!!busy || !comment.trim()}><MessageSquare size={15} />{t("Post comment")}</button></form>}</section>
     </>)}
   </section>;
 }

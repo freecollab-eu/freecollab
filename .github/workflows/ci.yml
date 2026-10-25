@@ -491,7 +491,6 @@ jobs:
       ENVIRONMENT: test
       BACKEND_PYTHON: python
       FREECOLLAB_PROOF_RUN_LABEL: ci-${{ matrix.stage }}
-      FREECOLLAB_PROOF_REPORT_DIR: ${{ runner.temp }}/freecollab-matrix-proof
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -524,6 +523,8 @@ jobs:
           sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends coturn
           echo "MEETINGS_TEST_TURN_BINARY=$(command -v turnserver)" >> "$GITHUB_ENV"
       - name: Verify actual trusted devices across two separate installations
+        env:
+          FREECOLLAB_PROOF_REPORT_DIR: ${{ runner.temp }}/freecollab-matrix-proof
         run: python frontend/tests/encrypted-work-browser.py --${{ matrix.stage }}-only
       - name: Retain scoped encrypted acceptance evidence
         if: always()

@@ -29,7 +29,7 @@ sys.path.insert(0, str(ROOT / 'backend'))
 from tests.oidc_mock import tls_fixture
 spec = importlib.util.spec_from_file_location('private_helpers', Path(__file__).with_name('remote-sync-browser.py'))
 helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
-PYTHON = os.getenv('BACKEND_PYTHON') or str(ROOT.parent / 'core/backend/.venv/bin/python')
+PYTHON = os.getenv('BACKEND_PYTHON') or sys.executable
 REPORT = Path(os.getenv('AI_SURFACE_REPORT', str(ROOT.parent / '.freecollab/proof-results/gap-completion-20261025/ai-surface/browser.json')))
 PASSWORD = 'Private-ai-surface!2026'
 KEY = 'synthetic-owned-ai-surface-key'

@@ -15,6 +15,7 @@ from pathlib import Path
 import re
 import secrets
 import subprocess
+import sys
 import tempfile
 import wave
 from urllib.request import Request, urlopen
@@ -27,7 +28,7 @@ def module(name,file):
     spec=importlib.util.spec_from_file_location(name,Path(__file__).with_name(file));value=importlib.util.module_from_spec(spec);spec.loader.exec_module(value);return value
 p=module('flow_private_helpers','customer-sso-browser.py')
 held=module('flow_held_reads','my-day-browser.py')
-PYTHON=os.getenv('BACKEND_PYTHON') or str(ROOT.parent/'core/backend/.venv/bin/python')
+PYTHON=os.getenv('BACKEND_PYTHON') or sys.executable
 REPORT=Path(os.getenv('FLOW_COMPLETION_REPORT',str(ROOT.parent/'.freecollab/proof-results/gap-completion-20261025/flow-completion/browser.json')))
 SOURCES=['frontend/src/'+name for name in ['App.tsx','components/Chat.tsx','components/NativeLinkController.tsx','lib/native-links.ts','components/WorkHub.tsx','components/MyDay.tsx','components/PersonalCalendar.tsx','components/ActivityFeedPanel.tsx','components/WorkflowsPanel.tsx','components/MeetingsPanel.tsx','components/SharedDocumentOrganization.tsx','lib/useResourceTargetFocus.ts','lib/personal-calendar-api.ts']]
 SOURCES+=['frontend/tests/flow-completion-browser.py','backend/app/api/content_completion.py','backend/app/services/content_completion.py']

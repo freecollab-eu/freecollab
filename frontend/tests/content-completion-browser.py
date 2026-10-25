@@ -4,14 +4,14 @@
 Component-host proof, not a claim about Chat integration or production deployment.
 Uses actual SQLite persistence, accounts, binary upload, Yjs editor and search APIs.
 """
-import base64, hashlib, importlib.util, json, os, secrets, subprocess, tempfile
+import base64, hashlib, importlib.util, json, os, secrets, subprocess, sys, tempfile
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 from playwright.sync_api import expect, sync_playwright
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('content_proof_helpers',Path(__file__).with_name('customer-sso-browser.py'));p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
-PYTHON=os.getenv('BACKEND_PYTHON') or '/workspace/core/backend/.venv/bin/python'
+PYTHON=os.getenv('BACKEND_PYTHON') or sys.executable
 REPORT=Path(os.getenv('CONTENT_COMPLETION_REPORT',str(ROOT.parent/'.freecollab/proof-results/gap-completion-20261025/content-search/browser/report.json')))
 SOURCES=['frontend/src/components/SemanticDocumentSuggestions.tsx','frontend/src/components/FederatedDocumentComments.tsx','frontend/src/lib/encrypted-document-organization-api.ts','frontend/src/lib/latent-semantic.ts','frontend/src/lib/semantic-search.worker.ts','frontend/src/components/ContentCollections.tsx','frontend/src/components/PersonalCalendar.tsx','frontend/src/components/SemanticSearchPanel.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/content-collections-api.ts','frontend/src/lib/semantic-search.ts','frontend/src/lib/document-anchors.ts','frontend/src/lib/shared-documents-api.ts','backend/app/api/content_completion.py','backend/app/services/semantic_index.py','backend/app/services/search_sources.py','backend/app/api/shared_documents.py','frontend/tests/content-completion-browser.py']
 ENTRY=r'''import React,{useState}from'react';import{createRoot}from'react-dom/client';import{api}from'./src/lib/api';import{ContentCollections}from'./src/components/ContentCollections';import{PersonalCalendar}from'./src/components/PersonalCalendar';import{SemanticSearchPanel}from'./src/components/SemanticSearchPanel';import{SharedDocumentsPanel}from'./src/components/SharedDocumentsPanel';import{LocaleProvider,applyLocale}from'./src/i18n';import './src/index.css';api.useMemorySession();applyLocale('en');window.fixture={events:[]};for(const name of ['freecollab:open-search-source','freecollab:open-personal-source'])window.addEventListener(name,event=>window.fixture.events.push({name,kind:event.detail.kind,id:event.detail.id||event.detail.item_id}));function Host(){const[entry,setEntry]=useState(null);window.fixture.open=(session,workspace,channel,view,document)=>{api.applySession(session);setEntry({workspace,channel,view,document,key:crypto.randomUUID()})};return <LocaleProvider><main style={{maxWidth:880,margin:'auto',padding:16}}>{entry?<section key={entry.key}>{entry.view==='calendar'?<PersonalCalendar workspaceId={entry.workspace} channelId={entry.channel}/>:entry.view==='search'?<SemanticSearchPanel workspaceId={entry.workspace}/>:entry.view==='documents'?<SharedDocumentsPanel workspaceId={entry.workspace} channelId={entry.channel} initialDocumentId={entry.document} isAdmin/>:<ContentCollections workspaceId={entry.workspace} channelId={entry.channel}/>}</section>:<p>Ready for a private account</p>}</main></LocaleProvider>}createRoot(document.getElementById('root')).render(<Host/>);'''
@@ -41,7 +41,7 @@ def main():
     p.api(base,'POST',f'/channels/{cid}/shared-documents',owner,{'id':'meaning-page-'+str(index),'update_id':'meaning-first-'+str(index),'update_base64':encoded,'title':title})
    p.api(base,'POST',f'/channels/{cid}/shared-documents/{doc["id"]}/comments',owner,{'id':'meaning-evidence','text':'cat pet kitten'})
    with sync_playwright() as pw:
-    browser=pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox']);context=browser.new_context(viewport={'width':1000,'height':850},reduced_motion='reduce');page=context.new_page();page.set_default_timeout(25000)
+    browser=pw.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or '/usr/bin/chromium',headless=True,args=['--no-sandbox']);context=browser.new_context(viewport={'width':1000,'height':850},reduced_motion='reduce');page=context.new_page();page.set_default_timeout(25000)
     page.on('pageerror',lambda e:errors.append(str(e)));page.on('request',lambda r:external.append(urlsplit(r.url).hostname) if urlsplit(r.url).hostname not in ['127.0.0.1','localhost'] else None)
     page.goto(app,wait_until='networkidle');page.wait_for_function('()=>!!window.fixture?.open')
     def open_view(view,actor=owner):page.evaluate('(v)=>fixture.open(...v)',[actor,wid,cid,view,doc['id']])

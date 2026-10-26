@@ -59,7 +59,7 @@ def main():
             commands += [([python, str(ROOT/'backend/tests/media_browser_api.py')], 'api.log', ROOT/'backend'), (['node', str(launcher)], 'vite.log', ROOT/'frontend')]
             for command, name, cwd in commands:
                 stream = (private/name).open('w'); streams.append(stream); processes.append(subprocess.Popen(command, cwd=cwd, env=env, stdout=stream, stderr=stream, start_new_session=True))
-            helpers.ready(api_base + '/ready', processes); helpers.ready(app + '/', processes)
+            helpers.ready(api_base + '/ready', processes); harness.ready_frontend(app, processes)
             if binary:
                 stream = (private/'worker.log').open('w'); streams.append(stream); processes.append(subprocess.Popen([python, '-m', 'app.services.sfu_worker'], cwd=ROOT/'backend', env=env, stdout=stream, stderr=stream, start_new_session=True))
             tokens = json.loads((private/'access.json').read_text())

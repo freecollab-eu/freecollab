@@ -41,8 +41,33 @@ createRoot(document.getElementById('root')).render(<React.StrictMode><LocaleProv
 def get(url):
     with urlopen(url, timeout=10) as response: return json.load(response)
 
+
+def retain_failure_diagnostics(private, diagnostics, sensitive):
+    diagnostics = dict(diagnostics)
+    for name in ['console', 'http', 'request_failures']:
+        diagnostics[name] = diagnostics.get(name, [])[-200:]
+    for name in ['vite.log', 'api.log']:
+        path = private / name
+        if path.exists(): diagnostics[name] = path.read_text()[-16000:]
+    value = json.dumps(diagnostics, indent=2)
+    for secret in sensitive:
+        if secret: value = value.replace(secret, '[redacted]')
+    REPORT.parent.mkdir(parents=True, exist_ok=True)
+    diagnostic = REPORT.with_name('external-meetings-failure.json'); diagnostic.write_text(value + '\n')
+    # Existing CI failure-artifact rules retain this private, bounded diagnostic
+    # after the original fixture's normal cleanup.
+    with tempfile.NamedTemporaryFile(mode='w', prefix='freecollab-external-meetings-failure-', suffix='.log', delete=False) as retained:
+        retained.write(value + '\n')
+    sanitized = json.loads(value)
+    print('External meeting failure diagnostics: ' + str(diagnostic), file=sys.stderr)
+    print('Failed HTTP requests: ' + json.dumps([row for row in sanitized['http'] if row['status'] >= 400][-12:]), file=sys.stderr)
+    print('Console errors: ' + json.dumps([row for row in sanitized['console'] if row['type'] == 'error'][-6:]), file=sys.stderr)
+    print('Vite tail: ' + sanitized.get('vite.log', '')[-4000:], file=sys.stderr)
+
+
 def main():
     results, processes, streams, stage = {}, [], [], 'private services'
+    diagnostics_written = False
     with tempfile.TemporaryDirectory(prefix='freecollab-external-meetings-') as directory:
         private = Path(directory)
         try:
@@ -56,7 +81,8 @@ def main():
             for command, name, cwd in commands:
                 stream = (private/name).open('w'); streams.append(stream)
                 processes.append(subprocess.Popen(command, cwd=cwd, env=env, stdout=stream, stderr=stream, start_new_session=True))
-            helpers.ready(api_base+'/ready', processes); helpers.ready(app+'/', processes)
+            helpers.ready(api_base+'/ready', processes); harness.ready_frontend(app, processes)
+            frontend_readiness = get(app + '/__proof/frontend-ready')
             token = json.loads((private/'access.json').read_text())['token']
             with sync_playwright() as playwright:
                 launch = {'headless':True, 'args':['--no-sandbox']}
@@ -77,12 +103,25 @@ def main():
                 for host in ['accounts.google.com','login.microsoftonline.com','zoom.us']:
                     context.route('https://'+host+'/**', authorize)
                 page = context.new_page(); page.set_default_timeout(30000)
+                browser_diagnostics = {'console': [], 'http': [], 'request_failures': []}
+                def sanitized(value):
+                    for secret in [token, 'private-protocol-fixture-client-secret', 'private-ui-password', env['JWT_SECRET'], env['ACCOUNT_SECURITY_KEY']]:
+                        value = value.replace(secret, '[redacted]')
+                    return value
+                def response_metadata(response):
+                    if response.request.resource_type in {'script', 'stylesheet'} or response.status >= 400:
+                        browser_diagnostics['http'].append({'path': urlsplit(response.url).path, 'status': response.status})
+                page.on('response', response_metadata)
+                page.on('console', lambda message: browser_diagnostics['console'].append({'type': message.type, 'text': sanitized(message.text)[:1500]}))
+                page.on('requestfailed', lambda request: browser_diagnostics['request_failures'].append({'path': urlsplit(request.url).path, 'error': request.failure}))
                 page.on('pageerror', lambda error: errors.append(str(error)))
                 page.on('request', lambda request: unexpected.append(request.url) if urlsplit(request.url).hostname not in ['127.0.0.1','localhost','accounts.google.com','login.microsoftonline.com','zoom.us'] else None)
                 try:
                     stage = 'customer configuration, OAuth consent, test and create for three providers'
                     for provider,label in [('google_meet','Google Meet'),('microsoft_teams','Microsoft Teams'),('zoom','Zoom')]:
                         page.goto(app, wait_until='networkidle')
+                        if provider == 'google_meet':
+                            assert get(app + '/__proof/frontend-ready')['currentBrowserHash'] == frontend_readiness['browserHash'], 'The frontend optimizer changed after its ready barrier'
                         page.get_by_role('button',name='Add meeting provider',exact=True).click()
                         form = page.get_by_role('form',name='Configure customer meeting provider')
                         # Changing customer applications clears every native/provider credential.
@@ -159,11 +198,20 @@ def main():
                     assert not errors, 'Browser page errors'
                     results['zero_browser_page_errors'] = True
                     protocol_counts = get(api_base+'/fixture/report')
+                except Exception:
+                    try: browser_diagnostics['body'] = sanitized(page.locator('body').inner_text(timeout=2000))[:12000]
+                    except Exception: browser_diagnostics['body'] = 'Page unavailable before diagnostics'
+                    browser_diagnostics['stage'] = stage
+                    retain_failure_diagnostics(private, browser_diagnostics, [token, 'private-protocol-fixture-client-secret', 'private-ui-password', env['JWT_SECRET'], env['ACCOUNT_SECURITY_KEY']])
+                    diagnostics_written = True
+                    raise
                 finally:
                     context.close(); browser.close()
         except Exception:
             print('FAILED external meeting proof stage: '+stage,file=sys.stderr)
             if 'errors' in locals(): print('Page errors: '+json.dumps(errors),file=sys.stderr)
+            if not diagnostics_written:
+                retain_failure_diagnostics(private, {'stage': stage}, [locals().get('token', ''), 'private-protocol-fixture-client-secret', 'private-ui-password', locals().get('env', {}).get('JWT_SECRET', ''), locals().get('env', {}).get('ACCOUNT_SECURITY_KEY', '')])
             raise
         finally:
             for process in reversed(processes):
@@ -173,7 +221,7 @@ def main():
                 except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
             for stream in streams: stream.close()
     REPORT.parent.mkdir(parents=True,exist_ok=True)
-    REPORT.write_text(json.dumps({'scope':'Production external meeting panel/adapters; private native session and OAuth consent fixtures; actual verified HTTPS/pinned CONNECT; no live providers/accounts or mocked provider API','results':results,'private_protocol_counts':protocol_counts,'source_sha256':{name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCE_FILES},'cleanup':'Own services/proxy/HTTPS/browser/database/keys removed'},indent=2)+'\n')
+    REPORT.write_text(json.dumps({'scope':'Production external meeting panel/adapters; private native session and OAuth consent fixtures; actual verified HTTPS/pinned CONNECT; no live providers/accounts or mocked provider API','results':results,'frontend_readiness':frontend_readiness,'private_protocol_counts':protocol_counts,'source_sha256':{name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCE_FILES},'cleanup':'Own services/proxy/HTTPS/browser/database/keys removed'},indent=2)+'\n')
     print('External meetings browser proof passed: '+str(len(results))+' checks.')
 
 if __name__=='__main__': main()

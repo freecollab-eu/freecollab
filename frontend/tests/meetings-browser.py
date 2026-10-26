@@ -57,11 +57,45 @@ createRoot(document.getElementById('root')).render(<React.StrictMode>{meeting?<M
     # Match the product's Rust-WASM exclusion. These lazy SDK entry points
     # otherwise trigger a late optimizer reload while a draft is being tested.
     optimizer = {'entries': [str(web / 'entry.tsx')], 'exclude': ['@matrix-org/matrix-sdk-crypto-wasm'],
-                 'include': ['matrix-js-sdk', 'matrix-js-sdk/lib/crypto-api',
+                 'include': ['react', 'react-dom/client', 'lucide-react', 'matrix-js-sdk', 'matrix-js-sdk/lib/crypto-api',
                              'matrix-js-sdk/lib/crypto-api/CryptoEvent', 'matrix-js-sdk/lib/crypto-api/recovery-key',
                              'matrix-encrypt-attachment', 'yjs', 'socket.io-client']}
-    launcher.write_text('import {createServer} from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';\nimport react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';\nconst server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],cacheDir:'+json.dumps(str(private/'vite-cache'))+',optimizeDeps:'+json.dumps(optimizer)+',resolve:{alias:{react:'+json.dumps(str(ROOT/'frontend/node_modules/react'))+',"react-dom":'+json.dumps(str(ROOT/'frontend/node_modules/react-dom'))+',"lucide-react":'+json.dumps(str(ROOT/'frontend/node_modules/lucide-react'))+'}},server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(ROOT/'frontend'))+','+json.dumps(str(web))+','+json.dumps(str(private/'vite-cache'))+']},proxy:{"/api":{target:'+json.dumps(api_base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")}}}});await server.listen();\n')
+    readiness = '''let proofReady=null;
+const proofReadiness={name:'freecollab-proof-readiness',configureServer(server){server.middlewares.use('/__proof/frontend-ready',(_request,response)=>{response.statusCode=proofReady?200:503;response.setHeader('Content-Type','application/json');response.setHeader('Cache-Control','no-store');response.end(JSON.stringify(proofReady?{...proofReady,currentBrowserHash:server.environments.client.depsOptimizer.metadata.browserHash}:{ready:false}));});}};
+'''
+    roots = ['/entry.tsx', '/@fs' + str(ROOT/'frontend/src/lib/secure/index.ts'), '/@fs' + str(ROOT/'frontend/src/lib/secure/files.ts')]
+    barrier = '''
+const client=server.environments.client,optimizer=client.depsOptimizer;
+if(!optimizer)throw Error('The private frontend requires its dependency optimizer.');
+const roots=ROOTS,includes=INCLUDES;
+async function completeFrontend(){
+  let previous='';const completedProcessing=new Set();
+  for(let round=0;round<8;round++){
+    for(const root of roots)if(!await client.transformRequest(root))throw Error('Frontend transform returned no module: '+root);
+    await client.waitForRequestsIdle();await optimizer.scanProcessing;
+    const pending=[...new Set(optimizer.metadata.depInfoList.map(info=>info.processing).filter(promise=>promise&&!completedProcessing.has(promise)))];
+    if(pending.length){optimizer.run();await Promise.all(pending.map(async promise=>{await promise;completedProcessing.add(promise);}));}
+    const metadata=optimizer.metadata;
+    if(Object.keys(metadata.discovered).length||metadata.depInfoList.some(info=>info.processing&&!completedProcessing.has(info.processing)))continue;
+    const missing=includes.filter(id=>!metadata.optimized[id]||!existsSync(metadata.optimized[id].file));
+    if(missing.length)throw Error('Frontend optimizer did not commit required bundles: '+missing.join(','));
+    const fingerprint=JSON.stringify([metadata.browserHash,Object.keys(metadata.optimized).sort()]);
+    if(fingerprint===previous)return{ready:true,browserHash:metadata.browserHash,optimized:Object.keys(metadata.optimized).sort(),roots};
+    previous=fingerprint;
+  }
+  throw Error('The private frontend dependency graph did not stabilize.');
+}
+let startupTimer;
+try{proofReady=await Promise.race([completeFrontend(),new Promise((_,reject)=>{startupTimer=setTimeout(()=>reject(Error('Frontend optimizer readiness exceeded its existing startup bound.')),45000);})]);console.info('PROOF_FRONTEND_READY '+JSON.stringify(proofReady));}
+finally{clearTimeout(startupTimer);}
+'''.replace('ROOTS', json.dumps(roots)).replace('INCLUDES', json.dumps(optimizer['include']))
+    launcher.write_text('import {existsSync} from "node:fs";\nimport {createServer} from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';\nimport react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';\n'+readiness+'const server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[proofReadiness,react()],cacheDir:'+json.dumps(str(private/'vite-cache'))+',optimizeDeps:'+json.dumps(optimizer)+',resolve:{alias:{react:'+json.dumps(str(ROOT/'frontend/node_modules/react'))+',"react-dom":'+json.dumps(str(ROOT/'frontend/node_modules/react-dom'))+',"lucide-react":'+json.dumps(str(ROOT/'frontend/node_modules/lucide-react'))+'}},server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(ROOT/'frontend'))+','+json.dumps(str(web))+','+json.dumps(str(private/'vite-cache'))+']},proxy:{"/api":{target:'+json.dumps(api_base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")}}}});await server.listen();\n'+barrier)
     return launcher
+
+
+def ready_frontend(app, processes):
+    # HTML can be served before Vite commits its optimized dependencies.
+    helpers.ready(app + '/__proof/frontend-ready', processes)
 
 
 OBSERVE = '''window.__meetingPCs=[];window.__meetingStreams=[];window.__meetingScreens=[];
@@ -135,7 +169,7 @@ uvicorn.run(app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,
 ''')
             for command,filename,cwd in [([python,str(launcher)],'api.log',ROOT/'backend'),(['node',str(create_frontend(private,api_base,app_port))],'vite.log',ROOT/'frontend')]:
                 stream=(private/filename).open('w');streams.append(stream);processes.append(subprocess.Popen(command,cwd=cwd,env=environment,stdout=stream,stderr=stream,start_new_session=True))
-            helpers.ready(api_base+'/ready',processes);helpers.ready(app+'/',processes)
+            helpers.ready(api_base+'/ready',processes);ready_frontend(app,processes)
             tokens=json.loads((private/'access.json').read_text())
             with sync_playwright() as playwright:
                 browser_args=['--no-sandbox','--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--autoplay-policy=no-user-gesture-required','--auto-select-desktop-capture-source=Entire screen','--allow-http-screen-capture','--enable-usermedia-screen-capturing']

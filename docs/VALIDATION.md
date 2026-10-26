@@ -49,11 +49,15 @@ then passed with explicit revised-Fast → unchanged-Careful → revised-Fast ch
 cleared request disclosure and no additional model calls. Product selection and
 consent behavior are unchanged.
 
-The shared private meeting fixture now resolves dependencies from its own root,
+The shared private meeting fixture resolves dependencies from its own root,
 allows its own optimizer cache, excludes Rust WASM as the product does and
-prebundles the four observed Matrix entry points. This prevents late Vite
-optimizer reloads from interrupting the original media/provider assertions;
-production configuration and all those assertions are unchanged.
+prebundles the observed Matrix/React entry points. A dedicated readiness endpoint
+waits for entry/lazy-root transforms, the static import crawl and committed,
+stable optimizer bundles before allowing the first browser navigation. A cold
+two-CPU reproduction exposed the prior late icon-library optimization replacing
+React while the fixture mounted; two cold provider runs passed after the fix,
+retaining the same optimizer hash across navigation. Production configuration
+and all original functional assertions are unchanged.
 
 Later original browser regressions also passed: enterprise onboarding **18**,
 connection setup **17**, calendar planning/delivery **5/10**, native calling

@@ -31,6 +31,11 @@ De flyttas inte till ett annat konto. Inloggnings- eller behörighetsändringar
 gör gamla kommandon och väntande återgångar ogiltiga. En senare avsiktlig
 handling får företräde framför en äldre begäran om fokus.
 
+Efter ett `@`-val får en väntande marköråterställning inte flytta tillbaka fokus
+från nästa fält eller skriva över en ny markörplacering. Ny inmatning, pekning,
+fokus, kontext eller autentisering gör återställningen ogiltig. Det valda
+materialets identitet och text ligger ändå kvar i ursprungsfältet.
+
 ## Kommandon och vanlig text
 
 I ett dokument eller ett annat längre arbetsfält tolkas kommandot på den rad

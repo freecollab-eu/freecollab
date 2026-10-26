@@ -20,28 +20,39 @@ function fixture(initial = {}) {
   let actor = 'reader', token = 'reader-token';
   const hub = () => {
     const handlers = new Map();
+    const key = (name, capture) => name + ':' + (capture === true || capture?.capture === true);
     return {
-      addEventListener(name, handler) { if (!handlers.has(name)) handlers.set(name, new Set()); handlers.get(name).add(handler); },
-      removeEventListener(name, handler) { handlers.get(name)?.delete(handler); },
-      emit(name, event = {}) { for (const handler of [...handlers.get(name) || []]) handler(event); },
+      addEventListener(name, handler, capture = false) { const id = key(name, capture); if (!handlers.has(id)) handlers.set(id, new Set()); handlers.get(id).add(handler); },
+      removeEventListener(name, handler, capture = false) { handlers.get(key(name, capture))?.delete(handler); },
+      emit(name, event = {}) { for (const capture of [true, false]) for (const handler of [...handlers.get(key(name, capture)) || []]) handler({ type: name, ...event }); },
+      get listenerCount() { return [...handlers.values()].reduce((count, items) => count + items.size, 0); },
     };
   };
-  const window = hub(), document = { ...hub(), getElementById: () => null };
+  const window = hub(), document = hub();
+  document.activeElement = null; document.getElementById = () => null;
   const input = { current: null };
   const inputNode = (name, text) => ({
-    name, value: text, selectionStart: text.length,
-    focus() { focus.push({ name, kind: 'focus' }); },
-    setSelectionRange(start, end) { this.selectionStart = start; focus.push({ name, kind: 'selection', start, end }); },
+    name, value: text, selectionStart: text.length, selectionEnd: text.length, isConnected: true,
+    focus() {
+      focus.push({ name, kind: 'focus' });
+      if (document.activeElement !== this) { document.activeElement = this; document.emit('focusin', { target: this }); }
+    },
+    setSelectionRange(start, end) {
+      this.selectionStart = start; this.selectionEnd = end;
+      focus.push({ name, kind: 'selection', start, end }); document.emit('select', { target: this });
+    },
   });
   let options = {
     channelId: 'room', workspaceId: 'workspace', secure: false, contextId: 'thread-a',
     text: '@Ada', references: [], input, ...initial,
     onInsert(text, references) {
       inserted.push({ contextId: options.contextId, text, references: plain(references) });
-      options = { ...options, text, references }; input.current.value = text; dirty = true;
+      options = { ...options, text, references }; input.current.value = text;
+      input.current.selectionStart = input.current.selectionEnd = text.length; dirty = true;
     },
   };
   input.current = inputNode(options.contextId || 'main', options.text);
+  document.activeElement = input.current;
   const changed = (left, right) => !left || !right || left.length !== right.length || left.some((value, n) => !Object.is(value, right[n]));
   const react = {
     useId() { const n = index++; if (!(n in slots)) slots[n] = { value: 'reference-' + n }; return slots[n].value; },
@@ -81,6 +92,7 @@ function fixture(initial = {}) {
     exports, require(name) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; },
     window, document, AbortController, clearTimeout,
     requestAnimationFrame(callback) { const id = ++nextFrame; frames.set(id, callback); return id; },
+    cancelAnimationFrame(id) { frames.delete(id); },
   });
   async function settle() {
     let idle = 0;
@@ -95,9 +107,12 @@ function fixture(initial = {}) {
     throw new Error('Reference hook did not settle');
   }
   return {
-    requests, inserted, focus, input,
+    requests, inserted, focus, input, document,
     get current() { return current; },
     get options() { return options; },
+    get pendingFrames() { return [...frames.values()]; },
+    createInput: inputNode,
+    emit(name, target = input.current) { document.emit(name, { target }); },
     settle,
     async query() { current.update(options.text, input.current.selectionStart, options.references, true); await settle(); },
     async advance(milliseconds = 120) {
@@ -109,12 +124,24 @@ function fixture(initial = {}) {
     async choose(row = current.candidates[0]) { current.choose(row); await settle(); },
     async setContext(contextId, changes = {}) {
       options = { ...options, contextId, ...changes };
-      input.current = inputNode(contextId || 'main', options.text); dirty = true; await settle();
+      input.current.isConnected = false; input.current = inputNode(contextId || 'main', options.text);
+      document.activeElement = input.current; dirty = true; await settle();
     },
     async render(changes = {}) { options = { ...options, ...changes }; input.current.value = options.text; dirty = true; await settle(); },
     async changeAccount() { actor = 'other'; token = 'other-token'; dirty = true; window.emit('freecollab:auth-changed'); await settle(); },
-    async flushFrames() { for (const [id, callback] of [...frames]) { frames.delete(id); callback(clock); } await settle(); },
-    unmount() { mounted = false; for (const slot of slots) slot?.cleanup?.(); },
+    account(nextActor, nextToken, notify = true) { actor = nextActor; token = nextToken; if (notify) window.emit('freecollab:auth-changed'); },
+    keyboardInsert(text) {
+      const node = document.activeElement;
+      document.emit('beforeinput', { target: node });
+      const end = node.selectionStart + text.length;
+      node.value = node.value.slice(0, node.selectionStart) + text + node.value.slice(node.selectionEnd);
+      node.selectionStart = node.selectionEnd = end; document.emit('input', { target: node });
+    },
+    async flushFrames() {
+      for (const [id, callback] of [...frames]) if (frames.has(id)) { frames.delete(id); callback(clock); }
+      if (mounted) await settle();
+    },
+    unmount() { if (!mounted) return; mounted = false; for (const slot of slots) slot?.cleanup?.(); },
   };
 }
 
@@ -239,5 +266,154 @@ test('short fields retain their exact native text limit when selecting a referen
     assert.equal(h.inserted.length, 0);
     assert.equal(h.current.open, true);
     assert.equal(h.input.current.value, '@Ada');
+  } finally { h.unmount(); }
+});
+
+async function chooseCurrent(h) {
+  await h.settle(); await h.query(); await h.advance(); await h.resolve(h.requests[0]); await h.choose();
+  assert.equal(h.inserted.length, 1);
+  assert.equal(h.pendingFrames.length, 1);
+  return h.pendingFrames[0];
+}
+
+test('a reference selected in the middle of current text restores its own caret and preserves the trailing passage', async () => {
+  const h = fixture({ text: 'Review @Ada after lunch.' });
+  try {
+    h.input.current.selectionStart = h.input.current.selectionEnd = 'Review @Ada'.length;
+    await chooseCurrent(h);
+    await h.flushFrames();
+    assert.equal(h.options.text, 'Review @Ada Lovelace  after lunch.');
+    assert.deepEqual(plain(h.options.references), [{ kind: 'person', id: 'ada', start: 7, end: 20 }]);
+    assert.equal(h.document.activeElement, h.input.current);
+    assert.equal(h.input.current.selectionStart, 21); assert.equal(h.input.current.selectionEnd, 21);
+    assert.deepEqual(h.focus, [{ name: 'thread-a', kind: 'focus' }, { name: 'thread-a', kind: 'selection', start: 21, end: 21 }]);
+    assert.equal(h.pendingFrames.length, 0);
+    assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('focusing the next field before the queued frame keeps its typed text in that field', async () => {
+  const h = fixture();
+  try {
+    const staleFrame = await chooseCurrent(h), selectedText = h.options.text;
+    const next = h.createInput('poll-option-2', '');
+    next.focus();
+    assert.equal(h.pendingFrames.length, 0);
+    // Model the two browser turns in fill(): focus/select first, insertText
+    // next. Even an already-delivered stale callback must not steal focus.
+    staleFrame(0); await h.flushFrames(); h.keyboardInsert('Discuss first');
+    assert.equal(h.document.activeElement, next); assert.equal(next.value, 'Discuss first');
+    assert.equal(h.input.current.value, selectedText); assert.equal(h.options.text, selectedText);
+    assert.deepEqual(plain(h.options.references), [{ kind: 'person', id: 'ada', start: 0, end: 13 }]);
+    assert.deepEqual(h.focus, [{ name: 'poll-option-2', kind: 'focus' }]);
+    assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+for (const event of ['pointerdown', 'touchstart', 'keydown', 'beforeinput', 'input', 'compositionstart']) {
+  test('newer ' + event + ' intent retires the pending reference caret even when its final text is unchanged', async () => {
+    const h = fixture();
+    try {
+      const staleFrame = await chooseCurrent(h), selectedText = h.options.text;
+      // Text equality alone cannot authorize delayed focus: a pointer move,
+      // key, IME edit or edit/undo may have superseded the insertion already.
+      h.emit(event);
+      assert.equal(h.pendingFrames.length, 0);
+      staleFrame(0); await h.flushFrames();
+      assert.equal(h.options.text, selectedText); assert.equal(h.inserted.length, 1);
+      assert.deepEqual(h.focus, []); assert.equal(h.document.listenerCount, 0);
+    } finally { h.unmount(); }
+  });
+}
+
+test('a newer selection in the same unchanged field survives the old reference caret frame', async () => {
+  const h = fixture();
+  try {
+    const staleFrame = await chooseCurrent(h), selectedText = h.options.text;
+    h.input.current.setSelectionRange(0, 3);
+    staleFrame(0); await h.flushFrames();
+    assert.equal(h.options.text, selectedText);
+    assert.equal(h.input.current.selectionStart, 0); assert.equal(h.input.current.selectionEnd, 3);
+    assert.deepEqual(h.focus, [{ name: 'thread-a', kind: 'selection', start: 0, end: 3 }]);
+    assert.equal(h.pendingFrames.length, 0); assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('moving focus away and back does not revive an earlier reference caret request', async () => {
+  const h = fixture();
+  try {
+    const staleFrame = await chooseCurrent(h), source = h.input.current;
+    h.createInput('another-field', '').focus(); source.focus();
+    staleFrame(0); await h.flushFrames();
+    assert.equal(h.document.activeElement, source);
+    assert.deepEqual(h.focus, [{ name: 'another-field', kind: 'focus' }, { name: 'thread-a', kind: 'focus' }]);
+    assert.equal(h.pendingFrames.length, 0); assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('a same-scope input replacement with identical text cannot inherit the old node focus request', async () => {
+  const h = fixture();
+  try {
+    await chooseCurrent(h);
+    const original = h.input.current, replacement = h.createInput('replacement', h.options.text);
+    // Keep the original connected and active to exercise exact node identity,
+    // independently of the normal focusin/disconnection cancellation paths.
+    h.input.current = replacement;
+    await h.flushFrames();
+    assert.equal(h.document.activeElement, original); assert.equal(original.isConnected, true);
+    assert.equal(h.input.current, replacement); assert.deepEqual(h.focus, []);
+    assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('a disconnected source cannot be focused by its pending reference frame', async () => {
+  const h = fixture();
+  try {
+    await chooseCurrent(h); h.input.current.isConnected = false;
+    await h.flushFrames();
+    assert.deepEqual(h.focus, []); assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('a same-scope permission change disables a previously authorized reference caret frame', async () => {
+  const h = fixture();
+  try {
+    await chooseCurrent(h); await h.render({ disabled: true });
+    await h.flushFrames();
+    assert.equal(h.current.open, false); assert.deepEqual(h.focus, []);
+    assert.equal(h.inserted.length, 1); assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('returning to the original account and credential does not revive focus after an auth transition', async () => {
+  const h = fixture();
+  try {
+    const staleFrame = await chooseCurrent(h);
+    h.account('other', 'other-token'); h.account('reader', 'reader-token');
+    assert.equal(h.pendingFrames.length, 0);
+    staleFrame(0); await h.flushFrames();
+    assert.equal(h.inserted.length, 1); assert.deepEqual(h.focus, []);
+    assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('a changed actor cannot restore focus even if its credential string and rendered scope have not changed yet', async () => {
+  const h = fixture();
+  try {
+    await chooseCurrent(h); h.account('other', 'reader-token', false);
+    await h.flushFrames();
+    assert.deepEqual(h.focus, []); assert.equal(h.document.listenerCount, 0);
+  } finally { h.unmount(); }
+});
+
+test('unmount cancels queued focus and removes its listeners even if its callback was already delivered', async () => {
+  const h = fixture();
+  try {
+    const staleFrame = await chooseCurrent(h);
+    assert.ok(h.document.listenerCount > 0, 'Pending focus intent listeners must actually be registered');
+    h.unmount();
+    assert.equal(h.pendingFrames.length, 0); assert.equal(h.document.listenerCount, 0);
+    staleFrame(0); await h.flushFrames();
+    assert.deepEqual(h.focus, []); assert.equal(h.inserted.length, 1);
   } finally { h.unmount(); }
 });

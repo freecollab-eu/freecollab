@@ -35,6 +35,7 @@ SOURCE_FILES = ['backend/app/models/meetings.py','backend/app/models/chat_produc
 
 def create_frontend(private, api_base, app_port):
     web = private / 'web'; web.mkdir()
+    (web / 'node_modules').symlink_to(ROOT / 'frontend/node_modules', target_is_directory=True)
     (web / 'index.html').write_text('<!doctype html><html><head><title>FreeCollab meeting proof</title><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script type="module" src="/entry.tsx"></script></body></html>')
     base_css = (ROOT / 'frontend/src/index.css').read_text().split('\n', 2)[2]
     (web / 'base.css').write_text(base_css + '\n.proof-meeting{max-width:1000px;margin:20px auto;padding:24px;background:var(--fc-surface);border:1px solid var(--fc-border);border-radius:18px} @media(max-width:480px){.proof-meeting{padding:14px;margin:10px}}\n')
@@ -53,7 +54,13 @@ createRoot(document.getElementById('root')).render(<React.StrictMode>{meeting?<M
 '''.replace('COMPONENTS', json.dumps(str(ROOT / 'frontend/src/components/MeetingsPanel.tsx'))).replace('GUEST', json.dumps(str(ROOT / 'frontend/src/components/MeetingGuest.tsx'))).replace('DOCK', json.dumps(str(ROOT / 'frontend/src/components/MeetingDock.tsx'))).replace('ACCOUNT', json.dumps(str(ROOT / 'frontend/src/styles/account.css'))).replace('CONTENT', json.dumps(str(ROOT / 'frontend/src/styles/integration-content.css')))
     (web / 'entry.tsx').write_text(source)
     launcher = private / 'vite.mjs'
-    launcher.write_text('import {createServer} from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';\nimport react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';\nconst server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],cacheDir:'+json.dumps(str(private/'vite-cache'))+',resolve:{alias:{react:'+json.dumps(str(ROOT/'frontend/node_modules/react'))+',"react-dom":'+json.dumps(str(ROOT/'frontend/node_modules/react-dom'))+',"lucide-react":'+json.dumps(str(ROOT/'frontend/node_modules/lucide-react'))+'}},server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(ROOT/'frontend'))+','+json.dumps(str(web))+']},proxy:{"/api":{target:'+json.dumps(api_base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")}}}});await server.listen();\n')
+    # Match the product's Rust-WASM exclusion. These lazy SDK entry points
+    # otherwise trigger a late optimizer reload while a draft is being tested.
+    optimizer = {'entries': [str(web / 'entry.tsx')], 'exclude': ['@matrix-org/matrix-sdk-crypto-wasm'],
+                 'include': ['matrix-js-sdk', 'matrix-js-sdk/lib/crypto-api',
+                             'matrix-js-sdk/lib/crypto-api/CryptoEvent', 'matrix-js-sdk/lib/crypto-api/recovery-key',
+                             'matrix-encrypt-attachment', 'yjs', 'socket.io-client']}
+    launcher.write_text('import {createServer} from '+json.dumps(str(ROOT/'frontend/node_modules/vite/dist/node/index.js'))+';\nimport react from '+json.dumps(str(ROOT/'frontend/node_modules/@vitejs/plugin-react/dist/index.js'))+';\nconst server=await createServer({configFile:false,root:'+json.dumps(str(web))+',plugins:[react()],cacheDir:'+json.dumps(str(private/'vite-cache'))+',optimizeDeps:'+json.dumps(optimizer)+',resolve:{alias:{react:'+json.dumps(str(ROOT/'frontend/node_modules/react'))+',"react-dom":'+json.dumps(str(ROOT/'frontend/node_modules/react-dom'))+',"lucide-react":'+json.dumps(str(ROOT/'frontend/node_modules/lucide-react'))+'}},server:{host:"127.0.0.1",port:'+str(app_port)+',strictPort:true,fs:{allow:['+json.dumps(str(ROOT/'frontend'))+','+json.dumps(str(web))+','+json.dumps(str(private/'vite-cache'))+']},proxy:{"/api":{target:'+json.dumps(api_base)+',changeOrigin:true,rewrite:p=>p.replace(/^\\/api/,"")}}}});await server.listen();\n')
     return launcher
 
 

@@ -29,6 +29,7 @@ export function useComposerReferences(options: Options) {
   const [response, setResponse] = useState<{ key: string; candidates: ReferenceCandidate[]; error: string } | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const dismissed = useRef('');
+  const pendingFocus = useRef<(() => void) | null>(null);
   const live = useRef(options); live.current = options;
   const currentScope = useRef(scope); currentScope.current = scope;
   const open = !options.disabled && !!token && !!options.channelId && !!options.workspaceId &&
@@ -55,11 +56,11 @@ export function useComposerReferences(options: Options) {
     if (!selection || selection.query.query !== value.query || selection.query.start !== value.start) setSelected(null);
   }
 
-  useEffect(() => { setSelection(null); setResponse(null); setSelected(null); dismissed.current = ''; }, [scope]);
+  useEffect(() => { pendingFocus.current?.(); setSelection(null); setResponse(null); setSelected(null); dismissed.current = ''; }, [scope]);
   useEffect(() => {
-    const clear = () => { setSelection(null); setResponse(null); };
+    const clear = () => { pendingFocus.current?.(); setSelection(null); setResponse(null); };
     window.addEventListener('freecollab:auth-changed', clear);
-    return () => window.removeEventListener('freecollab:auth-changed', clear);
+    return () => { pendingFocus.current?.(); window.removeEventListener('freecollab:auth-changed', clear); };
   }, []);
   useEffect(() => {
     if (!open) return;
@@ -94,11 +95,29 @@ export function useComposerReferences(options: Options) {
     if (before.text !== selection.text) return;
     const result = insertReference(before.text, before.references, query, candidate);
     if (result.text.length > (before.maxLength ?? 10000)) return;
-    before.onInsert(result.text, result.references);
+    const input = before.input.current, actor = api.getCurrentUserId();
+    if (!input?.isConnected) return;
+    pendingFocus.current?.();
+    let retired = false, frame: number | null = null;
+    const intents = ['pointerdown', 'touchstart', 'keydown', 'beforeinput', 'input', 'compositionstart', 'focusin', 'select'];
+    const retire = () => {
+      if (retired) return;
+      retired = true;
+      for (const name of intents) document.removeEventListener(name, retire, true);
+      if (frame !== null) cancelAnimationFrame(frame);
+      if (pendingFocus.current === retire) pendingFocus.current = null;
+    };
+    pendingFocus.current = retire;
+    for (const name of intents) document.addEventListener(name, retire, true);
+    try { before.onInsert(result.text, result.references); }
+    catch (failure) { retire(); throw failure; }
     setSelection(null);
-    requestAnimationFrame(() => {
-      const input = live.current.input.current;
-      if (currentScope.current === scope && token === api.getAccessToken() && input?.value === result.text) {
+    if (retired) return;
+    frame = requestAnimationFrame(() => {
+      const current = !retired && !live.current.disabled && currentScope.current === scope && token === api.getAccessToken() && actor === api.getCurrentUserId()
+        && live.current.input.current === input && input.isConnected && document.activeElement === input && input.value === result.text;
+      retire();
+      if (current) {
         input.focus({ preventScroll: true }); input.setSelectionRange(result.caret, result.caret);
       }
     });

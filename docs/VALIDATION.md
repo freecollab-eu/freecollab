@@ -18,8 +18,9 @@ lifetimes and cannot disclose content to external providers.
 
 | Verification | Accepted evidence and limits |
 | --- | --- |
-| Frontend and production bundles | **841/841 Node tests passed**, no skips; TypeScript plus application, embedded, widget, website and demo production builds passed. Application/embed/widget/demo bundles were rerun after the history-search correction; the unchanged website build has its separate prior receipt. CI independently rebuilds the exact committed source. |
+| Frontend and production bundles | **857/857 Node tests passed**, no skips; TypeScript plus application, embedded, widget, website and demo production builds passed. Application/embed/widget/demo bundles were rerun after the history-search and reference-focus corrections; the unchanged website build has its separate prior receipt. CI independently rebuilds the exact committed source. |
 | Universal command inventory | **34 actual groups passed** across native, sample, modal-writer and security-transition fixtures. Each native document/task-description/comment writer dispatched all **35 available commands** (105 actual handlers), including private calendar. Current catalog IDs must have a real UI handler; private-calendar checks include GET200, visible list, no event editor/write, close, retained source DOM/value and focus. All four source copies remained unchanged and current. |
+| Reference focus and fast field changes | A real delayed reference caret frame reproduced the CI failure: focus moved back to Option 1 during Option 2 input, leaving a required field empty and preventing publication. The shared hook now retires restoration on newer input/focus/selection intent, scope/authentication changes or unmount, and checks the original DOM node. **25 focused tests passed**, retaining the original nine; the old hook fails all 15 new stale-focus protections. The actual browser forces this boundary and verifies correct field values, POST201 and persisted reference IDs; a separate current-source check retains legitimate mid-text caret restoration. |
 | Accessible writing fields | All **19 affected fields in 12 consumers** use a separate explicit label/ID; slash, reference and AI controls remain outside the label. Existing IDs, refs, handlers and layout are preserved. The unchanged native/demo commands proof plus a real AI-open/live-Swedish/same-DOM/focus check passed **19 groups**; current AI14, full-App flow27 and 74 focused Node checks passed. All prior command/reference assertions remain. |
 | Exhaustive backend coverage | Four file shards collected 2,659 cases. All eight initial failures were reconciled to passing targeted receipts: three runner key-environment conflicts, four stale queue expectations, and one fixture watching a later upload lock. Subsequent argument/media cases reconciled 2,666 unique cases at that snapshot: 2,665 passing and one conditional OpenSearch case. Later changes have explicit focused receipts below; this is not represented as an unchanged-source full rerun. |
 | Final capture and demo policy | **87 passed**: complete demo boundary 62, meeting AI 2, capture policy 20 and clips 3. Actual secure-enable invalidates active/stopped capture receipts. Unknown legacy mode denies publication; Matrix captures cannot fall back to plaintext after a mode change. Caption audiences require explicit review. |
@@ -39,6 +40,20 @@ lifetimes and cannot disclose content to external providers.
 | Reverse proxies and native operations | Both actual Nginx configurations passed 21 protected core checks, 48 including logging-positive controls and upstream failure. Actual association JSON, strict routing, protected API denial and forwarding/privacy behavior ran against the product router. AI backup/restore orchestration passed **80 fake-only tests**; no real backup or offsite restore is claimed. |
 
 The calendar presentation fixture now overrides only the real client's channel-scoped data loader, preserving its actual module exports and scope/stop behavior. All **three unchanged React/Intl timezone assertions** passed against the accepted crypto baseline's 50 matching runtime hashes. It makes no new authentication or encryption claim.
+
+The AI scope fixture binds each consent assertion to the actual canonical profile
+ID, model and revision. Workspace/profile consent persists across channel changes;
+per-request disclosure is cleared. A real Careful-first ordering reproduced the
+previous test's incorrect assumption that Fast was selected. All **14 checks**
+then passed with explicit revised-Fast → unchanged-Careful → revised-Fast choices,
+cleared request disclosure and no additional model calls. Product selection and
+consent behavior are unchanged.
+
+The shared private meeting fixture now resolves dependencies from its own root,
+allows its own optimizer cache, excludes Rust WASM as the product does and
+prebundles the four observed Matrix entry points. This prevents late Vite
+optimizer reloads from interrupting the original media/provider assertions;
+production configuration and all those assertions are unchanged.
 
 Fresh isolated evidence is kept under `gap-completion-20261025/`, including
 commands, before/after hashes, JUnit, accepted reports and failed/interrupted

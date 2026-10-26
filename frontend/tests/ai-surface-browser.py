@@ -47,7 +47,7 @@ createRoot(document.getElementById('root')).render(<App/>);'''
 
 def main():
     checks, errors, requests, reads, processes, streams = {}, [], [], [], [], []
-    stage = 'startup'; server = browser = None
+    stage = 'startup'; server = browser = None; scope_profile_selection = None
     hashes = {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in SOURCES}
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='freecollab-ai-surface-') as directory:
@@ -182,7 +182,10 @@ else:
                         held_status.pop().continue_()
                     assert scoped_status.value.status==200
                     loaded_status=scoped_status.value.json()
-                    assert next(item for item in loaded_status['profiles'] if item['id']==fast['id'])['model']=='fixture-fast-v2'
+                    canonical_profiles={item['id']:item for item in loaded_status['profiles']}
+                    fast_current=canonical_profiles[fast['id']];careful_current=canonical_profiles[careful['id']]
+                    assert fast_current['model']=='fixture-fast-v2' and fast_current['revision']==fast['revision']+1 and fast_current['consented'] is False
+                    assert careful_current['model']=='fixture-careful' and careful_current['revision']==careful['revision'] and careful_current['consented'] is True
                     assert KEY not in json.dumps(loaded_status) and PASSWORD not in json.dumps(loaded_status) and 'synthetic-unsaved-scoped-key' not in json.dumps(loaded_status)
                     expect(panel.get_by_label('AI budget')).to_be_visible()
                     assert panel.get_by_label('AI budget').evaluate('(node,previous)=>node!==previous',old_budget)
@@ -191,7 +194,24 @@ else:
                     summary.click()
                     expect(form.get_by_label('Provider API key',exact=True)).to_be_visible()
                     expect(form.get_by_label('Provider API key',exact=True)).to_have_value('');expect(form.get_by_label('Current password',exact=True)).to_have_value('')
-                    expect(panel.get_by_label('I opt in to this exact model profile and recipient.',exact=True)).not_to_be_checked();expect(panel.get_by_label('Send this reviewed request to the selected model.',exact=True)).not_to_be_checked();assert len(requests)==before
+                    profile_picker=panel.get_by_label('Model profile',exact=True)
+                    def assert_current_profile(expected_profile):
+                        expect(profile_picker).to_have_value(expected_profile['id'])
+                        expect(profile_picker.locator('option:checked')).to_have_text(expected_profile['name']+' · '+expected_profile['model'])
+                        consent=panel.get_by_label('I opt in to this exact model profile and recipient.',exact=True)
+                        if expected_profile['consented']: expect(consent).to_be_checked()
+                        else: expect(consent).not_to_be_checked()
+                        expect(panel.get_by_label('Send this reviewed request to the selected model.',exact=True)).not_to_be_checked();assert len(requests)==before
+                        return {name:expected_profile[name] for name in ['id','model','revision','consented']}
+                    # Workspace/profile consent survives a channel change. The
+                    # default selected profile may be either random-ID row; only
+                    # Fast's revised configuration has lost that consent. The
+                    # per-request disclosure must remain clear for every choice.
+                    actual_default=canonical_profiles[profile_picker.input_value()]
+                    scope_profile_selection={'canonical_order':[item['id'] for item in loaded_status['profiles']],'after_scope':assert_current_profile(actual_default)}
+                    profile_picker.select_option(fast_current['id']);scope_profile_selection['revised_fast']=assert_current_profile(fast_current)
+                    profile_picker.select_option(careful_current['id']);scope_profile_selection['unchanged_careful']=assert_current_profile(careful_current)
+                    profile_picker.select_option(fast_current['id']);scope_profile_selection['returned_to_revised_fast']=assert_current_profile(fast_current)
                 finally:
                     for pending in held_status: pending.continue_()
                     page.unroute('**/copilot/runtime',hold_scope_status)
@@ -201,7 +221,7 @@ else:
                 assert not errors, errors
             after={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCES}
             checks['current_owned_frontend_sources']=all(after[name]==hashes[name] for name in SOURCES if name.startswith('frontend/src/components/') or name in {'frontend/src/lib/ai-runtime-api.ts','frontend/src/lib/copilot-api.ts'})
-            REPORT.write_text(json.dumps({'status':'passed','checks':checks,'provider_requests':len(requests),'tool_reads':len(reads),'browser_errors':errors,'source_hashes':hashes,'sources_unchanged':after==hashes,'scope':'Actual product components in explicit private host; real API, SQLite worker, semantic index, collections and synthetic TLS providers. No external customer provider, Matrix server or full Chat navigation in this proof.'},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'status':'passed','checks':checks,'provider_requests':len(requests),'tool_reads':len(reads),'browser_errors':errors,'scope_profile_selection':scope_profile_selection,'source_hashes':hashes,'sources_unchanged':after==hashes,'scope':'Actual product components in explicit private host; real API, SQLite worker, semantic index, collections and synthetic TLS providers. No external customer provider, Matrix server or full Chat navigation in this proof.'},indent=2)+'\n')
             print(json.dumps({'status':'passed','checks':checks,'report':str(REPORT)}))
         except Exception as failure:
             if browser:

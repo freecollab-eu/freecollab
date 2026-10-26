@@ -142,6 +142,32 @@ def choose_reference(field, kind, identifier, query, *, keyboard=False, touch=Fa
     expect(field).to_be_focused()
 
 
+@contextmanager
+def delayed_reference_focus(page, target):
+    """Delay the real reference caret frame across the next field's real focus.
+
+    Playwright fill focuses/selects a field before its separate insertText call.
+    No product event handler or API response is replaced: the original frame is
+    released at that real boundary so a stale focus restore cannot move typing.
+    """
+    key = 'reference-focus-' + secrets.token_hex(8)
+    page.evaluate('''key=>{
+      const original=requestAnimationFrame, state={held:false,released:false,callback:null,frame:null,target:null,listener:null};
+      state.wrapper=function(callback){if(!state.held&&new Error().stack.includes('/lib/useComposerReferences.ts')){state.held=true;state.callback=callback;state.frame=original(()=>{});return state.frame;}return original(callback);};
+      window[key]=state;state.original=original;window.requestAnimationFrame=state.wrapper;
+    }''', key)
+    def release_on_focus():
+        target.evaluate('''(node,key)=>{const state=window[key];if(!state.held||!state.callback)throw Error('The actual reference focus frame was not captured');state.target=node;state.listener=()=>queueMicrotask(()=>{const callback=state.callback;state.callback=null;state.released=true;state.activeBefore=document.activeElement?.id;callback(performance.now());state.activeAfter=document.activeElement?.id;});node.addEventListener('focus',state.listener,{once:true});}''', key)
+    try:
+        yield release_on_focus
+        state = page.evaluate('''key=>{const value=window[key];return {held:value.held,released:value.released,activeBefore:value.activeBefore,activeAfter:value.activeAfter};}''', key)
+        assert state['held'] and state['released'], 'The original reference frame must cross a real later field focus'
+        assert state['activeAfter'] == state['activeBefore'] == target.get_attribute('id'), state
+        evidence.append({'delayedReferenceFocus': state})
+    finally:
+        page.evaluate('''key=>{const state=window[key];if(!state)return;if(window.requestAnimationFrame===state.wrapper)window.requestAnimationFrame=state.original;if(state.frame!==null)cancelAnimationFrame(state.frame);if(state.listener)state.target.removeEventListener('focus',state.listener);delete window[key];}''', key)
+
+
 def browse(field):
     source = wrapper(field)
     source.get_by_role('button', name='Browse collaboration features', exact=True).click()
@@ -654,8 +680,15 @@ def run_native(browser):
             choose_reference(question, 'group', data['group']['id'], 'Universal group')
             first_option = feed_card.get_by_label('Option 1', exact=True)
             first_option.fill('Use ')
-            choose_reference(first_option, 'file', data['file']['id'], 'Universal-material')
-            feed_card.get_by_label('Option 2', exact=True).fill('Discuss first')
+            second_option = feed_card.get_by_label('Option 2', exact=True)
+            with delayed_reference_focus(page, second_option) as release_on_focus:
+                choose_reference(first_option, 'file', data['file']['id'], 'Universal-material')
+                first_value = first_option.input_value()
+                release_on_focus()
+                second_option.fill('Discuss first')
+                expect(first_option).to_have_value(first_value)
+                expect(second_option).to_have_value('Discuss first')
+                expect(second_option).to_be_focused()
             with page.expect_response(lambda response: response.request.method == 'POST' and urlsplit(response.url).path.endswith('/activity-feed')) as feed_posted:
                 feed_card.get_by_role('button', name='Publish update', exact=True).click()
             assert feed_posted.value.ok

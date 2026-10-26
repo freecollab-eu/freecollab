@@ -55,6 +55,16 @@ prebundles the four observed Matrix entry points. This prevents late Vite
 optimizer reloads from interrupting the original media/provider assertions;
 production configuration and all those assertions are unchanged.
 
+Later original browser regressions also passed: enterprise onboarding **18**,
+connection setup **17**, calendar planning/delivery **5/10**, native calling
+**11** and meetings **12**. Connection setup now identifies the exact legacy
+provider settings fieldset, retaining every original secret-clearing assertion
+alongside the new model-profile fields. The standalone meeting API includes the
+actual channel and capture routers required by the current component. Its
+unchanged assertions verify real bidirectional WebRTC/TURN media, screen sharing,
+admission, reconnection, removal and mobile layout. Native calling uses the
+original synthetic OS-store fixture; it does not establish physical OS behavior.
+
 Fresh isolated evidence is kept under `gap-completion-20261025/`, including
 commands, before/after hashes, JUnit, accepted reports and failed/interrupted
 attempts. Different overlapping suites are not added together as a unique total.

@@ -111,7 +111,7 @@ def main():
             launcher=private/'api.py'; launcher.write_text('''import json,os
 from fastapi import FastAPI
 from sqlmodel import Session
-from app.api import meetings,auth,clips,sfu,files,secure_messaging
+from app.api import meetings,auth,clips,sfu,files,secure_messaging,channels,media_capture
 from app.database import engine,init_db
 from app.models.user import User
 from app.models.channel import Channel,ChannelMember
@@ -128,7 +128,7 @@ with Session(engine) as session:
     result={name:create_token(name,session) for name in ['host','peer']}
     fd=os.open(os.environ['PROOF_CREDENTIAL_FILE'],os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600)
     with os.fdopen(fd,'w') as stream:json.dump(result,stream)
-app=FastAPI();app.include_router(meetings.router);app.include_router(auth.router);app.include_router(clips.router);app.include_router(sfu.router);app.include_router(files.router);app.include_router(secure_messaging.router)
+app=FastAPI();app.include_router(meetings.router);app.include_router(auth.router);app.include_router(clips.router);app.include_router(sfu.router);app.include_router(files.router);app.include_router(secure_messaging.router);app.include_router(channels.router);app.include_router(media_capture.router)
 @app.get('/ready')
 def ready():return{'status':'ready'}
 uvicorn.run(app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,access_log=False)

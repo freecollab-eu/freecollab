@@ -55,13 +55,41 @@ Verify the current Railway status and deployment result in your own project:
    its current Infrastructure as Code workflow. The tracked
    `/frontend/website/railway.json` is a legacy reference; do not substitute the
    customer app's `/frontend/railway.json`.
-2. Set `PORT=8080`, then build the reviewed source. This service needs no volume,
-   database URL, OAuth registration, API keys or signing material.
+2. Set `PORT=8080` and `VITE_PUBLIC_DEMO_URL` to the separate sample installation's
+   HTTPS `/product-demo/` URL, then build the reviewed source. This service needs
+   no volume, database URL, OAuth registration, API keys or signing material.
 3. Check `/healthz`, the landing page, `/#demo`, `/#docs`, EN/SV and a 320px
-   viewport. Confirm `/api/ready` returns 404 and the demo makes no API calls.
+   viewport. Confirm the website's `/api/ready` returns 404; the embedded product
+   makes its ordinary API calls only to the separate sample installation.
 4. Attach `freecollab.eu` using Railway's current domain instructions and the
    owner's DNS controls. Verify real public HTTPS and the deployed revision
    before advertising the site as live.
+
+### Wrong Dockerfile after connecting GitHub
+
+Connect the website service to `freecollab-eu/freecollab`, branch `main`, and
+check its service-specific build settings:
+
+| Setting | Website value |
+| --- | --- |
+| Root Directory | `/frontend` |
+| Custom Dockerfile / `RAILWAY_DOCKERFILE_PATH` service variable | `website/Dockerfile` |
+| Healthcheck Path | `/healthz` |
+| Railway Config File, only where an existing legacy service uses one | `/frontend/website/railway.json` |
+
+Railway Config File paths are absolute from the repository root, independently
+of Root Directory. An existing `/frontend/railway.json` selects the customer
+application's `railway/Dockerfile` and `/api/ready`; those code settings override
+dashboard settings. Select the website's legacy config when one is already in
+use. For services configured directly in Railway, use the documented
+`RAILWAY_DOCKERFILE_PATH` variable and matching build/health settings above.
+
+If the builder reports that `--mount=type=secret,id=proxy_ca` is unsupported,
+verify the selected Dockerfile and source revision. The website Dockerfile
+already uses plain, TLS-verified `npm ci`. A previous customer-image Dockerfile
+or an older source revision can contain the unsupported instruction. Removing
+that instruction alone does not turn the customer application into the website;
+the file selection and `/healthz` must also match this service.
 
 Use separate origins for the public website and any hosted customer workspace.
 The public demo is sample data and is never described as a connected customer

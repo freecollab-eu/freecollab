@@ -6,7 +6,7 @@ These files prepare deployment; they do not provision Railway, DNS, TLS or SMTP.
 
 ## Service layout
 
-Create a project from your repository/fork. Select each service's repository root and config path explicitly; verify the resulting Dockerfile/build context in Railway. Keep existing names, volumes, database and secrets during upgrades.
+Create a project from your repository/fork. Select each service's repository root and config path explicitly; verify the resulting Dockerfile/build context in Railway. For legacy config-as-code services, the config path is absolute from the repository root, such as `/frontend/railway.json`; it does not follow the service's `Root Directory`. A website service uses `/frontend/website/railway.json` with root `/frontend`, not the product app's config. Keep existing names, volumes, database and secrets during upgrades.
 
 | Service | Root / config | Persistent storage | Exposure |
 | --- | --- | --- | --- |
@@ -14,6 +14,8 @@ Create a project from your repository/fork. Select each service's repository roo
 | `backend` | `backend` / `/backend/railway.json` | One volume at `/data` | Private port 8000; no public domain/TCP proxy |
 | `frontend` | `frontend` / `/frontend/railway.json` | None | Only public HTTPS app service; target port 8080 |
 | `matrix`, optional | `scripts` / `/scripts/railway-matrix.json` | Independent volume at `/data` | Private port 8008; no public domain/federation |
+
+The Railway-specific Dockerfiles install dependencies without BuildKit secret mounts, which Railway's builder does not support. npm still verifies TLS and pip still verifies TLS and every locked package hash. For local validation behind a managed proxy, use the existing local Dockerfiles or a disposable Dockerfile copy outside the deployment/upload tree, supplying the public proxy CA through the local builder's temporary mount and the relevant tool's trust setting. Keep that copy local, keep the CA out of image layers and uploaded source, and never disable certificate verification.
 
 The backend Railway image runs **one API plus three independent workers: integrations, mail and durable AI runs, in the same service**. Railway volumes cannot be shared between services; a separate integration worker would not see uploads, exports or files awaiting erasure. The supervisor waits for database-aware API readiness before starting the workers. Any child exit stops all children and fails the service for Railway restart. SIGTERM allows 30 seconds to stop before killing/reaping stragglers; allow at least that platform grace period.
 

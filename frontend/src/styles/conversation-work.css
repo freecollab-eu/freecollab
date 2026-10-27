@@ -161,6 +161,7 @@
   .fc-chat-room-work { position: sticky; top: 1rem; }
   .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-room-work .fc-chat-shared-material { position: static; }
   .fc-conversation-work { display: flex; flex-direction: column; max-height: max(22rem, calc(100dvh - 18rem)); }
+  .fc-chat-room-work:not([data-workspace-mode="expanded"]) .fc-conversation-work { max-height: min(max(22rem, calc(100dvh - 18rem)), calc(var(--fc-work-scrollport-height, 100dvh) - 2rem)); }
   .fc-conversation-work-header, .fc-conversation-work-source, .fc-conversation-work-footer { flex-shrink: 0; }
   .fc-conversation-work-body { min-height: 0; flex: 1; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--fc-border) transparent; }
   .fc-chat:has(.fc-chat-room-work:not([hidden])):not(.is-focus-mode) .fc-chat-timeline-wrap { margin-bottom: calc(-1 * var(--fc-chat-composer-height, 150px)); }

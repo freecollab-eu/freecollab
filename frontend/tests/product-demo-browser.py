@@ -860,6 +860,58 @@ def main():
 
                     stage = 'message becomes an actual shared document with a persisted native routing reference'
                     source_article = page.locator('#message-' + message['id'])
+                    def return_to_source_work(reference, evidence_key):
+                        # The native reader resolves the index and both catalogs together, then
+                        # loads every referenced task project. Observe this entry's real reads.
+                        prefix = '/api/channels/' + channel
+                        index_path = prefix + '/conversation-work'
+                        documents_path, decisions_path = prefix + '/shared-documents', prefix + '/decisions'
+                        required = {index_path,documents_path,decisions_path}
+                        fresh_requests, responses, index_pages = [], {}, {}
+                        def capture_work_request(api_request):
+                            path = urlsplit(api_request.url).path
+                            if api_request.method == 'GET' and (path in required or re.fullmatch(re.escape(prefix) + r'/projects/[^/]+/tasks',path)) and api_request.headers.get('authorization') == 'Bearer ' + token:
+                                assert len(fresh_requests) < 128, 'Too many work-catalog reads during one channel return'
+                                fresh_requests.append(api_request)
+                        def catalogs_ready(response):
+                            if response.request not in fresh_requests: return False
+                            path = urlsplit(response.url).path
+                            responses[path] = response
+                            if response.status != 200: return True
+                            if path == index_path:
+                                index_pages[path] = response.json()
+                                if index_pages[path]['next_offset'] is not None: return True
+                                required.update(prefix + '/projects/' + row['project_id'] + '/tasks' for row in index_pages[path]['items'] if row['resource_kind'] == 'task')
+                            return index_path in index_pages and required.issubset(responses)
+                        page.on('request',capture_work_request)
+                        try:
+                            # One existing 30s response deadline covers the entire readiness gate.
+                            with page.expect_response(catalogs_ready):
+                                choose_chat_channel(page,selected['name'])
+                            assert all(response.status == 200 for response in responses.values())
+                            assert index_pages[index_path]['next_offset'] is None, 'This bounded sample index must fit one page'
+                            assert required.issubset(responses)
+                            assert any(row['id'] == reference['id'] and row['channel_id'] == channel and row['source_message_id'] == message['id'] and row['resource_id'] == reference['resource_id'] and row['resource_kind'] == reference['resource_kind'] and row['project_id'] == reference['project_id'] for row in index_pages[index_path]['items'])
+                            documents, decisions = responses[documents_path].json(), responses[decisions_path].json()
+                            assert all(row['channel_id'] == channel for row in documents + decisions)
+                            task_rows = []
+                            for path in required - {index_path,documents_path,decisions_path}:
+                                catalog = responses[path].json()
+                                assert catalog['next_offset'] is None, 'This bounded sample task catalog must fit one page'
+                                assert all(row['channel_id'] == channel and row['project_id'] == path.split('/')[-2] for row in catalog['items'])
+                                task_rows.extend(catalog['items'])
+                            if reference['resource_kind'] == 'document':
+                                assert any(row['id'] == reference['resource_id'] and not row['archived'] and row.get('title') for row in documents)
+                            else:
+                                assert any(row['id'] == reference['resource_id'] and row['project_id'] == reference['project_id'] and not row['archived'] and row['content_mode'] == 'server' and row.get('fields',{}).get('title') for row in task_rows)
+                        except Exception:
+                            print('Discussion return readiness mismatch: '+json.dumps({'reference_id':reference['id'],'resource_kind':reference['resource_kind'],'required_paths':sorted(required),'responses':{path:response.status for path,response in responses.items()},'fresh_request_count':len(fresh_requests)}),file=sys.stderr)
+                            raise
+                        finally:
+                            page.remove_listener('request',capture_work_request)
+                        expect(source_article).to_be_attached()
+                        source_article.scroll_into_view_if_needed()
+                        visual_geometry[evidence_key] = {'work_index_status':responses[index_path].status,'catalog_statuses':{path:responses[path].status for path in sorted(required)},'work_reference_id':reference['id'],'source_message_id':message['id'],'resource_id':reference['resource_id'],'resource_kind':reference['resource_kind'],'action':'Ordinary scroll to the attached persisted source after fresh authenticated index and native catalog responses'}
                     reveal_message_actions(source_article); source_article.get_by_role('button',name='Continue in a document',exact=True).click()
                     panel = flow_region(page); live_conversation(page,panel)
                     expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
@@ -876,7 +928,7 @@ def main():
                     reveal_discussion_work(source_article)
                     doc_card = source_article.locator('[data-work-reference="' + doc_reference['id'] + '"]')
                     expect(doc_card).to_contain_text('A document from our conversation')
-                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name'])
+                    choose_chat_channel(page,other['name']); return_to_source_work(doc_reference,'document_return_source')
                     reveal_discussion_work(source_article)
                     expect(doc_card).to_contain_text('A document from our conversation'); doc_card.click()
                     panel = flow_region(page); edit_saved_document(panel,title='A document from our conversation',text=text + ' Revised.'); expect(panel.get_by_label('Document text',exact=True)).to_have_value(text + ' Revised.')
@@ -899,7 +951,7 @@ def main():
                     reveal_discussion_work(source_article)
                     task_card = source_article.locator('[data-work-reference="' + task_reference['id'] + '"]')
                     expect(task_card).to_contain_text('A next step from our conversation')
-                    choose_chat_channel(page,other['name']); choose_chat_channel(page,selected['name']); reveal_discussion_work(source_article); task_card.click()
+                    choose_chat_channel(page,other['name']); return_to_source_work(task_reference,'task_return_source'); reveal_discussion_work(source_article); task_card.click()
                     panel = flow_region(page); expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text('A next step from our conversation')
                     assert any(row['id'] == task_reference['id'] for row in request(base,'GET','/channels/' + channel + '/conversation-work?source_message_id=' + message['id'],token)['items'])
                     panel.get_by_role('button',name='Close this work',exact=True).click()
@@ -952,23 +1004,7 @@ def main():
                     live_conversation(page,panel)
                     page.once('dialog',lambda dialog:dialog.accept()); choose_chat_channel(page,other['name'])
                     expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(page.get_by_role('region',name=FLOW_NAME,exact=True)).to_have_count(0)
-                    # Returning may enter at the first unread message, so await this entry's real
-                    # work index before scrolling to the persisted source farther down the room.
-                    return_work_requests = []
-                    def capture_return_work(api_request):
-                        if api_request.method == 'GET' and urlsplit(api_request.url).path == '/api/channels/' + channel + '/conversation-work' and api_request.headers.get('authorization') == 'Bearer ' + token:
-                            return_work_requests.append(api_request)
-                    page.on('request',capture_return_work)
-                    try:
-                        with page.expect_response(lambda response: response.request in return_work_requests) as return_work:
-                            choose_chat_channel(page,selected['name'])
-                        assert return_work.value.status == 200
-                        assert any(row['id'] == task_reference['id'] and row['source_message_id'] == message['id'] and row['resource_id'] == task_reference['resource_id'] and row['resource_kind'] == 'task' for row in return_work.value.json()['items'])
-                    finally:
-                        page.remove_listener('request',capture_return_work)
-                    expect(source_article).to_be_attached()
-                    source_article.scroll_into_view_if_needed()
-                    visual_geometry['dirty_task_return_source'] = {'work_index_status':return_work.value.status,'work_reference_id':task_reference['id'],'source_message_id':message['id'],'action':'Ordinary scroll to the attached persisted source after this channel entry authenticated work index'}
+                    return_to_source_work(task_reference,'dirty_task_return_source')
                     reveal_discussion_work(source_article); task_card.click(); panel = flow_region(page)
                     expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text(text + ' Revised.')
                     assert panel.get_by_role('form',name='Edit task',exact=True).count() == 0

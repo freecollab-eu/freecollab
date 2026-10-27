@@ -89,6 +89,19 @@ composer stayed at least 99% visible through ancestor clipping immediately,
 after two frames and after 500 ms. The full-demo simultaneous-editing group now
 also checks the actual viewport: complete headers and composer, at least 70%
 of the same editable text area, and unchanged editor identity/text afterward.
+That stronger check exposed clipping with the introduction open. Inline desktop
+cards now also cap their height against the actual timeline viewport, measured
+by a scoped `ResizeObserver`; expanded and mobile styles retain their behavior.
+A persisted-source native proof with the introduction, a real positive return
+summary and 12 sends kept headers, toolbar and composer completely visible and
+the editor 97.7–100% visible. Closing and reopening the introduction changed the
+measured viewport 734→915→734 px and the card cap 702→812→702 px, while retaining
+the same editor, Yjs text and chat draft. The measurement itself makes no focus,
+scroll or API calls.
+With this cap, the existing 8 hook checks, 17 actual workspace-mode groups and
+17 organization groups passed again on Chromium 151 with unchanged runtime
+bindings, including fullscreen/minimize, editor/caret/Yjs retention and the
+original native pointer move.
 
 - **9 actual local Matrix groups passed** with the exact pinned CI Synapse
   image, real Rust crypto and verified devices. They cover cache-independent

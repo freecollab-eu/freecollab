@@ -107,6 +107,18 @@ export function useWorkSurfaceLayout({ workRef, timelineRef, composerRef, scope,
     mounted.current = true;
     return () => { mounted.current = false; ++generation.current; pending.current = null; prepared.current = null; minimized.current = null; lastPreferredField.current = null; };
   }, []);
+  useLayoutEffect(() => {
+    const work = workRef.current, timeline = timelineRef.current;
+    if (!enabled || !work || !timeline) return;
+    const measure = () => {
+      if (!current() || workRef.current !== work || timelineRef.current !== timeline) return;
+      work.style.setProperty('--fc-work-scrollport-height', `${timeline.clientHeight}px`);
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(timeline);
+    return () => { observer.disconnect(); work.style.removeProperty('--fc-work-scrollport-height'); };
+  }, [identity]);
   useEffect(() => {
     if (!enabled) return;
     const clear = () => { prepared.current = null; };

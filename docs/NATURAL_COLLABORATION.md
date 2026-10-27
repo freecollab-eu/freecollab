@@ -35,9 +35,10 @@ samtalet igen och öppnar rätt tråd när källan är ett svar.
 
 Återgången stänger inte dokumentet. Editorn, Yjs-sessionen och chattutkastet
 ligger kvar. På breda skärmar följer dokumentytan med när chatten växer,
-så att du kan fortsätta skriva i båda. En otillgänglig källa visas inte som om
-den fortfarande gick att öppna. Nyare navigation, kanalbyte och kontobyte gör
-äldre återgångar ogiltiga.
+och höjden anpassas till den synliga ytan även när kanalintroduktionen och
+återkomstöversikten visas. Du kan fortsätta skriva i båda. En otillgänglig källa
+visas inte som om den fortfarande gick att öppna. Nyare navigation, kanalbyte
+och kontobyte gör äldre återgångar ogiltiga.
 
 ## Hitta rätt med `/` och `@`
 

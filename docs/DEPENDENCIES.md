@@ -1,5 +1,31 @@
 # Dependency baseline and audits
 
+## Security review — 2026-10-27
+
+Fresh registry audits of commit `f35d499` reported **zero known advisories** in
+all 76 runtime and 87 development Python lock entries using `pip-audit` 2.10.1's
+PyPI service. Full npm 11.9.0 audits, including development and optional
+dependencies, also reported zero advisories for the frontend (323 locked
+packages), component SDK (34), desktop (277) and mobile (99). The repository
+contains four tracked npm manifest/lockfile pairs. No dependency versions or
+overrides needed changing.
+
+Every Python lock entry retains SHA-256 artifact hashes. npm manifests match
+their lockfile roots, and registry tarball entries retain HTTPS URLs and
+SHA-512 integrity values; six bundled Tailwind WASM dependencies are covered by
+their parent tarball's integrity. These checks inspect the recorded locks, not
+every downloaded artifact or package's behavior. Audits cover runtime and build
+dependencies, but exclude container OS packages, Electron's bundled Chromium,
+native Gradle/Swift dependencies and application reachability analysis.
+
+Reproduce from `backend` with
+`pip-audit --strict --disable-pip --require-hashes -r requirements.lock --format json`
+and the equivalent command for `requirements-dev.lock`; use
+`npm audit --package-lock-only --json` in each npm project. Raw dated JSON
+reports and lockfile SHA-256 values are retained in the private local audit
+directory `/workspace/.freecollab/audit-tools-20261027/results/`. The audit tools
+use a separate environment and do not modify the application's Python environment.
+
 ## Security review — 2026-10-22
 
 The exact Python locks contain 76 runtime packages and 87 development packages.

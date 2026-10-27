@@ -7,6 +7,7 @@ Roles:
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import Session, select, func
 from pydantic import BaseModel, EmailStr, Field, field_validator
+from sqlalchemy import update
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from typing import Optional
@@ -15,6 +16,8 @@ import uuid
 from ..database import get_session
 from ..services.sso_scope import current_workspace_scope, require_unrestricted
 from ..services.auth import get_current_user, hash_password, validate_password, normalize_email
+from ..services.request_guard import lock_current_session, recheck_actor
+from ..models.account_security import AccountSecurity
 from ..models.user import User
 from ..models.channel import Channel
 from ..models.message import Message
@@ -56,6 +59,28 @@ def require_admin(current_user: User = Depends(get_current_user), session=Depend
     if current_user.role != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return current_user
+
+
+def _lock_user_management(session, actor_id: str, *, target_id: str | None = None, admin_only: bool = True):
+    """Serialize installation privilege edits, then verify current authority.
+
+    Use the same ordered administrator locks as account closure. This also
+    keeps concurrent creations/promotions inside the installation admin limit.
+    Hashing a new password must finish before these locks and checks.
+    """
+    administrators = session.exec(select(User.id).where(User.role == "admin")).all()
+    identifiers = set(administrators) | {actor_id}
+    if target_id is not None:
+        identifiers.add(target_id)
+    for identifier in sorted(identifiers):
+        session.execute(update(User).where(User.id == identifier).values(name=User.name))
+    session.execute(update(AccountSecurity).where(AccountSecurity.user_id == actor_id)
+                    .values(auth_version=AccountSecurity.auth_version))
+    lock_current_session(session, actor_id)
+    session.expire_all()
+    recheck_actor(session, actor_id)
+    actor = session.get(User, actor_id, populate_existing=True)
+    return require_admin(actor, session) if admin_only else require_staff(actor, session)
 
 
 @router.get("/me")
@@ -167,14 +192,18 @@ def create_user(
     admin: User = Depends(require_admin)
 ):
     """Create a new user - admin only"""
+    if data.role not in ["user", "moderator", "admin"]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+
+    # Password work can outlast a logout, block or demotion. Check again under
+    # the same locks as role/block changes before committing a new identity.
+    password_hash = hash_password(data.password)
+    _lock_user_management(session, admin.id)
+
     # Check if email already exists
     existing = session.exec(select(User).where(func.lower(User.email) == data.email)).first()
     if existing:
         raise HTTPException(status_code=400, detail="Email already registered")
-    
-    # Validate role
-    if data.role not in ["user", "moderator", "admin"]:
-        raise HTTPException(status_code=400, detail="Invalid role")
     
     # Check admin limit
     if data.role == "admin":
@@ -183,9 +212,6 @@ def create_user(
         ).one()
         if current_admins >= MAX_ADMINS:
             raise HTTPException(status_code=400, detail=f"Maximum {MAX_ADMINS} admins allowed")
-    
-    # Hash password
-    password_hash = hash_password(data.password)
     
     user = User(
         id=str(uuid.uuid4()),
@@ -219,6 +245,8 @@ def update_user_role(
     """Update user role - only admins can do this"""
     if role not in ["user", "moderator", "admin"]:
         raise HTTPException(status_code=400, detail="Invalid role. Must be: user, moderator, or admin")
+
+    admin = _lock_user_management(session, admin.id, target_id=user_id)
     
     user = session.get(User, user_id)
     if not user:
@@ -253,6 +281,7 @@ def toggle_block_user(
     staff: User = Depends(require_staff)
 ):
     """Block/unblock (pause) a user - staff can do this"""
+    staff = _lock_user_management(session, staff.id, target_id=user_id, admin_only=False)
     user = session.get(User, user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

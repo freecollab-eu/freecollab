@@ -8,11 +8,14 @@ from sqlmodel import Session, select
 
 from .database import engine
 from .models.file import File
+from .models.file_version import FileErasure
 from .services.storage import MAX_BLOB_BYTES, S3StorageService, StorageService
 from .config import settings
 
 
 def migrate(session, source, destination, *, copy=False):
+    if session.exec(select(FileErasure.file_id).limit(1)).first() is not None:
+        raise ValueError("Drain pending file erasure with the original storage configuration before migration")
     copied = verified = 0
     # Immutable file IDs/versions stay stable. Run during a maintenance window;
     # metadata is committed only once every selected blob has verified.

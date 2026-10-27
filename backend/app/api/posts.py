@@ -10,6 +10,8 @@ from ..services.chat_notifications import require_native_channel
 from ..services.workspaces import require_direct_message_writable
 from ..models.file import File
 from ..services.auth import get_current_user
+from ..services.request_guard import recheck_actor
+from ..services.enterprise_governance import assert_deletion_allowed, enforce_native_content
 from ..realtime.socket import broadcast_to_channel
 import json
 
@@ -20,12 +22,15 @@ def require_channel_access(session, user, flow_id: str, flow_type: str = "channe
     """Only channel-backed flows currently have an authorization model."""
     if flow_type != "channel":
         raise HTTPException(400, "Only channel flows are supported")
+    actor_id = user.id
     if write:
         lock_channel_writes(session, flow_id)
-    member = require_channel_member(session, flow_id, user.id)
+        session.expire_all()
+        recheck_actor(session, actor_id)
+    member = require_channel_member(session, flow_id, actor_id)
     require_native_channel(session, flow_id)
     if write:
-        require_direct_message_writable(session, flow_id, user.id)
+        require_direct_message_writable(session, flow_id, actor_id)
     return member
 
 
@@ -55,6 +60,8 @@ async def create_post(
         if not attachment or attachment.channel_id != flow_id:
             raise HTTPException(400, "Attachment is not in this channel")
 
+    warnings = enforce_native_content(session, flow_id, user.id, data.content)
+
     post = Post(
         author_id=user.id,
         content=data.content,
@@ -78,6 +85,7 @@ async def create_post(
         "comment_count": 0,
         "created_at": post.created_at.isoformat(),
         "user_liked": False,
+        "policy_warnings": warnings,
     }
 
     # Broadcast to flow
@@ -196,6 +204,8 @@ async def update_post(
     if post.author_id != user.id:
         raise HTTPException(403, "Can only edit your own posts")
 
+    assert_deletion_allowed(session, post.flow_id, author_id=post.author_id)
+    warnings = enforce_native_content(session, post.flow_id, user.id, data.content)
     post.content = data.content
     post.updated_at = datetime.utcnow()
     session.commit()
@@ -206,7 +216,7 @@ async def update_post(
         {"id": post.id, "content": post.content, "updated_at": post.updated_at.isoformat()},
     )
 
-    return {"updated": True, "id": post_id}
+    return {"updated": True, "id": post_id, "policy_warnings": warnings}
 
 
 @router.delete("/{post_id}")
@@ -227,6 +237,7 @@ async def delete_post(
     if post.author_id != user.id:
         raise HTTPException(403, "Can only delete your own posts")
 
+    assert_deletion_allowed(session, post.flow_id, author_id=post.author_id)
     post.deleted = True
     session.commit()
 

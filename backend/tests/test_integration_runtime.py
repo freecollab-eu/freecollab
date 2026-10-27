@@ -25,7 +25,7 @@ def test_disabled_integration_worker_never_contacts_a_provider(tmp_path, monkeyp
     def unexpected(_):
         raise AssertionError("Disabled queue contacted a provider")
 
-    assert run_once(engine, webhook_batch=unexpected, proof_batch=unexpected, sync_batch=unexpected) == {"avatar-cleanup": 0, "webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "calendar-delivery": "disabled", "workflows": "disabled", "data": "disabled", "push": "disabled", "native_push": "disabled", "native-call-cleanup": 0, "slack-import-cleanup": 0, "personal-oauth-cleanup": 0, "chat": 0, "apps": 0, "recaps": "disabled", "slack-livebridge": 0, "encrypted-work": "disabled"}
+    assert run_once(engine, webhook_batch=unexpected, proof_batch=unexpected, sync_batch=unexpected) == {"avatar-cleanup": 0, "file-cleanup": 0, "webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "calendar-delivery": "disabled", "workflows": "disabled", "data": "disabled", "push": "disabled", "native_push": "disabled", "native-call-cleanup": 0, "slack-import-cleanup": 0, "personal-oauth-cleanup": 0, "chat": 0, "apps": 0, "recaps": "disabled", "slack-livebridge": 0, "encrypted-work": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "integrations").last_seen_at <= datetime.utcnow()
 
@@ -48,7 +48,7 @@ def test_failed_queue_rolls_back_without_blocking_other_provider(tmp_path, monke
         session.commit()
         return 1
 
-    assert run_once(engine, webhook_batch=failed, proof_batch=remaining, sync_batch=lambda session: 2) == {"avatar-cleanup": 0, "webhooks": "error", "otrust": 1, "sync": 2, "calendar-delivery": 0, "workflows": "disabled", "data": "disabled", "push": "disabled", "native_push": "disabled", "native-call-cleanup": 0, "slack-import-cleanup": 0, "personal-oauth-cleanup": 0, "chat": 0, "apps": 0, "recaps": "disabled", "slack-livebridge": 0, "encrypted-work": "disabled"}
+    assert run_once(engine, webhook_batch=failed, proof_batch=remaining, sync_batch=lambda session: 2) == {"avatar-cleanup": 0, "file-cleanup": 0, "webhooks": "error", "otrust": 1, "sync": 2, "calendar-delivery": 0, "workflows": "disabled", "data": "disabled", "push": "disabled", "native_push": "disabled", "native-call-cleanup": 0, "slack-import-cleanup": 0, "personal-oauth-cleanup": 0, "chat": 0, "apps": 0, "recaps": "disabled", "slack-livebridge": 0, "encrypted-work": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "proof-work-completed")
         assert session.get(WorkerHeartbeat, "partial-write") is None
@@ -103,7 +103,7 @@ def test_local_jobs_run_without_external_integrations_and_fail_independently(tmp
         return 1
 
     assert run_once(engine, workflow_batch=failed, data_batch=export, push_batch=lambda session: 2) == {
-        "avatar-cleanup": 0, "webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "calendar-delivery": "disabled",
+        "avatar-cleanup": 0, "file-cleanup": 0, "webhooks": "disabled", "otrust": "disabled", "sync": "disabled", "calendar-delivery": "disabled",
         "workflows": "error", "data": 1, "push": 2, "native_push": "disabled", "native-call-cleanup": 0, "slack-import-cleanup": 0, "personal-oauth-cleanup": 0, "chat": 0, "apps": 0, "recaps": "disabled", "slack-livebridge": 0, "encrypted-work": "disabled"}
     with Session(engine) as session:
         assert session.get(WorkerHeartbeat, "export-completed")

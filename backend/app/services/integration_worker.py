@@ -44,11 +44,13 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
     from .chat_productivity import run_pending as productivity_pending
     from .app_platform import run_pending as apps_pending, run_recaps
     from .avatars import erase_pending_avatar_blobs
+    from .file_erasure import erase_pending_file_blobs
     from .slack_livebridge import run_pending as bridge_pending
     from .encrypted_work import run_pending as encrypted_work_pending
 
     batches = (
         ("avatar-cleanup", True, erase_pending_avatar_blobs),
+        ("file-cleanup", True, erase_pending_file_blobs),
         ("webhooks", settings.webhooks_enabled, webhook_batch or (lambda session: deliver_pending(session, limit=2))),
         ("otrust", settings.otrust_enabled, proof_batch or (lambda session: process_pending(session, limit=2))),
         ("sync", getattr(settings, "sync_enabled", False), sync_batch or (lambda session: sync_pending(session, limit=2))),
@@ -72,7 +74,7 @@ def run_once(engine, *, webhook_batch=None, proof_batch=None, sync_batch=None, c
         session.add(heartbeat)
         session.commit()
     result = {}
-    demo_lanes = {"chat", "workflows", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup"}
+    demo_lanes = {"chat", "workflows", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "file-cleanup"}
     for name, enabled, batch in batches:
         if not enabled or demo_instance and name not in demo_lanes:
             result[name] = "disabled"

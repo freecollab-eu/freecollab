@@ -148,6 +148,15 @@ BUILDX_CONFIG=/workspace/.cache/docker-buildx COMPOSE_PARALLEL_LIMIT=2 \
 
 Keep Docker's registry authentication and proxy settings intact. Do not print a resolved `docker compose config`, container environment or secret file to diagnose setup. `docker compose config --quiet` validates configuration without dumping its values.
 
+Keep registry/package credentials, SSH keys, mobile signing material and runtime
+databases outside the repository build contexts. The root, frontend and backend
+`.dockerignore` files exclude common credential paths and private key formats;
+check them when adding a new build context. Files uploaded to a remote builder
+are exposed to that builder even if a later stage omits them from the final image.
+Use temporary BuildKit secret mounts for local build authentication or CA trust,
+preserving TLS verification. Railway-specific Dockerfiles keep their supported
+plain install steps; do not copy credentials or proxy trust bundles into them.
+
 ## Upgrade and message-key migration
 
 Keep the previous image identifiers and take a cold backup first. Stop all writers, including external maintenance jobs, before applying a message-key migration. Add the old content key to the configured key ring, choose a new active ID, and follow [KEY_MANAGEMENT.md](KEY_MANAGEMENT.md) before removing any key. Legacy JWT-derived rows require an explicit legacy key.

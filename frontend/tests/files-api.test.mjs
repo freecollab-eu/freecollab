@@ -7,9 +7,12 @@ import ts from 'typescript';
 const source = readFileSync(new URL('../src/lib/files-api.ts', import.meta.url), 'utf8');
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText;
 function fixture(bootstrapError) {
-  const requests = [], events = [], exports = {};
+  const requests = [], events = [], nativeCalls = [], exports = {};
   let token = 'old-token';
-  const api = { getAccessToken: () => token, getBaseUrl: () => 'https://freecollab.test/api', getFiles: async () => [], request: async () => [], deleteFile: async () => {} };
+  let bootstrap = async () => { if (bootstrapError) throw bootstrapError; };
+  const api = { getAccessToken: () => token, getBaseUrl: () => 'https://freecollab.test/api',
+    getFiles: async () => { nativeCalls.push('list'); return []; }, request: async () => { nativeCalls.push('versions'); return []; },
+    deleteFile: async () => { nativeCalls.push('delete'); } };
   class XHR {
     upload = {}; headers = {}; response = null; status = 0;
     constructor() { requests.push(this); }
@@ -20,12 +23,14 @@ function fixture(bootstrapError) {
     complete(status, response) { this.status = status; this.response = response; this.onload?.(); }
     progress(loaded, total = 100) { this.upload.onprogress?.({ lengthComputable: true, loaded, total }); }
   }
-  vm.runInNewContext(compiled, { exports, require: name => name === './api' ? {api} : {getSecureMessaging: async () => { if (bootstrapError) throw bootstrapError; }}, XMLHttpRequest: XHR, DOMException, FormData, File, Blob, Event, fetch: async () => new Response('native'), window: { dispatchEvent: event => events.push(event.type) } });
+  vm.runInNewContext(compiled, { exports, require: name => name === './api' ? {api} : {getSecureMessaging: () => bootstrap()}, XMLHttpRequest: XHR, DOMException, FormData, File, Blob, Event,
+    fetch: async () => { nativeCalls.push('download'); return new Response('native'); }, window: { dispatchEvent: event => events.push(event.type) } });
   exports.registerSecureFileProvider({handles:async () => false});
-  return { files: exports, requests, events, switchToken: () => { token = 'new-token'; } };
+  return { files: exports, requests, events, nativeCalls, setBootstrap: value => { bootstrap = value; }, switchToken: () => { token = 'new-token'; } };
 }
 const file = () => new File(['hello'], 'note.txt', { type: 'text/plain' });
 const tick = async () => { for (let index=0;index<10;index++) await Promise.resolve(); };
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
 
 test('upload authenticates by header, preserves retry key, and waits for acknowledgement before 100%', async () => {
   const { files, requests } = fixture(), progress = [];
@@ -85,4 +90,57 @@ test('crypto provider initialization failure sends no plaintext file bytes', asy
   const {files, requests} = fixture(new Error('Crypto module unavailable'));
   await assert.rejects(files.uploadChannelFile('secure',file()), /Crypto module unavailable/);
   assert.equal(requests.length,0);
+});
+
+for (const boundary of ['bootstrap', 'channel lookup', 'publication review']) test(`upload never adopts another account during ${boundary}`, { timeout: 2000 }, async () => {
+  const { files, requests, setBootstrap, switchToken } = fixture(), wait = deferred();
+  if (boundary === 'bootstrap') setBootstrap(() => wait.promise);
+  if (boundary === 'channel lookup') files.registerSecureFileProvider({ handles: () => wait.promise });
+  const privateFile = new File(['account A private queued bytes'], 'account-a-private.txt', { type: 'text/plain' });
+  const pending = files.uploadChannelFile('shared-channel', privateFile, boundary === 'publication review' ? { beforePublish: () => wait.promise } : {});
+  const rejected = assert.rejects(pending, /signed-in account changed/);
+  await tick(); switchToken(); wait.resolve(false); await tick();
+  // A regressed implementation must fail this test without waiting on a network acknowledgement.
+  requests[0]?.complete(200, { id: 'wrong-account-upload' });
+  await rejected;
+  assert.equal(requests.length, 0, 'private bytes must never be sent with the replacement account token');
+});
+
+for (const operation of ['list', 'download', 'versions', 'delete']) test(`${operation} does not run under a replacement account after channel lookup`, async () => {
+  const { files, nativeCalls, switchToken } = fixture(), wait = deferred(), metadata = { id: 'file', channel_id: 'shared-channel' };
+  files.registerSecureFileProvider({ handles: () => wait.promise });
+  const pending = operation === 'list' ? files.listChannelFiles('shared-channel') : operation === 'download' ? files.downloadChannelFile(metadata)
+    : operation === 'versions' ? files.listFileVersions(metadata) : files.deleteChannelFile(metadata);
+  const rejected = assert.rejects(pending, /signed-in account changed/);
+  await tick(); switchToken(); wait.resolve(false); await rejected;
+  assert.deepEqual(nativeCalls, []);
+});
+
+test('a late upload acknowledgement cannot be adopted by the replacement account', async () => {
+  const { files, requests, switchToken } = fixture(), progress = [];
+  const pending = files.uploadChannelFile('channel', file(), { onProgress: value => progress.push(value) });
+  const rejected = assert.rejects(pending, /signed-in account changed/);
+  await tick(); switchToken(); requests[0].complete(200, { id: 'old-account-file' }); await rejected;
+  assert.equal(requests[0].headers.Authorization, 'Bearer old-token');
+  assert.deepEqual(progress, []);
+});
+
+for (const operation of ['list', 'upload', 'download', 'versions']) test(`${operation} discards a stale encrypted provider result`, async () => {
+  const { files, switchToken } = fixture(), wait = deferred(), metadata = { id: '$event', channel_id: 'secure', encrypted: true };
+  const provider = { handles: async () => true, [operation]: () => wait.promise };
+  files.registerSecureFileProvider(provider);
+  const pending = operation === 'list' ? files.listChannelFiles('secure') : operation === 'upload' ? files.uploadChannelFile('secure', file())
+    : operation === 'download' ? files.downloadChannelFile(metadata) : files.listFileVersions(metadata);
+  const rejected = assert.rejects(pending, /signed-in account changed/);
+  await tick(); switchToken(); wait.resolve(operation === 'download' ? new Blob(['private']) : operation === 'upload' ? metadata : [metadata]); await rejected;
+});
+
+test('an account change between provider resolution and dispatch cannot enter an encrypted upload', async () => {
+  const { files, switchToken } = fixture(), calls = [];
+  files.registerSecureFileProvider({
+    handles: async () => { queueMicrotask(() => queueMicrotask(switchToken)); return true; },
+    upload: async () => { calls.push('upload'); return { id: '$wrong-account-file' }; },
+  });
+  await assert.rejects(files.uploadChannelFile('shared', file()), /signed-in account changed/);
+  assert.deepEqual(calls, []);
 });

@@ -1,7 +1,7 @@
 """Additive document/version metadata; existing File rows remain immutable blobs."""
 from datetime import datetime
 
-from sqlalchemy import UniqueConstraint
+from sqlalchemy import Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -28,3 +28,12 @@ class FileUploadReceipt(SQLModel, table=True):
     request_id: str = Field(primary_key=True)
     file_id: str | None = Field(default=None, foreign_key="file.id", index=True)
     fingerprint: str
+
+
+class FileErasure(SQLModel, table=True):
+    """Committed native blob deletion survives storage outages and restarts."""
+    __table_args__ = (Index("ix_file_erasure_scope_created", "storage_scope", "created_at", "file_id"),)
+
+    file_id: str = Field(primary_key=True)
+    storage_scope: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)

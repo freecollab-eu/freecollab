@@ -13,6 +13,7 @@ from ..config import settings
 from ..models.account_security import MailOutbox
 from ..models.operations import WorkerHeartbeat
 from ..models.avatar import AvatarErasure
+from ..models.file_version import FileErasure
 from ..models.webhook import WebhookDelivery
 from ..models.version_proof import VersionProof
 from ..models import file_version  # Register the sync file-state dependency.
@@ -218,6 +219,11 @@ def integration_queue_status(session, now: datetime | None = None) -> dict:
         "pending": _count(session, AvatarErasure),
         "oldest_pending_seconds": _pending_age(first, now),
     }
+    first = session.exec(select(func.min(FileErasure.created_at))).one()
+    result["file-cleanup"] = {
+        "pending": _count(session, FileErasure),
+        "oldest_pending_seconds": _pending_age(first, now),
+    }
     for name, model, states in (
         ("slack-livebridge", SlackBridgeJob, ("pending", "processing", "delivered", "failed", "uncertain", "cancelled")),
         ("ai-runtime", AIRun, ("queued", "running", "awaiting_review", "completed", "failed", "cancelled")),
@@ -259,7 +265,7 @@ def integration_worker_required(queues: dict) -> bool:
         "workflows_enabled", "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled", "connect_federation_enabled")):
         return True
     return any(queues.get(group, {}).get(state, 0) for group in
-        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "slack-livebridge")
+        ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "file-cleanup", "slack-livebridge")
         for state in ("pending", "processing", "scheduled", "notification_pending"))
 
 

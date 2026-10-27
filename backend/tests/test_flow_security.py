@@ -277,3 +277,30 @@ def test_comment_rechecks_root_deleted_while_waiting_for_channel_fence(flow_api,
     assert response.status_code == 404
     with Session(flow_api.engine) as session:
         assert session.query(Comment).count() == 0
+
+
+@pytest.mark.parametrize("target", ["post", "comment"])
+@pytest.mark.parametrize("revocation", ["blocked_actor", "removed_membership"])
+def test_flow_writes_recheck_authority_after_waiting_for_the_channel_fence(flow_api, monkeypatch, target, revocation):
+    post = create_post(flow_api)
+    original = posts.lock_channel_writes
+    cached = []
+    def revoked_before_lock(session, channel_id):
+        # Keep a strong reference so an old membership remains in the identity map.
+        cached.append(session.get(ChannelMember, (channel_id, "owner")))
+        with Session(flow_api.engine) as concurrent:
+            if revocation == "blocked_actor":
+                actor = concurrent.get(User, "owner")
+                actor.is_blocked = True
+                concurrent.add(actor)
+            else:
+                concurrent.delete(concurrent.get(ChannelMember, (channel_id, "owner")))
+            concurrent.commit()
+        original(session, channel_id)
+    monkeypatch.setattr(posts, "lock_channel_writes", revoked_before_lock)
+    path = "/posts/flows/private" if target == "post" else "/comments/post/" + post["id"]
+    response = flow_api.client.post(path, json={"content": "Revoked write"})
+    assert response.status_code == (401 if revocation == "blocked_actor" else 403)
+    with Session(flow_api.engine) as session:
+        assert session.query(Post).count() == 1
+        assert session.query(Comment).count() == 0

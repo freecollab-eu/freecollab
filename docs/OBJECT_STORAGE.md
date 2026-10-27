@@ -65,7 +65,10 @@ media storage; this native-blob adapter does not move Matrix media.
 ## Explicit local migration
 
 Take a verified backup and stop uploads, background sync and destructive jobs
-for the maintenance window. Retain the original blob volume. Configure the
+for the maintenance window. Drain pending native file erasure with the worker
+using the original storage configuration before changing backends; the migration
+command refuses to proceed while its durable erasure queue is nonempty.
+Retain the original blob volume. Configure the
 destination S3 backend and run from `backend/` with your operator settings:
 
 ```sh
@@ -87,8 +90,12 @@ before reopening traffic or retiring the old volume.
 
 Application erasure removes **all listed versions and delete markers for the
 exact key**, with a bound of 10,000 entries. A retained object lock, provider
-error or missing deletion permission returns an error and keeps physical erasure
-pending. A successful `DeleteObject` marker alone is not reported as physical
+error or missing deletion permission keeps physical erasure pending. Ordinary
+native file deletion commits a durable cleanup record with metadata removal,
+returns `erasure_pending: true` while bytes remain, and retries in the worker
+even when data-control jobs are disabled. Cleanup is bound to its original
+storage configuration; drain it before changing roots, endpoints, buckets or
+prefixes. A successful `DeleteObject` marker alone is not reported as physical
 erasure. Provider replicas, independent backups and snapshots are separate
 retention domains and require their own deletion policy.
 

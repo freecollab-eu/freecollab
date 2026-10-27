@@ -143,16 +143,25 @@ def product_documentation(page, base, report):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--base-url', required=True)
+    parser.add_argument('--expected-demo-url', help='Require the built frame URL and CSP to use this configured sample installation.')
     parser.add_argument('--report', type=Path, default=ROOT.parent/'.freecollab/proof-results/website-browser.json')
     args = parser.parse_args()
     args.report.parent.mkdir(parents=True, exist_ok=True)
     base = args.base_url.rstrip('/')
+    expected_demo = urlsplit(args.expected_demo_url) if args.expected_demo_url else None
+    if expected_demo:
+        assert expected_demo.scheme in {'http', 'https'} and expected_demo.netloc
+        assert not expected_demo.username and not expected_demo.password
+        assert not expected_demo.query and not expected_demo.fragment
+        assert expected_demo.path == '/product-demo/'
     checks = {}
     with urlopen(base+'/healthz', timeout=10) as response:
         assert response.status == 200
         policy = response.headers.get('Content-Security-Policy', '')
         assert "connect-src 'none'" in policy and "worker-src 'none'" in policy
         assert 'frame-src ' in policy
+        if expected_demo:
+            assert f'frame-src {expected_demo.scheme}://{expected_demo.netloc};' in policy
         assert response.headers.get('Referrer-Policy') == 'no-referrer'
         assert response.headers.get('X-Content-Type-Options') == 'nosniff'
     checks['website_security_headers_and_controlled_demo_frame_policy'] = True
@@ -196,6 +205,8 @@ def main():
             expect(frame).to_be_visible()
             target = urlsplit(frame.get_attribute('src'))
             assert target.scheme in {'http','https'} and target.path == '/product-demo/'
+            if expected_demo:
+                assert (target.scheme, target.netloc, target.path) == (expected_demo.scheme, expected_demo.netloc, expected_demo.path)
             assert 'section=chat' in target.query and 'locale=en' in target.query
             assert page.locator('.fc-demo-desk,.fc-demo-showroom,[data-demo-assist]').count() == 0
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -203,6 +214,8 @@ def main():
             page.get_by_role('button',name='Back to website',exact=True).click()
             expect(page.locator('.fc-public')).to_be_visible()
         checks['demo_is_real_product_frame_handoff_not_an_alternate_feature_ui'] = True
+        if expected_demo:
+            checks['configured_demo_origin_path_and_frame_policy_match'] = True
         page.goto(base+'/#demo=documents',wait_until='networkidle')
         assert 'section=documents' in page.locator('iframe').get_attribute('src')
         page.goto(base+'/#demo=connections&provider=microsoft',wait_until='networkidle')

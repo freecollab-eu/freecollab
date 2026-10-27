@@ -8,6 +8,7 @@ from app.config import settings
 from app.models.app_platform import AppAIDraft, AppInstallation, AppJob, ChannelRecapSchedule
 from app.models.ai_runtime import AIRun
 from app.models.avatar import AvatarErasure
+from app.models.file_version import FileErasure
 from app.models.calendar_delivery import CalendarProviderJob, CalendarProviderPublication
 from app.models.channel import Channel
 from app.models.connect_federation import FederatedConnection
@@ -29,7 +30,7 @@ FLAGS = ("webhooks_enabled", "otrust_enabled", "sync_enabled", "workflows_enable
          "data_controls_enabled", "push_enabled", "native_push_enabled", "copilot_enabled", "connect_federation_enabled")
 GROUPS = {"webhooks", "otrust", "sync", "calendar-delivery", "workflows", "data", "push",
           "native_push", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup",
-          "chat", "apps", "recaps", "avatar-cleanup", "ai-runtime", "slack-livebridge", "encrypted-work"}
+          "chat", "apps", "recaps", "avatar-cleanup", "file-cleanup", "ai-runtime", "slack-livebridge", "encrypted-work"}
 
 
 def disable_features(monkeypatch):
@@ -91,6 +92,7 @@ def seed_new_groups(engine, now):
         session.add(MessageReminder(user_id="operator", channel_id="private-channel", item_id="private-completed", kind="message",
             due_at=past, session_hash="private-session", claims_json="{}", status="completed", completed_at=now))
         session.add(AvatarErasure(blob_id="private-removed-profile-photo", user_id="operator", created_at=past))
+        session.add(FileErasure(file_id="f" * 32, storage_scope="private-old-storage", created_at=past))
         for status, updated in (("queued", past), ("running", past), ("awaiting_review", past - timedelta(days=30))):
             session.add(AIRun(workspace_id="private-team", channel_id="private-channel", user_id="operator", request_id="private-" + status,
                 request_digest="private-digest", profile_id="private-profile", profile_revision=1, operation="answer", status=status,
@@ -133,6 +135,7 @@ def test_all_worker_groups_report_real_states_due_lag_and_no_private_data(operat
     assert "published" not in queues["recaps"] and "completed" not in queues["recaps"]
     assert queues["native-call-cleanup"] == {"pending": 1, "scheduled": 1, "oldest_pending_seconds": 420}
     assert queues["avatar-cleanup"] == {"pending": 1, "oldest_pending_seconds": 420}
+    assert queues["file-cleanup"] == {"pending": 1, "oldest_pending_seconds": 420}
     assert queues["ai-runtime"] == {"pending": 1, "processing": 1, "awaiting_review": 1, "completed": 0,
         "failed": 0, "cancelled": 0, "oldest_pending_seconds": 420}  # Human review is not worker lag.
     assert queues["slack-livebridge"] == {"pending": 1, "processing": 1, "delivered": 0, "failed": 0,
@@ -173,7 +176,7 @@ def test_always_on_work_requires_worker_but_terminal_or_disabled_queue_records_d
     with Session(engine) as session:
         queues = integration_queue_status(session)
     assert integration_worker_required(queues)
-    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "slack-livebridge"):
+    for group in ("apps", "chat", "native-call-cleanup", "slack-import-cleanup", "personal-oauth-cleanup", "avatar-cleanup", "file-cleanup", "slack-livebridge"):
         assert integration_worker_required({group: queues[group]})
     assert not integration_worker_required({"webhooks": {"pending": 2}, "recaps": {"scheduled": 1}})
     assert not integration_worker_required({"ai-runtime": {"pending": 1, "awaiting_review": 1}, "encrypted-work": {"pending": 1}})

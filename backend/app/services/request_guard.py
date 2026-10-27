@@ -8,6 +8,7 @@ from datetime import datetime
 import time
 
 from fastapi import HTTPException
+from sqlalchemy import update
 from sqlmodel import select
 
 from ..models.account_security import AccountSecurity
@@ -23,6 +24,27 @@ def remember_request(session, token_hash: str, claims: dict):
 
 def clear_request(session):
     session.info.pop(_KEY, None)
+
+
+def lock_current_session(session, user_id: str):
+    """Fence publication against logout/per-session revocation, then recheck.
+
+    Mutation callers acquire User and AccountSecurity first, matching the
+    account-wide revocation order. Generic authorization reads do not lock.
+    """
+    context = session.info.get(_KEY)
+    if context is not None:
+        from ..models.native_clients import NativeClientSession
+        hashes = {context["token_hash"]}
+        parent = session.exec(select(NativeClientSession.parent_token_hash).where(
+            NativeClientSession.token_hash == context["token_hash"], NativeClientSession.user_id == user_id,
+        )).first()
+        if parent is not None:
+            hashes.add(parent)
+        for token_hash in sorted(hashes):
+            session.execute(update(ActiveSession).where(
+                ActiveSession.token_hash == token_hash, ActiveSession.user_id == user_id,
+            ).values(expires_at=ActiveSession.expires_at))
 
 
 def recheck_actor(session, user_id: str):

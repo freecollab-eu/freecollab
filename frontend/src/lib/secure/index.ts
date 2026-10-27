@@ -75,11 +75,12 @@ const emit = (event: string, payload: Record<string, unknown>) => listeners.forE
 export function configureSecureMessaging(next: Configuration) { configuration = next; }
 async function request<T>(path: string, body?: unknown, method?: 'PATCH'): Promise<T> {
   if (!configuration?.getAccessToken()) throw new Error('Sign in to unlock encrypted channels.');
-  const requestToken = configuration.getAccessToken();
+  const requestToken = configuration.getAccessToken(), requestGeneration = generation;
   const response = await fetch(configuration.baseUrl + path, { method: method ?? (body === undefined ? 'GET' : 'POST'), headers: { Authorization: 'Bearer ' + requestToken, 'Content-Type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
-  if (!response.ok) { const data = await response.json().catch(() => null); if (response.status === 401 && requestToken === configuration?.getAccessToken()) window.dispatchEvent(new Event('freecollab:session-expired')); throw new APIError(typeof data?.detail === 'string' ? data.detail : typeof data?.detail?.message === 'string' ? data.detail.message : 'Encrypted channel is unavailable.', response.status, typeof data?.detail?.code === 'string' ? data.detail.code : undefined); }
-  if (requestToken !== configuration?.getAccessToken()) throw new Error('The signed-in account changed.');
-  return response.json();
+  if (!response.ok) { const data = await response.json().catch(() => null); if (response.status === 401 && requestToken === configuration?.getAccessToken() && requestGeneration === generation) window.dispatchEvent(new Event('freecollab:session-expired')); throw new APIError(typeof data?.detail === 'string' ? data.detail : typeof data?.detail?.message === 'string' ? data.detail.message : 'Encrypted channel is unavailable.', response.status, typeof data?.detail?.code === 'string' ? data.detail.code : undefined); }
+  const data = await response.json();
+  if (requestToken !== configuration?.getAccessToken() || requestGeneration !== generation) throw new Error('The signed-in account changed.');
+  return data as T;
 }
 function asMessage(channelId: string, e: MatrixEvent): Message {
   const outer = e.getContent(), relation = e.getOriginalContent()['m.relates_to'];
@@ -180,7 +181,13 @@ async function writeChannelMetadata(channelId: string, name: string, description
   if (token !== configuration?.getAccessToken()) throw new Error('The signed-in encryption session changed.');
   return readChannelMetadata(channelId, saved);
 }
-async function refreshBindings() { const rows = await request<SecureBinding[]>('/secure/channels'); bindings = new Map(rows.map(row => [row.channel_id, row])); bindingsLoaded = true; return rows; }
+async function refreshBindings() {
+  const token = configuration?.getAccessToken(), attempt = generation;
+  const rows = await request<SecureBinding[]>('/secure/channels');
+  if (token !== configuration?.getAccessToken() || attempt !== generation) throw new Error('The signed-in account changed.');
+  bindings = new Map(rows.map(row => [row.channel_id, row])); bindingsLoaded = true;
+  return rows;
+}
 async function ensureSession(): Promise<MatrixClient> {
   const token = configuration?.getAccessToken(); if (!token) throw new Error('Sign in to unlock encrypted channels.');
   if (ownerToken !== token) { generation++; if (client) { transactionEpochs.delete(client); publicationGuards.get(client)?.stop(); } client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }

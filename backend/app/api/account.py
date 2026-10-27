@@ -26,6 +26,7 @@ from ..services.account_security import (
 from ..services.auth import create_token, get_current_user, hash_password, normalize_email, security, token_digest, validate_password
 from ..services.mail import mail_available, delivery_mode
 from ..services.rate_limit import request_address
+from ..services.request_guard import recheck_actor
 
 router = APIRouter(prefix="/account", tags=["account security"])
 auth_router = APIRouter(tags=["account security"])
@@ -79,6 +80,15 @@ def _sensitive_limit(session, request, user_id):
     account_limit(session, "security-account", user_id, 15, 300)
 
 
+def _lock_account_security(session, user_id):
+    # Installation management and identity closure use User -> AccountSecurity.
+    # Acquire both before consuming an account link or a mutable MFA recovery code.
+    session.execute(update(User).where(User.id == user_id).values(name=User.name))
+    session.execute(update(AccountSecurity).where(AccountSecurity.user_id == user_id)
+                    .values(auth_version=AccountSecurity.auth_version))
+    session.expire_all()
+
+
 def _token_payload(user, session, request=None, *, mfa=False, info=None, auth_version=None, auth_methods=None, workspace_scope=None):
     if workspace_scope:
         tenants.current_config(session, workspace_scope["workspace_id"], workspace_scope["provider_revision"], user_id=user.id, lock=True)
@@ -118,6 +128,8 @@ def request_verification(request: Request, user=Depends(get_current_user), sessi
 def confirm_verification(data: TokenInput, request: Request, session=Depends(get_session)):
     account_limit(session, "verify-link-address", request_address(request), 30, 300)
     row, user, state = valid_account_token(session, data.token, "email-verify")
+    _lock_account_security(session, user.id)
+    row, user, state = valid_account_token(session, data.token, "email-verify")
     consume_account_token(session, row)
     changed = session.exec(update(AccountSecurity).where(AccountSecurity.user_id == user.id, AccountSecurity.auth_version == row.auth_version).values(email_verified_at=datetime.utcnow()))
     if changed.rowcount != 1:
@@ -147,6 +159,8 @@ def reset_password(data: ResetPassword, request: Request, session=Depends(get_se
     account_limit(session, "reset-address", request_address(request), 30, 300)
     row, user, state = valid_account_token(session, data.token, "password-reset")
     new_hash = hash_password(data.new_password)
+    _lock_account_security(session, user.id)
+    row, user, state = valid_account_token(session, data.token, "password-reset")
     consume_account_token(session, row)
     revoke_all_sessions(session, user.id, row.auth_version)
     user.password_hash = new_hash
@@ -158,8 +172,10 @@ def reset_password(data: ResetPassword, request: Request, session=Depends(get_se
 @router.post("/password")
 def change_password(data: ChangePassword, request: Request, user=Depends(get_current_user), session=Depends(get_session)):
     _sensitive_limit(session, request, user.id)
-    state = ensure_reauthentication(session, user, data.current_password, data.code)
     new_hash = hash_password(data.new_password)
+    _lock_account_security(session, user.id)
+    recheck_actor(session, user.id)
+    state = ensure_reauthentication(session, user, data.current_password, data.code)
     revoke_all_sessions(session, user.id, state.auth_version)
     user.password_hash = new_hash
     session.add(user)

@@ -7,6 +7,7 @@ from ..models.post import Post, Comment, CommentLike
 from ..models.file import File
 from .posts import require_channel_access
 from ..services.auth import get_current_user
+from ..services.enterprise_governance import assert_deletion_allowed, enforce_native_content
 from ..realtime.socket import broadcast_to_channel
 from .notifications import create_notification
 
@@ -203,7 +204,7 @@ async def update_comment(
     comment = session.get(Comment, comment_id)
     if not comment or comment.deleted:
         raise HTTPException(404, "Comment not found")
-    require_comment_access(session, user, comment, write=True)
+    channel_id, _, _, _ = require_comment_access(session, user, comment, write=True)
     session.refresh(comment)
     if comment.deleted:
         raise HTTPException(404, "Comment not found")
@@ -211,6 +212,8 @@ async def update_comment(
     if comment.author_id != user.id:
         raise HTTPException(403, "Can only edit your own comments")
 
+    assert_deletion_allowed(session, channel_id, author_id=comment.author_id)
+    warnings = enforce_native_content(session, channel_id, user.id, data.content)
     comment.content = data.content
     comment.edited_at = datetime.utcnow()
     session.commit()
@@ -219,6 +222,7 @@ async def update_comment(
         "id": comment.id,
         "content": comment.content,
         "edited_at": comment.edited_at.isoformat(),
+        "policy_warnings": warnings,
     }
 
 
@@ -232,7 +236,7 @@ async def delete_comment(
     comment = session.get(Comment, comment_id)
     if not comment or comment.deleted:
         raise HTTPException(404, "Comment not found")
-    require_comment_access(session, user, comment, write=True)
+    channel_id, _, _, _ = require_comment_access(session, user, comment, write=True)
     session.refresh(comment)
     if comment.deleted:
         raise HTTPException(404, "Comment not found")
@@ -240,6 +244,7 @@ async def delete_comment(
     if comment.author_id != user.id:
         raise HTTPException(403, "Can only delete your own comments")
 
+    assert_deletion_allowed(session, channel_id, author_id=comment.author_id)
     comment.deleted = True
     comment.content = "[Comment deleted]"
 
@@ -332,6 +337,7 @@ async def create_comment(
     channel_id, entity_author_id, root_key, root = resolve_entity(
         session, user, entity_type, entity_id, write=True
     )
+    warnings = enforce_native_content(session, channel_id, user.id, data.content)
     parent_id = data.parent_id
     if entity_type == "comment":
         if parent_id and parent_id != entity_id:
@@ -370,6 +376,7 @@ async def create_comment(
         "reply_count": 0,
         "created_at": comment.created_at.isoformat(),
         "user_liked": False,
+        "policy_warnings": warnings,
     }
 
     # Broadcast new comment

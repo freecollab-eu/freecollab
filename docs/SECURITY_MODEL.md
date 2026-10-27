@@ -1,5 +1,8 @@
 # FreeCollab security model
 
+The latest internal code and regression review is recorded in
+[Security and quality cleanup — 2026-10-27](SECURITY_REVIEW_2026_10_27.md).
+
 This describes current product boundaries. The default is one API process; configured replicas require the complete shared-runtime controls in [SCALING.md](SCALING.md). New secure channels use client-side Matrix encryption; legacy channels retain server-side encryption. The FreeCollab integration has not received an independent security audit. See [E2EE_IMPLEMENTATION.md](E2EE_IMPLEMENTATION.md) for device trust, recovery and visible routing metadata.
 
 ## Content, credentials and keys

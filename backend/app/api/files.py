@@ -1,4 +1,5 @@
 import hashlib
+import logging
 import re
 from uuid import uuid4
 from urllib.parse import quote
@@ -13,7 +14,7 @@ from sqlmodel import select
 
 from ..database import get_session
 from ..models.file import File
-from ..models.file_version import FileDocument, FileUploadReceipt, FileVersion
+from ..models.file_version import FileDocument, FileErasure, FileUploadReceipt, FileVersion
 from ..models.cloud_files import CloudFileImport
 from ..models.file_experience import FileComment, OfficeEditLock, OfficeEditSession
 from ..models.user import User
@@ -420,9 +421,19 @@ async def delete_file(file_id: str, user=Depends(get_current_user), session=Depe
         receipt.file_id = None
         session.add(receipt)
     session.flush()
+    from ..services.file_erasure import erase_pending_file_blobs, storage_scope
+    scope = storage_scope(storage_service)
     for stored in records:
+        session.add(FileErasure(file_id=stored.id, storage_scope=scope))
         session.delete(stored)
     session.commit()
-    for stored_id in file_ids:
-        await storage_service.delete_file(stored_id)
-    return {"deleted": True}
+    # Physical erasure follows the metadata/tombstone commit. A storage outage
+    # cannot lose the cleanup identity or hold a channel writer fence open.
+    try:
+        erased = await run_in_threadpool(erase_pending_file_blobs, session,
+                                        file_ids=file_ids, store=storage_service)
+    except Exception:
+        session.rollback()
+        logging.getLogger(__name__).warning("Removed files await private storage erasure")
+        erased = 0
+    return {"deleted": True, **({"erasure_pending": True} if erased < len(file_ids) else {})}

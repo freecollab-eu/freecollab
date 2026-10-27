@@ -6,6 +6,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import secrets
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ REPORT = Path(os.getenv('CHANNEL_RETURN_DEMO_REPORT', str(ROOT.parent/'.freecoll
 
 
 def main():
-    checks, processes, streams, stage, source_hashes = {}, [], [], 'private startup', {}
+    checks, processes, streams, stage, source_hashes, evidence = {}, [], [], 'private startup', {}, []
     REPORT.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='freecollab-return-demo-') as directory:
         private = Path(directory)
@@ -62,7 +63,9 @@ def main():
             p.ready(base+'/ready',processes); p.ready(app+'/product-demo/',processes)
             with sync_playwright() as playwright:
                 browser = playwright.chromium.launch(executable_path=os.getenv('CHROMIUM_PATH') or '/usr/bin/chromium',headless=True,args=['--no-sandbox'])
-                context = browser.new_context(viewport={'width':1440,'height':1000},locale='en-US',reduced_motion='reduce')
+                # Keep the genuine first unread history scrollable, so the
+                # reading choice is explicit rather than an already-visible end.
+                context = browser.new_context(viewport={'width':1440,'height':700},locale='en-US',reduced_motion='reduce')
                 context.add_init_script(p.INSTRUMENTATION)
                 unexpected, errors, summary_reads = [], [], []
                 def network(route):
@@ -76,20 +79,43 @@ def main():
                 page.on('pageerror',lambda error:errors.append(type(error).__name__))
                 page.on('response',lambda response:summary_reads.append(response) if urlsplit(response.url).path.endswith('/return-summary') else None)
                 stage = 'actual disposable demo entry and allowlisted summary'
-                with page.expect_response(lambda response: response.request.method=='POST' and urlsplit(response.url).path=='/api/demo/session') as started:
+                with page.expect_response(lambda response: response.request.method=='POST' and urlsplit(response.url).path=='/api/demo/session') as started, page.expect_response(lambda response: response.request.method=='GET' and re.fullmatch(r'/api/messages/channels/[^/]+',urlsplit(response.url).path) is not None) as initial_history:
                     page.goto(app+'/product-demo/?locale=en',wait_until='domcontentloaded')
                 assert started.value.ok
                 visit = started.value.json(); token = visit['session']['access_token']; channel = visit['channel_id']
                 expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-                # A first sample visit has no personal receipt. Read through
-                # the real timeline, then return through actual channel controls.
-                page.locator('.fc-chat-timeline').hover(); page.mouse.wheel(0,4000)
+                stage = 'actual sample history and explicit latest reading'
+                history = initial_history.value
+                assert history.ok and urlsplit(history.url).path=='/api/messages/channels/'+channel
+                assert history.request.headers.get('authorization')=='Bearer '+token
+                roots = [row for row in history.json() if not row.get('parent_id') and not row.get('deleted')]
+                assert len(roots)>=3
+                oldest, newest = min(roots,key=lambda row:row['created_at']), max(roots,key=lambda row:row['created_at'])
+                latest = page.locator('#message-'+newest['id'])
+                expect(latest).to_be_attached()
+                expect(page.locator('.fc-chat-history-loading')).to_have_count(0)
+                timeline = page.locator('.fc-chat-timeline')
+                page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollHeight>document.querySelector('.fc-chat-timeline').clientHeight")
+                first_action = page.locator('#message-'+oldest['id']).get_by_role('button',name='More message actions',exact=True)
+                first_action.focus(); first_action.press('Control+Home')
+                page.wait_for_function("document.querySelector('.fc-chat-timeline').scrollTop===0")
+                evidence.append({'sampleHistory':{'status':history.status,'rootCount':len(roots),'newestRootId':newest['id'],
+                    'timelineBeforeJump':timeline.evaluate('(node)=>({top:node.scrollTop,height:node.scrollHeight,viewport:node.clientHeight})')}})
+                # Opening the App and scrolling an empty/loading timeline do
+                # not choose to follow latest. Use the actual reading control.
+                with page.expect_response(lambda response: response.request.method=='POST' and urlsplit(response.url).path=='/api/read-receipts/channels/'+channel and response.request.post_data_json=={'message_id':newest['id']} and response.request.headers.get('authorization')=='Bearer '+token) as explicit_receipt:
+                    page.get_by_role('button',name='Jump to latest messages',exact=True).click()
+                assert explicit_receipt.value.ok
+                expect(latest).to_be_in_viewport(ratio=.7)
                 deadline = time.monotonic()+15
                 while True:
                     receipts = p.request(base,'GET','/read-receipts/channels/'+channel,token)
-                    if any(row['user_id']==visit['session']['user_id'] for row in receipts): break
+                    if any(row['user_id']==visit['session']['user_id'] and row['last_read_message_id']==newest['id'] for row in receipts): break
                     assert time.monotonic()<deadline,'Actual sample reading did not establish its receipt'
                     page.wait_for_timeout(200)
+                evidence.append({'explicitLatestReading':{'receiptStatus':explicit_receipt.value.status,'messageId':newest['id'],
+                    'timelineAfterJump':timeline.evaluate('(node)=>({top:node.scrollTop,height:node.scrollHeight,viewport:node.clientHeight})')}})
+                checks['actual_loaded_sample_history_and_explicit_latest_choice_establish_exact_server_receipt'] = True
                 channels = p.request(base,'GET','/channels?workspace_id='+visit['workspace_id'],token)
                 target = next(row for row in channels if row['id']==channel)
                 another = next(row for row in channels if row['id']!=channel)
@@ -120,6 +146,9 @@ def main():
                 p.storage_untouched(page)
                 assert not errors and not unexpected, {'errors':errors,'unexpected':unexpected}
                 checks['summary_keeps_retained_account_storage_vaults_workers_and_external_services_untouched'] = True
+                current_hashes = p.runtime_hashes(ROOT)
+                current_hashes['frontend/tests/channel-return-demo-browser.py'] = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+                assert source_hashes==current_hashes,'The copied actual demo source changed during the proof'
                 page.screenshot(path=str(REPORT.with_suffix('.png')))
                 browser.close(); stage = 'passed'
         except Exception:
@@ -129,7 +158,7 @@ def main():
         finally:
             p.stop(processes)
             for stream in streams: stream.close()
-            REPORT.write_text(json.dumps({'stage':stage,'checks':checks,'source_sha256':source_hashes,
+            REPORT.write_text(json.dumps({'stage':stage,'checks':checks,'evidence':evidence,'source_sha256':source_hashes,
                 'limits':['Actual public-demo native App/API with temporary sample credentials and owned loopback services only.',
                           'No retained real account, external provider, public deployment or encrypted-room acceptance is claimed.'],
                 'cleanup':'Private API/Vite processes, SQLite/keys/source snapshots and browser context removed.'},indent=2)+'\n')

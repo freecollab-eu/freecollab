@@ -32,8 +32,31 @@ spec.loader.exec_module(p)
 REPORT = Path(os.getenv('WORKSPACE_LAUNCH_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/workspace-launch-browser.json')))
 
 
+def mobile_layout(guide):
+    return guide.evaluate('''root=>({viewport:innerWidth,document:document.documentElement.scrollWidth,
+      guide:{client:root.clientWidth,scroll:root.scrollWidth,font:getComputedStyle(root).font},fonts:document.fonts.status,
+      overflow:[...document.body.querySelectorAll('*')].filter(node=>node.getClientRects().length).map(node=>{
+        const box=node.getBoundingClientRect();return {tag:node.tagName,classes:typeof node.className==='string'?node.className:'',
+          left:box.left,right:box.right,client:node.clientWidth,scroll:node.scrollWidth};
+      }).filter(row=>row.left< -1||row.right>innerWidth+1).slice(0,24)})''')
+
+
+def wait_mobile_layout(page, guide, evidence, name, check_guide=False):
+    entry = {'name': name, 'initial': mobile_layout(guide)}
+    evidence.append(entry)
+    try:
+        # Resize and font loading are asynchronous; persistent overflow still fails
+        # within three seconds, using the original exact one-pixel limits.
+        page.wait_for_function('''async ({root,checkGuide})=>{await document.fonts.ready;
+          return document.documentElement.scrollWidth<=innerWidth+1&&(!checkGuide||root.scrollWidth<=root.clientWidth+1);
+        }''', arg={'root': guide.element_handle(), 'checkGuide': check_guide}, timeout=3000)
+    finally:
+        entry['settled'] = mobile_layout(guide)
+
+
 def main():
     processes, streams, results, stage = [], [], {}, 'private fixture startup'
+    layout_evidence = []
     with tempfile.TemporaryDirectory(prefix='freecollab-workspace-launch-') as directory:
         private = Path(directory)
         try:
@@ -229,16 +252,21 @@ def main():
                     results['personal_appearance_and_google_m365_guides_preserve_context'] = True
 
                     stage = 'Swedish actual language preference and 320px launch guide'
-                    guide.get_by_label('Language', exact=True).select_option('sv')
+                    with page.expect_response(lambda response: urlsplit(response.url).path == '/api/preferences/language'
+                                              and response.request.method == 'PUT') as language_saved:
+                        guide.get_by_label('Language', exact=True).select_option('sv')
+                    assert language_saved.value.ok
                     guide = page.get_by_role('dialog', name='Startguide för arbetsytan', exact=True)
                     expect(guide.get_by_role('heading', name='En genomtänkt start.', exact=True)).to_be_visible()
                     assert p.api(api_base, 'GET', '/preferences/language', owner)['locale'] == 'sv'
                     page.set_viewport_size({'width': 320, 'height': 900})
+                    wait_mobile_layout(page, guide, layout_evidence, 'Swedish320 document')
                     assert page.evaluate('() => document.documentElement.scrollWidth <= innerWidth + 1')
                     REPORT.parent.mkdir(parents=True, exist_ok=True)
                     guide.locator('.fc-account-body').evaluate('node => node.scrollTo(0, 0)')
                     page.screenshot(path=str(REPORT.with_name('workspace-launch-mobile.png')), full_page=True)
                     guide.get_by_role('heading', name='Sedan, gå med i samtalet', exact=True).scroll_into_view_if_needed()
+                    wait_mobile_layout(page, guide, layout_evidence, 'Swedish320 channel access', check_guide=True)
                     assert guide.evaluate('node => node.scrollWidth <= node.clientWidth + 1')
                     page.screenshot(path=str(REPORT.with_name('workspace-channel-access-mobile.png')), full_page=True)
                     results['saved_swedish_language_and_320px_layout'] = True
@@ -302,11 +330,13 @@ def main():
             frozen_sources = {'frontend/src/' + name: hashlib.sha256((private / 'frontend/src' / name).read_bytes()).hexdigest() for name in proof_files}
             REPORT.write_text(json.dumps({'scope': 'Actual private API, frozen full application and Chromium; no providers, email or real users', 'results': results,
                 'frozen_frontend_sources': frozen_sources,
+                'mobile_layout_evidence': layout_evidence,
                 'harness_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
                 'cleanup': 'Own API/Vite services, SQLite data, files, keys, frozen frontend and browser contexts removed in finally'}, indent=2) + '\n')
             print('PASS workspace launch guide: ' + str(len(results)) + ' actual browser checks', flush=True)
         except Exception as failure:
             print('FAIL workspace launch proof stage: ' + stage + ' (' + type(failure).__name__ + ')', file=sys.stderr)
+            if layout_evidence: print('Mobile layout evidence: ' + json.dumps(layout_evidence), file=sys.stderr)
             if 'first-message' in stage:
                 for line in (private / 'api.log').read_text(errors='replace').splitlines():
                     if re.match(r'^(?:NameError|TypeError|AttributeError|RuntimeError|ValueError):', line):

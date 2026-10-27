@@ -34,11 +34,14 @@ These are the same components and API used by the product demo.
   comment writers. Cross-surface checks require the same unique permitted IDs
   while allowing their intended contextual order; retained source/no-write
   checks, demo, modal writers and security transitions remain covered.
-- **6 native return-summary groups and 4 public-demo groups** cover real
+- **6 native return-summary groups and 5 public-demo groups** cover real
   prior reading baselines, actual decision/document/attention sources, exact
   links including replies, receipt advancement without changing the baseline,
   read-only previews, EN/SV/320–1440px layout, stale response rejection and
   isolated sample credentials/data.
+  The demo first awaits actual loaded root history and uses the real explicit
+  Jump to latest control. Its receipt POST and stored receipt must both identify
+  the exact newest root; summary inspection still leaves that receipt unchanged.
 - **17 organization browser groups** cover current native persistence,
   local proposals, explicit acceptance/dismissal, visible Undo outside collapsed
   controls, peer edits, stack generations and original source navigation.
@@ -111,6 +114,14 @@ Persistent overflow still fails. It retains bounded initial/settled geometry,
 source bindings and failure screenshots in scoped CI artifacts. This is test
 synchronization and diagnostics; no OAuth layout defect was reproduced or
 product CSS changed in that investigation.
+The workspace-launch proof similarly waits for the actual language-save PUT
+before checking the stored preference, then checks its original mobile bounds
+after font/layout readiness. All **12 groups** passed with CPU throttling,
+including the saved large serif appearance at 320px.
+A fresh CI-Chromium tail sweep passed **109 checks across ten existing scripts**
+covering native push/calling/offline, enterprise/sync/workflows/data controls and
+mobile/documents/meetings, plus the original **three version-proof groups**.
+These used disposable services with unchanged production-source bindings.
 
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu

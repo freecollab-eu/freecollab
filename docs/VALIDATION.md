@@ -57,6 +57,11 @@ These are the same components and API used by the product demo.
 - **17 organization browser groups** cover current native persistence,
   local proposals, explicit acceptance/dismissal, visible Undo outside collapsed
   controls, peer edits, stack generations and original source navigation.
+  The native drag gesture and assertions are unchanged. Bounded trusted drag
+  events, geometry and placement responses now survive failures in the retained
+  report; a prior CI drag failure was not reproduced in normal or CPU-throttled
+  diagnostics. The final local run with the desktop column correction passed
+  all 17 groups, including the actual drag PUT and keyboard return.
 - The existing **17 workspace-mode browser groups** also passed across native
   and demo fixtures. Its expanded-document source selector now targets the
   actual ribbon; editor identity, contents, focus and discard guards remain
@@ -74,6 +79,16 @@ These are the same components and API used by the product demo.
   **18 groups**, keeping a 96px timeline, internally scrollable review, reachable
   44px controls, unchanged consent and the original draft. Both CSS inputs are
   bound in the proof; the full Node suite and app/embed/demo builds also passed.
+
+Visual review also caught an editor that was retained in the DOM but scrolled
+above the viewport after new chat messages. On desktop, the work column now
+spans the room height so its sticky document card can follow the conversation.
+A native check with the persisted CSS and 12 actual sends retained the same
+editor, synchronized Yjs text and unsent draft. The editor, work header and
+composer stayed at least 99% visible through ancestor clipping immediately,
+after two frames and after 500 ms. The full-demo simultaneous-editing group now
+also checks the actual viewport: complete headers and composer, at least 70%
+of the same editable text area, and unchanged editor identity/text afterward.
 
 - **9 actual local Matrix groups passed** with the exact pinned CI Synapse
   image, real Rust crypto and verified devices. They cover cache-independent

@@ -760,6 +760,29 @@ def main():
                     expect(panel.locator('.fc-shared-sync')).to_have_text('All edits synchronized')
                     live_conversation(page,panel)
                     expect(page.locator('#message-' + sent_in_document['id'])).to_be_visible()
+                    simultaneous_probe = """editor => {
+                      const rect = node => { if (!node) return null; const box = node.getBoundingClientRect();
+                        return {x:box.x,y:box.y,width:box.width,height:box.height}; };
+                      const work = editor.closest('.fc-conversation-work');
+                      return {viewport:{width:innerWidth,height:innerHeight},editor:rect(editor),
+                        work:rect(work),workParent:rect(work?.parentElement),room:rect(document.querySelector('.fc-chat-room-content')),
+                        header:rect(work?.querySelector('.fc-conversation-work-header')),
+                        documentToolbar:rect(work?.querySelector('.fc-shared-document-toolbar')),
+                        composer:rect(document.querySelector('.fc-chat-composer textarea'))};
+                    }"""
+                    simultaneous_initial = editor.evaluate(simultaneous_probe)
+                    try:
+                        expect(panel.locator('.fc-conversation-work-header')).to_be_in_viewport(ratio=1)
+                        expect(panel.locator('.fc-shared-document-toolbar')).to_be_in_viewport(ratio=1)
+                        expect(editor).to_be_editable()
+                        expect(editor).to_be_in_viewport(ratio=.7)
+                        expect(composer).to_be_in_viewport(ratio=1)
+                    except Exception:
+                        print('Simultaneous document viewport mismatch: '+json.dumps({'initial':simultaneous_initial,'settled':editor.evaluate(simultaneous_probe)}),file=sys.stderr)
+                        raise
+                    expect(editor).to_have_value(simultaneous_body)
+                    assert editor.evaluate('node=>node===window.__simultaneousEditor'), 'Viewport settling remounted the real Yjs editor'
+                    visual_geometry['simultaneous_document'] = {'initial':simultaneous_initial,'settled':editor.evaluate(simultaneous_probe),'minimum_viewport_ratios':{'header':1,'document_toolbar':1,'editor':.7,'composer':1}}
                     page.screenshot(path=str(REPORT.with_name('flow-simultaneous-document-en-1440.png')))
                     passed('real_Yjs_editor_and_message_send_are_simultaneous_without_editor_remount')
 

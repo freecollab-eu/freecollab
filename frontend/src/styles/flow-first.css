@@ -53,6 +53,7 @@
 .fc-flow-related-documents label > span { min-width: 0; overflow-wrap: anywhere; }
 .fc-flow-first > .fc-chat-main > .fc-contextual-copilot { padding-inline: var(--chat-inline); }
 @media (min-width: 1000px) {
+  .fc-flow-first .fc-chat-room-work-column { align-self: stretch; }
   .fc-flow-first:has(.fc-chat-room-work-column[hidden]):not(.is-focus-mode) .fc-chat-composer-area { max-width: 66rem; padding-inline: var(--chat-inline); }
   .fc-flow-first:has(.fc-chat-room-work-column[hidden]):not(.is-focus-mode) .fc-chat-composer-row { max-width: none; }
 }

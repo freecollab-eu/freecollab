@@ -136,7 +136,7 @@ jobs:
 
   product-e2e:
     name: Product browser and PostgreSQL workflow
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:15
@@ -191,11 +191,39 @@ jobs:
           VITE_PUBLIC_DEMO_URL=http://127.0.0.1:3011/product-demo/ npm run build --prefix frontend
           npm run build:widget --prefix frontend
       - name: Install media integration fixture
-        # Slow Ubuntu mirrors can take several minutes for codec dependencies.
+        # Keep noble packages on signed official HTTPS sources for this step;
+        # leave the runner's global feeds and the full codec proof unchanged.
         timeout-minutes: 30
         run: |
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 update
-          sudo apt-get -o Acquire::Retries=2 -o Acquire::http::Timeout=20 -o Acquire::https::Timeout=20 install -y --no-install-recommends ffmpeg
+          set -euo pipefail
+          media_apt_dir="$(mktemp -d "$RUNNER_TEMP/freecollab-media-apt.XXXXXX")"
+          trap 'sudo rm -rf -- "$media_apt_dir"' EXIT
+          chmod 0755 "$media_apt_dir"
+          mkdir -p "$media_apt_dir/lists/partial" "$media_apt_dir/sources.list.d"
+          cat > "$media_apt_dir/ubuntu.sources" <<'SOURCES'
+          Types: deb
+          URIs: https://archive.ubuntu.com/ubuntu
+          Suites: noble noble-updates noble-backports
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+
+          Types: deb
+          URIs: https://security.ubuntu.com/ubuntu
+          Suites: noble-security
+          Components: main restricted universe multiverse
+          Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+          SOURCES
+          chmod 0644 "$media_apt_dir/ubuntu.sources"
+          media_apt_options=(
+            -o "Dir::Etc::sourcelist=$media_apt_dir/ubuntu.sources"
+            -o "Dir::Etc::sourceparts=$media_apt_dir/sources.list.d"
+            -o "Dir::State::lists=$media_apt_dir/lists"
+            -o Acquire::Retries=2
+            -o Acquire::http::Timeout=20
+            -o Acquire::https::Timeout=20
+          )
+          sudo apt-get "${media_apt_options[@]}" update
+          sudo apt-get "${media_apt_options[@]}" install -y --no-install-recommends ffmpeg
           ffmpeg -hide_banner -version
       - name: Start API and reference client
         run: |

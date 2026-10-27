@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('COLLABORATION_INPUT_REPORT', str(ROOT.parent / '.freecollab/proof-results/collaboration-input-browser.json')))
 SOURCES = ['frontend/src/components/CollaborationInput.tsx', 'frontend/src/lib/collaboration-context.tsx',
            'frontend/src/lib/useComposerReferences.ts', 'frontend/src/components/MentionReferences.tsx',
+           'frontend/src/lib/suggestion-ranking.ts',
            'frontend/src/styles/collaboration-input.css', 'frontend/src/styles/panels-files.css',
            'frontend/src/styles/file-experience.css', 'frontend/tests/collaboration-input-browser.py']
 ENTRY = '''import React,{useState,useRef}from'react';import{createRoot}from'react-dom/client';import{flushSync}from'react-dom';
@@ -91,6 +92,19 @@ def main():
                     def snapshot(): return page.evaluate('()=>writingFixture.snapshot()')
                     def command(text):
                         field.fill(text); expect(page.locator('.fc-collaboration-popup .fc-slash-command').first).to_be_visible(); field.press('Enter')
+                    def choose_person_keyboard(identifier):
+                        options = page.locator('.fc-reference-candidate')
+                        target = page.locator('.fc-reference-candidate[data-reference-kind="person"][data-reference-id=' + json.dumps(identifier) + ']')
+                        expect(target).to_have_count(1)
+                        wanted = target.get_attribute('id')
+                        field.press('Home')
+                        for _ in range(options.count()):
+                            if field.get_attribute('aria-activedescendant') == wanted:
+                                break
+                            field.press('ArrowDown')
+                        expect(target).to_have_attribute('aria-selected', 'true')
+                        expect(field).to_have_attribute('aria-activedescendant', wanted)
+                        field.press('Enter')
                     try:
                         stage = 'current command consumes only its line and restores the exact source caret'
                         prefix = '@Earlier remains.\n'; suffix = '\nAfter remains.'; text = prefix + '/task Review this' + suffix
@@ -153,7 +167,9 @@ def main():
 
                         stage = 'exact selected person in this command becomes the only proposed owner'
                         reset(); field.fill('/task Review @C'); expect(options).to_have_count(40)
-                        field.press('ArrowDown'); field.press('Enter'); expect(field).to_have_value('/task Review @Colleague 01 ')
+                        expect(options.first).to_have_attribute('data-reference-id', 'colleague-18')
+                        choose_person_keyboard('colleague-1'); expect(field).to_have_value('/task Review @Colleague 01 ')
+                        assert snapshot()['refs'] == [{'kind': 'person', 'id': 'colleague-1', 'start': 13, 'end': 26}]
                         expect(page.locator('.fc-slash-command')).to_be_visible(); field.press('Enter'); expect(field).to_have_value('')
                         assert snapshot()['records'][0]['people'] == ['colleague-1']
                         checks['command_uses_only_explicit_selected_person'] = True
@@ -185,8 +201,8 @@ def main():
                         menu.locator('[role="option"][id$="-task"]').click(); expect(field).to_have_value('The file discussion stays.\n')
                         assert snapshot()['records'][0]['command'] == 'task' and snapshot()['submits'] == 0
                         field.fill('@C'); expect(page.locator('.fc-reference-candidate')).to_have_count(40)
-                        page.locator('.fc-reference-candidate').nth(2).click(); expect(field).to_have_value('@Colleague 02 ')
-                        assert snapshot()['refs'][0]['id'] == 'colleague-2'
+                        page.locator('.fc-reference-candidate[data-reference-kind="person"][data-reference-id="colleague-2"]').click(); expect(field).to_have_value('@Colleague 02 ')
+                        assert snapshot()['refs'] == [{'kind': 'person', 'id': 'colleague-2', 'start': 0, 'end': 13}]
                         checks['actual_file_css_scroller_backdrop_pointer_choices'] = True
                         assert not errors and not unexpected
                     finally:

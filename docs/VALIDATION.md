@@ -25,6 +25,10 @@ These are the same components and API used by the product demo.
   inventory, exact/context/recency precedence, all six reference types,
   duplicate-name durable identities, literal installed-command arguments,
   channel/account isolation and retained-account storage nonaccess in demo.
+- The existing **9 collaboration-input browser groups** passed with ranked
+  choices. Keyboard and pointer cases select the same intended stable person
+  IDs while retaining exact text and reference spans; they also verify that
+  the previously accepted person leads the later suggestion list.
 - **6 native return-summary groups and 4 public-demo groups** cover real
   prior reading baselines, actual decision/document/attention sources, exact
   links including replies, receipt advancement without changing the baseline,
@@ -78,6 +82,12 @@ authorized channel metadata with explicit `secure: false` before native
 transport is allowed. Revoked, unknown or failed classifications cannot send
 message or file content through a native fallback. The unused legacy upload
 helper also rejects encrypted channels before constructing multipart content.
+
+The Product job keeps its codec tests and signed Ubuntu packages. Its media
+installation uses temporary isolated apt sources/lists for the official Ubuntu
+HTTPS archives on pinned Ubuntu24.04, after the former Azure HTTP mirror took
+26 minutes to transfer 62.8MB. Runner-global feeds are unchanged; the mirror
+change does not skip the FFmpeg installation check or any browser assertion.
 
 ## Integrated feature completion — 2026-10-25
 

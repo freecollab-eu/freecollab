@@ -225,7 +225,7 @@ jobs:
           python frontend/tests/widget-security-browser.py
           python frontend/tests/appearance-browser.py
           python frontend/tests/elite-browser.py
-          python frontend/tests/open-studio-browser.py
+          SCREENSHOT_DIR="$RUNNER_TEMP/freecollab-product-browser/open-studio" python frontend/tests/open-studio-browser.py
           python frontend/tests/conversation-flow-browser.py
           BACKEND_PYTHON=python python frontend/tests/slash-commands-browser.py
           BACKEND_PYTHON=python python frontend/tests/commands-references-browser.py
@@ -302,6 +302,16 @@ jobs:
             ${{ runner.temp }}/freecollab-universal/reference-lifetime/*.png
             ${{ runner.temp }}/freecollab-universal/product/current.json
             ${{ runner.temp }}/freecollab-universal/product/*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain open-studio browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: open-studio-browser-failure
+          path: |
+            ${{ runner.temp }}/freecollab-product-browser/open-studio/**/*.json
+            ${{ runner.temp }}/freecollab-product-browser/open-studio/**/*.png
           if-no-files-found: warn
           retention-days: 7
       - name: Upload service diagnostics on failure

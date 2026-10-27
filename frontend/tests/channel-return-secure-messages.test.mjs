@@ -6,7 +6,7 @@ import ts from 'typescript';
 
 const source = readFileSync(new URL('../src/lib/secure/index.ts', import.meta.url), 'utf8');
 const parsed = ts.createSourceFile('secure.ts', source, ts.ScriptTarget.Latest, true);
-const functions = ['asMessage', 'getRecentMessages'].map(name => {
+const functions = ['asMessage', 'currentRoomEvents', 'getRecentMessages'].map(name => {
   const declaration = parsed.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === name);
   assert.ok(declaration, name); return declaration.getText(parsed);
 }).join('\n');
@@ -18,10 +18,12 @@ function event(id, extra = {}) {
     getContent: () => ({ body: value.body, 'eu.freecollab.mentions': value.mentions }), getOriginalContent: () => ({ 'm.relates_to': value.relation }) };
 }
 function fixture(rows, { cold = false } = {}) {
-  const state = { token: 'session', actor: 'viewer', ownerToken: cold ? null : 'session', current: true, permitted: true, refreshes: 0, decrypted: [], scrolls: 0, hook: async () => {} };
-  const client = { decryptEventIfNeeded: async row => { state.decrypted.push(row.getId()); await state.hook('decrypt'); }, scrollback: async () => { state.scrolls++; throw Error('Summary must never scroll back'); } };
+  const state = { token: 'session', actor: 'viewer', ownerToken: cold ? null : 'session', current: true, permitted: true, refreshes: 0, decrypted: [], snapshots: [], scrolls: 0, hook: async () => {} };
+  const client = { createMessagesRequest: async (...args) => { state.snapshots.push(args); return { chunk: [...rows].reverse().slice(0, args[2]).map(event => ({ room_id: event.getRoomId(), event })) }; },
+    decryptEventIfNeeded: async row => { state.decrypted.push(row.getId()); await state.hook('decrypt'); }, scrollback: async () => { state.scrolls++; throw Error('Summary must never scroll back'); } };
   const context = { exports: {}, configuration: { getAccessToken: () => state.token, getUserId: () => state.actor }, generation: 1,
-    client: cold ? null : client, EventType: { RoomMessage: 'm.room.message' }, Date, Map, Array, Promise, Number,
+    client: cold ? null : client, EventType: { RoomMessage: 'm.room.message', RoomCreate: 'm.room.create' }, Date, Map, Array, Promise, Number,
+    MatrixEvent: class { constructor(raw) { return raw.event; } }, Direction: { Backward: 'b' },
     accountId: id => id === '@fc_viewer:test' ? 'viewer' : id,
     encryptedContentReferences: () => [],
     refreshBindings: async () => { state.refreshes++; await state.hook('refresh:'+state.refreshes); },
@@ -38,11 +40,12 @@ function fixture(rows, { cold = false } = {}) {
   return { state, context, read: options => context.exports.read('room', options) };
 }
 
-test('summary inspects at most 200 loaded events in a work-heavy room and never paginates for message quota', async () => {
+test('summary inspects at most 200 current events in a work-heavy room and never paginates for message quota', async () => {
   const rows = Array.from({ length: 12000 }, (_, index) => event('$work-'+index, { type: 'eu.freecollab.encrypted_work.revision' }));
   rows.push(event('$parent', { sender: '@fc_viewer:test' }), event('$reply', { relation: { rel_type: 'm.thread', event_id: '$parent' }, mentions: ['viewer'] }));
   const f = fixture(rows), result = await f.read({ limit: 100, eventLimit: 200, isCurrent: () => f.state.current });
   assert.equal(f.state.decrypted.length, 200); assert.equal(f.state.scrolls, 0); assert.equal(result.length, 2);
+  assert.deepEqual(f.state.snapshots, [['!room:test', null, 200, 'b']]);
   assert.equal(result[0].parent_id, '$parent'); assert.equal(result[0].mentions[0], 'viewer');
   assert.equal(f.state.decrypted.includes('$work-0'), false);
 });
@@ -67,14 +70,18 @@ test('recent cold bootstrap rejects changed owner/client and caller cancellation
     assert.equal(f.state.decrypted.length, 0); assert.equal(f.state.scrolls, 0);
   }
 });
-test('recent encrypted projection excludes plaintext/foreign events and uses only same-sender current edits', async () => {
+test('recent encrypted projection excludes plaintext events and uses only same-sender current edits', async () => {
   const original = event('$message');
-  const f = fixture([event('$plain', { encrypted: false }), event('$foreign', { room: '!wrong:test' }), original,
+  const f = fixture([event('$plain', { encrypted: false }), original,
     event('$edit', { relation: { rel_type: 'm.replace', event_id: '$message' }, body: 'An actual revision', mentions: ['viewer'] }),
     event('$forged', { sender: '@fc_other:test', relation: { rel_type: 'm.replace', event_id: '$other' }, mentions: ['viewer'] })]);
   const result = await f.read();
   assert.equal(result.length, 1); assert.equal(result[0].content, 'An actual revision'); assert.equal(result[0].mentions[0], 'viewer');
-  assert.equal(f.state.decrypted.includes('$plain'), false); assert.equal(f.state.decrypted.includes('$foreign'), false);
+  assert.equal(f.state.decrypted.includes('$plain'), false);
+});
+test('recent snapshot rejects foreign room content before decryption', async () => {
+  const f = fixture([event('$foreign', { room: '!wrong:test' })]);
+  await assert.rejects(f.read()); assert.equal(f.state.decrypted.length, 0);
 });
 for (const changed of ['token', 'actor', 'scope', 'abort', 'generation', 'access']) test('recent inspection discards asynchronous '+changed+' changes', async () => {
   const f = fixture([event('$message')]), abort = new AbortController();

@@ -9,7 +9,7 @@ entry-scoped return summaries and versioned organization Undo. The
 [interaction guide](NATURAL_COLLABORATION.md) states the exact operating limits.
 These are the same components and API used by the product demo.
 
-- **996/996 frontend Node tests passed**, without skips. TypeScript and the
+- **1,047/1,047 frontend Node tests passed**, without skips. TypeScript and the
   application, embed and product-demo production builds passed.
 - **91 related backend cases passed** across channel return summaries,
   document organization and public-demo boundaries. Summary inspection leaves
@@ -38,17 +38,32 @@ These are the same components and API used by the product demo.
   actual ribbon; editor identity, contents, focus and discard guards remain
   checked. Ranking inventory snapshots wait for the actual member-authorized
   installed-command response and matching visible option after account changes.
+- The original open-studio scenario plus new short-screen cases passed **7
+  browser groups**. Real no-baseline and positive-return entries at 320×568 keep
+  a usable message viewport and onscreen composer with the summary closed or
+  open. Native complete empty summaries stay quiet; other context panels remain
+  scrollable. This fixes the measured zero-height timeline without removing
+  message actions, intro contents or summary sources.
+
+- **9 actual local Matrix groups passed** with the exact pinned CI Synapse
+  image, real Rust crypto and verified devices. They cover cache-independent
+  roots/replies, actual App summary navigation, invalid event types/redaction,
+  genuine wrong-room ciphertext decryption failure, membership/session
+  revocation, and zero native message/receipt/unread fallback. All eleven
+  critical source hashes remained unchanged. Only the owned temporary fixtures
+  were removed; proof records remain outside the repository.
 
 The five browser scripts run in the required **Natural collaboration flows** CI
-job and retain scoped JSON/PNG evidence. The real Matrix root/reply source proof
-is a separate required stage of **Real client encryption and recovery**, using
-the existing private Synapse and actual Rust crypto. A local homeserver was not
-available, so local focused event/authority checks are not represented as that
-real-Matrix acceptance. CI independently tests its exact checked-out revision.
+job and retain scoped JSON/PNG evidence. The real Matrix proof repeats in
+**Real client encryption and recovery**. CI independently tests its exact
+checked-out revision.
 
-Review also bounded background encrypted inspection to at most 200 loaded
-timeline events, four concurrent decryptions and 100 returned messages, with no
-automatic scrollback. Read-only encrypted-work inspection never flushes pending
+Review also bounded background encrypted inspection to one current room-history
+request of at most 200 events, four concurrent decryptions and 100 returned
+messages, with no automatic pagination. This avoids treating a cached initial
+Matrix sync as current history after a reload. An absent own receipt in
+truncated history, or newer unreadable own ciphertext, stays unavailable rather
+than implying that the member never read. Read-only encrypted-work inspection never flushes pending
 account writes. Both new secure readers initialize the first legitimate crypto
 session before capturing its client/generation lease; regression tests reject
 owner, client and cancellation changes during that bootstrap. Ordinary chat
@@ -56,6 +71,13 @@ history loading is unchanged. No schema migration
 or external AI/provider setup is needed for these six improvements. Encrypted
 tasks retain their source excerpt/references, but do not acquire the existing
 native persistent message/work relation.
+
+Channel classification uses the verified positive result even if first-session
+initialization clears an internal cache. A missing binding requires fresh
+authorized channel metadata with explicit `secure: false` before native
+transport is allowed. Revoked, unknown or failed classifications cannot send
+message or file content through a native fallback. The unused legacy upload
+helper also rejects encrypted channels before constructing multipart content.
 
 ## Integrated feature completion — 2026-10-25
 

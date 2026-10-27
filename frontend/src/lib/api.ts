@@ -461,11 +461,14 @@ class FreeCollabAPI {
 
   // Files
   async uploadFile(channelId: string, file: File): Promise<FileInfo> {
+    const requestToken = this.token, requestUser = this.userId;
+    const secure = await this.secureChannel(channelId);
+    if (requestToken !== this.token || requestUser !== this.userId) throw new Error('The signed-in account changed.');
+    if (secure) throw new Error('Use encrypted file transfer for this channel.');
     const formData = new FormData();
     formData.append('file', file);
 
     const headers: Record<string, string> = {};
-    const requestToken = this.token;
     if (requestToken) {
       headers['Authorization'] = `Bearer ${requestToken}`;
     }

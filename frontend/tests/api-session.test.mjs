@@ -20,6 +20,8 @@ function fixture(authenticated = true, embedded = false) {
   const events = [];
   const storageReads = [];
   const requests = [];
+  let notifyStarted;
+  const started = new Promise(resolve => { notifyStarted = resolve; });
   let release;
   const pending = new Promise(resolve => { release = resolve; });
   const response = (body, status = 200) => new Response(JSON.stringify(body), {
@@ -27,6 +29,7 @@ function fixture(authenticated = true, embedded = false) {
   });
   vm.runInNewContext(compiled, {
     exports, Event, FormData, Blob, File,
+    require: name => { assert.equal(name, './secure-client'); return { getSecureMessaging: async () => ({ handles: async () => false }) }; },
     document: { getElementById: () => ({ hasAttribute: name => embedded && name === 'data-embed-application' }) },
     localStorage: {
       getItem: key => { storageReads.push(key); return storage.get(key) ?? null; },
@@ -36,6 +39,7 @@ function fixture(authenticated = true, embedded = false) {
     window: { dispatchEvent: event => { events.push(event.type); return true; } },
     fetch: (url, options = {}) => {
       requests.push({ url, options });
+      notifyStarted();
       if (url.endsWith('/auth/login')) return Promise.resolve(response({
         access_token: 'token-b', token_type: 'bearer', user_id: 'user-b',
         public_key: '', encrypted_private_key: null,
@@ -44,7 +48,7 @@ function fixture(authenticated = true, embedded = false) {
     },
   });
   return {
-    api: exports.api, storage, storageReads, events, requests,
+    api: exports.api, storage, storageReads, events, requests, started,
     unauthorized: () => release(response({ detail: 'This request is no longer authorized.' }, 401)),
   };
 }
@@ -61,8 +65,9 @@ function expectUnauthorized(pending) {
 
 for (const operation of operations) {
   test(`${operation.label}: a late old-account 401 cannot expire the newly signed-in account`, async () => {
-    const { api, storage, events, requests, unauthorized } = fixture();
+    const { api, storage, events, requests, unauthorized, started } = fixture();
     const rejected = expectUnauthorized(operation.start(api));
+    await started;
     assert.equal(requests[0].url, 'https://freecollab.test/api' + operation.path);
     assert.equal(requests[0].options.method || 'GET', operation.method);
     assert.equal(new Headers(requests[0].options.headers).get('Authorization'), 'Bearer token-a');
@@ -77,16 +82,18 @@ for (const operation of operations) {
   });
 
   test(`${operation.label}: a 401 for the current account still expires its session`, async () => {
-    const { api, events, unauthorized } = fixture();
+    const { api, events, unauthorized, started } = fixture();
     const rejected = expectUnauthorized(operation.start(api));
+    await started;
     unauthorized();
     await rejected;
     assert.deepEqual(events, ['freecollab:session-expired']);
   });
 
   test(`${operation.label}: an unauthenticated 401 rejects without a global session-expired event`, async () => {
-    const { api, events, requests, unauthorized } = fixture(false);
+    const { api, events, requests, unauthorized, started } = fixture(false);
     const rejected = expectUnauthorized(operation.start(api));
+    await started;
     assert.equal(new Headers(requests[0].options.headers).get('Authorization'), null);
     unauthorized();
     await rejected;
@@ -94,8 +101,9 @@ for (const operation of operations) {
   });
 
   test(`${operation.label}: an anonymous request cannot expire an account signed in while it was pending`, async () => {
-    const { api, storage, events, unauthorized } = fixture(false);
+    const { api, storage, events, unauthorized, started } = fixture(false);
     const rejected = expectUnauthorized(operation.start(api));
+    await started;
     await api.login('bob@example.com', 'test-password');
     unauthorized();
     await rejected;

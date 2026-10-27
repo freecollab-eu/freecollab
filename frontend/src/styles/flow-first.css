@@ -96,3 +96,19 @@
 @media (max-width: 999px) {
   .fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column:not([hidden])) { display: flex; flex-direction: column; gap: 1rem; }
 }
+@media (max-width: 700px) and (max-height: 700px) {
+  .fc-flow-first .fc-chat-channel-introduction {
+    min-height: 0;
+    max-height: 22dvh;
+    flex-shrink: 1;
+    overflow-y: auto;
+  }
+  .fc-flow-first .fc-channel-return {
+    min-height: 0;
+    max-height: 25dvh;
+    flex-shrink: 1;
+    overflow-y: auto;
+  }
+  .fc-flow-first .fc-channel-return details[open] { max-height: none; overflow: visible; }
+  .fc-flow-first .fc-chat-timeline-wrap { min-height: min(6rem, 18dvh); }
+}

@@ -43,6 +43,8 @@ export function ChannelReturnSummary({ workspaceId, channel, baseline, entryKey,
   if (state.status === 'loading') return <div className="fc-channel-return-status" role="status"><Loader2 size={14} />{t('Checking what changed since your last read…')}</div>;
   if (state.status === 'error' || !state.snapshot) return <div className="fc-channel-return-status" role="status"><span>{t('Your return summary is unavailable.')}</span><button type="button" className="fc-text-button" onClick={() => setRetry(value => value + 1)}>{t('Try again')}</button></div>;
   const snapshot = state.snapshot;
+  if (!snapshot.secure && !snapshot.incomplete && Object.values(snapshot.groups).every(group =>
+    !group.incomplete && group.count === 0 && group.items.length === 0)) return null;
   const open = (source: ChannelReturnSource) => {
     if (state.generation !== generation.current || live.current !== scope || token !== api.getAccessToken() || user !== api.getCurrentUserId()) return;
     onOpenSource({ ...source });

@@ -69,6 +69,10 @@ uttryckliga omnämnanden, svar på dina meddelanden och fortfarande öppna uppgi
 som tilldelats dig. Översikten använder lästiden som fångades när du kom in i
 kanalen, även om du sedan läser nyare meddelanden.
 
+En fullständig native-översikt utan förändringar tar ingen plats. På låga
+mobilskärmar går introduktionen och en öppnad översikt att skrolla inom sina
+ytor, så att meddelanden och skrivfält fortfarande går att använda.
+
 Varje rad öppnar den verkliga källan genom samma behörighetskontroller och
 utkastskydd som övrig navigation. Att hämta översikten markerar inget som läst.
 Vanlig läskvittering fortsätter när meddelanden faktiskt visas enligt klientens

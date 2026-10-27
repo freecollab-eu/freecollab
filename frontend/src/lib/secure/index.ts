@@ -1,4 +1,4 @@
-import { createClient, ClientEvent, RoomEvent, MatrixEventEvent, EventType, MsgType, Method, type MatrixClient, MatrixEvent } from 'matrix-js-sdk';
+import { createClient, ClientEvent, RoomEvent, MatrixEventEvent, EventType, MsgType, Method, Direction, type MatrixClient, MatrixEvent } from 'matrix-js-sdk';
 import { CryptoEvent } from 'matrix-js-sdk/lib/crypto-api/CryptoEvent';
 import { decodeRecoveryKey } from 'matrix-js-sdk/lib/crypto-api/recovery-key';
 import { storageKeyFor, loadPendingNotices, savePendingNotices } from './device-store';
@@ -188,6 +188,28 @@ async function refreshBindings() {
   bindings = new Map(rows.map(row => [row.channel_id, row])); bindingsLoaded = true;
   return rows;
 }
+async function handlesChannel(channelId: string): Promise<boolean> {
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId();
+  let invalidated = false;
+  const invalidate = () => { invalidated = true; };
+  const current = () => {
+    if (invalidated || !token || !actor || token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()) throw new Error('The signed-in account changed.');
+  };
+  const events = typeof window === 'undefined' ? undefined : window;
+  events?.addEventListener?.('freecollab:auth-changed', invalidate);
+  try {
+    current();
+    const rows = await refreshBindings(); current();
+    // First-client initialization may clear the shared cache after this read.
+    // A verified positive classification must not become a native fallback.
+    if (rows.some(row => row.channel_id === channelId)) return true;
+    // Missing bindings can also mean revoked access. Confirm an authorized
+    // native channel before any caller sends plaintext to a native endpoint.
+    const channel = await request<{ id: string; secure: boolean }>('/channels/' + encodeURIComponent(channelId)); current();
+    if (!channel || channel.id !== channelId || typeof channel.secure !== 'boolean') throw new Error('Channel encryption could not be verified.');
+    return channel.secure;
+  } finally { events?.removeEventListener?.('freecollab:auth-changed', invalidate); }
+}
 async function ensureSession(): Promise<MatrixClient> {
   const token = configuration?.getAccessToken(); if (!token) throw new Error('Sign in to unlock encrypted channels.');
   if (ownerToken !== token) { generation++; if (client) { transactionEpochs.delete(client); publicationGuards.get(client)?.stop(); } client?.stopClient(); client = null; starting = null; bindings.clear(); bindingsLoaded = false; names.clear(); channelDetails.clear(); legacyMetadataOrder.clear(); revokedDevices.clear(); secretStorageKey?.fill(0); secretStorageKey = null; ownerToken = token; }
@@ -326,7 +348,26 @@ async function getMessages(channelId: string, before?: string, limit = 100, root
   });
 }
 
-/** Bounded entry inspection of loaded ciphertext; never scrolls back or marks read. */
+/** One current room snapshot: a reloaded device's cached /sync can still be behind. */
+async function currentRoomEvents(c: MatrixClient, roomId: string, limit: number, current: () => void): Promise<{ events: MatrixEvent[]; atStart: boolean }> {
+  current();
+  const snapshot = await c.createMessagesRequest(roomId, null, limit, Direction.Backward);
+  current();
+  if (!Array.isArray(snapshot.chunk)) throw new Error('Encrypted room history is unavailable.');
+  const chunk = snapshot.chunk.slice(0, limit);
+  const atStart = snapshot.chunk.length <= limit && (snapshot.end === undefined || chunk.some(event => event.type === EventType.RoomCreate));
+  const rows = chunk.map(event => {
+    if (!event || typeof event !== 'object' || event.room_id && event.room_id !== roomId) throw new Error('The encrypted room history changed.');
+    return new MatrixEvent({ ...event, room_id: roomId });
+  }).reverse().filter(event => event.isEncrypted());
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, rows.length) }, async () => {
+    while (next < rows.length) { current(); const event = rows[next++]; await c.decryptEventIfNeeded(event).catch(() => undefined); current(); }
+  }));
+  current(); return { events: rows, atStart };
+}
+
+/** Bounded current ciphertext inspection; never paginates or marks read. */
 async function getRecentMessages(channelId: string, options: { limit?: number; eventLimit?: number; signal?: AbortSignal; isCurrent?: () => boolean } = {}): Promise<Message[]> {
   const token = configuration?.getAccessToken(), actor = configuration?.getUserId();
   const limit = options.limit ?? 100, eventLimit = options.eventLimit ?? 200;
@@ -339,14 +380,10 @@ async function getRecentMessages(channelId: string, options: { limit?: number; e
   const attempt = generation;
   const sameOwner = () => { identity(); if (attempt !== generation || initialClient !== client) throw new Error('The encrypted conversation changed.'); };
   sameOwner(); await refreshBindings(); sameOwner();
-  const { c, room, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
+  const { c, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
   const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw new Error('The encrypted conversation changed.'); };
   current();
-  const rows = room.getLiveTimeline().getEvents().slice(-eventLimit).filter(event => event.getRoomId() === roomId && event.isEncrypted());
-  let next = 0;
-  await Promise.all(Array.from({ length: Math.min(4, rows.length) }, async () => {
-    while (next < rows.length) { current(); const event = rows[next++]; await c.decryptEventIfNeeded(event).catch(() => undefined); current(); }
-  }));
+  const { events: rows } = await currentRoomEvents(c, roomId, eventLimit, current);
   await refreshBindings(); current();
   const changes = new Map<string, MatrixEvent>();
   for (const event of rows) {
@@ -361,6 +398,31 @@ async function getRecentMessages(channelId: string, options: { limit?: number; e
       item.content = replacement.content; item.references = replacement.references; item.mentions = replacement.mentions; item.edited_at = new Date(edit.getTs()).toISOString(); }
     return item;
   });
+}
+
+async function getReadReceipts(channelId: string): Promise<ReadReceipt[]> {
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId();
+  const identity = () => { if (!token || !actor || token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()) throw new Error('The encrypted conversation changed.'); };
+  identity(); const initialClient = await ensureSession(); identity();
+  const attempt = generation;
+  const sameOwner = () => { identity(); if (attempt !== generation || initialClient !== client) throw new Error('The encrypted conversation changed.'); };
+  sameOwner(); await refreshBindings(); sameOwner();
+  const { c, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
+  const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw new Error('The encrypted conversation changed.'); };
+  const { events: rows, atStart } = await currentRoomEvents(c, roomId, 200, current);
+  await refreshBindings(); current();
+  const latest = new Map<string, ReadReceipt>();
+  let ownReceiptIndex = -1;
+  for (const [index, event] of rows.entries()) {
+    if (event.isRedacted() || event.isDecryptionFailure() || event.getType() !== RECEIPT || typeof event.getContent().event_id !== 'string' || !event.getContent().event_id) continue;
+    latest.set(event.getSender()!, { user_id: accountId(event.getSender()!), last_read_message_id: event.getContent().event_id, read_at: new Date(event.getTs()).toISOString() });
+    if (accountId(event.getSender()!) === actor) ownReceiptIndex = index;
+  }
+  // A newer unreadable own event may itself be a receipt. A bounded page with
+  // no own receipt also cannot establish that this member has never read.
+  if ((ownReceiptIndex < 0 && !atStart) || rows.some((event, index) => index > ownReceiptIndex && !event.isRedacted()
+      && (event.isDecryptionFailure() || event.getType() === 'm.room.encrypted') && accountId(event.getSender()!) === actor)) throw new Error('Unlock encrypted history to verify your reading position.');
+  return [...latest.values()];
 }
 
 /** Resolve one root/reply by its real encrypted event, including an actual root parent. */
@@ -509,7 +571,7 @@ async function getDevices(channelId?: string): Promise<SecureDevice[]> {
 }
 export const secureMessaging = {
   configure: configureSecureMessaging,
-  ensureSession, refreshBindings, getMessages, getRecentMessages, getMessage, sendMessage, getReactions, setupRecovery, unlockRecovery, getDevices, events, sendEvent, roomFor,
+  ensureSession, refreshBindings, getMessages, getRecentMessages, getMessage, getReadReceipts, sendMessage, getReactions, setupRecovery, unlockRecovery, getDevices, events, sendEvent, roomFor,
   async revokeDevice(deviceId: string, password: string, code?: string, managed = false): Promise<{ revoked: true; current: boolean }> {
     const c = await ensureSession();
     const result = await request<{ revoked: true; current: boolean }>('/secure/devices/' + encodeURIComponent(deviceId) + (managed ? '/revoke-managed' : '/revoke'), managed ? { confirmed: true } : { password, ...(code ? { code } : {}) });
@@ -524,7 +586,7 @@ export const secureMessaging = {
     return result;
   },
   subscribe(listener: Listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-  async handles(channelId: string) { await refreshBindings(); return bindings.has(channelId); },
+  handles: handlesChannel,
   async enableChannel(channelId: string, title: string) { const binding = await request<SecureBinding>('/secure/channels/' + encodeURIComponent(channelId) + '/enable', {}); bindings.set(channelId, binding); bindingsLoaded = true; await sendEvent(channelId, METADATA, { name: title }); names.set(channelId, title); return binding; },
   getChannelName(channelId: string) { return names.get(channelId); },
   getChannelMetadata: readChannelMetadata,
@@ -557,7 +619,6 @@ export const secureMessaging = {
   async addReaction(channelId: string, messageId: string, emoji: string) { await sendEvent(channelId, REACTION, { event_id: messageId, emoji }); return getReactions(channelId, messageId); },
   async removeReaction(channelId: string, messageId: string, emoji: string) { const { c, roomId } = await roomFor(channelId, true); for (const e of await events(channelId)) if (e.getType() === REACTION && e.getSender() === c.getUserId() && e.getContent().event_id === messageId && e.getContent().emoji === emoji && !e.isRedacted()) await c.redactEvent(roomId, e.getId()!); return getReactions(channelId, messageId); },
   async markRead(channelId: string, messageId: string) { await sendEvent(channelId, RECEIPT, { event_id: messageId }); },
-  async getReadReceipts(channelId: string): Promise<ReadReceipt[]> { const latest = new Map<string, ReadReceipt>(); for (const e of await events(channelId)) if (e.getType() === RECEIPT) latest.set(e.getSender()!, { user_id: accountId(e.getSender()!), last_read_message_id: e.getContent().event_id, read_at: new Date(e.getTs()).toISOString() }); return [...latest.values()]; },
   async verifyDevice(device: SecureDevice, fingerprint: string) { const c = await ensureSession(); await refreshRevocations(); if (revokedDevices.has(deviceKey(device.matrix_user_id, device.device_id))) throw new Error('This encryption device was removed.'); const info = await c.getCrypto()!.getUserDeviceInfo([device.matrix_user_id], true), current = info.get(device.matrix_user_id)?.get(device.device_id); if (!current || current.getFingerprint() !== fingerprint.replace(/\s/g, '')) throw new Error('Fingerprint mismatch. Verify it through a separate trusted channel.'); await c.getCrypto()!.setDeviceVerified(device.matrix_user_id, device.device_id, true); for (const [channelId, title] of names) { const binding = bindings.get(channelId); if (binding?.room_id && c.getRoom(binding.room_id)?.getMember(device.matrix_user_id)?.membership === 'join') await sendEvent(channelId, METADATA, { name: title }); } },
   async recoveryStatus() { const c = await ensureSession(); await hydrateRecoveryMetadata(c); return { ready: !!await c.secretStorage.getKey() && !pendingRecovery, unlocked: !!secretStorageKey && !pendingRecovery, device_id: c.getDeviceId(), fingerprint: (await c.getCrypto()!.getOwnDeviceKeys()).ed25519 }; },
   async getDecryptedEvent(channelId: string, eventId: string) { const { c, room } = await roomFor(channelId), timeline = await c.getEventTimeline(room.getUnfilteredTimelineSet(), eventId), e = timeline?.getEvents().find(item => item.getId() === eventId); if (!e || !e.isEncrypted()) throw new Error('Encrypted event not found.'); await c.decryptEventIfNeeded(e); if (e.isDecryptionFailure()) throw new Error('Verify this device or unlock recovery to read this event.'); return e; },

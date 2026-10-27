@@ -44,6 +44,7 @@ for (const boundary of ['account change', 'encryption reset']) test(`a delayed s
   assert.equal(response.authorization, 'Bearer account-a');
 
   const current = f.enqueue(); current.body.resolve([]);
+  const native = f.enqueue(); native.body.resolve({ id: 'account-a-private', secure: false });
   assert.equal(await f.secure.handles('account-a-private'), false);
   assert.equal(current.authorization, boundary === 'account change' ? 'Bearer account-b' : 'Bearer account-a');
 });

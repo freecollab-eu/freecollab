@@ -6,7 +6,7 @@ import pkgutil
 from fastapi import FastAPI
 from sqlmodel import Session
 import uvicorn
-from app.api import auth, clips, files, meetings, secure_messaging, sfu
+from app.api import auth, channels, clips, files, meetings, secure_messaging, sfu
 from app.database import engine, init_db
 from app.models.user import User
 from app.models.channel import Channel, ChannelMember
@@ -29,7 +29,7 @@ with Session(engine) as session:
     descriptor = os.open(os.environ['PROOF_CREDENTIAL_FILE'], os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     with os.fdopen(descriptor, 'w') as stream: json.dump(tokens, stream)
 app = FastAPI()
-for module in [auth, clips, files, meetings, secure_messaging, sfu]: app.include_router(module.router)
+for module in [auth, channels, clips, files, meetings, secure_messaging, sfu]: app.include_router(module.router)
 @app.get('/ready')
 def ready(): return {'ready': True}
 uvicorn.run(app, host='127.0.0.1', port=int(os.environ['PROOF_API_PORT']), proxy_headers=False, access_log=False)

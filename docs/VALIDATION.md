@@ -93,6 +93,16 @@ transport is allowed. Revoked, unknown or failed classifications cannot send
 message or file content through a native fallback. The unused legacy upload
 helper also rejects encrypted channels before constructing multipart content.
 
+The disposable media API mounts the real channel router so the same fresh
+authorization/classification runs before native recording uploads. The original
+Chromium audio, camera and screen capture/upload/download/decode/playback proof
+passed all **5 checks**, with relevant source hashes unchanged during the run.
+No recorder, codec or transport assertion is bypassed.
+The original two-browser project/task proof also passed **10 checks**. After
+membership revocation, a linked-file action must receive the current owner's
+channel-metadata 403, without reaching native file transport or downloading
+bytes; task history, conflict, decision and mobile assertions remain intact.
+
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu
 HTTPS archives on pinned Ubuntu24.04, after the former Azure HTTP mirror took

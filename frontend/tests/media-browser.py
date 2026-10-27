@@ -7,6 +7,7 @@ Set LIVEKIT_TEST_BINARY to run actual seven-device SFU publication/subscription.
 Set CLIPS_TEST_LOCAL_ASR=1 to download/run the real pinned Whisper model too.
 """
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -25,10 +26,16 @@ spec = importlib.util.spec_from_file_location('media_meeting_harness', Path(__fi
 harness = importlib.util.module_from_spec(spec); spec.loader.exec_module(harness)
 helpers = harness.helpers
 REPORT = Path(os.getenv('MEDIA_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results' / ('media-sfu-browser.json' if os.getenv('LIVEKIT_TEST_BINARY') else 'media-browser.json'))))
+SOURCE_FILES = ['backend/tests/media_browser_api.py', 'frontend/tests/media-browser.py', 'frontend/tests/meetings-browser.py',
+    'frontend/src/lib/secure/index.ts', 'frontend/src/lib/secure-client.ts', 'frontend/src/lib/secure/files.ts',
+    'frontend/src/lib/clips-api.ts', 'frontend/src/lib/files-api.ts', 'frontend/src/lib/meeting-recorder.ts',
+    'frontend/src/components/ClipsPanel.tsx', 'frontend/src/components/MeetingsPanel.tsx',
+    'backend/app/api/channels.py', 'backend/app/api/clips.py', 'backend/app/api/files.py']
 
 
 def main():
     processes, streams, results, stage = [], [], {}, 'private services'
+    source_hashes = {name: hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in SOURCE_FILES}
     binary = os.getenv('LIVEKIT_TEST_BINARY')
     with tempfile.TemporaryDirectory(prefix='freecollab-media-') as directory:
         private = Path(directory)
@@ -79,7 +86,8 @@ def main():
                     # Vite's first dependency optimization cannot reload a draft.
                     for attempt in range(5):
                         try:
-                            host.evaluate('''async path=>{const {getSecureMessaging}=await import(path);await(await getSecureMessaging()).handles('shared')}''', '/@fs' + str(ROOT/'frontend/src/lib/secure-client.ts'))
+                            native = host.evaluate('''async path=>{const {getSecureMessaging}=await import(path);return(await getSecureMessaging()).handles('shared')}''', '/@fs' + str(ROOT/'frontend/src/lib/secure-client.ts'))
+                            assert native is False, 'The actual authorized channel metadata must explicitly classify this fixture as native'
                             host.wait_for_timeout(700); host.reload(wait_until='networkidle')
                         except Exception:
                             if attempt == 4: raise
@@ -156,7 +164,9 @@ def main():
                 try: process.wait(timeout=10)
                 except subprocess.TimeoutExpired: process.kill(); process.wait(timeout=5)
             for stream in streams: stream.close()
-    REPORT.parent.mkdir(parents=True, exist_ok=True); REPORT.write_text(json.dumps({'results': results, 'scope': 'Actual synthetic-device Chromium capture/encoding/decoding/playback; actual LiveKit only when binary explicitly supplied; no media API mocks', 'local_asr_model': 'Official pinned model bytes from explicit same-origin operator mirror' if os.getenv('CLIPS_TEST_MODEL_DIRECTORY') else 'Default model origin; actual inference only when ASR enabled', 'livekit_binary_supplied': bool(binary), 'cleanup': 'Own isolated services, browser devices, private database, generated credentials and files removed; caller-owned model mirror/binary retained'}, indent=2) + '\n')
+    source_changes = [name for name, digest in source_hashes.items() if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest]
+    REPORT.parent.mkdir(parents=True, exist_ok=True); REPORT.write_text(json.dumps({'results': results, 'scope': 'Actual synthetic-device Chromium capture/encoding/decoding/playback; actual LiveKit only when binary explicitly supplied; no media API mocks', 'local_asr_model': 'Official pinned model bytes from explicit same-origin operator mirror' if os.getenv('CLIPS_TEST_MODEL_DIRECTORY') else 'Default model origin; actual inference only when ASR enabled', 'livekit_binary_supplied': bool(binary), 'source_sha256': source_hashes, 'current_source_mismatches': source_changes, 'runtime_source_unchanged': not source_changes, 'cleanup': 'Own isolated services, browser devices, private database, generated credentials and files removed; caller-owned model mirror/binary retained'}, indent=2) + '\n')
+    assert not source_changes, 'Media proof source changed during execution: ' + ', '.join(source_changes)
     print('Media browser proof passed: ' + str(len(results)) + ' checks.')
 
 

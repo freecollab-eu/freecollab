@@ -252,10 +252,18 @@ with Session(engine) as session:
                     assert denied_decision.value.status == 403
                     expect(panel.get_by_role('alert')).to_be_visible()
                     expect(panel.get_by_role('region', name='Linked decision details', exact=True)).to_have_count(0)
-                    with page.expect_response(lambda response: response.request.method == 'GET' and urlsplit(response.url).path == '/api/files/channels/' + channel['id']) as denied_file:
+                    owner_file_authorization = page.evaluate('async () => "Bearer " + (await import("/src/lib/api.ts")).api.getAccessToken()')
+                    file_requests_after_revocation = []
+                    page.on('request', lambda request: file_requests_after_revocation.append(urlsplit(request.url).path)
+                        if urlsplit(request.url).path.startswith('/api/files/') else None)
+                    with page.expect_response(lambda response: response.request.method == 'GET'
+                        and urlsplit(response.url).path == '/api/channels/' + channel['id']
+                        and response.request.headers.get('authorization') == owner_file_authorization) as denied_file_authority:
                         card.get_by_role('button', name='Download file Project source.txt', exact=True).click()
-                    assert denied_file.value.status == 403
+                    assert denied_file_authority.value.status == 403
                     expect(panel.get_by_role('alert')).to_be_visible()
+                    expect(card.get_by_role('button', name='Download file Project source.txt', exact=True)).to_be_enabled()
+                    assert not file_requests_after_revocation, 'Revoked task link reached native file listing or download transport'
                     assert not downloads_after_revocation, 'Revoked task link downloaded a file'
                     results['stale_link_actions_recheck_current_channel_membership'] = True
                     assert not errors, 'Browser page errors'

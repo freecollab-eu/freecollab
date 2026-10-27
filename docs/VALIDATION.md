@@ -1,5 +1,54 @@
 # FreeCollab validation record
 
+## Natural collaboration flows — 2026-10-27
+
+The `feature/natural-collaboration-flow` changes follow `f2d50d7`. They add
+reviewed task drafts from selected message text, a source ribbon for expanded
+documents, contextual command/reference ordering, one local stack proposal,
+entry-scoped return summaries and versioned organization Undo. The
+[interaction guide](NATURAL_COLLABORATION.md) states the exact operating limits.
+These are the same components and API used by the product demo.
+
+- **992/992 frontend Node tests passed**, without skips. TypeScript and the
+  application, embed and product-demo production builds passed.
+- **91 related backend cases passed** across channel return summaries,
+  document organization and public-demo boundaries. Summary inspection leaves
+  read receipts and the sample mutation budget unchanged. The new demo
+  permission is one explicit native GET route, with current visit/channel
+  isolation; nested secure metadata and mutation routes stay denied.
+- **8 actual App/API browser groups** cover main and thread text selection,
+  editable real-member/date suggestions, no task write before Save, persisted
+  exact native source links, dialog keyboard/first-Escape behavior, expanded
+  document return with the same editor/caret/chat draft and pending Yjs write,
+  exact server-side Yjs reconstruction, and Swedish 320px layout.
+- **7 actual ranking groups** cover the entire permitted native/member/demo
+  inventory, exact/context/recency precedence, all six reference types,
+  duplicate-name durable identities, literal installed-command arguments,
+  channel/account isolation and retained-account storage nonaccess in demo.
+- **6 native return-summary groups and 4 public-demo groups** cover real
+  prior reading baselines, actual decision/document/attention sources, exact
+  links including replies, receipt advancement without changing the baseline,
+  read-only previews, EN/SV/320–1440px layout, stale response rejection and
+  isolated sample credentials/data.
+- **17 organization browser groups** cover current native persistence,
+  local proposals, explicit acceptance/dismissal, visible Undo outside collapsed
+  controls, peer edits, stack generations and original source navigation.
+
+The five browser scripts run in the required **Natural collaboration flows** CI
+job and retain scoped JSON/PNG evidence. The real Matrix root/reply source proof
+is a separate required stage of **Real client encryption and recovery**, using
+the existing private Synapse and actual Rust crypto. A local homeserver was not
+available, so local focused event/authority checks are not represented as that
+real-Matrix acceptance. CI independently tests its exact checked-out revision.
+
+Review also bounded background encrypted inspection to at most 200 loaded
+timeline events, four concurrent decryptions and 100 returned messages, with no
+automatic scrollback. Read-only encrypted-work inspection never flushes pending
+account writes. Ordinary chat history loading is unchanged. No schema migration
+or external AI/provider setup is needed for these six improvements. Encrypted
+tasks retain their source excerpt/references, but do not acquire the existing
+native persistent message/work relation.
+
 ## Integrated feature completion — 2026-10-25
 
 This record concerns the `design/open-studio` review branch, following

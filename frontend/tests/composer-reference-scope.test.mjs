@@ -13,6 +13,51 @@ const hookSource = readFileSync(new URL('../src/lib/useComposerReferences.ts', i
 const plain = value => JSON.parse(JSON.stringify(value));
 const candidate = (id = 'ada', label = 'Ada Lovelace') => ({ kind: 'person', id, label, channel_id: 'room' });
 
+test('the real picker ranks current writing context and keeps its selected identity when context changes', async () => {
+  const h = fixture({ text: '@', suggestions: { surface: 'conversation' } });
+  try {
+    await h.settle(); await h.query(); await h.advance();
+    const rows = [candidate('person'), { kind: 'document', id: 'doc', label: 'Plan', channel_id: 'room' }, { kind: 'file', id: 'file', label: 'Notes', channel_id: 'room' }];
+    await h.resolve(h.requests[0], rows);
+    assert.deepEqual(plain(h.current.candidates).map(row => row.id), ['person', 'doc', 'file']);
+    h.current.setActiveIndex(0); await h.settle();
+    await h.render({ suggestions: { surface: 'document', field: 'body' } });
+    assert.deepEqual(plain(h.current.candidates).map(row => row.id), ['doc', 'file', 'person']);
+    assert.equal(h.current.candidates[h.current.activeIndex].id, 'person');
+    assert.equal(h.requests.length, 1, 'changing presentation context does not request another authority snapshot');
+    assert.deepEqual(rows.map(row => row.id), ['person', 'doc', 'file']);
+    await h.choose(h.current.candidates[h.current.activeIndex]);
+    assert.equal(h.options.references[0].id, 'person');
+  } finally { h.unmount(); }
+});
+
+test('a successful reference choice becomes recent within this session and clears on account change', async () => {
+  const h = fixture({ text: '@', suggestions: { surface: 'task', field: 'assignee' } });
+  const rows = [candidate('alex-a', 'Alex'), candidate('alex-b', 'Alex')];
+  try {
+    await h.settle(); await h.query(); await h.advance(); await h.resolve(h.requests[0], rows);
+    await h.choose(h.current.candidates[1]);
+    assert.equal(h.options.references[0].id, 'alex-b');
+    await h.render({ text: '@', references: [] }); h.input.current.selectionStart = h.input.current.selectionEnd = 1;
+    await h.query(); await h.advance(); await h.resolve(h.requests[1], rows);
+    assert.deepEqual(plain(h.current.candidates).map(row => row.id), ['alex-b', 'alex-a']);
+    await h.changeAccount(); await h.query(); await h.advance(); await h.resolve(h.requests[2], rows);
+    assert.deepEqual(plain(h.current.candidates).map(row => row.id), ['alex-a', 'alex-b']);
+  } finally { h.unmount(); }
+});
+
+test('an exact reference label outranks a contextual prefix in the actual picker', async () => {
+  const h = fixture({ text: '/task Review @Alex' });
+  try {
+    await h.settle(); await h.query(); await h.advance();
+    await h.resolve(h.requests[0], [candidate('person', 'Alex Morgan'), { kind: 'document', id: 'doc', label: 'Alex', channel_id: 'room' }]);
+    assert.deepEqual(plain(h.current.candidates).map(row => row.id), ['doc', 'person']);
+    await h.choose();
+    assert.deepEqual(plain(h.options.references).map(row => [row.kind, row.id]), [['document', 'doc']]);
+    assert.equal(h.options.text, '/task Review @Alex ');
+  } finally { h.unmount(); }
+});
+
 /** Execute the actual hook with deterministic React effects, delayed reads and frames. */
 function fixture(initial = {}) {
   const slots = [], effects = [], requests = [], inserted = [], focus = [], timers = new Map(), frames = new Map();
@@ -87,6 +132,9 @@ function fixture(initial = {}) {
     './message-references-api': { messageReferencesApi },
     './commands': { nextCommandIndex: (active, direction, length) => length ? (active + direction + length) % length : -1 },
   };
+  const ranking = {};
+  vm.runInNewContext(compile(readFileSync(new URL('../src/lib/suggestion-ranking.ts', import.meta.url), 'utf8')), { exports: ranking, window });
+  imports['./suggestion-ranking'] = ranking;
   const exports = {};
   vm.runInNewContext(compile(hookSource), {
     exports, require(name) { assert.ok(Object.hasOwn(imports, name), name); return imports[name]; },

@@ -19,6 +19,7 @@ export interface SlashCommandsProps {
   /** The explicit launcher searches here without replacing an existing draft. */
   onQueryChange?: (query: string) => void;
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
+  contextual?: boolean;
 }
 
 const GROUP_LABELS = {
@@ -28,7 +29,7 @@ const GROUP_LABELS = {
 } as const;
 
 /** A local suggestion list. Focus stays in the composer (or its explicit search). */
-export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSelect, onClose, query, usage, argumentPreview, error, onQueryChange, onKeyDown }: SlashCommandsProps) {
+export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSelect, onClose, query, usage, argumentPreview, error, onQueryChange, onKeyDown, contextual = false }: SlashCommandsProps) {
   useI18n();
   const panelRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -76,7 +77,7 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
 
   const groups: { key: string; commands: { command: SlashCommand; index: number }[] }[] = [];
   commands.forEach((command, index) => {
-    const key = query.trim() ? 'results' : command.group;
+    const key = query.trim() ? 'results' : contextual ? 'contextual' : command.group;
     const previous = groups[groups.length - 1];
     if (previous?.key === key) previous.commands.push({ command, index });
     else groups.push({ key, commands: [{ command, index }] });
@@ -109,8 +110,8 @@ export function SlashCommands({ id, commands, activeIndex, onActiveIndex, onSele
         onChange={event => onQueryChange(event.target.value)} onKeyDown={onKeyDown} />
     </div>}
     <div ref={listRef} id={id} className="fc-slash-commands-list" role="listbox" aria-labelledby={titleId}>
-      {groups.map((group, groupIndex) => <div key={group.key + '-' + groupIndex} role="group" aria-label={group.key === 'results' ? t('Everything you can do here') : t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}>
-        {group.key !== 'results' && <p className="fc-slash-commands-group" aria-hidden="true">{t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}</p>}
+      {groups.map((group, groupIndex) => <div key={group.key + '-' + groupIndex} role="group" aria-label={group.key === 'results' ? t('Everything you can do here') : group.key === 'contextual' ? t('Useful here, then recent choices') : t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}>
+        {group.key !== 'results' && <p className="fc-slash-commands-group" aria-hidden="true">{group.key === 'contextual' ? t('Useful here, then recent choices') : t(GROUP_LABELS[group.key as keyof typeof GROUP_LABELS])}</p>}
         {/* Keyboard scrolling can move rows under a stationary pointer.
             Only actual mouse movement should change the hover selection. */}
         {group.commands.map(({ command, index }) => <div key={command.id} id={id + '-' + command.id} role="option"

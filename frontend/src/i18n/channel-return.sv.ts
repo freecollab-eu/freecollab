@@ -1,0 +1,17 @@
+export default {
+  'Since your last read': 'Sedan du läste senast',
+  'Checking what changed since your last read…': 'Kontrollerar vad som ändrats sedan du läste senast…',
+  'Your return summary is unavailable.': 'Översikten är inte tillgänglig.',
+  'Updated documents': 'Uppdaterade dokument',
+  'For your attention': 'För din uppmärksamhet',
+  'At least {count}': 'Minst {count}',
+  'A quick return to the conversation. Mentions and replies use explicit recipients; assignments are still open.': 'En snabb väg tillbaka till samtalet. Omnämnanden och svar har uttryckliga mottagare; tilldelade uppgifter är fortfarande öppna.',
+  'You were mentioned': 'Du blev omnämnd',
+  'Reply to your message': 'Svar på ditt meddelande',
+  'Open task assigned to you': 'Öppen uppgift tilldelad dig',
+  'No matching items in available history.': 'Inga matchande objekt i tillgänglig historik.',
+  'No changes in this category.': 'Inga ändringar i den här kategorin.',
+  'Showing the latest {count} items.': 'Visar de senaste {count} objekten.',
+  'Encrypted summary: available verified history only. Locked items, older messages and some document updates may be missing.': 'Krypterad översikt: endast tillgänglig, verifierad historik. Låsta objekt, äldre meddelanden och vissa dokumentändringar kan saknas.',
+  'This summary reached a history limit or could not verify some items. Counts cover the available records.': 'Översikten nådde en historikgräns eller kunde inte verifiera vissa objekt. Antalen omfattar tillgängliga poster.',
+};

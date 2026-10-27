@@ -14,9 +14,10 @@ function fixture(name, encrypted = false) {
     handles: async () => encrypted,
     sendEvent: async (channel, type, content) => { const event_id = '$' + state.events.length; state.events.push({ event_id, channel, type, content: plain(content) }); return { event_id }; },
     roomFor: async () => ({ roomId: '!room:test', c: { getUserId: () => '@fc_actor:test' } }),
-    getDecryptedEvent: async (_, id) => { const event = state.events.find(event => event.event_id === id); return { getRoomId: () => '!room:test', getType: () => event.type, getContent: () => event.content, getSender: () => '@fc_actor:test', isRedacted: () => false }; },
+    getDecryptedEvent: async (_, id) => { const event = state.events.find(event => event.event_id === id); if(state.rotateOnRead)state.token='replacement'; return { getRoomId: () => state.tamperRoom || '!room:test', getType: () => event.type, getContent: () => event.content, getSender: () => '@fc_actor:test', isRedacted: () => false }; },
   };
   const api = { getAccessToken: () => state.token, getCurrentUserId: () => 'actor', request: async (path, options) => {
+    if (!options?.method) { state.requests.push({ path }); return state.metadata; }
     const body = JSON.parse(options.body), event = state.events.find(event => event.event_id === body.matrix_event_id); state.requests.push({ path, body });
     const decision = name === 'collaboration-api', kind = decision ? undefined : path.endsWith('/comments') ? 'comment' : 'post';
     return { id: body.id || 'decision', channel_id: 'channel', created_by: 'actor', created_at: '2026-10-24T00:00:00Z', revised_by: 'actor', revised_at: '2026-10-24T00:00:00Z', revision: (body.expected_revision || 0) + 1, revision_id: 'revision', content_mode: event ? 'matrix' : 'server', matrix_event_id: event?.event_id || null,
@@ -66,6 +67,22 @@ test('historical feed/comment/decision references do not block archive or status
   await decisions.collaborationApi.reviseDecision(decision, { ...decisionFields(), status: 'accepted' });
   assert.equal(decisions.state.resolutions.length, 1);
   await assert.rejects(decisions.collaborationApi.reviseDecision(decision, { ...decisionFields(), content: '@Plan changed' }), /no longer available/);
+});
+
+test('legacy encrypted return decisions use only verified event fields and reject plaintext and wrong-room metadata', async () => {
+  const f = fixture('collaboration-api', true), saved = await f.collaborationApi.createDecision('channel', decisionFields());
+  f.state.metadata = { channel_id: 'channel', incomplete: false, items: [{ ...saved, title: 'Forged server title', content: 'Forged server content' },
+    { ...saved, id: 'native', content_mode: 'server', title: 'Never fall back' }] };
+  const sends = f.state.events.length;
+  const result = await f.collaborationApi.encryptedDecisionSummaries('channel', '2026-10-20T00:00:00');
+  assert.equal(result.items.length, 1); assert.equal(result.items[0].title, decisionFields().title); assert.equal(result.incomplete, true);
+  assert.equal(f.state.events.length, sends);
+  assert.match(f.state.requests.at(-1).path, /return-summary\/encrypted-decisions\?since=/);
+  f.state.tamperRoom = '!wrong:test';
+  const locked = await f.collaborationApi.encryptedDecisionSummaries('channel', '2026-10-20T00:00:00');
+  assert.equal(locked.items.length, 0); assert.equal(locked.incomplete, true);
+  f.state.tamperRoom = null; f.state.rotateOnRead = true;
+  await assert.rejects(f.collaborationApi.encryptedDecisionSummaries('channel', '2026-10-20T00:00:00'), /account changed/);
 });
 
 test('poll bindings are limited to actual options; non-writing activity payloads reject sidecars', async () => {

@@ -121,6 +121,9 @@ links in autosaved documents do not send a notification on every edit.
 See the [command list](docs/SLASH_COMMANDS.md) and
 [references and groups](docs/MENTIONS_REFERENCES.md), and
 [concurrent collaboration and its boundaries](docs/UNIVERSAL_COLLABORATION.md).
+The [natural collaboration flows](docs/NATURAL_COLLABORATION.md) describe turning
+selected conversation text into reviewed tasks, keeping a document's source in
+view, contextual commands, return summaries and reversible organization.
 
 In the composer, **Enter** sends and **Shift+Enter** inserts a new line. Enter used to compose text with an input method does not send prematurely. Drafts are encrypted in this browser’s private storage and survive channel switching and reloads. The encrypted outbox checks the current sign-in, channel access and encryption mode before reconnect delivery; review is required after a changed sign-in. Opening a channel prioritizes an explicit source, then your scoped reading position, then the first unread incoming message established by actual receipts. Messages remain oldest to newest, with the latest beside the composer. When you scroll back, incoming messages preserve your position; **Jump to latest** explicitly resumes following. Unknown or locked history is not automatically marked read. A successful own send or newer navigation takes precedence over an older pending history load. The [design and interaction guide](docs/DESIGN_SYSTEM.md) describes these behaviors and the shared dialog controls.
 

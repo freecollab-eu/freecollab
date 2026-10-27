@@ -7,6 +7,7 @@ import { nextCommandIndex } from '../lib/commands';
 import { getSlashCommands, type SlashCommand, type SlashContext } from '../lib/slash-commands';
 import { insertReference, normalizeMessageReferences, reconcileReferences, referenceOptionId, type MessageReference, type ReferenceCandidate, type ReferenceEdit } from '../lib/message-references';
 import { useComposerReferences } from '../lib/useComposerReferences';
+import { inferSuggestionContext, recordCommandChoice, type SuggestionContext } from '../lib/suggestion-ranking';
 import { SlashCommands } from './SlashCommands';
 import { MentionReferences } from './MentionReferences';
 import { WritingCopilot, writingSuggestion } from './WritingCopilot';
@@ -18,6 +19,7 @@ type NativeAttributes = Omit<InputHTMLAttributes<HTMLInputElement> & TextareaHTM
 export interface CollaborationInputProps extends NativeAttributes {
   as?: 'input' | 'textarea';
   contextId: string;
+  suggestions?: SuggestionContext;
   value: string;
   references?: MessageReference[];
   onValueChange: (text: string, references: MessageReference[]) => void;
@@ -74,7 +76,7 @@ interface Placement { left: number; top: number; width: number; height: number; 
 
 /** Explicit opt-in writing field. Source text and reference persistence remain owned by its editor. */
 export const CollaborationInput = forwardRef<CollaborationInputElement, CollaborationInputProps>(function CollaborationInput({
-  as = 'textarea', contextId, value, references = [], onValueChange, allowCommands = true, allowReferences = true, allowAI = true,
+  as = 'textarea', contextId, suggestions, value, references = [], onValueChange, allowCommands = true, allowReferences = true, allowAI = true,
   consumeCommands = true, toolbar = false, containerClassName = '', onPaletteActiveChange, submissionScope, onChange, onBeforeInput, onKeyDown, onKeyUp, onClick, onSelect,
   onCompositionStart, onCompositionEnd, ...attributes
 }, forwardedRef) {
@@ -98,7 +100,14 @@ export const CollaborationInput = forwardRef<CollaborationInputElement, Collabor
   const available = writable && !!collaboration?.workspaceId && !!collaboration.channelId && !!actor && !!token;
   const commandsEnabled = available && allowCommands;
   const referencesEnabled = available && allowReferences;
-  const commandContext = collaboration?.commandContext || emptyContext;
+  const suggestionScope = { actorId: actor, token, workspaceId: collaboration?.workspaceId, channelId: collaboration?.channelId };
+  const inferredContext = inferSuggestionContext(attributes.id, contextId, collaboration?.surfaceId);
+  const writingContext = suggestions || {
+    ...(collaboration?.commandContext.suggestions || inferredContext),
+    ...(inferredContext.surface !== 'conversation' ? { surface: inferredContext.surface } : {}),
+    ...(inferredContext.field ? { field: inferredContext.field } : {}),
+  };
+  const commandContext = { ...(collaboration?.commandContext || emptyContext), suggestions: writingContext, suggestionScope };
   const activePalette = commandsEnabled && palette?.identity === identity && palette.value === value ? palette : null;
   const range = activePalette?.range;
   const commandText = range?.text || '';
@@ -119,7 +128,7 @@ export const CollaborationInput = forwardRef<CollaborationInputElement, Collabor
   }
   const picker = useComposerReferences({
     channelId: collaboration?.channelId, workspaceId: collaboration?.workspaceId, secure: collaboration?.secure,
-    contextId: JSON.stringify([collaboration?.surfaceId, contextId]), text: value, references, input, disabled: !referencesEnabled,
+    contextId: JSON.stringify([collaboration?.surfaceId, contextId]), suggestions: writingContext, text: value, references, input, disabled: !referencesEnabled,
     maxLength: attributes.maxLength ?? 10000, keepOpenFor: isSubmissionControl,
     onInsert(text, nextReferences) {
       if (live.current.identity !== identity || !visible(input.current)) return;
@@ -197,6 +206,7 @@ export const CollaborationInput = forwardRef<CollaborationInputElement, Collabor
       const accepted = dispatch && typeof (dispatch as Promise<unknown>).then === 'function' ? await dispatch : dispatch;
       if (request !== sequence.current || !source.isCurrent()) return;
       if (accepted !== false) {
+        recordCommandChoice(suggestionScope, command.id);
         if (consumeCommands && entry.mode === 'typed') (source as CollaborationOrigin & { consume?: () => void }).consume?.();
         closePalette(); picker.close();
       }
@@ -326,7 +336,7 @@ export const CollaborationInput = forwardRef<CollaborationInputElement, Collabor
     {open && <div className={`fc-collaboration-popup${placement?.below ? ' is-below' : ''}${placement && placement.height < 220 ? ' is-compact' : ''}`} style={popupStyle}>
       {picker.open ? <MentionReferences id={picker.id} candidates={picker.candidates} activeIndex={picker.activeIndex} onActiveIndex={picker.setActiveIndex}
         onSelect={chooseReference} onClose={() => { picker.close(); if (visible(input.current)) input.current.focus({ preventScroll: true }); }} query={picker.query?.query || ''} loading={picker.loading} error={picker.error} />
-        : activePalette && <SlashCommands id={id} commands={commands} activeIndex={activeIndex} onActiveIndex={index => setSelected(commands[index]?.id || null)}
+        : activePalette && <SlashCommands contextual id={id} commands={commands} activeIndex={activeIndex} onActiveIndex={index => setSelected(commands[index]?.id || null)}
           onSelect={command => void chooseCommand(command)} onClose={() => closePalette(true, true)} query={parsed?.query ?? activePalette.query}
           usage={parsed?.usage} argumentPreview={parsed?.arguments} error={error || parsed?.error}
           onQueryChange={activePalette.mode === 'browse' ? query => { setPalette(previous => previous ? { ...previous, query } : null); setSelected(null); setError(''); } : undefined}

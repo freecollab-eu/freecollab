@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--api-base', default='http://127.0.0.1:8000')
 parser.add_argument('--app-base', default='http://127.0.0.1:3000')
 parser.add_argument('--threads-only', action='store_true', help='Stop after the focused encrypted thread and reply-edit checks.')
+parser.add_argument('--navigation-only', action='store_true', help='Run focused real encrypted source navigation and authorization acceptance.')
 parser.add_argument('--chromium', default=os.getenv('CHROMIUM_PATH') or shutil.which('chromium'))
 args = parser.parse_args()
 
@@ -54,15 +55,28 @@ with sync_playwright() as playwright:
             page = browser.new_context().new_page()
             page.set_default_timeout(90000)
             page.goto(args.app_base, wait_until='domcontentloaded')
+            if args.navigation_only:
+                # Let the unauthenticated App finish its landing route before
+                # binding module-only fixture auth. This keeps the real API's
+                # remembered-message map empty until the later actual App reload.
+                page.locator('.fc-public-nav').wait_for(state='visible')
+                page.evaluate('()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
             for attempt in range(4):
                 try:
-                    page.evaluate('''async ({auth,base}) => {
+                    page.evaluate('''async ({auth,base,navigation}) => {
+                        if(navigation){
+                            localStorage.setItem('freecollab_token',auth.access_token);
+                            localStorage.setItem('freecollab_user_id',auth.user_id);
+                            localStorage.setItem('freecollab_public_key',auth.public_key||'');
+                            if(auth.encrypted_private_key)localStorage.setItem('freecollab_encrypted_private_key',auth.encrypted_private_key);
+                            const {api}=await import('/src/lib/api.ts');api.syncStoredSession();
+                        }
                         const {getSecureMessaging} = await import('/src/lib/secure-client.ts');
                         const adapter = await getSecureMessaging();
                         adapter.configure({baseUrl:base,getAccessToken:()=>auth.access_token,getUserId:()=>auth.user_id});
                         window.secureProof=adapter;
                         window.secureFiles=(await import('/src/lib/secure/files.ts')).secureFileProvider;
-                    }''', {'auth': user, 'base': args.api_base.rstrip('/')})
+                    }''', {'auth': user, 'base': args.api_base.rstrip('/'), 'navigation': args.navigation_only})
                     break
                 except Exception as error:
                     if attempt == 3 or 'context was destroyed' not in str(error).lower():
@@ -88,8 +102,20 @@ with sync_playwright() as playwright:
         wire = bob.evaluate('''async ({channel,event})=>{const e=await secureProof.getDecryptedEvent(channel,event);return {type:e.getWireType(),wire:JSON.stringify(e.getWireContent())}}''', {'channel': channel, 'event': sent['id']})
         assert wire['type'] == 'm.room.encrypted' and message not in wire['wire']
         print('PASS two isolated browsers: native-session-bound Matrix E2EE, encrypted title and opaque wire content', flush=True)
+        if args.navigation_only:
+            # A genuine prior encrypted read is the return summary's baseline.
+            alice.evaluate('args=>secureProof.markRead(...args)', [channel, sent['id']])
         reply = bob.evaluate('args=>secureProof.sendMessage(...args)', [channel, 'Private thread reply', sent['id']])
         poll(lambda: alice.evaluate('args=>secureProof.getThread(...args)', [channel, sent['id']]), lambda rows: any(row['id'] == reply['id'] for row in rows), 'Encrypted thread reply missing.')
+        if args.navigation_only:
+            import importlib.util
+            from pathlib import Path
+            stage_path = Path(__file__).resolve().parents[1] / 'frontend/tests/secure-message-navigation-browser.py'
+            stage_spec = importlib.util.spec_from_file_location('secure_message_navigation_stage', stage_path)
+            stage = importlib.util.module_from_spec(stage_spec); stage_spec.loader.exec_module(stage)
+            stage.run_navigation_stage(alice, bob, users, channel, sent, reply, args, request, poll)
+            print('PASS actual encrypted source navigation, App reply source, and fail-closed authorization', flush=True)
+            raise SystemExit(0)
         bob.evaluate('args=>secureProof.editMessage(...args)', [channel, reply['id'], 'Private edited thread reply'])
         poll(lambda: alice.evaluate('args=>secureProof.getThread(...args)', [channel, sent['id']]), lambda rows: any(row['id'] == reply['id'] and row['content'] == 'Private edited thread reply' and row.get('edited_at') for row in rows), 'Encrypted reply edit was not folded into thread history.')
         if args.threads_only:

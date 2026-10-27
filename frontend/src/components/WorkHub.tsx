@@ -22,6 +22,8 @@ import { ChannelApps } from './ChannelApps';
 import { FederatedWorkPanel } from './FederatedWorkPanel';
 import { EncryptedWorkPanel } from './EncryptedWorkPanel';
 import { ConversationWorkControls, type ConversationWorkLayoutActions } from './ConversationWorkControls';
+import { ConversationSourceRibbon } from './ConversationSourceRibbon';
+import { conversationSourcePreview } from '../lib/conversation-source-ribbon';
 import type { WorkHubTab } from '../lib/work-hub-view';
 import { useCollaborationContext } from '../lib/collaboration-context';
 import { normalizeMessageReferences } from '../lib/message-references';
@@ -29,7 +31,7 @@ import '../styles/work-hub.css';
 
 export type { WorkHubTab } from '../lib/work-hub-view';
 export interface ConversationResourceSelection { kind: 'document' | 'task' | 'decision'; id: string; projectId?: string | null; title?: string }
-interface Props { instanceId?: string; closeController?: { current: (() => void) | null }; presentation?: 'dialog' | 'flow'; layoutActions?: ConversationWorkLayoutActions; sourceMessage?: Message | null; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; onActiveResourceChange?: (resource: ConversationResourceSelection | null) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; initialSharedResourceId?: string; initialSharedResourceKind?: string; initialFeedId?: string; initialWorkflowRunId?: string; initialWorkflowId?: string; initialMeetingId?: string; initialClipId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
+interface Props { instanceId?: string; closeController?: { current: (() => void) | null }; presentation?: 'dialog' | 'flow'; layoutActions?: ConversationWorkLayoutActions; sourceMessage?: Message | null; sourceAuthorName?: string; initialCommandDraft?: ComposerWorkDraft; onRevealSource?: () => void; onResourceSaved?: (resource: ConversationResourceSelection) => void; onActiveResourceChange?: (resource: ConversationResourceSelection | null) => void; workspaceId: string; channel: Channel; onClose: () => void; onTabChange?: (tab: WorkHubTab) => void; initialTab?: WorkHubTab; dataAdmin?: boolean; integrationAdmin?: boolean; initialProjectId?: string; focusTaskId?: string; initialDocumentId?: string; initialStackId?: string; initialSharedResourceId?: string; initialSharedResourceKind?: string; initialFeedId?: string; initialWorkflowRunId?: string; initialWorkflowId?: string; initialMeetingId?: string; initialClipId?: string; pendingStackMessageId?: string | null; onStackMessageSaved?: () => void; onRevealMessage?: (id: string) => void }
 const tabs = [
   { id: 'shared-work', label: 'Shared work', icon: Globe },
   { id: 'feed', label: 'Activity feed', icon: Newspaper },
@@ -54,10 +56,16 @@ function documentDraftFromMessage(message: Message): ComposerWorkDraft {
   return { key: message.id, title, text, ...(references.length ? { field_references: { body: references, ...(titleReferences.length ? { title: titleReferences } : {}) } } : {}) };
 }
 
-export function WorkHub({ instanceId, closeController, presentation = 'dialog', layoutActions, sourceMessage, initialCommandDraft, onRevealSource, onResourceSaved, onActiveResourceChange, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, initialSharedResourceId, initialSharedResourceKind, initialFeedId, initialWorkflowRunId, initialWorkflowId, initialMeetingId, initialClipId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
+export function WorkHub({ instanceId, closeController, presentation = 'dialog', layoutActions, sourceMessage, sourceAuthorName, initialCommandDraft, onRevealSource, onResourceSaved, onActiveResourceChange, workspaceId, channel, onClose, onTabChange, initialTab = 'tasks', dataAdmin = false, integrationAdmin = false, initialProjectId, focusTaskId, initialDocumentId, initialStackId, initialSharedResourceId, initialSharedResourceKind, initialFeedId, initialWorkflowRunId, initialWorkflowId, initialMeetingId, initialClipId, pendingStackMessageId, onStackMessageSaved, onRevealMessage }: Props) {
   useI18n();
   const navigationContext = useCollaborationContext();
   const surfaceId = navigationContext?.surfaceId;
+  const sourceOwner = useRef({ actor: api.getCurrentUserId(), credential: api.getAccessToken(), workspaceId, channelId: channel.id });
+  const sourceCurrent = () => sourceOwner.current.actor === api.getCurrentUserId() && sourceOwner.current.credential === api.getAccessToken()
+    && sourceOwner.current.workspaceId === workspaceId && sourceOwner.current.channelId === channel.id
+    && (!navigationContext || navigationContext.isCurrent?.() !== false
+      && (!navigationContext.workspaceId || navigationContext.workspaceId === workspaceId) && (!navigationContext.channelId || navigationContext.channelId === channel.id));
+  const availableSource = sourceCurrent() ? conversationSourcePreview(sourceMessage, channel.id) : null;
   const [tab, setTab] = useState<WorkHubTab>(initialTab);
   const [sharedWork, setSharedWork] = useState(false);
   const [sharedMode, setSharedMode] = useState<'local' | 'federated' | null>(null);
@@ -132,8 +140,10 @@ export function WorkHub({ instanceId, closeController, presentation = 'dialog', 
       if (layoutActions?.expanded) layoutActions.onToggleExpanded(); else close();
     }}>
       <header className={flow ? "fc-conversation-work-header" : "fc-work-hub-header"}><div><span className="fc-kicker">{channel.name || t("Your channel")}</span><h2>{t(flow ? selectedLabel : "Room for good work.")}</h2>{!flow && <p>{t("Plan, create and meet in one shared place.")}</p>}</div>{flow && layoutActions ? <ConversationWorkControls layout={layoutActions} onClose={close} /> : <button type="button" className="fc-icon-button" aria-label={t(flow ? "Close this work" : "Close workspace tools")} onClick={close}><X size={20} /></button>}</header>
-      {flow && sourceMessage?.channel_id === channel.id && <div className="fc-conversation-work-source"><div><span>{t("From this conversation")}</span><p>{sourceMessage.content}</p>{onRevealSource && <button type="button" onClick={onRevealSource}>{t("Show source message")}</button>}</div></div>}
-      {flow && sourceMessage && selectedResource && onResourceSaved && <div className="fc-conversation-work-source"><button type="button" onClick={() => onResourceSaved(selectedResource)}>{t("Link this work to the message")}</button></div>}
+      {flow && availableSource && sourceMessage && (tab === 'documents' && layoutActions?.expanded
+        ? <ConversationSourceRibbon sourceMessage={sourceMessage} channelId={channel.id} channelName={channel.name || undefined} authorName={sourceAuthorName} isCurrent={sourceCurrent} onBeforeReveal={layoutActions.onBeforeViewChange} onRevealSource={onRevealSource} />
+        : <div className="fc-conversation-work-source"><div><span>{t("From this conversation")}</span><p>{sourceMessage.content}</p>{onRevealSource && <button type="button" onClick={() => { if (sourceCurrent()) onRevealSource(); }}>{t("Show source message")}</button>}</div></div>)}
+      {flow && availableSource && selectedResource && onResourceSaved && <div className="fc-conversation-work-source"><button type="button" onClick={() => { if (sourceCurrent()) onResourceSaved(selectedResource); }}>{t("Link this work to the message")}</button></div>}
       {!flow && <><label className="fc-work-hub-tool-switch"><span>{t('Workspace tool')}</span><select className="fc-input" aria-label={t('Workspace tool')} value={tab} onChange={event => select(event.target.value as WorkHubTab)}>{visibleTabs.map(item => <option key={item.id} value={item.id}>{t(item.label)}</option>)}</select></label>
       <nav ref={navigation} role="tablist" aria-label={t("Workspace tools")} className="fc-work-hub-tabs" onKeyDown={event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;

@@ -1,0 +1,23 @@
+.fc-channel-return{margin:0 0 16px;border:1px solid var(--fc-border,#e3e5de);border-radius:12px;background:var(--fc-surface,#fff);font-size:var(--fc-detail-size,.8125rem);overflow:hidden}
+.fc-channel-return summary{display:flex;align-items:center;gap:10px;cursor:pointer;padding:12px 14px;list-style:none}
+.fc-channel-return summary::-webkit-details-marker{display:none}
+.fc-channel-return details[open]{max-height:min(44dvh,24rem);overflow-y:auto;overscroll-behavior:contain}
+.fc-channel-return summary>span{flex:1;min-width:0}
+.fc-channel-return summary strong{display:block;font-size:var(--fc-detail-size,.8125rem)}
+.fc-channel-return summary small{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--fc-muted,#65705f);font-size:var(--fc-caption-size,.75rem);margin-top:3px}
+.fc-channel-return-chevron{transition:transform .15s}
+.fc-channel-return details[open] .fc-channel-return-chevron{transform:rotate(180deg)}
+.fc-channel-return-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding:0 14px 12px}
+.fc-channel-return-groups h3{font-size:var(--fc-caption-size,.75rem);margin:3px 0 7px}
+.fc-channel-return-groups ul{padding:0;margin:0;list-style:none}
+.fc-channel-return-groups button{display:flex;width:100%;min-width:0;gap:6px;align-items:center;text-align:left;border:0;background:none;color:inherit;border-radius:6px;padding:7px 4px;cursor:pointer}
+.fc-channel-return-groups button:hover{background:var(--fc-accent-soft,#f1f4ee)}
+.fc-channel-return-groups button:focus-visible,.fc-channel-return summary:focus-visible{outline:2px solid var(--fc-accent,#718763);outline-offset:-2px}
+.fc-channel-return-groups button>span{flex:1;min-width:0;overflow-wrap:anywhere}
+.fc-channel-return-groups strong{font-size:var(--fc-detail-size,.8125rem);font-weight:600}
+.fc-channel-return-groups small{display:block;font-size:var(--fc-caption-size,.75rem);color:var(--fc-muted,#65705f);margin-top:2px}
+.fc-channel-return-groups p,.fc-channel-return-caption{font-size:var(--fc-caption-size,.75rem);line-height:1.5;color:var(--fc-muted,#65705f)}
+.fc-channel-return-caption{margin:0;padding:0 14px 10px}
+.fc-channel-return-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 0 12px;font-size:var(--fc-caption-size,.75rem);color:var(--fc-muted,#65705f)}
+@media(max-width:700px){.fc-channel-return-groups{grid-template-columns:1fr;gap:7px}.fc-channel-return summary small{gap:3px 10px}}
+@media(prefers-reduced-motion:reduce){.fc-channel-return-chevron{transition:none}}

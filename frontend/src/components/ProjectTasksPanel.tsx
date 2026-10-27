@@ -9,6 +9,7 @@ import { ContextualCopilot } from './ContextualCopilot';
 import { useCollaborationContext } from '../lib/collaboration-context';
 import { registerConversationNavigationGuard } from '../lib/conversation-navigation';
 import type { ComposerWorkDraft } from '../lib/composer-commands';
+import { isTaskDraftDate, taskDraftFromMessage } from '../lib/task-draft';
 import { CollaborationInput } from './CollaborationInput';
 import { FieldReferenceText } from './FieldReferenceText';
 import { reconcileFieldReferences, taskReferenceTexts, validateFieldReferences } from '../lib/field-references';
@@ -22,13 +23,14 @@ interface Props {
   onTaskSaved?: (task: TaskRecord) => void; onOpenMessage?: (channelId: string, messageId: string) => void;
 }
 type ProjectEditor = { kind: 'project'; id: string; fields: ProjectFields; previous?: ProjectRecord };
-type TaskEditor = { kind: 'task'; id: string; fields: TaskFields; previous?: TaskRecord };
+type TaskEditor = { kind: 'task'; id: string; fields: TaskFields; previous?: TaskRecord; fromMessage?: boolean };
 type Editor = ProjectEditor | TaskEditor;
 const statuses = { todo: 'To do', doing: 'In progress', done: 'Done' } as const;
 const freshTask = (): TaskFields => ({ title: '', description: '', status: 'todo', priority: 'normal', assignee_user_id: null, due_date: null, checklist: [], file_ids: [], decision_ids: [] });
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const taskCommandDraft = (value?: ComposerWorkDraft): ComposerWorkDraft | null => {
   if (!value || typeof value.key !== 'string' || !value.key || typeof value.title !== 'string' || !value.title.trim() || value.title.length > 200 || typeof value.text !== 'string' || value.text.length > 12000) return null;
+  if (value.dueDate !== undefined && !isTaskDraftDate(value.dueDate)) return null;
   try {
     const field_references = validateFieldReferences({ title: value.title, description: value.text }, value.field_references);
     const draft = { ...value }; if (field_references) draft.field_references = field_references; else delete draft.field_references;
@@ -103,12 +105,20 @@ export function ProjectTasksPanel({ instanceId, workspaceId, channelId, isAdmin 
     if (!projects.some(row => row.id === id) || !mayDiscardEditor(!!commandDraft)) return;
     setEditor(null); setFlowTaskId(null); setSelected(id);
   }
+  function currentDraftAssignee(draft: ComposerWorkDraft) {
+    if (!draft.key.startsWith('message-task:')) return draft.assigneeUserId || null;
+    const source = sourceMessage?.channel_id === channelId && !sourceMessage.deleted && !sourceMessage.locked ? sourceMessage : null;
+    // The panel has fetched this channel's current members. Re-resolve local
+    // name suggestions before first showing the editor; never replace edits.
+    return source ? taskDraftFromMessage(source, { text: draft.text, members, locale: currentLocale() })?.assigneeUserId || null : null;
+  }
   function newTask() {
     const source = sourceMessage?.channel_id === channelId && !sourceMessage.deleted && !sourceMessage.locked ? sourceMessage : null;
-    const description = commandDraft?.text || source?.content.slice(0, 12000) || '';
-    const sourceReferences = source && !commandDraft ? normalizeMessageReferences(description, source.references?.filter(reference => reference.end <= description.length)) : [];
-    const field_references = commandDraft?.field_references || (sourceReferences.length ? { description: sourceReferences } : undefined);
-    beginEditor({ kind: 'task', id: crypto.randomUUID(), fields: { ...freshTask(), title: commandDraft?.title || '', description, assignee_user_id: commandDraft?.assigneeUserId || null, ...(field_references ? { field_references } : {}) } });
+    const draft = commandDraft || (source ? taskDraftFromMessage(source, { members, locale: currentLocale() }) : undefined);
+    const description = draft?.text || source?.content.slice(0, 12000) || '';
+    const sourceReferences = source && !draft ? normalizeMessageReferences(description, source.references?.filter(reference => reference.end <= description.length)) : [];
+    const field_references = draft?.field_references || (sourceReferences.length ? { description: sourceReferences } : undefined);
+    beginEditor({ kind: 'task', id: crypto.randomUUID(), fromMessage: !!source, fields: { ...freshTask(), title: draft?.title || '', description, assignee_user_id: draft ? currentDraftAssignee(draft) : null, due_date: draft?.dueDate || null, ...(field_references ? { field_references } : {}) } });
   }
   function refresh() {
     if (!mayDiscardEditor()) return;
@@ -161,7 +171,7 @@ export function ProjectTasksPanel({ instanceId, workspaceId, channelId, isAdmin 
   useEffect(() => { setTasks([]); setEditor(null); setHistory(null); setLinkedDecision(null); setArchiving(null); void loadTasks(selected); }, [selected]);
   useEffect(() => {
     if (!commandDraft || loading || busy || editor || !project || project.archived || !project.fields || !current(generation.current)) return;
-    setEditor({ kind: 'task', id: crypto.randomUUID(), fields: { ...freshTask(), title: commandDraft.title, description: commandDraft.text, assignee_user_id: commandDraft.assigneeUserId || null, ...(commandDraft.field_references ? { field_references: commandDraft.field_references } : {}) } });
+    setEditor({ kind: 'task', id: crypto.randomUUID(), fromMessage: !!sourceMessage && sourceMessage.channel_id === channelId && !sourceMessage.deleted && !sourceMessage.locked, fields: { ...freshTask(), title: commandDraft.title, description: commandDraft.text, assignee_user_id: currentDraftAssignee(commandDraft), due_date: commandDraft.dueDate || null, ...(commandDraft.field_references ? { field_references: commandDraft.field_references } : {}) } });
     if (commandDraft.assigneeUserId && !members.some(member => member.user_id === commandDraft.assigneeUserId)) setError(t('The selected person is no longer in this conversation. Choose another assignee.'));
     setCommandDraft(null); setHistory(null); setLinkedDecision(null); setArchiving(null);
   }, [commandDraft, loading, busy, editor, selected, projects, members]);
@@ -337,6 +347,7 @@ export function ProjectTasksPanel({ instanceId, workspaceId, channelId, isAdmin 
       {project.archived && <p className="fc-project-caption">{t("This project is archived. Its creator or a channel administrator can reopen it.")}</p>}
     </> : !editor && !(flow && focusTaskId) && <div className="fc-project-empty"><CheckSquare size={28} /><p>{t("Create a project to organize the next steps for this channel.")}</p></div>}
     {editor && <form className="fc-project-editor" aria-label={editor.kind === 'project' ? editor.previous ? t("Edit project") : t("New project") : editor.previous ? t("Edit task") : t("New task")} onSubmit={save}>
+      {editor.kind === 'task' && editor.fromMessage && !editor.previous && <p className="fc-project-caption" role="status">{t('Review the suggested title, person and date. You can change every field before saving this task.')}</p>}
       <div className="fc-project-heading"><h4>{editor.previous ? t("Edit ") : t("New ")}{editor.kind}</h4><button className="fc-icon-button" type="button" aria-label={t("Cancel task or project editing")} disabled={!!busy} onClick={cancelEditor}><X size={17} /></button></div>
       <label htmlFor={fieldId("project-item-title")}>{editor.kind === 'project' ? t("Project title") : t("Task title")}</label><CollaborationInput as="input" ref={editorTitle} id={fieldId("project-item-title")} contextId={fieldContext("title")} className="fc-input" value={editor.fields.title} references={editor.fields.field_references?.title} maxLength={editor.kind === 'project' ? 160 : 200} required disabled={!!busy} onValueChange={(value, refs) => changeWritingField("title", value, refs)} />
       <label htmlFor={fieldId("project-item-description")}>{t("Description")}</label><CollaborationInput as="textarea" id={fieldId("project-item-description")} contextId={fieldContext("description")} className="fc-input" rows={4} toolbar maxLength={editor.kind === 'project' ? 4000 : 12000} disabled={!!busy} value={editor.fields.description} references={editor.fields.field_references?.description} onValueChange={(value, refs) => changeWritingField("description", value, refs)} />

@@ -1,6 +1,8 @@
 # FreeCollab: funktioner och implementation
 
-Granskad **2026-10-25** för granskningsgrenen `design/open-studio`. Den här
+Kompletterad **2026-10-27** med de naturliga samarbetsflödena i
+`feature/natural-collaboration-flow`, efter den tidigare granskningen av
+`design/open-studio`. Den här
 förteckningen beskriver produktkod i grenen. Den ändrar inte status för `main`,
 en publicerad version eller en redan driftsatt Railway-instans.
 
@@ -14,6 +16,15 @@ eller klientexekvering. **Kundkonfiguration** betyder att operatören måste ang
 sin egen tjänst, behörighet eller signeringsidentitet. **Extern acceptans**
 betyder exempelvis ett riktigt kundkonto, fysisk enhet eller kapacitetsprov.
 Protokolltester ersätter inte dessa senare kontroller.
+
+## Naturliga samarbetsflöden
+
+Markerad meddelandetext blir ett granskat uppgiftsutkast. Förstorade dokument
+behåller sin samtalsremsa; `/` och `@` ordnas efter träff, kontext och
+sessionshistorik. En läsbunden återkomstöversikt länkar till verkliga källor.
+Dokument kan få ett lokalt högförslag vid ordnande och synlig Ångra för flytt,
+högens namn och en ny tom hög. Se [kontrakt och gränser](NATURAL_COLLABORATION.md),
+inklusive begränsad historik, versionsskydd och krypterade källänkar.
 
 ## Produktens sammanhängande flöden
 

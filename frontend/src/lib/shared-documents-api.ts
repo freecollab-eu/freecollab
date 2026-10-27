@@ -164,6 +164,24 @@ async function writeUpdate(channelId: string, documentId: string, item: PendingU
 }
 
 export const sharedDocumentsApi = {
+  /** Metadata plus one verified encrypted title per changed document; no Yjs body reads. */
+  async encryptedSummaries(channelId: string, since: number, signal?: AbortSignal) {
+    const token = api.getAccessToken();
+    const check = () => { current(token); if (signal?.aborted) throw new Error('The document summary was cancelled.'); };
+    check();
+    const rows = await api.request<SharedDocumentRecord[]>(path(channelId) + '?archived=false', { signal }); check();
+    let incomplete = rows.length >= 50;
+    const candidates = rows.filter(row => row.channel_id === channelId && !row.archived && Date.parse(/(?:z|[+-]\d\d:\d\d)$/i.test(row.updated_at) ? row.updated_at : row.updated_at + 'Z') > since);
+    const items: SharedDocumentRecord[] = [];
+    // A secure summary never accepts a plaintext title supplied by this endpoint.
+    for (const row of candidates.slice(0, 50)) {
+      check();
+      if (!row.summary_event_id || !row.summary_update_id || !row.summary_by) { incomplete = true; continue; }
+      const resolved = await resolveSummary({ ...row, title: undefined }); check();
+      if (resolved.resolution_error) incomplete = true; else items.push(resolved);
+    }
+    return { items, incomplete };
+  },
   async list(channelId: string, archived = false) {
     const token = api.getAccessToken(), rows = await api.request<SharedDocumentRecord[]>(path(channelId) + '?archived=' + archived);
     const result = await Promise.all(rows.map(resolveSummary)); current(token); return result;

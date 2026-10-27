@@ -23,6 +23,14 @@
 .fc-document-organization .fc-shared-toolbar > strong { margin-right: auto; font-size: var(--fc-detail-size); font-weight: 500; }
 .fc-document-organization [draggable=true] { cursor: grab; }
 
+.fc-document-stack-suggestion { margin: .25rem 0 .8rem; padding: .65rem .8rem; border-left: 2px solid var(--fc-border); color: var(--fc-muted); font-size: var(--fc-caption-size); }
+.fc-document-stack-suggestion p { margin: 0; overflow-wrap: anywhere; }
+.fc-document-stack-suggestion small { display: block; margin-top: .25rem; }
+.fc-document-stack-suggestion > div { display: flex; flex-wrap: wrap; gap: .35rem 1rem; margin-top: .35rem; }
+.fc-document-undo { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; margin-block: .75rem; padding: .65rem .8rem; border: 1px solid var(--fc-border); border-radius: var(--fc-radius); font-size: var(--fc-caption-size); }
+.fc-document-undo > span { min-width: 0; flex: 1 1 12rem; overflow-wrap: anywhere; color: var(--fc-muted); }
+.fc-document-undo .fc-button { flex-shrink: 0; }
+
 .fc-document-stack-discussion,
 .fc-document-stack-messages { border-top: 1px solid var(--fc-border); margin-top: 1.15rem; padding-top: .85rem; }
 .fc-document-stack-discussion ul,

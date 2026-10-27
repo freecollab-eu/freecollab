@@ -21,6 +21,17 @@ not across closing/reloading the panel. A deleted/recreated stack ID has a new
 server-generated generation: old rename, delete, move and Undo requests cannot
 address its replacement, even if their numeric revision happens to match.
 
+The visible Undo receipt also covers a stack rename and creation of a new empty
+stack. It remains outside the collapsed organization controls. Undo refuses to
+remove a newly created stack once documents or references have arrived; it never
+deletes the contents to make the old action reversible.
+
+Starting a move can show one local proposed destination, based on shared words
+in current visible titles and unresolved comments. Accept or dismiss it; equally
+supported stacks produce no prompt. Acceptance rereads and verifies the exact
+evidence before using the normal versioned move. No model request or automatic
+placement occurs. See the [natural collaboration flows](NATURAL_COLLABORATION.md).
+
 Use a native message’s **Save in document stack** action in the actual conversation
 to open Documents with an authoritative source review. Choose or create a stack,
 then explicitly **Save message reference**. The server checks the exact reviewed

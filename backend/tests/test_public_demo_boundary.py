@@ -13,7 +13,7 @@ from pydantic import SecretStr
 from sqlmodel import Session, SQLModel, create_engine, select
 
 from app import database
-from app.api import auth, chat_productivity, messages, push, content_completion, meetings, media_capture, app_platform, slack_livebridge
+from app.api import auth, chat_productivity, messages, push, content_completion, meetings, media_capture, app_platform, slack_livebridge, read_receipts
 from app.config import settings
 from app.database import get_session
 from app.main import app as _registered_models  # Register every additive FK table.
@@ -77,6 +77,7 @@ def demo(tmp_path, monkeypatch):
     app = FastAPI()
     app.include_router(auth.router)
     app.include_router(messages.router)
+    app.include_router(read_receipts.router)
     app.include_router(chat_productivity.router)
     app.include_router(push.router)
     app.include_router(content_completion.router)
@@ -382,6 +383,33 @@ def test_cross_site_form_cannot_consume_a_sample_slot(demo):
 @pytest.mark.parametrize("path", ["/channels/room/../admin/users", "/channels//members", "/channels/room\\admin", "/workspaces/room/copilot/config"])
 def test_no_normalization_or_prefix_policy_escape(path):
     assert not boundary.allowed_public_demo_route("POST", path)
+
+
+def test_return_summary_allows_only_native_read_and_keeps_real_visit_scope_receipt_and_mutation_budget(demo):
+    from app.models.message import Message
+    from app.models.read_receipt import ReadReceipt
+    client, engine, people, _ = demo
+    actor, other = people
+    baseline = datetime.utcnow() - timedelta(days=1)
+    path = '/read-receipts/channels/'+actor['channel']+'/return-summary'
+    with Session(engine) as session:
+        session.add(Message(id='demo-return-baseline', channel_id=actor['channel'], author_id=actor['user'], content='A prior actual message', created_at=baseline))
+        session.add(ReadReceipt(channel_id=actor['channel'], user_id=actor['user'], last_read_message_id='demo-return-baseline', read_at=baseline))
+        session.commit()
+        before = session.get(PublicDemoVisit, actor['visit']).mutation_count
+    response = client.get(path, params={'since': baseline.isoformat()}, headers=actor['headers'])
+    assert response.status_code == 200, response.text
+    assert response.headers['cache-control'] == 'no-store'
+    assert response.json()['channel_id'] == actor['channel']
+    assert not response.json()['incomplete']
+    assert client.get(path, params={'since': baseline.isoformat()}, headers=other['headers']).status_code == 403
+    assert client.post(path, json={}, headers=actor['headers']).status_code == 403
+    for extra in ['/encrypted-decisions', '/anything', '/unread-count']:
+        assert client.get(path+extra, params={'since': baseline.isoformat()}, headers=actor['headers']).status_code == 403
+    with Session(engine) as session:
+        receipt = session.exec(select(ReadReceipt).where(ReadReceipt.user_id == actor['user'])).one()
+        assert receipt.read_at == baseline and receipt.last_read_message_id == 'demo-return-baseline'
+        assert session.get(PublicDemoVisit, actor['visit']).mutation_count == before
 
 
 def test_streamed_oversize_body_and_huge_length_fail_before_handler(demo):

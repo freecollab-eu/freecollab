@@ -13,7 +13,7 @@ function load(path, imports = {}) {
 }
 const i18n = load('../src/i18n/core.ts');
 i18n.registerCatalog('sv', load('../src/i18n/composer-commands.sv.ts').default);
-const slash = load('../src/lib/slash-commands.ts', { '../i18n/core': i18n });
+const slash = load('../src/lib/slash-commands.ts', { '../i18n/core': i18n, './suggestion-ranking': load('../src/lib/suggestion-ranking.ts') });
 const references = load('../src/lib/message-references.ts');
 const { parseComposerCommand, getComposerCommandQuery, isComposerCommandDraft, composerCommandUsage, prepareCommandPeople, prepareComposerDraftReferences } = load('../src/lib/composer-commands.ts', {
   '../i18n/core': i18n, './slash-commands': slash, './message-references': references,

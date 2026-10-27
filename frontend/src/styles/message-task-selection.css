@@ -1,0 +1,21 @@
+.fc-message-task-selection {
+  position: fixed;
+  z-index: 1600;
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  min-height: 40px;
+  padding: .55rem .85rem;
+  border: 1px solid var(--fc-border, #d7ddd5);
+  border-radius: 999px;
+  color: var(--fc-text, #27352c);
+  background: var(--fc-surface, #fff);
+  box-shadow: 0 6px 24px rgb(18 40 25 / 18%);
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.fc-message-task-selection:hover { background: var(--fc-hover, #edf2e9); }
+.fc-message-task-selection:focus-visible { outline: 2px solid var(--fc-accent, #51775d); outline-offset: 3px; }

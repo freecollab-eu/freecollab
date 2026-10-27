@@ -69,6 +69,40 @@ def test_move_and_guarded_undo_preserve_later_crdt_edits_and_reject_another_move
         assert session.get(SharedDocument,'brief').update_count==2
 
 
+def test_stack_name_undo_compensates_only_its_own_revision(organized):
+    d=organized; original=stack(d).json()
+    endpoint=PATH+'/stacks/'+original['id']
+    renamed=d.client.patch(endpoint,json={'title':'Research materials','expected_version':original['version'],
+        'expected_generation':original['generation']},headers=headers()).json()
+    undo={'title':original['title'],'expected_version':renamed['version'],'expected_generation':renamed['generation']}
+    restored=d.client.patch(endpoint,json=undo,headers=headers())
+    assert restored.status_code==200 and restored.json()['title']==original['title']
+    current=restored.json()
+    later=d.client.patch(endpoint,json={'title':'A colleague’s current name','expected_version':current['version'],
+        'expected_generation':current['generation']},headers=headers('owner'))
+    assert later.status_code==200
+    assert d.client.patch(endpoint,json=undo,headers=headers()).status_code==409
+    assert d.client.get(PATH,headers=headers()).json()['stacks'][0]['title']=='A colleague’s current name'
+
+
+@pytest.mark.parametrize('later_change',['renamed','populated','membership_revoked'])
+def test_new_stack_undo_keeps_later_work_and_rechecks_current_permission(organized,later_change):
+    d=organized; created=stack(d).json()
+    if later_change=='renamed':
+        assert d.client.patch(PATH+'/stacks/materials',json={'title':'Current group','expected_version':created['version'],
+            'expected_generation':created['generation']},headers=headers()).status_code==200
+    elif later_change=='populated':
+        assert move(d,actor='peer').status_code==200
+    else:
+        with Session(d.engine) as session:
+            session.delete(session.get(ChannelMember,('room','member')));session.commit()
+    undone=d.client.delete(stack_url(d,created['version'],expected_generation=created['generation']),headers=headers())
+    assert undone.status_code==(403 if later_change=='membership_revoked' else 409)
+    with Session(d.engine) as session:
+        assert session.get(SharedDocumentStack,'materials') is not None
+        if later_change=='populated': assert session.get(SharedDocumentPlacement,'brief').stack_id=='materials'
+
+
 def test_nonempty_stack_cannot_delete_even_when_its_document_is_archived(organized):
     d=organized; stack(d); move(d)
     assert d.client.delete(stack_url(d,1),headers=headers()).status_code==409

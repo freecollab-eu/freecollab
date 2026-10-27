@@ -7,7 +7,7 @@ function fixture(encrypted=false) {
  const state={token:'actor',requests:[],encryptedRequests:[],encrypted,error:false,swap:false};
  const api={getAccessToken:()=>state.token,request:async(path,options)=>{state.requests.push({path,options});return {stacks:[],placements:[],relations:[]};}};
  const exports={}; const source=readFileSync(new URL('../src/lib/document-organization-api.ts',import.meta.url),'utf8');
- const encryptedApi={list:async channel=>{state.encryptedRequests.push(['list',channel]);return {supported:true,documents:[],stacks:[],placements:[],relations:[],message_references:[],stack_comments:[],comments_incomplete:false};},createStack:async(...args)=>{state.encryptedRequests.push(['create',...args]);return {id:args[2],title:args[1]};},previewMessage:async(...args)=>{state.encryptedRequests.push(['preview',...args]);return {id:args[1],channel_id:args[0],text:'Verified encrypted text'};}};
+ const encryptedApi={renameStack:async(...args)=>{state.encryptedRequests.push(['rename',...args]);return args[1];},deleteStack:async(...args)=>{state.encryptedRequests.push(['delete',...args]);},move:async(...args)=>{state.encryptedRequests.push(['move',...args]);return {version:args[3]+1};},list:async channel=>{state.encryptedRequests.push(['list',channel]);return {supported:true,documents:[],stacks:[],placements:[],relations:[],message_references:[],stack_comments:[],comments_incomplete:false};},createStack:async(...args)=>{state.encryptedRequests.push(['create',...args]);return {id:args[2],title:args[1]};},previewMessage:async(...args)=>{state.encryptedRequests.push(['preview',...args]);return {id:args[1],channel_id:args[0],text:'Verified encrypted text'};}};
  vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports,require:name=>name==='./api'?{api}:name==='./encrypted-document-organization-api'?{encryptedDocumentOrganizationApi:encryptedApi}:{getSecureMessaging:async()=>({handles:async()=>{if(state.error)throw Error('Binding unavailable');if(state.swap)state.token='other';return state.encrypted;}})}});
  return {...exports,state};
 }
@@ -23,6 +23,27 @@ test('native move and Undo transport preserve the exact server version and old t
  const f=fixture();await f.documentOrganizationApi.move('room/one','doc','stack',7,'a'.repeat(32));await f.documentOrganizationApi.move('room/one','doc',null,8,null);
  assert.equal(f.state.requests[0].path,'/channels/room%2Fone/shared-document-organization/documents/doc/placement');
  assert.deepEqual(f.state.requests.map(r=>JSON.parse(r.options.body)),[{stack_id:'stack',expected_version:7,stack_generation:'a'.repeat(32)},{stack_id:null,expected_version:8,stack_generation:null}]);
+});
+test('visible Undo compensates only the recorded rename/create generation and version',async()=>{
+ const f=fixture(),stack={id:'stack',channel_id:'room',title:'Renamed',version:4,generation:'a'.repeat(32)};
+ await f.undoDocumentOrganization('room',{kind:'rename',stack,previousTitle:'Original'});
+ await f.undoDocumentOrganization('room',{kind:'create',stack});
+ await f.undoDocumentOrganization('room',{kind:'move',receipt:{documentId:'doc',fromStackId:null,toStackId:'stack',expectedVersion:9,fromStackGeneration:null}});
+ assert.equal(f.state.requests[0].options.method,'PATCH');
+ assert.deepEqual(JSON.parse(f.state.requests[0].options.body),{title:'Original',expected_version:4,expected_generation:'a'.repeat(32)});
+ assert.equal(f.state.requests[1].path,'/channels/room/shared-document-organization/stacks/stack?expected_version=4&expected_generation='+'a'.repeat(32));
+ assert.equal(f.state.requests[1].options.method,'DELETE');
+ assert.deepEqual(JSON.parse(f.state.requests[2].options.body),{stack_id:null,expected_version:9,stack_generation:null});
+});
+test('Undo in an encrypted channel retains the adapter authority boundary and never falls back to native metadata',async()=>{
+ const f=fixture(true),stack={id:'private-stack',channel_id:'private',title:'Reviewed',version:5,generation:'a'.repeat(32)};
+ await f.undoDocumentOrganization('private',{kind:'rename',stack,previousTitle:'Earlier'});
+ await f.undoDocumentOrganization('private',{kind:'create',stack});
+ await f.undoDocumentOrganization('private',{kind:'move',receipt:{documentId:'doc',fromStackId:'private-stack',toStackId:null,expectedVersion:4,fromStackGeneration:stack.generation}});
+ assert.deepEqual(f.state.encryptedRequests,[['rename','private',stack,'Earlier'],['delete','private',stack],['move','private','doc','private-stack',4,stack.generation]]);
+ assert.equal(f.state.requests.length,0);
+ const unavailable=fixture(true);unavailable.state.error=true;
+ await assert.rejects(unavailable.undoDocumentOrganization('private',{kind:'create',stack}));assert.equal(unavailable.state.requests.length,0);assert.equal(unavailable.state.encryptedRequests.length,0);
 });
 test('suggestions use visible same-channel active title words only, exclude saved pairs and create no request',()=>{
  const f=fixture(),doc={id:'a',channel_id:'room',title:'Design research',archived:false};

@@ -130,6 +130,21 @@ async function subscriptionPath(channelId: string, messageId: string) {
 }
 
 export const collaborationApi = {
+  async encryptedDecisionSummaries(channelId: string, since: string, signal?: AbortSignal) {
+    const token = api.getAccessToken(), actor = api.getCurrentUserId();
+    const check = () => { if (!token || token !== api.getAccessToken() || actor !== api.getCurrentUserId() || signal?.aborted) throw new Error('The signed-in account changed.'); };
+    check();
+    const result = await api.request<{ channel_id: string; items: Decision[]; incomplete: boolean }>(`/read-receipts/channels/${segment(channelId)}/return-summary/encrypted-decisions?since=${encodeURIComponent(since)}`, { signal }); check();
+    if (result.channel_id !== channelId || !Array.isArray(result.items) || result.items.length > 200) throw new Error('Invalid encrypted decision summary.');
+    let incomplete = result.incomplete; const items: Decision[] = [];
+    for (const row of result.items) {
+      check();
+      if (row.channel_id !== channelId || row.content_mode !== 'matrix' || !row.matrix_event_id) { incomplete = true; continue; }
+      const verified = await resolveDecision({ ...row, title: undefined, content: undefined, field_references: undefined }); check();
+      if (verified.resolution_error) incomplete = true; else items.push(verified);
+    }
+    return { items, incomplete };
+  },
   savedState(channelId: string): Promise<SavedState> {
     const key = savedStateKey(channelId);
     let pending = savedStateLoads.get(key);

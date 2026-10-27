@@ -4,6 +4,10 @@
 verklig person, kanalgrupp, sida, uppgift, fil eller det aktuella samtalet.
 Dokument, uppgifter och diskussioner använder samma kontroller som chatten.
 
+För textmarkering till uppgift, samtalsremsan i förstorade dokument,
+kontextordnade val, lokala högförslag, återkomstöversikt och säker Ångra, se
+[Från samtal till gemensamt arbete](NATURAL_COLLABORATION.md).
+
 ## Flera arbeten samtidigt
 
 Öppna ett dokument, skriv `/task Granska förslaget` på en egen rad och välj

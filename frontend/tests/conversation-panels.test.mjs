@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import ts from 'typescript';
-import { fieldReferences, messageReferences } from './load-field-references.mjs';
+import { fieldReferences, messageReferences, taskDrafts } from './load-field-references.mjs';
 
 // Exercise the actual native panel event handlers and lifecycle with controlled
 // API promises. Browser proofs separately verify real DOM/focus and APIs.
@@ -54,6 +54,7 @@ function fixture(kind, props = {}) {
     '../lib/api': { api },
     '../lib/collaboration-context': { useCollaborationContext: () => props.surfaceId ? { surfaceId: props.surfaceId } : null },
     '../lib/field-references': fieldReferences, '../lib/message-references': messageReferences,
+    '../lib/task-draft': taskDrafts,
     './CollaborationInput': { CollaborationInput: 'collaboration-input' }, './FieldReferenceText': { FieldReferenceText: 'field-reference-text' }, './ReferencedMessage': { ReferencedMessage: 'referenced-message' },
     '../lib/project-tasks-api': { projectTasksApi: { projects: async () => state.projects, tasks: async () => state.tasks, saveTask, history: async () => [task], saveProject: async (_, fields) => ({ ...project, fields }) } },
     '../lib/collaboration-api': { collaborationApi: { bookmarks: async () => { state.views.push('bookmarks'); return [{ channel_id: 'room', item_id: 'saved', kind: 'message', available: true, created_at: '2026-10-23T10:00:00Z', message: { id: 'message', content: 'Saved native message' } }]; }, pins: async () => { state.views.push('pins'); return []; }, settings: async () => { state.views.push('notifications'); return { level: 'mentions', email_digest: 'none' }; }, decisions: async () => state.decisions, revisions: async () => [decision], createDecision: (_, fields) => saveDecision(undefined, fields), reviseDecision: saveDecision } },
@@ -148,6 +149,45 @@ test('source-prefilled task remains an explicit unsaved native task without unsu
   f.edit('project-item-title', 'Review materials');
   await f.one(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); await f.settle();
   assert.equal(f.state.calls.length, 1); assert.equal('source_message_id' in f.state.calls[0].fields, false); assert.equal(f.state.saved[0].id, 'new-task');
+});
+
+test('message task preview fills title, real assignee and editable date but publishes only after Save', async () => {
+  const text = 'Nora reviews the samples by 2026-11-03.';
+  const f = fixture('ProjectTasksPanel', { sourceMessage: { id: 'message', channel_id: 'room', content: text } }); await f.settle();
+  f.button('New task').props.onClick(); f.render();
+  assert.equal(f.state.calls.length, 0);
+  assert.equal(f.input('project-item-title').props.value, text);
+  assert.equal(f.one(node => node.type === 'select' && node.props['aria-label'] === 'Responsible person').props.value, 'actor');
+  const date = f.one(node => node.type === 'input' && node.props.type === 'date');
+  assert.equal(date.props.value, '2026-11-03');
+  f.edit('project-item-title', 'Review samples together');
+  f.one(node => node.type === 'input' && node.props.type === 'date').props.onChange({ target: { value: '2026-11-05' } }); f.render();
+  assert.equal(f.state.calls.length, 0);
+  await f.one(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); await f.settle();
+  assert.equal(f.state.calls.length, 1);
+  assert.equal(f.state.calls[0].fields.title, 'Review samples together');
+  assert.equal(f.state.calls[0].fields.assignee_user_id, 'actor');
+  assert.equal(f.state.calls[0].fields.due_date, '2026-11-05');
+});
+
+test('incoming task dates remain editable and invalid dates do not enter the editor', async () => {
+  const draft = { key: 'selected', title: 'Review', text: 'Source excerpt', dueDate: '2026-11-03' };
+  const f = fixture('ProjectTasksPanel', { initialDraft: draft }); await f.settle();
+  assert.equal(f.one(node => node.type === 'input' && node.props.type === 'date').props.value, draft.dueDate);
+  assert.equal(f.state.calls.length, 0);
+  const invalid = fixture('ProjectTasksPanel', { initialDraft: { ...draft, dueDate: '2026-02-30' } }); await invalid.settle();
+  assert.equal(nodes(invalid.tree, node => node.type === 'form').length, 0);
+});
+
+test('message task suggestions resolve owners from freshly loaded actual channel members before preview', async () => {
+  const sourceMessage = { id: 'message', channel_id: 'room', content: 'Nora reviews the samples tomorrow.' };
+  const initialDraft = taskDrafts.taskDraftFromMessage(sourceMessage);
+  assert.equal(initialDraft.assigneeUserId, undefined);
+  const f = fixture('ProjectTasksPanel', { sourceMessage, initialDraft }); await f.settle();
+  assert.equal(f.one(node => node.type === 'select' && node.props['aria-label'] === 'Responsible person').props.value, 'actor');
+  assert.equal(f.state.calls.length, 0);
+  f.one(node => node.type === 'select' && node.props['aria-label'] === 'Responsible person').props.onChange({ target: { value: '' } }); f.render();
+  assert.equal(f.one(node => node.type === 'select' && node.props['aria-label'] === 'Responsible person').props.value, '', 'A reviewed edit is not replaced by inference');
 });
 
 test('flow decision is nonmodal, exact, and source navigation keeps a dirty native revision open', async () => {

@@ -18,7 +18,8 @@ for (const name of readdirSync(new URL('../src/i18n/', import.meta.url)).filter(
   Object.assign(catalog, load('../src/i18n/' + name).default);
 }
 i18n.registerCatalog('sv', catalog);
-const { getSlashCommands, getSlashQuery } = load('../src/lib/slash-commands.ts', { '../i18n/core': i18n });
+const ranking = load('../src/lib/suggestion-ranking.ts');
+const { getSlashCommands, getSlashQuery } = load('../src/lib/slash-commands.ts', { '../i18n/core': i18n, './suggestion-ranking': ranking });
 const context = { hasChannel: true, hasWorkspace: true, secure: false, channelType: 'group', embedded: false, nativeSession: true, workspaceRole: 'owner', hasAdmin: true };
 const ids = (changes = {}, query = '') => Array.from(getSlashCommands({ ...context, ...changes }, query), command => command.id);
 

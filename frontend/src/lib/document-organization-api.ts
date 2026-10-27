@@ -11,6 +11,10 @@ export interface StackMessagePreview { id: string; channel_id: string; text: str
 export interface StackDocumentComment { id: string; channel_id: string; document_id: string; stack_id: string | null; text: string; references?: MessageReference[]; created_by: string; created_at: string; resolved: boolean; version: number }
 export interface DocumentOrganization { documents: SharedDocumentRecord[]; supported: boolean; content_mode?: 'server' | 'matrix'; organization_conflicts?: Array<{ event_id: string; author: string; at: number; stacks: string[] }>; stacks: DocumentStack[]; placements: DocumentPlacement[]; relations: DocumentRelation[]; message_references: StackMessageReference[]; stack_comments: StackDocumentComment[]; comments_incomplete: boolean }
 export interface DocumentMoveUndo { documentId: string; fromStackId: string | null; toStackId: string | null; expectedVersion: number; fromStackGeneration: string | null }
+export type DocumentOrganizationUndo =
+  | { kind: 'move'; receipt: DocumentMoveUndo }
+  | { kind: 'rename'; stack: DocumentStack; previousTitle: string }
+  | { kind: 'create'; stack: DocumentStack };
 const path = (channel: string) => '/channels/' + encodeURIComponent(channel) + '/shared-document-organization';
 const unchanged = (owner: string | null) => { if (!owner || owner !== api.getAccessToken()) throw Error('The signed-in account changed.'); };
 const encryptedApi = async () => (await import('./encrypted-document-organization-api')).encryptedDocumentOrganizationApi;
@@ -55,6 +59,17 @@ export const documentOrganizationApi = {
   async relate(channel: string, documentId: string, relatedDocumentId: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).relate(channel, documentId, relatedDocumentId, id); return mutate<DocumentRelation>(channel, '/relations', 'POST', { id, document_id: documentId, related_document_id: relatedDocumentId }); },
   async unlink(channel: string, id: string) { const owner = api.getAccessToken(); if (!await native(channel, owner)) return (await encryptedApi()).unlink(channel, id); return mutate<void>(channel, '/relations/' + encodeURIComponent(id), 'DELETE'); },
 };
+
+/** Compensate only the exact metadata revision produced by the reviewed action. */
+export async function undoDocumentOrganization(channel: string, undo: DocumentOrganizationUndo) {
+  if (undo.kind === 'move') {
+    const receipt = undo.receipt;
+    return documentOrganizationApi.move(channel, receipt.documentId, receipt.fromStackId, receipt.expectedVersion, receipt.fromStackGeneration);
+  }
+  if (undo.kind === 'rename') return documentOrganizationApi.renameStack(channel, undo.stack, undo.previousTitle);
+  // Both adapters refuse to remove a stack that acquired pages or references.
+  return documentOrganizationApi.deleteStack(channel, undo.stack);
+}
 
 /** Visible native titles only. A proposal creates no relationship or request. */
 export function suggestDocumentRelations(document: SharedDocumentRecord, visible: SharedDocumentRecord[], relations: DocumentRelation[], comments: StackDocumentComment[] = []) {

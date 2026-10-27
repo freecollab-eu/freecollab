@@ -17,7 +17,7 @@ import subprocess
 import sys
 import tempfile
 from playwright.sync_api import expect, sync_playwright
-from ui_navigation import reveal_message_actions, edit_saved_document
+from ui_navigation import reveal_message_actions, edit_saved_document, capture_work_card
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('document_helpers',Path(__file__).with_name('shared-documents-browser.py'))
 doc=importlib.util.module_from_spec(spec);spec.loader.exec_module(doc)
@@ -52,7 +52,7 @@ def main():
             python=os.getenv('BACKEND_PYTHON') or '/workspace/core/backend/.venv/bin/python'
             server=private/'api.py';server.write_text('import uvicorn\nfrom app.main import socket_app\nuvicorn.run(socket_app,host="127.0.0.1",port='+str(api_port)+',proxy_headers=False,access_log=False)\n')
             frontend=private/'frontend';shutil.copytree(ROOT/'frontend',frontend,ignore=shutil.ignore_patterns('node_modules','dist','__pycache__','.git'));(frontend/'node_modules').symlink_to(ROOT/'frontend/node_modules',target_is_directory=True)
-            bound_sources=['frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/Chat.tsx','frontend/src/components/WorkHub.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/lib/document-organization-api.ts','frontend/src/lib/shared-documents-api.ts','frontend/src/lib/socket.ts','frontend/src/styles/document-organization.css','frontend/src/styles/thread-history.css','frontend/src/lib/thread-history.ts','frontend/src/i18n/document-organization.sv.ts','backend/app/api/document_organization.py','backend/app/models/document_organization.py','backend/app/services/data_control.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/api/secure_messaging.py','frontend/tests/document-organization-browser.py']
+            bound_sources=['frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/Chat.tsx','frontend/src/components/WorkHub.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/lib/document-organization-api.ts','frontend/src/lib/document-organization-assist.ts','frontend/src/lib/shared-documents-api.ts','frontend/src/lib/socket.ts','frontend/src/styles/document-organization.css','frontend/src/styles/thread-history.css','frontend/src/lib/thread-history.ts','frontend/src/i18n/document-organization.sv.ts','backend/app/api/document_organization.py','backend/app/models/document_organization.py','backend/app/services/data_control.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/api/secure_messaging.py','frontend/tests/document-organization-browser.py']
             bound_sources+=['frontend/tests/ui_navigation.py','frontend/tests/shared-documents-browser.py','frontend/src/styles/conversation-work.css','backend/app/api/channels.py']
             source_hashes={name:hashlib.sha256(((frontend/Path(name).relative_to('frontend')) if name.startswith('frontend/src/') else ROOT/name).read_bytes()).hexdigest() for name in bound_sources}
             vite=helpers.vite_launcher(private,base,app_port);vite_source=vite.read_text().replace('root:'+json.dumps(str(ROOT/'frontend')),'root:'+json.dumps(str(frontend))).replace(json.dumps(str(private/'vite-cache')),json.dumps(str(frontend/'.vite-cache'))).replace('server:{host:','server:{fs:{allow:'+json.dumps([str(private),str(ROOT/'frontend')])+'},host:');vite.write_text(vite_source)
@@ -75,6 +75,36 @@ def main():
                     create_page('Research brief','Current source material.');create_page('Research notes','Evidence and observations.');create_page('Budget','Current costs.')
                     docs=helpers.api(base,'GET','/channels/'+channel+'/shared-documents',alice);by_title={row['title']:row for row in docs};brief=by_title['Research brief']['id'];notes=by_title['Research notes']['id']
                     results['real_ui_create_and_reloadable_three_documents']=True
+                    stage='quiet local stack suggestion with explicit accept dismiss and visible guarded Undo'
+                    organize(panel).get_by_role('button',name='New stack',exact=True).click();organize(panel).get_by_label('Stack name',exact=True).fill('Research material');organize(panel).get_by_role('button',name='Create stack',exact=True).click()
+                    expect(organize(panel).get_by_role('region',name='Research material',exact=True)).to_be_visible()
+                    research=next(row for row in helpers.api(base,'GET',endpoint,alice)['stacks'] if row['title']=='Research material')
+                    expect(panel.locator('.fc-document-stack-suggestion')).to_have_count(0)
+                    organize(panel).get_by_label('Move Research brief to stack',exact=True).focus()
+                    suggestion=panel.get_by_role('complementary',name='Suggested document stack',exact=True)
+                    expect(suggestion).to_have_count(1);expect(suggestion.get_by_text('Shared words: research',exact=True)).to_be_visible()
+                    assert not helpers.api(base,'GET',endpoint,alice)['placements']
+                    suggestion.get_by_role('button',name='Dismiss suggestion',exact=True).click()
+                    organize(panel).get_by_label('Move Research notes to stack',exact=True).focus();expect(suggestion).to_have_count(1)
+                    organize(panel).get_by_label('Move Research brief to stack',exact=True).focus();expect(suggestion).to_have_count(0)
+                    organize(panel).get_by_label('Move Research notes to stack',exact=True).focus();expect(suggestion).to_have_count(1)
+                    suggestion.get_by_role('button',name='Move to Research material',exact=True).click()
+                    expect(organize(panel).get_by_label('Move Research notes to stack',exact=True)).to_have_value(research['id'])
+                    organize(panel).locator(':scope > summary').click()
+                    expect(panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True)).to_be_visible()
+                    panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True).click()
+                    expect(organize(panel).get_by_label('Move Research notes to stack',exact=True)).to_have_value('')
+                    organize(panel).get_by_role('button',name='Rename stack Research material',exact=True).click();organize(panel).get_by_label('Stack name',exact=True).fill('Research source');organize(panel).get_by_role('button',name='Save name',exact=True).click()
+                    expect(organize(panel).get_by_role('region',name='Research source',exact=True)).to_be_visible()
+                    organize(panel).locator(':scope > summary').click();panel.locator('.fc-document-undo').get_by_role('button',name='Undo rename',exact=True).click()
+                    expect(organize(panel).get_by_role('region',name='Research material',exact=True)).to_be_visible()
+                    organize(panel).get_by_role('button',name='Delete empty stack Research material',exact=True).click();expect(organize(panel).get_by_role('region',name='Research material',exact=True)).to_have_count(0)
+                    organize(panel).get_by_role('button',name='New stack',exact=True).click();organize(panel).get_by_label('Stack name',exact=True).fill('Temporary group');organize(panel).get_by_role('button',name='Create stack',exact=True).click()
+                    expect(organize(panel).get_by_role('region',name='Temporary group',exact=True)).to_be_visible()
+                    organize(panel).locator(':scope > summary').click();panel.locator('.fc-document-undo').get_by_role('button',name='Undo stack creation',exact=True).click()
+                    expect(organize(panel).get_by_role('region',name='Temporary group',exact=True)).to_have_count(0)
+                    results['one_local_suggestion_explicit_dismiss_accept_and_metadata_only_move']=True
+                    results['move_rename_empty_stack_creation_undo_visible_outside_collapsed_controls']=True
                     stage='stack create and keyboard move'
                     for title in ['Underlag','Decisions']:
                         organize(panel).get_by_role('button',name='New stack',exact=True).click();organize(panel).get_by_label('Stack name',exact=True).fill(title);organize(panel).get_by_role('button',name='Create stack',exact=True).click();expect(organize(panel).get_by_role('region',name=title,exact=True)).to_be_visible()
@@ -92,14 +122,14 @@ def main():
                     results['actual_pointer_drag_and_keyboard_return_update_real_placement']=True
                     stage='document text edits survive guarded move Undo'
                     organize(panel).get_by_role('button',name=re.compile('^Research brief')).click();edit_saved_document(panel);expect(panel.get_by_label('Document text',exact=True)).to_be_editable()
-                    organize(panel).get_by_label('Move Research brief to stack',exact=True).select_option(decisions['id']);expect(organize(panel).get_by_role('button',name='Undo move',exact=True)).to_be_visible()
-                    panel.get_by_label('Document text',exact=True).fill('Newer synchronized source material.');expect(panel.get_by_text('All edits synchronized',exact=True)).to_be_visible();organize(panel).get_by_role('button',name='Undo move',exact=True).click();expect(organize(panel).get_by_label('Move Research brief to stack',exact=True)).to_have_value(underlag['id']);expect(panel.get_by_label('Document text',exact=True)).to_have_value('Newer synchronized source material.')
+                    organize(panel).get_by_label('Move Research brief to stack',exact=True).select_option(decisions['id']);expect(panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True)).to_be_visible()
+                    panel.get_by_label('Document text',exact=True).fill('Newer synchronized source material.');expect(panel.get_by_text('All edits synchronized',exact=True)).to_be_visible();panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True).click();expect(organize(panel).get_by_label('Move Research brief to stack',exact=True)).to_have_value(underlag['id']);expect(panel.get_by_label('Document text',exact=True)).to_have_value('Newer synchronized source material.')
                     results['undo_moves_metadata_only_and_preserves_later_yjs_text']=True
                     stage='second member changes invalidate stale Undo'
-                    organize(panel).get_by_label('Move Research brief to stack',exact=True).select_option(decisions['id']);expect(organize(panel).get_by_role('button',name='Undo move',exact=True)).to_be_visible()
+                    organize(panel).get_by_label('Move Research brief to stack',exact=True).select_option(decisions['id']);expect(panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True)).to_be_visible()
                     data=helpers.api(base,'GET',endpoint,bob);placement=next(row for row in data['placements'] if row['document_id']==brief)
                     helpers.api(base,'PUT',endpoint+'/documents/'+brief+'/placement',bob,{'stack_id':underlag['id'],'stack_generation':underlag['generation'],'expected_version':placement['version']})
-                    organize(panel).get_by_role('button',name='Undo move',exact=True).click();expect(panel.get_by_role('alert').filter(has_text='moved since')).to_be_visible();expect(panel.get_by_label('Document text',exact=True)).to_have_value('Newer synchronized source material.');panel.get_by_role('button',name='Reload organization',exact=True).click();expect(organize(panel).get_by_label('Move Research brief to stack',exact=True)).to_have_value(underlag['id'])
+                    panel.locator('.fc-document-undo').get_by_role('button',name='Undo move',exact=True).click();expect(panel.get_by_role('alert').filter(has_text='moved since')).to_be_visible();expect(panel.get_by_label('Document text',exact=True)).to_have_value('Newer synchronized source material.');panel.get_by_role('button',name='Reload organization',exact=True).click();expect(organize(panel).get_by_label('Move Research brief to stack',exact=True)).to_have_value(underlag['id'])
                     results['stale_undo_rejected_after_other_member_move_without_text_loss']=True
                     stage='source-title suggestion explicit save and document navigation'
                     proposals=organize(panel).locator('.fc-document-proposals');expect(proposals.get_by_text('Research notes',exact=True)).to_be_visible();assert helpers.api(base,'GET',endpoint,alice)['relations']==[]
@@ -203,7 +233,7 @@ def main():
                     stage='native encrypted title storage and mobile keyboard layout'
                     with sqlite3.connect(private/'proof.db') as connection:
                         ciphertexts=[row[0] for row in connection.execute('SELECT encrypted_payload FROM shareddocumentstack')];assert ciphertexts and all('Underlag' not in text and 'Research' not in text for text in ciphertexts)
-                    page.set_viewport_size({'width':320,'height':950});expect(organize(panel).get_by_role('region',name='Underlag',exact=True)).to_be_visible();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1');assert panel.evaluate('el=>el.scrollWidth<=el.clientWidth+1');page.evaluate("async()=>{(await import('/src/i18n/core.ts')).applyLocale('sv')}");panel=page.get_by_role('region',name='Arbete i det här samtalet',exact=True);expect(organize(panel).get_by_role('button',name='Ny hög',exact=True)).to_be_visible();expect(organize(panel).get_by_role('button',name=re.compile('^Research brief'))).to_be_visible();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1');REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.with_suffix('.png')));assert not errors
+                    page.set_viewport_size({'width':320,'height':950});expect(organize(panel).get_by_role('region',name='Underlag',exact=True)).to_be_visible();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1');assert panel.evaluate('el=>el.scrollWidth<=el.clientWidth+1');locale_owner=capture_work_card(page,panel);page.evaluate("async()=>{(await import('/src/i18n/core.ts')).applyLocale('sv')}");panel=locale_owner.get_by_role('region',name='Arbete i det här samtalet',exact=True);expect(organize(panel).get_by_role('button',name='Ny hög',exact=True)).to_be_visible();expect(organize(panel).get_by_role('button',name=re.compile('^Research brief'))).to_be_visible();assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1');REPORT.parent.mkdir(parents=True,exist_ok=True);page.screenshot(path=str(REPORT.with_suffix('.png')));assert not errors
                     results['swedish_mobile_controls_keep_user_document_titles_literal']=True
                     results['encrypted_native_titles_320px_no_overflow_and_no_browser_exceptions']=True
                     print('PASS document organization: '+str(len(results))+' real browser groups',flush=True)

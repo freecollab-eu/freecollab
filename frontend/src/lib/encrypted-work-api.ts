@@ -19,6 +19,9 @@ interface Page { items: Pointer[]; next_after: number; has_more: boolean; status
 interface Dependencies {
   request?: <T>(path: string, options?: RequestInit) => Promise<T>;
   token?: () => string | null; actor?: () => string | null; secure?: typeof getSecureMessaging;
+  /** Inspection must not publish retries or open retained pointer storage. */
+  readOnly?: boolean;
+  eventLimit?: number;
 }
 export interface EncryptedSaveOptions { id?: string; mergeParents?: string[]; archived?: boolean }
 const local = (channel: string) => '/channels/' + encodeURIComponent(channel) + '/encrypted-work';
@@ -95,6 +98,8 @@ export async function getEncryptedWorkAuthority(channelId: string, eventId: stri
 
 /** Resource content exists only in verified Matrix events and this device's memory. */
 export class EncryptedWorkClient {
+  private readonly readOnly: boolean;
+  private readonly eventLimit: number;
   private readonly request: NonNullable<Dependencies['request']>;
   private readonly token: NonNullable<Dependencies['token']>;
   private readonly actor: NonNullable<Dependencies['actor']>;
@@ -112,6 +117,9 @@ export class EncryptedWorkClient {
   private activeFiltered=false;
   private readonly invalidate = () => this.stop();
   constructor(readonly channelId: string, dependencies: Dependencies = {}) {
+    this.readOnly = dependencies.readOnly === true;
+    this.eventLimit = dependencies.eventLimit ?? 10000;
+    if (!Number.isSafeInteger(this.eventLimit) || this.eventLimit < 1 || this.eventLimit > 10000) throw Error('Choose a bounded encrypted history limit.');
     this.request = dependencies.request || ((path, options) => api.request(path, options));
     this.token = dependencies.token || (() => api.getAccessToken());
     this.actor = dependencies.actor || (() => api.getCurrentUserId());
@@ -145,6 +153,7 @@ export class EncryptedWorkClient {
     return context.mode === 'federated' ? federated(this.channelId) + '/work-index' : local(this.channelId) + '/index';
   }
   private async flush(context: EncryptedWorkContext) {
+    if (this.readOnly) return;
     const digest = await pointerSessionDigest(this.owner!); this.current();
     try { for (const pointer of await pendingWorkPointers(context.matrix_user_id, digest))
       if (pointer.channel_id === this.channelId && pointer.connection_id === context.connection_id && Date.now() - pointer.created_at < 7 * 86400000) this.pending.set(pointer.matrix_event_id, pointer); }
@@ -193,7 +202,7 @@ export class EncryptedWorkClient {
       }
       this.cursor = results[0].next_after; if (results[1]) this.peerCursor = results[1].next_after;
       more = results.some(page => page.has_more);
-      if (this.pointers.size > 10000) throw Error('Encrypted work exceeds its retained event bound.');
+      if (this.pointers.size > this.eventLimit) throw Error('Encrypted work exceeds this view’s history limit.');
     }
     const secure = await this.secure(); this.current();
     const { c, roomId } = await secure.roomFor(this.channelId); this.current();
@@ -237,6 +246,12 @@ export class EncryptedWorkClient {
     return this.latest;
   }
   async organizationId() { const view = await this.load(); this.current(); return organizationResourceId(view.context.connection_id); }
+  async inspect() {
+    if (!this.readOnly) throw Error('Use a read-only client for inspection.');
+    const snapshot = await this.load(); this.current();
+    return { snapshot, events: [...this.eventsById.values()].map(event => ({ ...event,
+      content: JSON.parse(JSON.stringify(event.content)) as Record<string, unknown> })) };
+  }
   async verifiedEvents(types: string[]): Promise<VerifiedWorkEvent[]> {
     if (!Array.isArray(types) || !types.length || types.length > 16 || types.some(type => typeof type !== 'string' || !type || type.length > 128)) throw Error('Choose bounded encrypted event types.');
     await this.loadEvents(types); this.current();
@@ -248,6 +263,7 @@ export class EncryptedWorkClient {
     return events.map(event=>{const pointer=this.pointers.get(event.event_id);if(!pointer?.index_server||pointer.matrix_user_id!==event.sender||!Number.isSafeInteger(pointer.sequence)||pointer.sequence<1)throw Error('The encrypted event has no authenticated durable index position.');return {...event,index_server:pointer.index_server,index_sequence:pointer.sequence};});
   }
   async publishPointer(eventId: string) {
+    if (this.readOnly) throw Error('This encrypted view is read-only.');
     const context = await this.context(); this.current();
     if (typeof eventId !== 'string' || !eventId.startsWith('$') || eventId.length > 1024) throw Error('Choose an encrypted Matrix event.');
     const digest = await pointerSessionDigest(this.owner!); this.current();
@@ -258,6 +274,7 @@ export class EncryptedWorkClient {
     await this.flush(context); return eventId;
   }
   private async send(context: EncryptedWorkContext, content: Record<string, unknown>) {
+    if (this.readOnly) throw Error('This encrypted view is read-only.');
     const payload={protocol: ENCRYPTED_WORK_PROTOCOL, connection_id: context.connection_id, ...content};
     if(new TextEncoder().encode(JSON.stringify(payload)).length>40*1024)throw new EncryptedWorkDraftError('This change is too large. Shorten the text or save fewer workflow steps.');
     const secure = await this.secure(); this.current();

@@ -66,7 +66,7 @@ _READ = (
     r"/channels", r"/channels/" + _ID + r"(?:/members|/invites|/metadata)?",
     r"/messages/channels/" + _ID + r"(?:/sync(?:/head)?)?", r"/messages/" + _ID,
     r"/threads/messages/" + _ID + r"(?:/subscription)?", r"/reactions/messages/" + _ID,
-    r"/read-receipts/channels/" + _ID + r"(?:/unread-count)?",
+    r"/read-receipts/channels/" + _ID + r"(?:/(?:unread-count|return-summary))?",
     r"/presence/(?:online|users/" + _ID + r"|channel/" + _ID + r")",
     r"/preferences/(?:appearance|language)", r"/mentions/me", r"/my-day",
     r"/direct-messages(?:/blocks)?", r"/group-conversations",

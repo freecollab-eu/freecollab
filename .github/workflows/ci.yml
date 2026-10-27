@@ -365,6 +365,10 @@ jobs:
           curl --fail --retry 30 --retry-connrefused --retry-delay 1 http://127.0.0.1:3000/
       - name: Verify two browsers, attachments, recovery and member removal
         run: python scripts/secure-browser-test.py
+      - name: Verify encrypted root and reply source navigation
+        env:
+          SECURE_MESSAGE_NAVIGATION_PROOF_REPORT: ${{ runner.temp }}/freecollab-secure-message-navigation.json
+        run: python frontend/tests/secure-message-navigation-browser.py
       - name: Verify lost-device revocation with stale recipient keys
         run: python scripts/secure-device-browser-test.py
       - name: Verify encryption account controls in the real client
@@ -406,6 +410,78 @@ jobs:
         with:
           name: secure-e2e-service-logs
           path: /tmp/freecollab-secure-*.log
+          retention-days: 7
+      - name: Retain encrypted source navigation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: secure-message-navigation-proofs
+          path: |
+            ${{ runner.temp }}/freecollab-secure-message-navigation.json
+            ${{ runner.temp }}/freecollab-secure-message-navigation*.png
+          if-no-files-found: warn
+          retention-days: 7
+
+  natural-collaboration-e2e:
+    name: Natural collaboration flows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BACKEND_PYTHON: python
+      ENVIRONMENT: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.lock
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install locked dependencies and browser
+        run: |
+          python -m pip install --require-hashes -r backend/requirements-dev.lock
+          python -m playwright install --with-deps chromium
+          python - <<'PY'
+          import os
+          from playwright.sync_api import sync_playwright
+          with sync_playwright() as playwright:
+              with open(os.environ['GITHUB_ENV'], 'a') as output:
+                  output.write('CHROMIUM_PATH=' + playwright.chromium.executable_path + '\n')
+          PY
+          npm ci --prefix frontend
+      - name: Verify reviewed next steps and retained document source
+        env:
+          NATURAL_COLLABORATION_PROOF_REPORT: ${{ runner.temp }}/freecollab-natural/interaction/report.json
+        run: python frontend/tests/natural-collaboration-browser.py
+      - name: Verify entry summary and exact source navigation
+        env:
+          CHANNEL_RETURN_PROOF_REPORT: ${{ runner.temp }}/freecollab-natural/return/report.json
+        run: python frontend/tests/channel-return-browser.py
+      - name: Verify sample entry summary and retained account isolation
+        env:
+          CHANNEL_RETURN_DEMO_REPORT: ${{ runner.temp }}/freecollab-natural/demo-return/report.json
+        run: python frontend/tests/channel-return-demo-browser.py
+      - name: Verify contextual command and reference ordering
+        env:
+          SUGGESTION_RANKING_REPORT: ${{ runner.temp }}/freecollab-natural/ranking/report.json
+        run: python frontend/tests/suggestion-ranking-browser.py
+      - name: Verify local organization suggestions and guarded Undo
+        env:
+          DOCUMENT_ORGANIZATION_PROOF_REPORT: ${{ runner.temp }}/freecollab-natural/organization/report.json
+        run: python frontend/tests/document-organization-browser.py
+      - name: Retain scoped natural collaboration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: natural-collaboration-proofs
+          path: |
+            ${{ runner.temp }}/freecollab-natural/**/*.json
+            ${{ runner.temp }}/freecollab-natural/**/*.png
+          if-no-files-found: warn
           retention-days: 7
 
   completion-e2e:
@@ -539,7 +615,7 @@ jobs:
   docker-build:
     name: Docker Build
     runs-on: ubuntu-latest
-    needs: [backend-test, frontend-test, product-e2e, secure-e2e, completion-e2e, completion-secure-e2e]
+    needs: [backend-test, frontend-test, product-e2e, secure-e2e, natural-collaboration-e2e, completion-e2e, completion-secure-e2e]
     env:
       # The browser inspects and aborts this owned fixture frame before network.
       PUBLIC_WEBSITE_DEMO_URL: http://127.0.0.1:18082/product-demo/

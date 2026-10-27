@@ -4,7 +4,7 @@ import { normalizeMessageReferences, validateMessageReferences, type MessageRefe
 import type { FieldReferences } from './field-references';
 
 /** A reviewed native draft, never an instruction to create a record. */
-export interface ComposerWorkDraft { key: string; title: string; text: string; assigneeUserId?: string; field_references?: FieldReferences }
+export interface ComposerWorkDraft { key: string; title: string; text: string; assigneeUserId?: string; dueDate?: string; field_references?: FieldReferences }
 export interface ComposerDecisionDraft { key: string; title: string; content: string; responsibleUserId?: string; field_references?: FieldReferences }
 
 export type ComposerCommandIntent =

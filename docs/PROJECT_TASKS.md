@@ -6,6 +6,16 @@ Open a linked file to download its bytes through the channel's existing native o
 
 Changes are persisted as immutable revisions. Task history shows previous content and completion state. A save includes the revision that the editor read; a concurrent change returns HTTP 409 without replacing the other person's work. The panel retains an unsaved form after a conflict. Choosing **Reload current revisions** explicitly closes that form and discards its unsaved edits, as the panel warns, so reopening the task starts from its current content. Archive and reopen create revisions too. An archived project must be reopened before its tasks can change.
 
+## Reviewed drafts from conversation
+
+Selected text in a conversation or thread can open a reviewed task draft with
+locally suggested title, current member and due date. Every field stays editable;
+no task exists before Save. Explicit selected person identities are retained,
+ambiguous names or dates stay unset, and members are refreshed before initial
+review. Native saved tasks retain the original message link; encrypted task
+content retains its selected excerpt and references, without a persistent native
+message/work link. See [the interaction contract](NATURAL_COLLABORATION.md).
+
 ## Access and limits
 
 Current workspace and channel membership are required for every read and write. Workspace administration alone does not grant access to a private channel. All current channel members can collaborate on content. Only the item's creator or a channel administrator can archive or reopen it. Removed or blocked members lose access, including through previously issued customer SSO sessions. Writers recheck the verified native session, account security version, current provider scope and membership after acquiring the channel lock and after Matrix event validation.

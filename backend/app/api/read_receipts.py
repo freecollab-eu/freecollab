@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel
 from ..database import get_session
 from ..models.read_receipt import ReadReceipt
@@ -6,13 +6,38 @@ from ..models.message import Message
 from ..services.auth import get_current_user
 from ..services.access import require_channel_member
 from ..realtime.socket import broadcast_to_channel
-from datetime import datetime
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/read-receipts", tags=["read-receipts"])
 
 
 class MarkRead(BaseModel):
     message_id: str
+
+
+def reading_baseline(since: datetime):
+    baseline = since.astimezone(timezone.utc).replace(tzinfo=None) if since.tzinfo else since
+    if baseline > datetime.utcnow():
+        raise HTTPException(422, "The read baseline must not be in the future")
+    return baseline
+
+
+@router.get("/channels/{channel_id}/return-summary")
+def return_summary(channel_id: str, since: datetime, response: Response,
+                   user=Depends(get_current_user), session=Depends(get_session)):
+    """Inspect changes without changing the captured or current read receipt."""
+    response.headers["Cache-Control"] = "no-store"
+    from ..services.channel_return import channel_return_summary
+    return channel_return_summary(session, channel_id, user.id, reading_baseline(since))
+
+
+@router.get("/channels/{channel_id}/return-summary/encrypted-decisions")
+def encrypted_return_summary(channel_id: str, since: datetime, response: Response,
+                             user=Depends(get_current_user), session=Depends(get_session)):
+    """Opaque current decision pointers; labels are resolved only on the device."""
+    response.headers["Cache-Control"] = "no-store"
+    from ..services.channel_return import encrypted_return_decisions
+    return encrypted_return_decisions(session, channel_id, user.id, reading_baseline(since))
 
 
 @router.post("/channels/{channel_id}")

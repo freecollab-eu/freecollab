@@ -3,6 +3,7 @@ import { api } from './api';
 import { nextCommandIndex } from './commands';
 import { messageReferencesApi } from './message-references-api';
 import { getReferenceQuery, insertReference, referenceKey, type MessageReference, type ReferenceCandidate, type ReferenceQuery } from './message-references';
+import { inferSuggestionContext, rankReferenceSuggestions, recordReferenceChoice, referenceSuggestionContext, type SuggestionContext } from './suggestion-ranking';
 
 interface Options {
   channelId?: string;
@@ -10,6 +11,7 @@ interface Options {
   secure?: boolean;
   /** Distinguishes draft contexts such as threads within the same channel. */
   contextId?: string;
+  suggestions?: SuggestionContext;
   text: string;
   references: MessageReference[];
   input: RefObject<HTMLInputElement | HTMLTextAreaElement>;
@@ -36,7 +38,9 @@ export function useComposerReferences(options: Options) {
     !!selection && selection.scope === scope && selection.text === options.text;
   const query = open ? selection.query : null;
   const key = query && selection ? JSON.stringify([scope, selection.text, query.start, query.end, query.query]) : '';
-  const candidates = key && response?.key === key ? response.candidates : [];
+  const suggestionScope = { actorId: api.getCurrentUserId(), token, workspaceId: options.workspaceId, channelId: options.channelId };
+  const suggestions = referenceSuggestionContext(options.suggestions || inferSuggestionContext(options.contextId), options.text, query?.start ?? options.text.length);
+  const candidates = key && response?.key === key ? rankReferenceSuggestions(response.candidates, query?.query || '', suggestions, suggestionScope) : [];
   const error = key && response?.key === key ? response.error : '';
   const activeIndex = candidates.length ? Math.max(0, candidates.findIndex(candidate => referenceKey(candidate) === selected)) : -1;
 
@@ -111,6 +115,7 @@ export function useComposerReferences(options: Options) {
     for (const name of intents) document.addEventListener(name, retire, true);
     try { before.onInsert(result.text, result.references); }
     catch (failure) { retire(); throw failure; }
+    if (token === api.getAccessToken() && actor === api.getCurrentUserId() && currentScope.current === scope) recordReferenceChoice(suggestionScope, candidate);
     setSelection(null);
     if (retired) return;
     frame = requestAnimationFrame(() => {

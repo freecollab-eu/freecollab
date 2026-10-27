@@ -9,6 +9,7 @@ export interface MentionReferencesProps {
   id: string; candidates: ReferenceCandidate[]; activeIndex: number;
   onActiveIndex: (index: number) => void; onSelect: (candidate: ReferenceCandidate) => void;
   onClose: () => void; query: string; loading?: boolean; error?: string; onManageGroups?: () => void;
+  contextual?: boolean;
 }
 export const REFERENCE_LABELS: Record<ReferenceKind, string> = {
   person: 'People', group: 'Groups', document: 'Documents', task: 'Tasks', file: 'Files', channel: 'Channels',
@@ -16,7 +17,7 @@ export const REFERENCE_LABELS: Record<ReferenceKind, string> = {
 const icons = { person: UserRound, group: Users, document: FileText, task: CheckSquare, file: Paperclip, channel: Hash };
 
 /** Suggestions stay attached to the active composer and never take its focus. */
-export function MentionReferences({ id, candidates, activeIndex, onActiveIndex, onSelect, onClose, query, loading = false, error = '', onManageGroups }: MentionReferencesProps) {
+export function MentionReferences({ id, candidates, activeIndex, onActiveIndex, onSelect, onClose, query, loading = false, error = '', onManageGroups, contextual = true }: MentionReferencesProps) {
   useI18n();
   const panel = useRef<HTMLElement>(null), list = useRef<HTMLDivElement>(null);
   const [height, setHeight] = useState<number>();
@@ -38,19 +39,21 @@ export function MentionReferences({ id, candidates, activeIndex, onActiveIndex, 
     if (bounds.top < frame.top) viewport.scrollTop -= frame.top - bounds.top;
     else if (bounds.bottom > frame.bottom) viewport.scrollTop += bounds.bottom - frame.bottom;
   }, [current?.kind, current?.id, id, height]);
-  const grouped: { kind: ReferenceKind; rows: { candidate: ReferenceCandidate; index: number }[] }[] = [];
+  const grouped: { key: string; label: string; rows: { candidate: ReferenceCandidate; index: number }[] }[] = [];
   candidates.forEach((candidate, index) => {
+    const key = contextual ? query.trim() ? 'matching' : 'contextual' : candidate.kind;
+    const label = key === 'matching' ? 'Matching references' : key === 'contextual' ? 'Useful here, then recent choices' : REFERENCE_LABELS[candidate.kind];
     const previous = grouped[grouped.length - 1];
-    if (previous?.kind === candidate.kind) previous.rows.push({ candidate, index });
-    else grouped.push({ kind: candidate.kind, rows: [{ candidate, index }] });
+    if (previous?.key === key) previous.rows.push({ candidate, index });
+    else grouped.push({ key, label, rows: [{ candidate, index }] });
   });
   return <section ref={panel} className={`fc-slash-commands fc-mention-references${height !== undefined && height < 220 ? ' is-compact' : ''}`}
     aria-labelledby={id + '-title'} style={height === undefined ? undefined : { '--fc-slash-available-height': height + 'px' } as CSSProperties}
     onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); onClose(); } }}>
     <header className="fc-slash-commands-header"><div><AtSign size={20} aria-hidden="true" /><h2 id={id + '-title'}>{t('Mention or reference')}</h2></div><button type="button" aria-label={t('Close reference list')} onClick={onClose}><X size={17} aria-hidden="true" /></button></header>
     <div ref={list} id={id} className="fc-slash-commands-list" role="listbox" aria-labelledby={id + '-title'} aria-busy={loading}>
-      {grouped.map((group, groupIndex) => <div key={group.kind + '-' + groupIndex} role="group" aria-label={t(REFERENCE_LABELS[group.kind])}>
-        <p className="fc-slash-commands-group" aria-hidden="true">{t(REFERENCE_LABELS[group.kind])}</p>
+      {grouped.map((group, groupIndex) => <div key={group.key + '-' + groupIndex} role="group" aria-label={t(group.label)}>
+        <p className="fc-slash-commands-group" aria-hidden="true">{t(group.label)}</p>
         {/* Keyboard scrolling must not select rows under a stationary pointer. */}
         {group.rows.map(({ candidate, index }) => {
           const Icon = icons[candidate.kind];

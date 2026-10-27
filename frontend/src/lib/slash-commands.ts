@@ -1,5 +1,6 @@
 import { t } from '../i18n/core';
 import type { InstalledAppCommand } from './installed-app-commands';
+import { orderCommandSuggestions, type SuggestionContext, type SuggestionScope } from './suggestion-ranking';
 
 export type SlashAction =
   | 'document' | 'task' | 'decision' | 'meetings' | 'files' | 'members' | 'groups' | 'channel'
@@ -34,6 +35,9 @@ export interface SlashContext {
   /** True only after verifying this channel's federated-work context. */
   sharedWork?: boolean;
   installedCommands?: readonly InstalledAppCommand[];
+  /** Presentation hints never grant access or change command parsing. */
+  suggestions?: SuggestionContext;
+  suggestionScope?: SuggestionScope;
 }
 
 interface Definition extends SlashCommand {
@@ -115,7 +119,7 @@ export function getSlashCommands(context: SlashContext, query = ''): SlashComman
       group: 'conversation', keywords: `${item.app_id} ${item.app_name} ${item.name} ${item.description}`,
       installedApp: item,
     })) : [];
-  return [...definitions, ...installed].filter(item => !item.available || item.available(context)).map((item, index) => {
+  const matches = [...definitions, ...installed].filter(item => !item.available || item.available(context)).map((item, index) => {
     const description = item.id === 'cloud' && context.secure ? 'Share encrypted links to your provider files.' : item.description;
     const command: SlashCommand = { id: item.id, command: item.command, label: item.installedApp ? item.label : t(item.label), description: item.installedApp ? description : t(description), group: item.group, keywords: item.keywords, ...(item.installedApp ? { installedApp: item.installedApp } : {}) };
     const shortcut = normalize(item.command);
@@ -124,5 +128,6 @@ export function getSlashCommands(context: SlashContext, query = ''): SlashComman
     const searchable = normalize([item.command, item.label, command.label, item.description, command.description, item.keywords].join(' '));
     const score = !normalized ? 0 : shortcut === normalized || label === normalized || original === normalized ? 0 : shortcut.startsWith(normalized) || label.startsWith(normalized) || original.startsWith(normalized) ? 1 : normalized.split(' ').every(word => searchable.includes(word)) ? 2 : -1;
     return { command, index, score };
-  }).filter(item => item.score >= 0).sort((left, right) => left.score - right.score || left.index - right.index).map(item => item.command);
+  }).filter(item => item.score >= 0);
+  return orderCommandSuggestions(matches, context.suggestions, context.suggestionScope).map(item => item.command);
 }

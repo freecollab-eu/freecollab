@@ -326,6 +326,69 @@ async function getMessages(channelId: string, before?: string, limit = 100, root
   });
 }
 
+/** Bounded entry inspection of loaded ciphertext; never scrolls back or marks read. */
+async function getRecentMessages(channelId: string, options: { limit?: number; eventLimit?: number; signal?: AbortSignal; isCurrent?: () => boolean } = {}): Promise<Message[]> {
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId(), attempt = generation;
+  const limit = options.limit ?? 100, eventLimit = options.eventLimit ?? 200;
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(eventLimit) || eventLimit < 1 || eventLimit > 200) throw new Error('Choose bounded recent message limits.');
+  const sameOwner = () => { if (!token || !actor || token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()
+    || attempt !== generation || options.signal?.aborted || options.isCurrent && !options.isCurrent()) throw new Error('The encrypted conversation changed.'); };
+  sameOwner(); await refreshBindings(); sameOwner();
+  const { c, room, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
+  const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw new Error('The encrypted conversation changed.'); };
+  current();
+  const rows = room.getLiveTimeline().getEvents().slice(-eventLimit).filter(event => event.getRoomId() === roomId && event.isEncrypted());
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, rows.length) }, async () => {
+    while (next < rows.length) { current(); const event = rows[next++]; await c.decryptEventIfNeeded(event).catch(() => undefined); current(); }
+  }));
+  await refreshBindings(); current();
+  const changes = new Map<string, MatrixEvent>();
+  for (const event of rows) {
+    const relation = event.getOriginalContent()['m.relates_to'];
+    if (!event.isRedacted() && !event.isDecryptionFailure() && event.getType() === EventType.RoomMessage
+        && relation?.rel_type === 'm.replace' && typeof relation.event_id === 'string') changes.set(relation.event_id, event);
+  }
+  return rows.filter(event => (event.getType() === EventType.RoomMessage || event.isDecryptionFailure())
+    && event.getOriginalContent()['m.relates_to']?.rel_type !== 'm.replace').slice(-limit).reverse().map(event => {
+    const item = asMessage(channelId, event), edit = changes.get(item.id);
+    if (edit && edit.getSender() === event.getSender()) { const replacement = asMessage(channelId, edit);
+      item.content = replacement.content; item.references = replacement.references; item.mentions = replacement.mentions; item.edited_at = new Date(edit.getTs()).toISOString(); }
+    return item;
+  });
+}
+
+/** Resolve one root/reply by its real encrypted event, including an actual root parent. */
+async function getMessage(channelId: string, eventId: string): Promise<Message> {
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId(), attempt = generation;
+  const validId = (value: unknown): value is string => typeof value === 'string' && !!value && value.length <= 1024 && !/[\s\u0000-\u001f\u007f]/.test(value);
+  const unavailable = () => new Error('This encrypted source message could not be verified.');
+  if (!token || !actor || !validId(eventId)) throw unavailable();
+  const sameOwner = () => { if (token !== configuration?.getAccessToken() || actor !== configuration?.getUserId() || generation !== attempt) throw unavailable(); };
+  await refreshBindings(); sameOwner();
+  const { c, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
+  const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw unavailable(); };
+  const verify = (event: MatrixEvent, id: string, root = false) => {
+    current();
+    if (event.getId() !== id || event.getRoomId() !== roomId || !event.isEncrypted() || event.getType() !== EventType.RoomMessage
+      || event.isRedacted() || event.isDecryptionFailure() || !validId(event.getSender()) || !Number.isFinite(event.getTs())
+      || typeof event.getContent().body !== 'string' || 'm.new_content' in event.getContent()) throw unavailable();
+    const relation = event.getOriginalContent()['m.relates_to'];
+    if (relation != null && (typeof relation !== 'object' || Array.isArray(relation) || relation.rel_type !== 'm.thread'
+      || root || !validId(relation.event_id) || relation.event_id === id)) throw unavailable();
+    return relation?.event_id as string | undefined;
+  };
+  const event = await secureMessaging.getDecryptedEvent(channelId, eventId); current();
+  const parentId = verify(event, eventId);
+  let parent: MatrixEvent | undefined;
+  if (parentId) { parent = await secureMessaging.getDecryptedEvent(channelId, parentId); current(); verify(parent, parentId, true); }
+  // Even a cached Matrix timeline must not outlive current product membership.
+  await refreshBindings(); current();
+  if (verify(event, eventId) !== parentId) throw unavailable();
+  if (parent && parentId) verify(parent, parentId, true);
+  return asMessage(channelId, event);
+}
+
 async function messageRecipients(channelId: string, content: string, references: MessageReference[], mentions: string[]) {
   const token = configuration?.getAccessToken(), owner = configuration?.getUserId();
   const prepared = await prepareMessageReferences(content, references, mentions, async identities => {
@@ -437,7 +500,7 @@ async function getDevices(channelId?: string): Promise<SecureDevice[]> {
 }
 export const secureMessaging = {
   configure: configureSecureMessaging,
-  ensureSession, refreshBindings, getMessages, sendMessage, getReactions, setupRecovery, unlockRecovery, getDevices, events, sendEvent, roomFor,
+  ensureSession, refreshBindings, getMessages, getRecentMessages, getMessage, sendMessage, getReactions, setupRecovery, unlockRecovery, getDevices, events, sendEvent, roomFor,
   async revokeDevice(deviceId: string, password: string, code?: string, managed = false): Promise<{ revoked: true; current: boolean }> {
     const c = await ensureSession();
     const result = await request<{ revoked: true; current: boolean }>('/secure/devices/' + encodeURIComponent(deviceId) + (managed ? '/revoke-managed' : '/revoke'), managed ? { confirmed: true } : { password, ...(code ? { code } : {}) });

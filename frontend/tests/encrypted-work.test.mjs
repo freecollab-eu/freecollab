@@ -197,21 +197,34 @@ test('cancelled encrypted run does not execute any future operation', async () =
   f.client.stop();
 });
 
-async function guardedReader({changeMembers=false,changeRevocations=false,counter={trusted:0},sourceSender=alice}={}) {
+async function guardedReader({changeMembers=false,changeRevocations=false,counter={trusted:0},sourceSender=alice,readOnly=false,eventLimit=10000,indexed=1}={}) {
   const resource=await id(),event={event_id:'$read',sender:alice,sender_device_id:'ALICE',timestamp:1,type:model.ENCRYPTED_WORK_REVISION,content:{protocol:model.ENCRYPTED_WORK_PROTOCOL,connection_id:connection,id:resource,kind:'feed',fields:{title:'Verified private source',body:'Never return after revoked authority'},parents:[],archived:false}};
   let scopes=0,deviceReads=0;
   const api={getAccessToken:()=> 'session',getCurrentUserId:()=> 'alice'};
-  const transport=compile('../src/lib/encrypted-work-api.ts',{'./api':{api},'./secure-client':{},'./federated-work-api':{CandidateFault:class extends Error{},validateContext:x=>x,trustedEvent:async()=>{counter.trusted++;return event;}},'./encrypted-work-references':references,'./federated-work-model':legacy,'./encrypted-work-model':model,'./federated-work-pointers':{pointerSessionDigest:async()=> 'digest',pendingWorkPointers:async()=>[],removeWorkPointer:async()=>{}}},{window:new EventTarget()});
-  const client=new transport.EncryptedWorkClient('room',{token:()=> 'session',actor:()=> 'alice',secure:async()=>({roomFor:async()=>({roomId:context.room_id,c:{getUserId:()=>alice,getDeviceId:()=> 'ALICE'}})}),request:async path=>{
+  const transport=compile('../src/lib/encrypted-work-api.ts',{'./api':{api},'./secure-client':{},'./federated-work-api':{CandidateFault:class extends Error{},validateContext:x=>x,trustedEvent:async()=>{counter.trusted++;return event;}},'./encrypted-work-references':references,'./federated-work-model':legacy,'./encrypted-work-model':model,'./federated-work-pointers':{pointerSessionDigest:async()=> 'digest',pendingWorkPointers:async()=>{counter.retained=(counter.retained||0)+1;return [];},removeWorkPointer:async()=>{}}},{window:new EventTarget()});
+  const client=new transport.EncryptedWorkClient('room',{readOnly,eventLimit,token:()=> 'session',actor:()=> 'alice',secure:async()=>({roomFor:async()=>({roomId:context.room_id,c:{getUserId:()=>alice,getDeviceId:()=> 'ALICE'}})}),request:async path=>{
     if(path.endsWith('/context')){scopes++;return {...context,members:changeMembers&&scopes>1?context.members.filter(m=>m.matrix_user_id!==bob):context.members};}
     if(path.startsWith('/secure/devices/revocations')){deviceReads++;return {revoked_devices:changeRevocations&&deviceReads>1?[{matrix_user_id:alice,device_id:'ALICE'}]:[]};}
-    const empty={connection_id:connection,status:'active',items:[],next_after:0,has_more:false},after=Number(new URL(path,'https://fixture.test').searchParams.get('local_after')||0);return {connection_id:connection,local:{...empty,items:after?[]:[{sequence:1,matrix_event_id:'$read',matrix_user_id:sourceSender}],next_after:1},remote:empty};
+    const empty={connection_id:connection,status:'active',items:[],next_after:0,has_more:false},after=Number(new URL(path,'https://fixture.test').searchParams.get('local_after')||0);return {connection_id:connection,local:{...empty,items:after?[]:Array.from({length:indexed},(_,i)=>({sequence:i+1,matrix_event_id:i?'$extra-'+i:'$read',matrix_user_id:sourceSender})),next_after:indexed},remote:empty};
   }});
   return client;
 }
 test('actual encrypted reader rechecks current room and device authority after asynchronous event verification',async()=>{
  for(const change of [{changeMembers:true},{changeRevocations:true}]){const client=await guardedReader(change);await assert.rejects(client.load(),/authority changed/);assert.equal(client.hasCurrentScope(),false);client.stop();}
  const allowed=await guardedReader();const view=await allowed.load();assert.equal(view.records[0].selected.fields.title,'Verified private source');allowed.stop();
+});
+
+test('read-only inspection never opens pending account storage, publishes pointers or sends changes',async()=>{
+ const counter={trusted:0,retained:0},client=await guardedReader({readOnly:true,counter});
+ const inspection=await client.inspect();assert.equal(inspection.snapshot.records.length,1);assert.equal(inspection.events.length,1);
+ assert.equal(counter.retained,0);
+ await assert.rejects(client.publishPointer('$no-write'),/read-only/);
+ await assert.rejects(client.save('feed',{title:'Do not publish',body:''}),/read-only/);
+ assert.equal(counter.retained,0);client.stop();
+});
+test('inspection history limit is enforced before decrypting a large encrypted index',async()=>{
+ const counter={trusted:0,retained:0},client=await guardedReader({readOnly:true,eventLimit:1,indexed:2,counter});
+ await assert.rejects(client.inspect(),/history limit/);assert.equal(counter.trusted,0);assert.equal(counter.retained,0);client.stop();
 });
 
 test('only exact verified historical spans survive target removal; forged old metadata and copied spans need current access',async()=>{

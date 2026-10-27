@@ -101,6 +101,12 @@ import { mobileDrafts, mobileOutbox } from '../mobile';
 import { offlineLibrary } from '../mobile/library';
 import { getModalFocusRestoration, useModalFocus } from '../lib/useModalFocus';
 import { ChatSharedMaterial } from './ChatSharedMaterial';
+import { ChannelReturnSummary } from './ChannelReturnSummary';
+import type { ChannelReturnBaseline } from '../lib/channel-return-summary';
+import { MessageTaskSelection } from './MessageTaskSelection';
+import { taskDraftFromMessage } from '../lib/task-draft';
+import { resolveNavigationMessage } from '../lib/message-navigation';
+import { recordCommandChoice } from '../lib/suggestion-ranking';
 import { Avatar } from './Avatar';
 import { ContextualCopilot, type ContextualCopilotActivation } from './ContextualCopilot';
 import { copilotIntents, copilotDiscussionSummaryInstruction, copilotRelatedDocumentsInstruction } from '../lib/copilot-intents';
@@ -399,7 +405,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     embedded: !!embeddedChannelId, nativeSession, workspaceRole: workspace?.role, hasWorkspace: !!workspace,
     hasAdmin: !!onAdmin && !!slashStaff?.allowed && slashStaff.token === api.getAccessToken(),
     sharedWork: !!slashSharedWork && slashSharedWork.channelId === activeChannel?.id && slashSharedWork.workspaceId === workspace?.id && slashSharedWork.token === api.getAccessToken(),
-    installedCommands: appCommandCatalogue?.scope === flowScope ? appCommandCatalogue.commands : [] };
+    installedCommands: appCommandCatalogue?.scope === flowScope ? appCommandCatalogue.commands : [],
+    suggestions: { surface: slashPalette?.surface === 'thread' ? 'thread' : 'conversation' },
+    suggestionScope: { actorId: api.getCurrentUserId(), token: api.getAccessToken(), workspaceId: workspace?.id, channelId: activeChannel?.id } };
   const rawCommand = slashVisible && slashPalette.mode === 'typed' ? parseComposerCommand(slashText, slashContext) : null;
   const parsedCommand = rawCommand?.command && ['task', 'decision', 'groups'].includes(rawCommand.command.id)
     ? parseComposerCommand(prepareCommandPeople(slashText, slashReferences).text, slashContext) : rawCommand;
@@ -450,7 +458,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const [conversationEntry, setConversationEntry] = useState<{ scope: ConversationEntryScope; decision: ConversationEntry; remembered?: ConversationReadingSnapshot } | null>(null);
   const [firstUnreadId, setFirstUnreadId] = useState<string | null>(null);
   const [entryNotice, setEntryNotice] = useState('');
-  const entryReadStateRef = useRef<{ scope: ConversationEntryScope; readState: { status: 'known'; lastReadMessageId: string | null } | { status: 'unavailable' } } | null>(null);
+  const entryReadStateRef = useRef<{ scope: ConversationEntryScope; readState: ChannelReturnBaseline } | null>(null);
+  const [returnSummaryEntry, setReturnSummaryEntry] = useState<{ scope: ConversationEntryScope; baseline: ChannelReturnBaseline; entryKey: number } | null>(null);
+  const returnSummaryEntryRef = useRef(returnSummaryEntry); returnSummaryEntryRef.current = returnSummaryEntry;
   const seekEarlierUnreadRef = useRef(false);
   const followingLatestRef = useRef(false);
   const followTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -516,10 +526,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   useModalFocus(threadDialogRef, () => setThreadMessage(null), !!threadMessage, { escapePhase: 'bubble' });
   useModalFocus(presenceDialog, () => setPresenceOpen(false), presenceOpen);
   const mainReferencePicker = useComposerReferences({ channelId: activeChannel?.id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
-    text: newMessage, references: draftReferences, input: inputRef, disabled: sending,
+    text: newMessage, references: draftReferences, input: inputRef, disabled: sending, suggestions: { surface: 'conversation' },
     onInsert: (text, references) => { markFlowMoved(false); setNewMessage(text); assistLive.current.draft = text; if (activeChannel) persistDraft(activeChannel.id, text, !!activeChannel.secure, references); updateCommandPalette(text); } });
   const threadReferencePicker = useComposerReferences({ channelId: threadMessage?.channel_id, workspaceId: workspace?.id, secure: !!activeChannel?.secure,
-    text: threadReplyContent, references: threadReferences, input: threadInputRef, contextId: threadMessage?.id,
+    text: threadReplyContent, references: threadReferences, input: threadInputRef, contextId: threadMessage?.id, suggestions: { surface: 'thread' },
     onInsert: (text, references) => {
       if (threadMessageRef.current?.id !== threadMessage?.id) return;
       updateThreadDraft(text, references); updateCommandPalette(text, 'thread');
@@ -804,8 +814,11 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         else if (target.kind === 'decision' && target.item_id) accepted = sameRoomWork.current.notebook?.(target.item_id) || false;
         else if (target.kind === 'file' && target.item_id) accepted = await sameRoomWork.current.reference?.({ kind: 'file', id: target.item_id, channel_id: verified.id, label: '', available: true }, target.current, target.sourceElement) || false;
         else if (target.kind === 'message' && target.item_id) {
-          pendingJumpRef.current = { id: target.item_id, channel_id: verified.id, author_id: '', content: '', encrypted: !!verified.secure, created_at: '' };
-          entryChoiceRef.current = null; ++entryNavigationRef.current; void loadMessages(verified.id); accepted = true;
+          const source = await resolveNavigationMessage(verified, target.item_id, () => target.current() && pendingPersonalSource.current === target && liveFlowScope.current === target.expectedScope);
+          if (target.current() && pendingPersonalSource.current === target && liveFlowScope.current === target.expectedScope) {
+            pendingJumpRef.current = source;
+            entryChoiceRef.current = null; ++entryNavigationRef.current; void loadMessages(verified.id); accepted = true;
+          }
         } else if (target.kind === 'calendar' || target.kind === 'linked-document') {
           setIntegrationEntry(previous => ({ tab: target.kind === 'calendar' ? 'calendar' : 'documents', channelId: verified.id, resourceId: target.item_id, revision: (previous?.revision || 0) + 1 }));
           setIntegrationsOpen(true); activateModalTarget(`integrations:${verified.workspace_id}`, modal); accepted = true;
@@ -951,7 +964,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     positionedChannelRef.current = null;
     entryReadBlockedRef.current = true; entryReadBarrierRef.current = true;
     entryChoiceRef.current = null; ++entryNavigationRef.current;
-    entryReadStateRef.current = null; seekEarlierUnreadRef.current = false;
+    entryReadStateRef.current = null; setReturnSummaryEntry(null); seekEarlierUnreadRef.current = false;
     setConversationEntry(null); setFirstUnreadId(null); setEntryNotice('');
     observedMessagesRef.current = { channelId: activeChannel?.id || null, ids: new Set(), lastTime: 0 };
     setReactions({});
@@ -1454,7 +1467,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     const navigation = entryNavigationRef.current;
     const storedPosition = readingPositionsRef.current.get(channelId);
     const remembered = storedPosition && sameConversationEntryScope(scope, storedPosition.scope) ? storedPosition : undefined;
-    const receipt = initialEntry ? api.getReadReceipts(channelId).then(rows => ({ status: 'known' as const, lastReadMessageId: rows.find(row => row.user_id === scope.userId)?.last_read_message_id || null })).catch(() => ({ status: 'unavailable' as const })) : null;
+    const receipt = initialEntry ? api.getReadReceipts(channelId).then(rows => {
+      const own = rows.find(row => row.user_id === scope.userId);
+      return { status: 'known' as const, lastReadMessageId: own?.last_read_message_id || null, readAt: own?.read_at || null };
+    }).catch(() => ({ status: 'unavailable' as const })) : null;
     const initial = new Map(messagesRef.current.map((message) => [message.id, message]));
     setMessagesLoading(true); setMessageError('');
     try {
@@ -1499,6 +1515,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         else if (entryReadBarrierRef.current && decision.kind === 'latest') decision = baseline;
         if (entryReadBarrierRef.current) entryReadBlockedRef.current = true;
         entryReadStateRef.current = { scope, readState };
+        setReturnSummaryEntry({ scope, baseline: readState, entryKey: request });
         setConversationEntry({ scope, decision, remembered: explicitChoice ? undefined : remembered });
       }
       if (activeChannelRef.current !== channelId || messageRequestRef.current !== request) return;
@@ -2258,6 +2275,18 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     return true;
   };
 
+  const openMessageTask = (message: Message, text?: string) => {
+    if (!activeChannel || !workspace || !workScopeCurrent(flowScope)) return false;
+    const current = [...messagesRef.current, ...threadRepliesRef.current, ...(threadMessageRef.current ? [threadMessageRef.current] : [])]
+      .find(row => row.id === message.id && row.channel_id === activeChannel.id && !row.deleted && !row.locked);
+    if (!current || current.content !== message.content || current.edited_at !== message.edited_at
+        || JSON.stringify(current.references || []) !== JSON.stringify(message.references || [])) return false;
+    const draft = taskDraftFromMessage(current, { ...(text !== undefined ? { text } : {}),
+      members: Object.entries(memberNames).map(([user_id, name]) => ({ user_id, name })), locale: currentLocale(),
+      key: 'message-task:' + current.id + ':' + crypto.randomUUID() });
+    return !!draft && openRoomWork('tasks', {}, current, draft);
+  };
+
   const closeWorkHub = () => {
     const expectedFocus = document.activeElement;
     const closeRequest = ++workReturnRequest.current, closeIntent = flowIntent.current, closeActor = api.getCurrentUserId(); modalReturnIntentCleanup.current?.(); cancelAnimationFrame(workReturnFrame.current);
@@ -2308,7 +2337,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const revealFlowSource = async (messageId: string) => {
-    const channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken(), request = ++stackSourceRequest.current;
+    const channel = activeChannel, channelId = channel?.id, workspaceId = workspace?.id, token = api.getAccessToken(), request = ++stackSourceRequest.current;
     if (!channelId || !workspaceId || !token || activeChannelRef.current !== channelId || workspaceRef.current !== workspaceId) return;
     markFlowMoved(); restoreRetainedModals(); workLayout.reset();
     const element = document.getElementById('message-' + messageId);
@@ -2322,7 +2351,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     else {
       const current = () => request === stackSourceRequest.current && navigation === entryNavigationRef.current && token === api.getAccessToken() && channelId === activeChannelRef.current && workspaceId === workspaceRef.current;
       try {
-        const source = await api.request<Message>('/messages/' + encodeURIComponent(messageId));
+        const source = await resolveNavigationMessage(channel, messageId, current);
         if (!current()) return;
         if (source.id !== messageId || source.channel_id !== channelId || source.deleted || source.locked) throw new Error('This source message is no longer available.');
         // Resolve the actual parent before loading roots, while keeping the
@@ -2333,7 +2362,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
   };
   const activeWorkSource = workHubSource?.token === api.getAccessToken() && workHubSource.workspaceId === workspace?.id && workHubSource.message.channel_id === activeChannel?.id
-    ? messages.find(row => row.id === workHubSource.message.id && !row.deleted && !row.locked) || null : null;
+    ? [...messages, ...threadReplies, ...(threadMessage ? [threadMessage] : [])].find(row => row.id === workHubSource.message.id && !row.deleted && !row.locked) || null : null;
   const attachConversationWork = async (resource: ConversationResourceSelection, sourceOverride?: Message | null) => {
     const source = sourceOverride === undefined ? activeWorkSource : sourceOverride, channelId = activeChannel?.id, workspaceId = workspace?.id, token = api.getAccessToken();
     if (!source || !channelId || !workspaceId || !token) return;
@@ -2399,7 +2428,10 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   };
 
   const renderThreadStackAction = (message: Message) => activeChannel && !message.deleted && !message.locked
-    ? <button type="button" className="fc-icon-button fc-chat-thread-stack" aria-label={t('Save in document stack')} title={t('Save in document stack')} onClick={() => saveMessageInStack(message)}><Layers size={15} /></button> : null;
+    ? <div className="fc-chat-thread-work-actions">
+      <button type="button" className="fc-icon-button fc-chat-thread-stack" aria-label={t('Make a next step')} title={t('Make a next step')} onClick={() => openMessageTask(message)}><CheckSquare size={15} /></button>
+      <button type="button" className="fc-icon-button fc-chat-thread-stack" aria-label={t('Save in document stack')} title={t('Save in document stack')} onClick={() => saveMessageInStack(message)}><Layers size={15} /></button>
+    </div> : null;
 
   const jumpToMessage = (messageId: string, navigation?: number) => {
     const scope = conversationScope();
@@ -2624,6 +2656,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
     }
       const accepted = opened && workScopeCurrent(flowScope);
+      if (accepted) recordCommandChoice(slashContext.suggestionScope, command.id);
       if (accepted && targetKey) activateModalTarget(targetKey, modal);
       else if (accepted && modal) parkModalReturn(modal);
       return accepted;
@@ -2702,7 +2735,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
   function renderSlashCommands() {
     if (!slashVisible || !slashPalette) return null;
-    return <SlashCommands id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={index => setSlashSelected(slashCommands[index]?.id || null)}
+    return <SlashCommands contextual id={slashId} commands={slashCommands} activeIndex={slashActiveIndex} onActiveIndex={index => setSlashSelected(slashCommands[index]?.id || null)}
       onSelect={selectSlashCommand} onClose={closeSlashCommands} query={parsedCommand?.query ?? slashPalette.query}
       usage={parsedCommand?.usage} argumentPreview={parsedCommand?.arguments} error={commandError || parsedCommand?.error}
       onQueryChange={slashPalette.mode === 'browse' ? query => { setSlashPalette(previous => previous ? { ...previous, query } : null); setSlashSelected(null); } : undefined}
@@ -2780,7 +2813,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         workspaceId={workspace.id} channel={activeChannel} initialTab={entry.tab} initialCommandDraft={entry.workDraft}
         initialDocumentId={entry.target?.documentId} initialStackId={entry.target?.stackId} initialProjectId={entry.target?.projectId} focusTaskId={entry.target?.taskId}
         initialSharedResourceId={entry.target?.sharedResourceId} initialSharedResourceKind={entry.target?.sharedResourceKind} initialFeedId={entry.target?.feedId} initialWorkflowRunId={entry.target?.workflowRunId} initialWorkflowId={entry.target?.workflowId} initialMeetingId={entry.target?.meetingId} initialClipId={entry.target?.clipId}
-        sourceMessage={source} onRevealSource={source ? () => { if (current()) void revealFlowSource(source.id); } : undefined}
+        sourceMessage={source} sourceAuthorName={source ? authorName(source.author_id) : undefined} onRevealSource={source ? () => { if (current()) void revealFlowSource(source.id); } : undefined}
         onActiveResourceChange={setResource} onResourceSaved={resource => { if (current()) void attachConversationWork(resource, source); }}
         dataAdmin={workspace.role === 'owner'} integrationAdmin={['owner', 'admin'].includes(workspace.role)} onTabChange={tab => { if (current()) rememberWorkHubTab(tab); }}
         pendingStackMessageId={entry.stackMessageId} onStackMessageSaved={() => { if (current()) publishRetainedWork(retainedWorkRef.current.map(row => row.id === entry.id ? { ...row, stackMessageId: undefined } : row)); }}
@@ -2796,7 +2829,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
         </div></div>}
     </CollaborationProvider>;
   };
-  const conversationWork = hasActiveWork && workHubOpen && workspace && activeChannel ? <WorkHub closeController={primaryCloseController} presentation="flow" layoutActions={layoutActions} onActiveResourceChange={resource => { primaryResource.current = resource; if (activeChannelRef.current === activeChannel.id && workspaceRef.current === workspace.id && workHubIdentity.credential === api.getAccessToken()) setWorkSurfaceResourceTitle(resource?.title || ''); }} sourceMessage={activeWorkSource} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}:${workHubCommandDraft?.key || ""}` } initialCommandDraft={workHubCommandDraft || undefined} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
+  const conversationWork = hasActiveWork && workHubOpen && workspace && activeChannel ? <WorkHub closeController={primaryCloseController} presentation="flow" layoutActions={layoutActions} onActiveResourceChange={resource => { primaryResource.current = resource; if (activeChannelRef.current === activeChannel.id && workspaceRef.current === workspace.id && workHubIdentity.credential === api.getAccessToken()) setWorkSurfaceResourceTitle(resource?.title || ''); }} sourceMessage={activeWorkSource} sourceAuthorName={activeWorkSource ? authorName(activeWorkSource.author_id) : undefined} onRevealSource={activeWorkSource ? () => revealFlowSource(activeWorkSource.id) : undefined} onResourceSaved={resource => { void attachConversationWork(resource); }} key={`${workspace.id}:${activeChannel.id}:${workHubInitialTab}:${workHubTask?.taskId || ""}:${workHubDocument?.documentId || ""}:${workHubDocument?.stackId || ""}:${workHubSource?.message.id || ""}:${workHubCommandDraft?.key || ""}` } initialCommandDraft={workHubCommandDraft || undefined} workspaceId={workspace.id} channel={activeChannel} initialTab={workHubInitialTab} initialProjectId={workHubTask?.projectId} focusTaskId={workHubTask?.taskId} initialDocumentId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.documentId : undefined} initialStackId={workHubDocument?.workspaceId === workspace.id && workHubDocument.channelId === activeChannel.id && workHubDocument.token === api.getAccessToken() ? workHubDocument.stackId : undefined} integrationAdmin={workspace.role === "owner" || workspace.role === "admin"} dataAdmin={workspace.role === "owner"} onTabChange={rememberWorkHubTab} pendingStackMessageId={stackMessageEntry?.workspaceId === workspace.id && stackMessageEntry.channelId === activeChannel.id && stackMessageEntry.token === api.getAccessToken() ? stackMessageEntry.messageId : null} onStackMessageSaved={() => setStackMessageEntry(previous => previous?.workspaceId === workspace.id && previous.channelId === activeChannel.id && previous.messageId === stackMessageEntry?.messageId && previous.token === api.getAccessToken() ? null : previous)} onRevealMessage={revealFlowSource} onClose={closeWorkHub} /> : null;
   const conversationNotebook = hasActiveWork && activeChannel && collaborationTab ? <CollaborationPanel closeController={primaryCloseController} presentation="flow" workspaceId={workspace?.id} onDecisionSaved={() => setMaterialRefresh(value => value + 1)} key={`${activeChannel.id}:${collaborationTab}:${focusDecisionId || ''}:${decisionSource?.id || ''}:${decisionCommandDraft?.key || ''}`} initialDraft={decisionCommandDraft || undefined} channel={activeChannel} tab={collaborationTab} focusDecisionId={focusDecisionId} sourceMessage={decisionSource} onClose={closeWorkHub} onOpenMessage={(channelId,messageId) => { if (channelId === activeChannel?.id) revealFlowSource(messageId); }} /> : null;
   const conversationGroups = hasActiveWork && groupsOpen && activeChannel && workspace ? <ReferenceGroupsPanel closeController={primaryCloseController} layoutActions={layoutActions} key={`${workspace.id}:${activeChannel.id}:${groupCommandDraft?.key || ""}:${referenceGroupId || ""}`} channelId={activeChannel.id} workspaceId={workspace.id} canManage={["owner", "admin"].includes(activeChannel.role || "")} initialDraft={groupCommandDraft} initialGroupId={referenceGroupId} onClose={closeWorkHub} onChanged={() => setMaterialRefresh(value => value + 1)} /> : null;
   const workSurfaceTitle = workHubOpen ? workSurfaceResourceTitle || workHubCommandDraft?.title || t(workTabTitles[workHubInitialTab])
@@ -2956,6 +2989,21 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           <div><span className="fc-kicker">{t('Channel introduction')}</span><h1>{activeChannel.name || t('Your channel')}</h1><p>{activeChannel.description || t('A shared place for this conversation and the work around it.')}</p></div>
           <button type="button" className="fc-icon-button" aria-label={t('Close channel introduction')} onClick={toggleIntroduction}><X size={18} /></button>
         </section>}
+        {activeChannel && workspace && <MessageTaskSelection scopeKey={flowScope} channelId={activeChannel.id}
+          messages={[...messages, ...threadReplies, ...(threadMessage ? [threadMessage] : [])]}
+          onCreateTask={(message, text) => { openMessageTask(message, text); }} />}
+        {activeChannel && workspace && !encryptionLocked && returnSummaryEntry && currentEntryScope(returnSummaryEntry.scope) &&
+          <ChannelReturnSummary workspaceId={workspace.id} channel={activeChannel} baseline={returnSummaryEntry.baseline} entryKey={returnSummaryEntry.entryKey}
+            onOpenSource={source => {
+              const entry = returnSummaryEntry, scope = flowScope;
+              if (!workScopeCurrent(scope) || !currentEntryScope(entry.scope)) return;
+              window.dispatchEvent(new CustomEvent<PersonalNavigationRequest>('freecollab:open-personal-source', { detail: {
+                workspace_id: workspace.id, channel_id: activeChannel.id, kind: source.kind, item_id: source.id,
+                ...(source.projectId ? { project_id: source.projectId } : {}), ...(source.resourceKind ? { resource_kind: source.resourceKind } : {}),
+                isCurrent: () => workScopeCurrent(scope) && returnSummaryEntryRef.current?.entryKey === entry.entryKey,
+                sourceElement: document.activeElement instanceof HTMLElement ? document.activeElement : undefined,
+              } }));
+            }} />}
         {renderConversationAssist()}
         {workReferences.error && workReferences.supported && <div className="fc-flow-work-notice" role="status"><span>{workReferences.error}</span><button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></div>}
         {entryNotice && <div className="fc-flow-entry-notice" role="status"><span>{t(entryNotice)}</span>{conversationEntry?.decision.kind === 'history' && hasOlder ? <button type="button" className="fc-chat-text-button" disabled={loadingOlder} onClick={loadEarlierUnread}>{t('Load earlier history')}</button> : <button type="button" className="fc-chat-text-button" disabled={messagesLoading} onClick={retryReadingPosition}>{t('Retry reading position')}</button>}{atLatest && <button type="button" className="fc-chat-text-button" aria-label={t('Jump to latest messages')} onClick={() => { markFlowMoved(); scrollToLatest(scrollBehavior(), true); }}>{t('Jump to latest')}</button>}</div>}
@@ -2972,7 +3020,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                 <Fragment key={msg.id}>
                   {(index === 0 || dateKey(messages[index - 1].created_at) !== dateKey(msg.created_at)) && <div className="fc-chat-date"><span>{dateLabel(msg.created_at)}</span></div>}
                   {firstUnreadId === msg.id && <div className="fc-flow-unread-marker" role="separator" aria-label={t('New messages')}><span>{t('New messages')}</span></div>}
-                  <article id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${messageActionsOpen === msg.id ? 'has-open-actions' : ''} ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
+                  <article data-message-source-id={msg.id} id={`message-${msg.id}`} tabIndex={-1} className={`fc-chat-message ${messageActionsOpen === msg.id ? 'has-open-actions' : ''} ${highlightedMessage === msg.id ? 'is-highlighted' : ''}`} aria-label={t("Message from {value0}", { value0: String(authorName(msg.author_id)) })}>
                     <div className="fc-chat-message-avatar"><div className={`fc-chat-avatar ${avatarTone(msg.author_id)} ${msg.author_id === currentUserId ? 'fc-chat-avatar-self' : ''}`}><Avatar userId={msg.author_id} name={memberNames[msg.author_id] || authorName(msg.author_id)} workspaceId={workspace?.id} /></div><div className="fc-chat-presence"><PresenceIndicator userId={msg.author_id} size="sm" /></div></div>
                     <div className="fc-chat-message-body">
                       {editingMessage === msg.id ? <form className="fc-chat-edit" onSubmit={event => { event.preventDefault(); void handleEditMessage(msg.id); }}>
@@ -2990,13 +3038,13 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
                         <button type="button" onClick={() => setEditingMessage(null)} className="fc-icon-button" aria-label={t("Cancel edit")}><X size={17} /></button>
                       </form> : <>
                         <div className="fc-chat-message-meta"><strong>{authorName(msg.author_id)}</strong><time dateTime={msg.created_at} title={new Date(msg.created_at).toLocaleString(currentLocale())}>{timeLabel(msg.created_at)}</time>{msg.edited_at && <span>{t("edited")}</span>}{!msg.deleted && !msg.locked && <button type="button" className="fc-chat-message-menu" data-message-assist={msg.id} aria-label={t("More message actions")} aria-expanded={messageActionsOpen === msg.id} aria-controls={`message-actions-${msg.id}`} onClick={() => setMessageActionsOpen(current => current === msg.id ? null : msg.id)}><MoreHorizontal size={17} /></button>}</div>
-                        <p className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}><ReferencedMessage content={msg.content} references={msg.deleted || msg.locked ? [] : msg.references} channelId={msg.channel_id} workspaceId={workspace?.id} secure={!!activeChannel.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p>
+                        <p data-message-source-text className={`fc-chat-message-content ${msg.deleted ? 'is-deleted' : ''}`}><ReferencedMessage content={msg.content} references={msg.deleted || msg.locked ? [] : msg.references} channelId={msg.channel_id} workspaceId={workspace?.id} secure={!!activeChannel.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p>
                         {renderMessageAssist(msg)}
                         {!msg.deleted && !msg.locked && <DiscussionWorkSummary rows={discussionWork.get(msg.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} />}
                         {!msg.deleted && !msg.locked && msg.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${activeChannel.id}:${msg.id}`} channelId={activeChannel.id} messageId={msg.id} secure={!!activeChannel.secure} />}
                         {reactions[msg.id]?.length > 0 && <div className="fc-chat-reactions">{reactions[msg.id].map((reaction) => <button type="button" key={reaction.emoji} aria-pressed={reaction.user_reacted} aria-label={t("{value0}, {value1} {value2}", { value0: String(reaction.emoji), value1: String(reaction.count), value2: String(reaction.count === 1 ? 'reaction' : 'reactions') })} onClick={() => reaction.user_reacted ? handleRemoveReaction(msg.id, reaction.emoji) : handleAddReaction(msg.id, reaction.emoji)}><span>{reaction.emoji}</span><span>{reaction.count}</span></button>)}</div>}
                         {(msg.thread_count || 0) > 0 && <button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-chat-thread-link"><MessageCircle size={14} />{msg.thread_count} {msg.thread_count === 1 ? t("reply") : t("replies")}<ArrowUpRight size={12} /></button>}
-                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'reply', msg.id); }}><Sparkles size={15} />{t('Draft a reply')}</button><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'summary', msg.id); }}>{t('Summarize this message')}</button>{!activeChannel.secure && workReferences.documents.length > 0 && <button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'related-documents', msg.id); }}>{t('Find related documents')}</button>}<button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('tasks', {}, msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} /><button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button><button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { editPaletteActiveRef.current = false; setEditPaletteActive(false); setEditingMessage(msg.id); setEditContent(msg.content); setEditReferences(normalizeMessageReferences(msg.content, msg.references)); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
+                        {!msg.deleted && !msg.locked && <div id={`message-actions-${msg.id}`} className="fc-chat-message-actions"><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'reply', msg.id); }}><Sparkles size={15} />{t('Draft a reply')}</button><button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'summary', msg.id); }}>{t('Summarize this message')}</button>{!activeChannel.secure && workReferences.documents.length > 0 && <button type="button" className="fc-chat-text-button" onClick={() => { setMessageActionsOpen(null); openAssist('main', 'related-documents', msg.id); }}>{t('Find related documents')}</button>}<button type="button" className="fc-chat-text-button" onClick={() => openRoomWork('documents', {}, msg)}><FileText size={15} />{t('Continue in a document')}</button><button type="button" className="fc-chat-text-button" onClick={() => openMessageTask(msg)}><CheckSquare size={15} />{t('Make a next step')}</button><MessageSaveActions channel={activeChannel} message={msg} onDecision={(message) => openConversationDecision(message)} /><button type="button" className="fc-icon-button" aria-label={t("Save in document stack")} title={t("Save in document stack")} onClick={() => saveMessageInStack(msg)}><Layers size={15} /></button><button type="button" className="fc-icon-button" aria-label={t("Remind me about this message")} onClick={() => setProductivity({message:msg})}><Bell size={15}/></button><button type="button" onClick={() => setShowReactionPicker(showReactionPicker === msg.id ? null : msg.id)} className="fc-icon-button" title={t("Add reaction")} aria-label={t("Add reaction")}><Smile size={16} /></button><button type="button" onClick={() => { setToolPanel(null); void loadThread(msg); }} className="fc-icon-button" title={t("Reply in thread")} aria-label={t("Reply in thread")}><CornerDownRight size={16} /></button>{msg.author_id === currentUserId && <><button type="button" onClick={() => { editPaletteActiveRef.current = false; setEditPaletteActive(false); setEditingMessage(msg.id); setEditContent(msg.content); setEditReferences(normalizeMessageReferences(msg.content, msg.references)); }} className="fc-icon-button" title={t("Edit")} aria-label={t("Edit")}><Edit3 size={15} /></button><button type="button" onClick={() => handleDeleteMessage(msg.id)} className="fc-icon-button fc-chat-delete" title={t("Delete")} aria-label={t("Delete")}><Trash2 size={15} /></button></>}</div>}
                         {showReactionPicker === msg.id && <div className="fc-chat-reaction-picker" aria-label={t("Choose a reaction")}>{REACTIONS.map((emoji) => <button type="button" key={emoji} onClick={() => handleAddReaction(msg.id, emoji)} aria-label={t("React {value0}", { value0: String(emoji) })}>{emoji}</button>)}</div>}
                       </>}
                     </div>
@@ -3087,9 +3135,9 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
 
       {threadMessage && <aside ref={threadDialogRef} tabIndex={-1} className="fc-chat-thread" role="dialog" aria-modal="true" aria-label={t("Thread")}>
         <header className="fc-chat-thread-header"><div><span className="fc-kicker">{t("Keep the conversation close")}</span><h2>{t("Thread")}</h2><ThreadWatchButton channelId={threadMessage.channel_id} messageId={threadMessage.id} /></div><button type="button" onClick={() => setThreadMessage(null)} className="fc-icon-button" aria-label={t("Close thread")} data-autofocus><X size={19} /></button></header>
-        <div className="fc-chat-thread-parent"><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
+        <div className="fc-chat-thread-parent" data-message-source-id={threadMessage.id}><div className="fc-chat-avatar">{<Avatar userId={threadMessage.author_id} name={memberNames[threadMessage.author_id] || authorName(threadMessage.author_id)} workspaceId={workspace?.id} />}</div><div><strong>{authorName(threadMessage.author_id)}</strong><p data-message-source-text><ReferencedMessage content={threadMessage.content} references={threadMessage.deleted || threadMessage.locked ? [] : threadMessage.references} channelId={threadMessage.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p><time dateTime={threadMessage.created_at}>{new Date(threadMessage.created_at).toLocaleString(currentLocale())}</time></div>{renderThreadStackAction(threadMessage)}</div>
         {!threadMessage.deleted && !threadMessage.locked && threadMessage.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails key={`${threadMessage.channel_id}:${threadMessage.id}`} channelId={threadMessage.channel_id} messageId={threadMessage.id} secure={!!activeChannel?.secure} />}
-        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}<div className="fc-flow-thread-actions"><button type="button" className="fc-chat-text-button" data-message-assist={threadMessage.id} onClick={() => openAssist('thread', 'summary', threadMessage.id)}><Sparkles size={16} />{t('Summarize replies')}</button><button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread', 'reply', threadMessage.id)}>{t('Draft a reply')}</button></div>{workReferences.error && workReferences.supported && <p className="fc-chat-muted" role="status">{workReferences.error} <button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></p>}<DiscussionWorkSummary rows={discussionWork.get(threadMessage.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} label={t('Work in this discussion')} />{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{threadReplyContent.trim() && <button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread-draft', 'tidy')}><Sparkles size={16} />{t('Tidy my draft')}</button>}{renderDraftAssist('thread')}</div>
+        <div ref={threadScroller} className="fc-chat-thread-replies" aria-busy={threadLoading}>{threadHasMore && <button type="button" className="fc-button fc-chat-thread-older" disabled={threadLoading} onClick={() => void loadEarlierThread()}>{t('Load earlier replies')}</button>}{threadLoading && <p role="status">{t('Loading replies…')}</p>}{threadError && <div className="fc-chat-thread-error"><p role="alert">{t(threadError)}</p><button type="button" className="fc-button" disabled={threadLoading} onClick={() => void (threadReplies.length && threadHasMore ? loadEarlierThread() : loadThread(threadMessage))}>{t('Retry loading replies')}</button></div>}<div className="fc-flow-thread-actions"><button type="button" className="fc-chat-text-button" data-message-assist={threadMessage.id} onClick={() => openAssist('thread', 'summary', threadMessage.id)}><Sparkles size={16} />{t('Summarize replies')}</button><button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread', 'reply', threadMessage.id)}>{t('Draft a reply')}</button></div>{workReferences.error && workReferences.supported && <p className="fc-chat-muted" role="status">{workReferences.error} <button type="button" className="fc-chat-text-button" onClick={workReferences.retry}>{t('Retry shared work')}</button></p>}<DiscussionWorkSummary rows={discussionWork.get(threadMessage.id) || []} onOpen={row => void openReferencedWork(row)} partial={workReferences.partial} label={t('Work in this discussion')} />{renderMessageAssist(threadMessage, 'thread')}{threadReplies.length === 0 && !threadLoading && !threadError && <p className="fc-chat-muted">{t("No replies yet. Add your perspective below.")}</p>}{threadReplies.map((reply) => <div key={reply.id} id={'thread-reply-' + reply.id} data-thread-reply={reply.id} data-message-source-id={reply.id} tabIndex={-1} className="fc-chat-thread-reply"><div className="fc-chat-avatar">{<Avatar userId={reply.author_id} name={memberNames[reply.author_id] || authorName(reply.author_id)} workspaceId={workspace?.id} />}</div><div><div className="fc-chat-message-meta"><strong>{authorName(reply.author_id)}</strong><time dateTime={reply.created_at}>{timeLabel(reply.created_at)}</time></div><p data-message-source-text><ReferencedMessage content={reply.content} references={reply.deleted || reply.locked ? [] : reply.references} channelId={reply.channel_id} workspaceId={workspace?.id} secure={!!activeChannel?.secure} onOpen={(reference, lease) => { void openMessageReference(reference, undefined, lease.isCurrent, lease.element); }} /></p>{!reply.deleted && !reply.locked && reply.content.startsWith('[Imported from Slack · ') && <HistoricalSlackDetails channelId={reply.channel_id} messageId={reply.id} secure={!!activeChannel?.secure} />}</div>{renderThreadStackAction(reply)}</div>)}{threadReplyContent.trim() && <button type="button" className="fc-chat-text-button" onClick={() => openAssist('thread-draft', 'tidy')}><Sparkles size={16} />{t('Tidy my draft')}</button>}{renderDraftAssist('thread')}</div>
         <div ref={threadSlashRootRef} className="fc-chat-thread-composer-area">
         <form className="fc-chat-thread-composer" onSubmit={(event) => { event.preventDefault(); void handleThreadReply(); }}>
           {threadSlashVisible && !threadReferencePicker.open && renderSlashCommands()}

@@ -28,7 +28,7 @@ function fixture({ encrypted = true, cryptoChanged } = {}) {
   };
   const api = { getAccessToken: () => state.token, getCurrentUserId: () => 'actor', request: async (path, options) => {
     state.requests.push({ path, options });
-    if (!options) return state.records;
+    if (!options?.method) return state.records;
     const body = JSON.parse(options.body);
     return { id: body.id, channel_id: 'channel', created_by: 'actor', created_at: '2026-10-21T00:00:00',
       updated_at: '2026-10-21T00:00:00', archived: false, update_count: 1, version: 1,
@@ -62,6 +62,24 @@ test('secure document creation sends only an authenticated opaque reference to t
   assert.deepEqual(Object.keys(body).sort(), ['id', 'matrix_event_id', 'update_id']);
   assert.equal(body.matrix_event_id, '$entry-0');
   assert.ok(!f.state.requests[0].options.body.includes('private'));
+});
+
+test('return inspection uses current encrypted document title metadata without opening Yjs bodies or trusting plaintext', async () => {
+  const f = fixture();
+  const created = await f.sharedDocumentsApi.create('channel', 'Verified private title');
+  f.state.records = [{ ...created, title: 'Forged server title', updated_at: '2026-10-22T00:00:00' },
+    { ...created, id: 'native-legacy', summary_event_id: null, title: 'Never use plaintext', updated_at: '2026-10-22T00:00:00' }];
+  const sends = f.state.events.length, requests = f.state.requests.length;
+  const result = await f.sharedDocumentsApi.encryptedSummaries('channel', Date.parse('2026-10-21T00:00:00Z'));
+  assert.equal(result.items.length, 1); assert.equal(result.items[0].title, 'Verified private title');
+  assert.equal(result.incomplete, true);
+  assert.equal(f.state.events.length, sends);
+  assert.equal(f.state.requests.length, requests + 1);
+  assert.equal(f.state.requests.at(-1).path, '/channels/channel/shared-documents?archived=false');
+  assert.equal(f.state.requests.at(-1).options.method, undefined);
+  f.state.tamper = { room: '!wrong:room' };
+  const locked = await f.sharedDocumentsApi.encryptedSummaries('channel', Date.parse('2026-10-21T00:00:00Z'));
+  assert.equal(locked.items.length, 0); assert.equal(locked.incomplete, true);
 });
 
 test('explicit native document creation commits the reviewed title and body in one initial Yjs update', async () => {

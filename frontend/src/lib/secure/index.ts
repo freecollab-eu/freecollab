@@ -218,8 +218,16 @@ async function ensureSession(): Promise<MatrixClient> {
   })().catch(error => { if (generation === attempt) { client?.stopClient(); client = null; starting = null; } throw error; }); return starting;
 }
 async function roomFor(channelId: string, writing = false) {
-  const c = await ensureSession(); if (!bindingsLoaded || !bindings.has(channelId)) await refreshBindings();
+  const token = configuration?.getAccessToken(), c = await ensureSession(), attempt = generation;
+  const assertClient = () => { if (token !== configuration?.getAccessToken() || attempt !== generation || c !== client) throw new Error('The signed-in encryption session changed.'); };
+  assertClient();
+  if (!bindingsLoaded || !bindings.has(channelId)) await refreshBindings();
   const binding = bindings.get(channelId); if (!binding?.room_id || binding.status !== 'active') throw new Error('This encrypted channel is not ready.');
+  const assertCurrent = () => {
+    assertClient();
+    const current = bindings.get(channelId);
+    if (current?.room_id !== binding.room_id || current.status !== 'active') throw new Error('The encrypted channel binding changed.');
+  };
   let room = c.getRoom(binding.room_id);
   const joining = !room || room.getMyMembership() !== 'join';
   // A newly granted Connect member has a product seat before Matrix invites
@@ -241,7 +249,8 @@ async function roomFor(channelId: string, writing = false) {
     if (removed.some(row => keys.get(row.matrix_user_id)?.has(row.device_id))) throw new Error('Device keys are refreshing after removal. Retry when encrypted sync finishes.');
     await c.getCrypto()!.forceDiscardSession(binding.room_id);
   }
-  return { c, room, roomId: binding.room_id, membershipEpoch: snapshot?.membership_epoch, federatedOperators: snapshot?.federated_operators,
+  assertCurrent();
+  return { c, room, roomId: binding.room_id, assertCurrent, membershipEpoch: snapshot?.membership_epoch, federatedOperators: snapshot?.federated_operators,
     federatedPeerServer: binding.federated_peer_server };
 }
 async function events(channelId: string, paginate = false) {

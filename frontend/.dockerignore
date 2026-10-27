@@ -17,6 +17,9 @@ tests
 **/.kube
 **/.azure
 **/.config/gcloud
+**/.config/gh
+**/.config/railway
+**/.freecollab
 **/.railway
 **/.npmrc
 **/.netrc

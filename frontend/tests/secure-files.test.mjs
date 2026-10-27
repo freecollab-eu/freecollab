@@ -10,37 +10,62 @@ const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.Modu
 const previewHelpers = {};
 vm.runInNewContext(ts.transpileModule(readFileSync(new URL('../src/lib/file-preview.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, { exports: previewHelpers, File });
 function fixture({ peerServer, recordingVerifier } = {}) {
-  const exports = {}, events = [], media = new Map(), transactions = new Map(), uploads = [], downloads = [];
-  const control = { owner: 'owner', failAfterSend: false, upload: null };
+  const exports = {}, events = [], media = new Map(), transactions = new Map(), uploads = [], downloads = [], publications = [];
+  const control = { owner: 'owner', generation: 0, failAfterSend: false, upload: null, pause: null, indexReads: 0, digestCalls: 0 };
+  const pause = async stage => { await control.pause?.(stage); };
   function event(content, sender = '@fc_owner:local.test', id = '$' + crypto.randomUUID()) {
     return { getContent: () => content, getSender: () => sender, getId: () => id, getRoomId: () => '!room:local.test',
       getTs: () => Date.now(), getType: () => 'eu.freecollab.file', isEncrypted: () => true, isRedacted: () => false };
   }
   const c = { getUserId: () => `@fc_${control.owner}:local.test`, getHomeserverUrl: () => 'https://freecollab.test/api', getAccessToken: () => 'matrix-token',
+    scrollback: async room => { await pause('scrollback'); room.oldState.paginationToken = undefined; },
     uploadContent: async (blob, options) => {
       uploads.push({ blob, options });
+      await pause('ciphertext-upload');
       if (control.upload) return control.upload(blob, options);
       const uri = 'mxc://local.test/' + crypto.randomUUID(); media.set(uri.split('/').at(-1), await blob.arrayBuffer()); return { content_uri: uri };
     } };
-  const secureMessaging = { handles: async () => true, roomFor: async channel => ({ c, room: { oldState: {} }, roomId: channel === 'channel' ? '!room:local.test' : '!other-room:local.test', federatedPeerServer: peerServer }),
-    events: async () => events,
+  const secureMessaging = { handles: async () => true, roomFor: async channel => {
+      const owner = control.owner, generation = control.generation;
+      return { c, room: { oldState: control.paginate ? { paginationToken: 'older' } : {} }, roomId: channel === 'channel' ? '!room:local.test' : '!other-room:local.test', federatedPeerServer: peerServer,
+        assertCurrent: () => { if (owner !== control.owner || generation !== control.generation) throw new Error('The signed-in encryption session changed.'); } };
+    },
+    events: async () => { await pause(++control.indexReads === 1 ? 'file-index' : 'confirmation-index'); return events; },
     sendEvent: async (channel, type, content, transactionId, options) => {
       control.publication = {transactionId,options};
+      await pause('sdk-publication');
+      await options?.authorize?.();
+      publications.push({ owner: control.owner, content });
       if (transactionId && transactions.has(transactionId)) return { event_id: transactions.get(transactionId) };
       const item = event(content, c.getUserId()); events.push(item);
       if (transactionId) transactions.set(transactionId, item.getId());
       if (control.failAfterSend) { control.failAfterSend = false; throw new Error('lost acknowledgement'); }
       return { event_id: item.getId() };
     },
-    getDecryptedEvent: async (channel, id) => { const item = events.find(e => e.getId() === id); if (!item) throw new Error('missing event'); return item; },
+    getDecryptedEvent: async (channel, id) => { await pause('receipt'); const item = events.find(e => e.getId() === id); if (!item) throw new Error('missing event'); return item; },
   };
-  vm.runInNewContext(compiled, { exports, require: name => name === 'matrix-encrypt-attachment' ? { encryptAttachment, decryptAttachment } : name === '../file-preview' ? previewHelpers : name === '../meeting-capture-proof' ? {verifyEncryptedRecordingFile:recordingVerifier || (async()=>{throw Error('unverified recording');})} : { secureMessaging },
-    crypto, TextEncoder, Uint8Array, Blob, File, DOMException, AbortController,
-    fetch: async (url, options) => { downloads.push({ url, options }); return new Response(media.get(decodeURIComponent(url.split('/').at(-1))) || new Uint8Array([1])); } });
-  return { provider: exports.secureFileProvider, verifyReferences: exports.verifiedSecureFileReferenceIds, getReference: exports.getVerifiedSecureFileReference, events, media, uploads, downloads, event, control };
+  vm.runInNewContext(compiled, { exports, require: name => name === 'matrix-encrypt-attachment' ? {
+      encryptAttachment: async bytes => { const value = await encryptAttachment(bytes); await pause('encryption'); return value; },
+      decryptAttachment: async (...args) => { const value = await decryptAttachment(...args); await pause('decryption'); return value; },
+    } : name === '../file-preview' ? previewHelpers : name === '../meeting-capture-proof' ? {verifyEncryptedRecordingFile:recordingVerifier || (async()=>{throw Error('unverified recording');})} : { secureMessaging },
+    crypto: { randomUUID: () => crypto.randomUUID(), subtle: { digest: async (...args) => { const value = await crypto.subtle.digest(...args); await pause(++control.digestCalls === 1 ? 'content-digest' : 'fingerprint-digest'); return value; } } },
+    TextEncoder, Uint8Array, Blob, File, DOMException, AbortController,
+    fetch: async (url, options) => { downloads.push({ url, options }); await pause('download-response'); const bytes = media.get(decodeURIComponent(url.split('/').at(-1))) || new Uint8Array([1]).buffer;
+      return { ok: true, headers: new Headers(), body: null, arrayBuffer: async () => { await pause('download-body'); return bytes; } }; } });
+  return { provider: exports.secureFileProvider, verifyReferences: exports.verifiedSecureFileReferenceIds, getReference: exports.getVerifiedSecureFileReference, events, media, uploads, downloads, publications, event, control };
 }
 const file = () => new File(['private attachment bytes'], 'private-name.txt', { type: 'text/plain' });
 const opts = () => ({ requestId: crypto.randomUUID() });
+const deferred = () => { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; };
+function pauseAt(fixture, boundary) {
+  const entered = deferred(), release = deferred(); let paused = false;
+  fixture.control.pause = async stage => { if (stage === boundary && !paused) { paused = true; entered.resolve(); await release.promise; } };
+  return { entered: entered.promise, release: release.resolve };
+}
+function invalidate(fixture, lifecycle) {
+  if (lifecycle === 'account change') fixture.control.owner = 'replacement';
+  fixture.control.generation++;
+}
 
 test('secure file transfer encrypts bytes and sends neither filename nor media type to storage; decrypts exact bytes', async () => {
   const { provider, uploads, downloads } = fixture();
@@ -144,12 +169,12 @@ test('only an explicitly bound peer domain may supply remote encrypted files and
 
 
 test('capture key publication requires current foreground review, reserved transaction and encrypted proof',async()=>{
- const f=fixture({recordingVerifier:async()=>{}}),proof={protocol:'test-fixture-proof',generation:1},authorize=async()=>{},controller=new AbortController();
+ let reviews=0;const f=fixture({recordingVerifier:async()=>{}}),proof={protocol:'test-fixture-proof',generation:1},authorize=async()=>{reviews++;},controller=new AbortController();
  await assert.rejects(f.provider.upload('channel',file(),{requestId:'fc-capture-file-one'}),/consent proof/);
  await assert.rejects(f.provider.upload('channel',file(),{requestId:'plain',meetingCaptureProof:proof,beforePublish:authorize}),/consent proof/);
  assert.equal(f.uploads.length,0);
  const row=await f.provider.upload('channel',file(),{requestId:'fc-capture-file-one',meetingCaptureProof:proof,beforePublish:authorize,signal:controller.signal});
- assert.equal(f.control.publication.transactionId,'fc-capture-file-one');assert.equal(f.control.publication.options.authorize,authorize);assert.equal(f.control.publication.options.signal,controller.signal);
+ assert.equal(f.control.publication.transactionId,'fc-capture-file-one');assert.equal(typeof f.control.publication.options.authorize,'function');assert.equal(reviews,1);assert.equal(f.control.publication.options.signal,controller.signal);
  assert.deepEqual(JSON.parse(JSON.stringify(f.events[0].getContent().meeting_capture)),proof);assert.equal(row.filename,'private-name.txt');
 });
 test('recording indexes and downloads quarantine missing or rejected proof without exposing the file key',async()=>{
@@ -164,4 +189,54 @@ test('a published recording with rejected consent stays quarantined and reports 
  await assert.rejects(f.provider.upload('channel',file(),{requestId:'fc-capture-file-rejected',meetingCaptureProof:{protocol:'test-fixture-proof'},beforePublish:async()=>{}}),error=>error===rejection);
  assert.equal(f.events.length,1);assert.equal((await f.provider.list('channel')).length,0);
  assert.equal(f.downloads.length,0);
+});
+
+for (const lifecycle of ['account change', 'encryption reset']) {
+  for (const boundary of ['file-read', 'content-digest', 'fingerprint-digest', 'scrollback', 'file-index', 'encryption', 'ciphertext-upload', 'sdk-publication', 'publication-review']) {
+    test(`secure upload publishes no key after ${lifecycle} during ${boundary}`, { timeout: 2000 }, async () => {
+      const f = fixture(), input = file(), gate = pauseAt(f, boundary), progress = [];
+      const read = input.arrayBuffer.bind(input);
+      input.arrayBuffer = async () => { const bytes = await read(); await f.control.pause?.('file-read'); return bytes; };
+      if (boundary === 'scrollback') f.control.paginate = true;
+      const pending = f.provider.upload('channel', input, { ...opts(), onProgress: value => progress.push(value),
+        beforePublish: async () => { await f.control.pause?.('publication-review'); } });
+      const rejected = assert.rejects(pending, /encryption session changed/);
+      await gate.entered; invalidate(f, lifecycle); gate.release(); await rejected;
+      assert.deepEqual(f.publications, [], 'file metadata and its decryption key must stay unpublished');
+      assert.equal(progress.includes(100), false);
+    });
+  }
+
+  for (const boundary of ['receipt', 'confirmation-index']) test(`secure upload rejects stale confirmation after ${lifecycle} during ${boundary}`, async () => {
+    const f = fixture(), gate = pauseAt(f, boundary), progress = [];
+    const pending = f.provider.upload('channel', file(), { ...opts(), onProgress: value => progress.push(value) });
+    const rejected = assert.rejects(pending, /encryption session changed/);
+    await gate.entered; invalidate(f, lifecycle); gate.release(); await rejected;
+    assert.equal(f.publications.length, 1); assert.equal(f.publications[0].owner, 'owner');
+    assert.equal(progress.includes(100), false);
+  });
+
+  for (const boundary of ['file-index', 'sdk-publication']) test(`secure deletion cannot publish under a new session after ${lifecycle} during ${boundary}`, async () => {
+    const f = fixture(), stored = await f.provider.upload('channel', file(), opts());
+    f.publications.length = 0; f.control.indexReads = 0;
+    const gate = pauseAt(f, boundary), pending = f.provider.delete(stored), rejected = assert.rejects(pending, /encryption session changed/);
+    await gate.entered; invalidate(f, lifecycle); gate.release(); await rejected;
+    assert.deepEqual(f.publications, []);
+  });
+
+  for (const boundary of ['file-index', 'receipt', 'download-response', 'download-body', 'decryption']) test(`secure download discards private bytes after ${lifecycle} during ${boundary}`, async () => {
+    const f = fixture(), stored = await f.provider.upload('channel', file(), opts());
+    f.control.indexReads = 0;
+    const gate = pauseAt(f, boundary), pending = f.provider.download(stored), rejected = assert.rejects(pending, /encryption session changed/);
+    await gate.entered; invalidate(f, lifecycle); gate.release(); await rejected;
+  });
+}
+
+test('a delayed publication review preserves a current owner and publishes the exact decryptable file once', async () => {
+  const f = fixture(), gate = pauseAt(f, 'publication-review'); let reviews = 0;
+  const pending = f.provider.upload('channel', file(), { ...opts(), beforePublish: async () => { reviews++; await f.control.pause?.('publication-review'); } });
+  await gate.entered; assert.deepEqual(f.publications, []); gate.release();
+  const stored = await pending;
+  assert.equal(reviews, 1); assert.equal(f.publications.length, 1); assert.equal(f.publications[0].owner, 'owner');
+  assert.equal(await (await f.provider.download(stored)).text(), 'private attachment bytes');
 });

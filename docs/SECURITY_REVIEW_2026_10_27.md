@@ -12,7 +12,7 @@ assessment of the cryptographic protocols.
 | --- | --- | --- |
 | High | An administrator request could create a replacement administrator after demotion, blocking or revocation during password hashing. Concurrent creation could also exceed the administrator limit. | [Management](../backend/app/api/admin.py) serializes current administrator/actor/target state, fences the browser session and any native parent, then rechecks authority before publishing. |
 | High | Legacy posts/comments bypassed preservation holds and native message DLP, including replies and comments on files. | [Posts](../backend/app/api/posts.py) and [comments](../backend/app/api/comments.py) apply existing preservation and content-policy guards. Channel-lock waits also refresh actor and membership authority. |
-| Medium | Asynchronous file-provider lookup or publication review could upload account A's queued bytes using account B's newly selected identity. | [File transfers](../frontend/src/lib/files-api.ts) retain the original owner through lookup, dispatch, publication review and result/body acceptance. |
+| Medium | Asynchronous file-provider lookup, encryption or publication review could continue with another account's newly selected identity. | [File transfers](../frontend/src/lib/files-api.ts) retain the original owner. [Encrypted files](../frontend/src/lib/secure/files.ts) also retain the original Matrix client, generation and room binding through preparation, result acceptance and the final SDK/HTTP publication guard. |
 | Medium | A delayed secure API JSON body could restore the previous account's bindings after a session or encryption reset. | [Secure requests](../frontend/src/lib/secure/index.ts) recheck the original token and encryption generation after parsing and before updating bindings. |
 | Medium | A storage failure after file metadata deletion permanently lost the identities needed to retry blob erasure. | [Deletion](../backend/app/api/files.py) atomically commits indexed [tombstones](../backend/app/models/file_version.py) with metadata removal. An [always-on lane](../backend/app/services/file_erasure.py) retries after commit without holding channel locks across storage I/O. |
 | Medium | Local credentials and signing material could enter remote Docker contexts despite being ignored by Git or unused in the final image. | Root, backend and frontend Docker exclusions now cover nested cloud/SSH/package credentials, signing keys, databases and private reports. Git exclusions and [operations guidance](OPERATIONS.md) match. |
@@ -23,12 +23,15 @@ assessment of the cryptographic protocols.
 
 Focused groups overlap and must not be added together as a unique total.
 
-- Complete frontend Node suite: **875 passed**, no failures, skips or
+- Complete frontend Node suite: **914 passed**, no failures, skips or
   cancellations. TypeScript and app, embedded-client and product-demo builds
   passed.
-- Frontend account-boundary regressions: **48 focused tests passed**, including
-  18 new cases. Sixteen fail against the original implementations; two retain
-  legitimate same-actor behavior.
+- Frontend account-boundary regressions: **92 focused tests passed**, including
+  57 new cases across the two repairs. Sixteen initial cases fail against the
+  original implementations; 36 encrypted-provider lifecycle cases fail against
+  their pre-correction source. Positive cases retain legitimate same-actor and
+  delayed-review behavior. The final adapter/HTTP boundary uses real guards with
+  SDK stubs, without real accounts or external network activity.
 - **Eight actual PostgreSQL tests passed**: password/reset/MFA lock ordering,
   both management/logout orders for browser/native-parent sessions, and
   concurrent reset/email verification. Prior failures were reproduced. Tests
@@ -52,6 +55,9 @@ Focused groups overlap and must not be added together as a unique total.
 - **34 deployment-kit tests passed**. Base, federation and website Compose
   configurations validated. Credential/key ignore checks and whitespace checks
   passed. TLS, package hashes and managed CA handling remain enabled.
+
+Exact-commit CI and combined-suite results are recorded with
+[the review change](https://github.com/freecollab-eu/freecollab/pull/2).
 
 ## Operating boundaries
 

@@ -69,6 +69,8 @@ pilot-backups/
 .kube/
 .azure/
 **/.config/gcloud/
+**/.config/gh/
+**/.config/railway/
 **/.codex/auth.json
 application_default_credentials.json
 .npmrc

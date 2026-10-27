@@ -124,11 +124,14 @@ export const secureFileProvider: ChannelFileProvider = {
     if (options.meetingCaptureProof && JSON.stringify(options.meetingCaptureProof).length > 16384) throw new Error('The recording consent proof exceeds its bound.');
     if (file.size > MAX_SIZE) throw new Error('Maximum file size is 50 MB.');
     if (!allowedTypes.has(file.type)) throw new Error('This file type is not supported.');
-    const { c, roomId } = await secureMessaging.roomFor(channelId, true), owner = accountId(c.getUserId()!);
+    const { c, roomId, assertCurrent } = await secureMessaging.roomFor(channelId, true), owner = accountId(c.getUserId()!);
+    const current = () => { check(options.signal); assertCurrent(); };
+    current();
     if (!owner) throw new Error('Encrypted file identity is unavailable.');
-    const bytes = await file.arrayBuffer(), hash = await fingerprint(channelId, options.documentId, file, bytes);
-    check(options.signal);
+    const bytes = await file.arrayBuffer(); current();
+    const hash = await fingerprint(channelId, options.documentId, file, bytes); current();
     const requestId = options.requestId || crypto.randomUUID(), state = await index(channelId, options.signal);
+    current();
     const receipt = state.receipts.get(`${owner}:${requestId}`);
     if (receipt) {
       if (receipt.fingerprint !== hash) throw new Error('This upload request was already used for another file.');
@@ -138,10 +141,10 @@ export const secureFileProvider: ChannelFileProvider = {
     const versions = options.documentId ? state.files.filter(row => row.document_id === options.documentId) : [];
     if (options.documentId && (!versions.length || versions.some(row => row.document_owner_id !== owner))) throw new Error('Only the document owner can upload a new version.');
     options.onProgress?.(5);
-    const encrypted = await encryptAttachment(bytes); check(options.signal); options.onProgress?.(35);
+    const encrypted = await encryptAttachment(bytes); current(); options.onProgress?.(35);
     const controller = new AbortController(), abort = () => controller.abort();
     options.signal?.addEventListener('abort', abort, { once: true });
-    check(options.signal);
+    current();
     let uploaded: { content_uri: string };
     try {
       // The homeserver receives anonymous ciphertext, never filename or media type.
@@ -149,45 +152,57 @@ export const secureFileProvider: ChannelFileProvider = {
         type: 'application/octet-stream', includeFilename: false, abortController: controller,
       });
     } finally { options.signal?.removeEventListener('abort', abort); }
-    check(options.signal); options.onProgress?.(85);
+    current(); options.onProgress?.(85);
     const documentId = options.documentId || `${owner}:${requestId}`, version = versions.reduce((max, row) => Math.max(max, row.version_number || 1), 0) + 1;
     const metadata = { document_id: documentId, owner_id: owner, version_number: version, request_id: requestId, fingerprint: hash,
       name: file.name, content_type: file.type, size: file.size, file: { ...encrypted.info, url: uploaded.content_uri },
       ...(options.meetingCaptureProof ? {meeting_capture:options.meetingCaptureProof} : {}) };
-    const result = await secureMessaging.sendEvent(channelId, FILE_EVENT, metadata, requestId.startsWith('fc-capture-file-') ? requestId : `file-${requestId}`, {authorize:options.beforePublish,signal:options.signal});
-    check(options.signal);
+    const authorize = async () => { current(); await options.beforePublish?.(); current(); };
+    current();
+    const result = await secureMessaging.sendEvent(channelId, FILE_EVENT, metadata, requestId.startsWith('fc-capture-file-') ? requestId : `file-${requestId}`, {authorize,signal:options.signal});
+    current();
     // A retried Matrix transaction may return its original event. Acknowledge
     // only that authenticated event, rather than claiming the new bytes arrived.
-    const event = await secureMessaging.getDecryptedEvent(channelId, result.event_id), actual = asFile(channelId, event, domainOf(c.getUserId()!));
+    const event = await secureMessaging.getDecryptedEvent(channelId, result.event_id); current();
+    const actual = asFile(channelId, event, domainOf(c.getUserId()!));
     if (!actual || event.getRoomId() !== roomId || event.getContent().fingerprint !== hash || event.getContent().request_id !== requestId) throw new Error('The encrypted upload confirmation could not be verified. Refresh and retry safely.');
     const confirmation = await index(channelId, options.signal), confirmed = confirmation.files.find(row => row.id === actual.id);
+    current();
     if (confirmation.recordingFailures.has(actual.id)) throw confirmation.recordingFailures.get(actual.id);
     if (!confirmed) throw new Error('Another version completed first, or this document was deleted. Refresh and choose the file again.');
-    check(options.signal); options.onProgress?.(100); return confirmed;
+    current(); options.onProgress?.(100); return confirmed;
   },
   async download(file, options = {}) {
     check(options.signal);
+    const { c, roomId, federatedPeerServer, assertCurrent } = await secureMessaging.roomFor(file.channel_id);
+    const current = () => { check(options.signal); assertCurrent(); };
+    current();
     const state = await index(file.channel_id, options.signal), stored = state.files.find(row => row.id === file.id);
+    current();
     if (!stored) throw new Error('This encrypted file is no longer available.');
-    const { c, roomId, federatedPeerServer } = await secureMessaging.roomFor(file.channel_id);
     // Re-read the authenticated room event; injected locators and keys are ignored.
-    const event = await secureMessaging.getDecryptedEvent(file.channel_id, stored.id), actual = asFile(file.channel_id, event, domainOf(c.getUserId()!), federatedPeerServer);
+    const event = await secureMessaging.getDecryptedEvent(file.channel_id, stored.id); current();
+    const actual = asFile(file.channel_id, event, domainOf(c.getUserId()!), federatedPeerServer);
     if (!actual?.secure_url || event.getRoomId() !== roomId) throw new Error('Encrypted attachment metadata is unavailable.');
-    await verifyRecording(file.channel_id, event); check(options.signal);
+    await verifyRecording(file.channel_id, event); current();
     const parsed = /^mxc:\/\/([^/]+)\/([^/?#]+)$/.exec(actual.secure_url);
     if (!parsed) throw new Error('Invalid encrypted attachment locator.');
     const response = await fetch(c.getHomeserverUrl() + '/_matrix/client/v1/media/download/' + encodeURIComponent(parsed[1]) + '/' + encodeURIComponent(parsed[2]), { headers: { Authorization: 'Bearer ' + c.getAccessToken() }, signal: options.signal });
+    current();
     if (!response.ok) throw new Error('Encrypted attachment could not be downloaded.');
-    const bytes = await decryptAttachment(await boundedCiphertext(response, options.signal), actual.encrypted_file as IEncryptedFile);
-    check(options.signal);
+    const ciphertext = await boundedCiphertext(response, options.signal); current();
+    const bytes = await decryptAttachment(ciphertext, actual.encrypted_file as IEncryptedFile); current();
     if (bytes.byteLength !== actual.size) throw new Error('Encrypted attachment size verification failed.');
     return new Blob([bytes], { type: actual.content_type });
   },
   async versions(file) { return (await index(file.channel_id)).files.filter(row => row.document_id === file.document_id).sort((a, b) => b.version_number! - a.version_number!); },
   async delete(file) {
-    const { c } = await secureMessaging.roomFor(file.channel_id, true), owner = accountId(c.getUserId()!);
+    const { c, assertCurrent } = await secureMessaging.roomFor(file.channel_id, true), owner = accountId(c.getUserId()!);
+    assertCurrent();
     const stored = (await index(file.channel_id)).files.find(row => row.id === file.id);
+    assertCurrent();
     if (!stored || stored.document_owner_id !== owner) throw new Error('Only the document owner can remove this file.');
-    await secureMessaging.sendEvent(file.channel_id, FILE_EVENT, { document_id: stored.document_id, owner_id: owner, deleted: true });
+    await secureMessaging.sendEvent(file.channel_id, FILE_EVENT, { document_id: stored.document_id, owner_id: owner, deleted: true }, undefined, { authorize: assertCurrent });
+    assertCurrent();
   },
 };

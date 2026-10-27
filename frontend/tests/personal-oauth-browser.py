@@ -8,6 +8,7 @@ the real verified HTTPS/CONNECT transport. No customer/vendor credential is used
 """
 from ui_navigation import open_chat_tool
 import base64
+import hashlib
 import importlib.util
 import json
 import os
@@ -32,8 +33,40 @@ ACCESS = 'synthetic-browser-personal-provider-access'
 REFRESH = 'synthetic-browser-personal-provider-refresh'
 
 
+def source_binding(web, before):
+    current = {'frontend': f.source_hash(ROOT/'frontend/src'), 'backend': f.source_hash(ROOT/'backend/app'),
+               'harness': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
+    copied = f.source_hash(web/'src') if web else None
+    return {'before': before, 'after': current, 'checkoutUnchanged': current == before,
+            'frontendSnapshotSha256': copied, 'frontendSnapshotMatchesCheckout': copied == before['frontend']}
+
+
+def layout_evidence(panel, name):
+    return panel.evaluate('''(root,name)=>{
+      const round=value=>Math.round(value*100)/100;
+      const bounds=node=>{const box=node.getBoundingClientRect(),style=getComputedStyle(node);return {
+        selector:node.tagName.toLowerCase()+(node.id?'#'+node.id:'')+[...node.classList].slice(0,4).map(value=>'.'+value).join(''),
+        clientWidth:node.clientWidth,scrollWidth:node.scrollWidth,left:round(box.left),right:round(box.right),width:round(box.width),
+        display:style.display,minWidth:style.minWidth,flexWrap:style.flexWrap,overflowX:style.overflowX};};
+      const box=root.getBoundingClientRect();
+      const rendered=node=>node.getClientRects().length&&getComputedStyle(node).visibility==='visible';
+      return {name,viewport:{width:innerWidth,height:innerHeight},fonts:document.fonts.status,browser:navigator.userAgent,
+        document:{clientWidth:document.documentElement.clientWidth,scrollWidth:document.documentElement.scrollWidth},
+        panel:bounds(root),overflowNodes:[...root.querySelectorAll('*')].filter(node=>{
+          if(!rendered(node))return false;const b=node.getBoundingClientRect();
+          return node.scrollWidth>node.clientWidth+1||b.right>box.right+1||b.left<box.left-1;
+        }).slice(0,24).map(bounds),documentOverflowNodes:[...document.body.querySelectorAll('*')].filter(node=>{
+          if(!rendered(node))return false;const b=node.getBoundingClientRect();
+          return b.right>innerWidth+1||b.left< -1;
+        }).slice(0,32).map(bounds)};
+    }''', name)
+
+
 def main():
     processes, streams, checks, blocked = [], [], f.ProofChecks(), []
+    stage, evidence, web = 'private_services', [], None
+    source_before = {'frontend': f.source_hash(ROOT/'frontend/src'), 'backend': f.source_hash(ROOT/'backend/app'),
+                     'harness': hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
     with tempfile.TemporaryDirectory(prefix='freecollab-personal-oauth-browser-') as directory:
         private = Path(directory)
         try:
@@ -73,6 +106,7 @@ personal_oauth.transport.request=provider_request
 uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers=False,access_log=False)
 ''')
             web,vite=f.frontend_snapshot(private,base,web_port)
+            assert source_binding(web, source_before)['frontendSnapshotMatchesCheckout'], 'The private frontend must match the reviewed source'
             for command,name,cwd in [([PYTHON,str(launcher)],'api.log',ROOT/'backend'),(['node',str(vite)],'vite.log',web)]:
                 stream=(private/name).open('w');streams.append(stream)
                 processes.append(subprocess.Popen(command,cwd=cwd,env=environment,stdout=stream,stderr=stream,start_new_session=True))
@@ -104,11 +138,13 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 try:
                     dialog,_=f.login(page,origin,owner,email,workspace['id'])
                 except Exception:
-                    page.screenshot(path='/tmp/freecollab-personal-oauth-failure.png')
+                    REPORT.parent.mkdir(parents=True,exist_ok=True)
+                    page.screenshot(path=str(REPORT.parent/'personal-oauth-initial-failure.png'))
                     print(json.dumps({'initial_page_errors':page_errors,'public_page':page.locator('body').inner_text()[:2500]}),flush=True)
                     raise
                 dialog.get_by_role('button',name='Provider accounts',exact=True).click()
                 panel=dialog.get_by_role('region',name='Provider accounts',exact=True)
+                stage = 'actual_customer_application_registration'
                 expect(panel.get_by_text('A workspace administrator must configure the customer application for this provider and purpose first.',exact=True)).to_be_visible()
                 expect(panel.get_by_role('button',name='Continue to Google Workspace',exact=True)).to_be_disabled()
                 checks['actual_readiness_blocks_unconfigured_provider']=True
@@ -131,6 +167,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 expect(page).to_have_url(origin+'/',timeout=60000)
                 assert page.evaluate('([a,b,c])=>![...Object.values(localStorage),...Object.values(sessionStorage)].some(v=>v.includes(a)||v.includes(b)||v.includes(c))',[ACCESS,REFRESH,CLIENT_SECRET])
                 checks['provider_navigation_pkce_one_use_callback_and_token_free_browser_storage']=True
+                stage = 'actual_personal_provider_search'
                 open_chat_tool(page, 'Integrations')
                 dialog=page.get_by_role('dialog',name='Integrations',exact=True)
                 dialog.get_by_role('button',name='Provider accounts',exact=True).click()
@@ -153,12 +190,36 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 dialog.get_by_role('button',name='Leverantörskonton',exact=True).click()
                 panel=dialog.get_by_role('region',name='Leverantörskonton',exact=True)
                 expect(panel.get_by_role('heading',name='Ditt konto. Din organisations applikation.',exact=True)).to_be_visible()
+                stage = 'saved_swedish_320px_layout'
+                cpu_rate = float(os.getenv('PERSONAL_OAUTH_DIAGNOSTIC_CPU_RATE', '1'))
+                assert 1 <= cpu_rate <= 8, 'Layout diagnostic CPU rate must be between 1 and 8'
+                diagnostic = context.new_cdp_session(page) if cpu_rate != 1 else None
+                if diagnostic:
+                    diagnostic.send('Emulation.setCPUThrottlingRate', {'rate': cpu_rate})
                 page.set_viewport_size({'width':320,'height':844})
-                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-                assert panel.evaluate('el=>el.scrollWidth<=el.clientWidth+1')
+                frames = [layout_evidence(panel, stage + '_initial')]
+                try:
+                    # Observe the completed mobile layout before asserting it.
+                    # Persistent overflow still fails these exact bounds.
+                    page.wait_for_function('''async root=>{
+                      await document.fonts.ready;
+                      return root.isConnected&&innerWidth===320&&document.documentElement.scrollWidth<=innerWidth&&root.scrollWidth<=root.clientWidth+1;
+                    }''', arg=panel.element_handle(), timeout=3000)
+                    assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                    assert panel.evaluate('el=>el.scrollWidth<=el.clientWidth+1')
+                finally:
+                    frames.append(layout_evidence(panel, stage + '_settled_or_failed'))
+                    for frame in range(6):
+                        page.evaluate('()=>new Promise(requestAnimationFrame)')
+                        frames.append(layout_evidence(panel, stage + '_frame_' + str(frame + 1)))
+                    evidence.append({'resizeFrames': frames, 'cpuRate': cpu_rate})
+                    if diagnostic:
+                        diagnostic.send('Emulation.setCPUThrottlingRate', {'rate': 1})
+                        diagnostic.detach()
                 REPORT.parent.mkdir(parents=True,exist_ok=True)
                 page.screenshot(path=str(REPORT.parent/'personal-oauth-mobile-sv.png'))
                 checks['saved_swedish_and_320px_customer_account_layout']=True
+                stage = 'actual_nested_provider_revocation'
                 dialog.get_by_role('button',name='Klart',exact=True).click()
                 page.set_viewport_size({'width':1440,'height':1100})
                 open_chat_tool(page, 'Sök i all historik')
@@ -190,20 +251,26 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 page.evaluate('delete window.freecollabNative')
                 assert not blocked and not page_errors
                 checks['no_unexpected_external_browser_requests_or_runtime_errors']=True
+                binding = source_binding(web, source_before)
+                assert binding['checkoutUnchanged'] and binding['frontendSnapshotMatchesCheckout'], 'The actual proof source changed while running'
                 context.close();browser.close()
-            REPORT.write_text(json.dumps({'ok':True,'checks':checks,'provider_acceptance':'synthetic-browser-consent; verified-https-tested-in-backend'},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':True,'checks':checks,'stage':stage,'evidence':evidence,'sourceBinding':binding,'provider_acceptance':'synthetic-browser-consent; verified-https-tested-in-backend'},indent=2)+'\n')
             print(json.dumps({'ok':True,'checks':list(checks),'report':str(REPORT)}),flush=True)
         except Exception as failure:
             REPORT.parent.mkdir(parents=True,exist_ok=True)
-            REPORT.write_text(json.dumps({'ok':False,'checks':checks,'failure_type':type(failure).__name__},indent=2)+'\n')
+            REPORT.write_text(json.dumps({'ok':False,'checks':checks,'stage':stage,'evidence':evidence,'sourceBinding':source_binding(web, source_before),'failure_type':type(failure).__name__},indent=2)+'\n')
             if 'page' in locals():
-                try:page.screenshot(path='/tmp/freecollab-personal-oauth-failure.png')
+                try:page.screenshot(path=str(REPORT.parent/'personal-oauth-failure.png'))
                 except Exception:pass
             print(json.dumps({'failure':f.redacted(failure)[:7000],'completed':list(checks)}),flush=True)
             raise AssertionError('Private OAuth browser proof failed: '+type(failure).__name__) from None
         finally:
             f.stop(processes)
             for stream in streams:stream.close()
+            if REPORT.exists():
+                recorded = json.loads(REPORT.read_text())
+                recorded['ownedProcessesStopped'] = all(process.poll() is not None for process in processes)
+                REPORT.write_text(json.dumps(recorded,indent=2)+'\n')
 
 
 if __name__=='__main__':main()

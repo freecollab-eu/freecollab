@@ -102,6 +102,15 @@ The original two-browser project/task proof also passed **10 checks**. After
 membership revocation, a linked-file action must receive the current owner's
 channel-metadata 403, without reaching native file transport or downloading
 bytes; task history, conflict, decision and mobile assertions remain intact.
+The personal OAuth mobile proof awaits loaded fonts and the original exact
+document/panel bounds at a 320px viewport for at most three seconds before
+asserting them. The final proof passed **9 checks** with the exact CI Chromium
+151 revision, including a sixfold CPU-throttled resize; all eight geometry
+samples met the same bounds and source hashes stayed unchanged.
+Persistent overflow still fails. It retains bounded initial/settled geometry,
+source bindings and failure screenshots in scoped CI artifacts. This is test
+synchronization and diagnostics; no OAuth layout defect was reproduced or
+product CSS changed in that investigation.
 
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu

@@ -287,7 +287,7 @@ jobs:
           BACKEND_PYTHON=python python frontend/tests/calendar-planning-browser.py
           BACKEND_PYTHON=python python frontend/tests/calendar-delivery-browser.py
           BACKEND_PYTHON=python python frontend/tests/import-library-browser.py
-          BACKEND_PYTHON=python python frontend/tests/personal-oauth-browser.py
+          BACKEND_PYTHON=python PERSONAL_OAUTH_REPORT="$RUNNER_TEMP/freecollab-product-browser/personal-oauth/report.json" python frontend/tests/personal-oauth-browser.py
           BACKEND_PYTHON=python python frontend/tests/native-push-browser.py
           BACKEND_PYTHON=python python frontend/tests/native-calling-browser.py
           BACKEND_PYTHON=python python frontend/tests/offline-library-browser.py
@@ -340,6 +340,16 @@ jobs:
           path: |
             ${{ runner.temp }}/freecollab-product-browser/open-studio/**/*.json
             ${{ runner.temp }}/freecollab-product-browser/open-studio/**/*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain personal OAuth browser failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-oauth-browser-failure
+          path: |
+            ${{ runner.temp }}/freecollab-product-browser/personal-oauth/**/*.json
+            ${{ runner.temp }}/freecollab-product-browser/personal-oauth/**/*.png
           if-no-files-found: warn
           retention-days: 7
       - name: Upload service diagnostics on failure

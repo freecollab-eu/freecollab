@@ -78,6 +78,10 @@ utkastskydd som övrig navigation. Att hämta översikten markerar inget som lä
 Vanlig läskvittering fortsätter när meddelanden faktiskt visas enligt klientens
 befintliga regler.
 
+Väljer du **Gå till senaste** följer vyn även när kopplat arbete laddas in
+senare. Läser du längre upp behåller chatten din plats. En hopfälld arbetsyta
+tar inte en dold kolumn från samtalet.
+
 Detta är en begränsad översikt av tillgängliga poster, inte en genererad
 tolkning av hela samtalet. Den anger när historik saknas eller en gräns nåtts.
 Krypterade samtal använder verifierad, klientdekrypterad historik och visar

@@ -929,7 +929,24 @@ def main():
                     live_conversation(page,panel)
                     page.once('dialog',lambda dialog:dialog.accept()); choose_chat_channel(page,other['name'])
                     expect(page.locator('#chat-channel-name')).to_have_text(other['name']); expect(page.get_by_role('region',name=FLOW_NAME,exact=True)).to_have_count(0)
-                    choose_chat_channel(page,selected['name']); reveal_discussion_work(source_article); task_card.click(); panel = flow_region(page)
+                    # Returning may enter at the first unread message, so await this entry's real
+                    # work index before scrolling to the persisted source farther down the room.
+                    return_work_requests = []
+                    def capture_return_work(api_request):
+                        if api_request.method == 'GET' and urlsplit(api_request.url).path == '/api/channels/' + channel + '/conversation-work' and api_request.headers.get('authorization') == 'Bearer ' + token:
+                            return_work_requests.append(api_request)
+                    page.on('request',capture_return_work)
+                    try:
+                        with page.expect_response(lambda response: response.request in return_work_requests) as return_work:
+                            choose_chat_channel(page,selected['name'])
+                        assert return_work.value.status == 200
+                        assert any(row['id'] == task_reference['id'] and row['source_message_id'] == message['id'] and row['resource_id'] == task_reference['resource_id'] and row['resource_kind'] == 'task' for row in return_work.value.json()['items'])
+                    finally:
+                        page.remove_listener('request',capture_return_work)
+                    expect(source_article).to_be_attached()
+                    source_article.scroll_into_view_if_needed()
+                    visual_geometry['dirty_task_return_source'] = {'work_index_status':return_work.value.status,'work_reference_id':task_reference['id'],'source_message_id':message['id'],'action':'Ordinary scroll to the attached persisted source after this channel entry authenticated work index'}
+                    reveal_discussion_work(source_article); task_card.click(); panel = flow_region(page)
                     expect(panel.locator('.fc-project-card[data-task-id="' + task_reference['resource_id'] + '"]')).to_contain_text(text + ' Revised.')
                     assert panel.get_by_role('form',name='Edit task',exact=True).count() == 0
                     panel.get_by_role('button',name='Close this work',exact=True).click()

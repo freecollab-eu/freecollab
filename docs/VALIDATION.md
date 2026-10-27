@@ -34,7 +34,7 @@ These are the same components and API used by the product demo.
   comment writers. Cross-surface checks require the same unique permitted IDs
   while allowing their intended contextual order; retained source/no-write
   checks, demo, modal writers and security transitions remain covered.
-- **6 native return-summary groups and 5 public-demo groups** cover real
+- **6 native return-summary groups and 8 public-demo groups** cover real
   prior reading baselines, actual decision/document/attention sources, exact
   links including replies, receipt advancement without changing the baseline,
   read-only previews, EN/SV/320–1440px layout, stale response rejection and
@@ -42,6 +42,18 @@ These are the same components and API used by the product demo.
   The demo first awaits actual loaded root history and uses the real explicit
   Jump to latest control. Its receipt POST and stored receipt must both identify
   the exact newest root; summary inspection still leaves that receipt unchanged.
+  A delayed genuine work-index response reproduced a lost latest-message
+  position: a hidden work column incorrectly activated the two-column layout,
+  and late discussion summaries did not participate in latest-follow layout.
+  The correction keeps a hidden column out of the layout and includes the stable
+  rendered-work revision in the existing scoped positioning effect. With the
+  actual response held until after Jump and its exact receipt, the newest root
+  remains visible when the response arrives. The paired older-reading check
+  retains the same visible position and server receipts with zero receipt POSTs.
+  A real open modal also keeps those receipts unchanged, and revealing the
+  material column still restores its normal grid layout. The response gate is
+  restricted to the private app origin; external requests retain the original
+  isolation guard.
 - **17 organization browser groups** cover current native persistence,
   local proposals, explicit acceptance/dismissal, visible Undo outside collapsed
   controls, peer edits, stack generations and original source navigation.
@@ -141,6 +153,11 @@ The full-demo sender meters both browser and direct verification requests before
 transport, keeping the same visit and the real 300-request/120-mutation limits
 per 60 seconds. Its original zero-429 and functional assertions remain intact;
 neither the production limits nor sample data are reset to bypass the budget.
+On a return to a channel, the full-demo scenario waits for that entry's actual
+authorized work index and exact persisted task before scrolling to its source.
+The mobile-offline revocation scenario likewise waits for the real membership
+denial and settled authorized channel list before reopening device settings;
+the revoked outbox entry must still need review, with no duplicate server send.
 
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu

@@ -215,7 +215,19 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     page.get_by_role('button',name='Close mobile settings',exact=True).click();set_offline(context,page,network,True)
                     composer.fill('Removed membership must never send');page.get_by_role('button',name='Send message',exact=True).click();expect(page.get_by_text('Saved in your encrypted outbox. It will sync when this sign-in reconnects.',exact=True)).to_be_visible()
                     with sqlite3.connect(private/'proof.db') as db:db.execute("DELETE FROM channelmember WHERE channel_id='shared' AND user_id='alice'");db.commit()
-                    set_offline(context,page,network,False);open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
+                    # Reconnect revokes the current channel and its scoped dialogs.
+                    # Observe the genuine authorization/list responses and the
+                    # committed empty-channel view before opening device settings.
+                    with page.expect_response(lambda response: response.request.method=='GET' and response.url==app+'/api/channels/shared/members') as removed_membership, page.expect_response(lambda response: response.request.method=='GET' and response.url==app+'/api/channels?workspace_id=team') as refreshed_channels:
+                        set_offline(context,page,network,False)
+                    assert removed_membership.value.status==403
+                    assert refreshed_channels.value.ok
+                    assert not any(channel['id']=='shared' for channel in refreshed_channels.value.json())
+                    expect(page.locator('#chat-channel-name')).to_have_text('Choose a channel')
+                    expect(page.get_by_role('heading',name='Select a channel',exact=True)).to_be_visible()
+                    expect(composer).to_have_count(0)
+                    expect(page.get_by_role('dialog',name='Mobile and offline',exact=True)).to_have_count(0)
+                    open_chat_tool(page, 'Mobile and offline settings');dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
                     expect(dialog.get_by_text('Needs review',exact=True)).to_be_visible();assert count()==2
                     results['removed_membership_requires_review_and_cannot_auto_send']=True
                     stage='logout purge and two-account cross-tab isolation'

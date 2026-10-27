@@ -18,7 +18,7 @@
 .fc-chat-channel-introduction p { margin: 0; color: var(--fc-muted); font-size: var(--fc-body-size); line-height: 1.7; overflow-wrap: anywhere; }
 .fc-flow-first .fc-chat-channel-introduction > .fc-icon-button { flex-shrink: 0; border-color: transparent; }
 .fc-flow-first .fc-chat-timeline-inner { padding-top: 1.25rem; }
-.fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column[hidden]) { max-width: 58rem; margin-inline: auto; }
+.fc-flow-first .fc-chat-room-content:has(> .fc-chat-room-work-column[hidden]) { display: block; max-width: 58rem; margin-inline: auto; }
 .fc-flow-first .fc-chat-message-list { min-width: 0; padding: 0; }
 .fc-flow-first .fc-chat-message { gap: .9rem; margin: 0; padding: .8rem 0 1rem; }
 .fc-flow-first .fc-chat-message-content { max-width: 100%; margin-top: .4rem; font-family: var(--fc-font); font-size: var(--fc-message-size); font-weight: 400; line-height: 1.7; letter-spacing: normal; }

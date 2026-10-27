@@ -360,6 +360,12 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
   const presenceDialog = useRef<HTMLElement>(null);
   const [threadHasMore, setThreadHasMore] = useState(false), [threadLoading, setThreadLoading] = useState(false), [threadError, setThreadError] = useState('');
   const discussionWork = groupDiscussionWork(workReferences.rows, [...messages, ...threadReplies, ...(threadMessage ? [threadMessage] : [])], activeChannel?.id || '');
+  const discussionWorkLayoutRevision = JSON.stringify(messages.flatMap(message => {
+    const rows = discussionWork.get(message.id) || [];
+    return message.channel_id === activeChannel?.id && !message.parent_id && !message.deleted && !message.locked && rows.length
+      ? [[message.id, rows.map(row => [row.reference.resource_kind, row.reference.resource_id,
+        row.reference.source_message_id, row.reference.discussion_message_id, row.title, row.status])]] : [];
+  }));
   useEffect(() => {
     if (!activeAssist) return;
     const missingDraft = activeAssist.target === 'main-draft' && !newMessage.trim()
@@ -1209,7 +1215,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
     }
     if (!roomOverviewRef.current && (nearBottomRef.current || added.some(message => message.author_id === api.getCurrentUserId()))) scrollToLatest(scrollBehavior());
     else if (added.length) setPendingMessages(count => count + added.length);
-  }, [messages, activeChannel?.id, messagesLoading, conversationEntry, hasOlder, introductionOpen]);
+  }, [messages, activeChannel?.id, messagesLoading, conversationEntry, hasOlder, introductionOpen, discussionWorkLayoutRevision]);
 
   const resizeComposer = () => {
     const input = inputRef.current;

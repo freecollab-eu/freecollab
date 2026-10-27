@@ -17,15 +17,21 @@ function event(id, extra = {}) {
     getTs: () => value.timestamp, isEncrypted: () => value.encrypted, isRedacted: () => value.redacted, isDecryptionFailure: () => value.locked,
     getContent: () => ({ body: value.body, 'eu.freecollab.mentions': value.mentions }), getOriginalContent: () => ({ 'm.relates_to': value.relation }) };
 }
-function fixture(rows) {
-  const state = { token: 'session', actor: 'viewer', current: true, permitted: true, refreshes: 0, decrypted: [], scrolls: 0, hook: async () => {} };
+function fixture(rows, { cold = false } = {}) {
+  const state = { token: 'session', actor: 'viewer', ownerToken: cold ? null : 'session', current: true, permitted: true, refreshes: 0, decrypted: [], scrolls: 0, hook: async () => {} };
   const client = { decryptEventIfNeeded: async row => { state.decrypted.push(row.getId()); await state.hook('decrypt'); }, scrollback: async () => { state.scrolls++; throw Error('Summary must never scroll back'); } };
   const context = { exports: {}, configuration: { getAccessToken: () => state.token, getUserId: () => state.actor }, generation: 1,
-    client, EventType: { RoomMessage: 'm.room.message' }, Date, Map, Array, Promise, Number,
+    client: cold ? null : client, EventType: { RoomMessage: 'm.room.message' }, Date, Map, Array, Promise, Number,
     accountId: id => id === '@fc_viewer:test' ? 'viewer' : id,
     encryptedContentReferences: () => [],
     refreshBindings: async () => { state.refreshes++; await state.hook('refresh:'+state.refreshes); },
-    roomFor: async () => ({ c: client, roomId: '!room:test', room: { oldState: { paginationToken: 'more-history' }, getLiveTimeline: () => ({ getEvents: () => rows }) },
+    ensureSession: async () => {
+      if (state.ownerToken !== state.token) { context.generation++; state.ownerToken = state.token; }
+      await state.hook('bootstrap');
+      if (!context.client) context.client = client;
+      return client;
+    },
+    roomFor: async () => ({ c: await context.ensureSession(), roomId: '!room:test', room: { oldState: { paginationToken: 'more-history' }, getLiveTimeline: () => ({ getEvents: () => rows }) },
       assertCurrent: () => { if (!state.permitted) throw Error('Current channel access removed'); } }),
   };
   vm.runInNewContext(ts.transpileModule(functions+'\nexports.read=getRecentMessages;', { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText, context);
@@ -39,6 +45,27 @@ test('summary inspects at most 200 loaded events in a work-heavy room and never 
   assert.equal(f.state.decrypted.length, 200); assert.equal(f.state.scrolls, 0); assert.equal(result.length, 2);
   assert.equal(result[0].parent_id, '$parent'); assert.equal(result[0].mentions[0], 'viewer');
   assert.equal(f.state.decrypted.includes('$work-0'), false);
+});
+test('recent inspection accepts a cold first encryption bootstrap without widening its bounds', async () => {
+  const fixture = fixtureForCold();
+  const result = await fixture.read({ eventLimit: 1, limit: 1 });
+  assert.equal(result.length, 1); assert.equal(result[0].id, '$message');
+  assert.equal(fixture.context.generation, 2); assert.deepEqual(fixture.state.decrypted, ['$message']); assert.equal(fixture.state.scrolls, 0);
+});
+function fixtureForCold() { return fixture([event('$message')], { cold: true }); }
+test('recent cold bootstrap rejects changed owner/client and caller cancellation before decrypting', async () => {
+  for (const change of ['token', 'actor', 'client', 'scope', 'abort']) {
+    const f = fixtureForCold(), abort = new AbortController();
+    f.state.hook = async step => {
+      if (step !== 'bootstrap') return;
+      if (change === 'client') f.context.client = {};
+      else if (change === 'scope') f.state.current = false;
+      else if (change === 'abort') abort.abort();
+      else f.state[change] = 'replacement';
+    };
+    await assert.rejects(f.read({ signal: abort.signal, isCurrent: () => f.state.current }));
+    assert.equal(f.state.decrypted.length, 0); assert.equal(f.state.scrolls, 0);
+  }
 });
 test('recent encrypted projection excludes plaintext/foreign events and uses only same-sender current edits', async () => {
   const original = event('$message');

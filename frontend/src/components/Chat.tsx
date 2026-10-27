@@ -3084,7 +3084,7 @@ export function Chat({ onLogout, onAdmin, initialChannelId, initialSyncReturn, e
           {parkedModals.filter(modalReturnCurrent).map(value => <div key={value.id} className="fc-work-resume-bar" role="group" aria-label={t('Work set aside')}><button type="button" className="fc-work-resume" data-modal-continue={value.chain[0].id} onClick={() => resumeModalReturn(value)}><ArrowUpRight size={16} aria-hidden="true" /><span>{t('Continue {title}', { title: modalRegistry.current.get(value.chain[0].id)?.title || value.title })}</span></button></div>)}
           {flowNotice && <p role="status" className="fc-chat-muted">{flowNotice}</p>}
           {currentUserId && <div className="fc-chat-typing"><TypingIndicator channelId={activeChannel.id} currentUserId={currentUserId} /></div>}
-          {actionError && <p role="alert" className="fc-alert">{actionError}</p>}
+          {actionError && <p role="alert" className="fc-alert">{t(actionError)}</p>}
           {policyNotice && <p role="status" className="fc-alert">{t('Shared content matched an organization policy. Review it before sharing further.')}<button type="button" className="fc-icon-button" aria-label={t('Dismiss policy notice')} onClick={()=>setPolicyNotice(false)}><X size={14}/></button></p>}
           {mobileNotice && <p role="status" className="fc-chat-muted">{mobileNotice}</p>}
           <div ref={slashRootRef} className="fc-chat-composer-row">

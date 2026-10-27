@@ -328,11 +328,16 @@ async function getMessages(channelId: string, before?: string, limit = 100, root
 
 /** Bounded entry inspection of loaded ciphertext; never scrolls back or marks read. */
 async function getRecentMessages(channelId: string, options: { limit?: number; eventLimit?: number; signal?: AbortSignal; isCurrent?: () => boolean } = {}): Promise<Message[]> {
-  const token = configuration?.getAccessToken(), actor = configuration?.getUserId(), attempt = generation;
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId();
   const limit = options.limit ?? 100, eventLimit = options.eventLimit ?? 200;
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 || !Number.isSafeInteger(eventLimit) || eventLimit < 1 || eventLimit > 200) throw new Error('Choose bounded recent message limits.');
-  const sameOwner = () => { if (!token || !actor || token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()
-    || attempt !== generation || options.signal?.aborted || options.isCurrent && !options.isCurrent()) throw new Error('The encrypted conversation changed.'); };
+  const identity = () => { if (!token || !actor || token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()
+    || options.signal?.aborted || options.isCurrent && !options.isCurrent()) throw new Error('The encrypted conversation changed.'); };
+  identity(); const initialClient = await ensureSession(); identity();
+  // The first legitimate session bootstrap advances generation. Bind only after
+  // that guarded initialization, then reject every later client/generation change.
+  const attempt = generation;
+  const sameOwner = () => { identity(); if (attempt !== generation || initialClient !== client) throw new Error('The encrypted conversation changed.'); };
   sameOwner(); await refreshBindings(); sameOwner();
   const { c, room, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
   const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw new Error('The encrypted conversation changed.'); };
@@ -360,11 +365,15 @@ async function getRecentMessages(channelId: string, options: { limit?: number; e
 
 /** Resolve one root/reply by its real encrypted event, including an actual root parent. */
 async function getMessage(channelId: string, eventId: string): Promise<Message> {
-  const token = configuration?.getAccessToken(), actor = configuration?.getUserId(), attempt = generation;
+  const token = configuration?.getAccessToken(), actor = configuration?.getUserId();
   const validId = (value: unknown): value is string => typeof value === 'string' && !!value && value.length <= 1024 && !/[\s\u0000-\u001f\u007f]/.test(value);
   const unavailable = () => new Error('This encrypted source message could not be verified.');
   if (!token || !actor || !validId(eventId)) throw unavailable();
-  const sameOwner = () => { if (token !== configuration?.getAccessToken() || actor !== configuration?.getUserId() || generation !== attempt) throw unavailable(); };
+  const identity = () => { if (token !== configuration?.getAccessToken() || actor !== configuration?.getUserId()) throw unavailable(); };
+  const initialClient = await ensureSession(); identity();
+  const attempt = generation;
+  const sameOwner = () => { identity(); if (generation !== attempt || initialClient !== client) throw unavailable(); };
+  sameOwner();
   await refreshBindings(); sameOwner();
   const { c, roomId, assertCurrent } = await roomFor(channelId); sameOwner();
   const current = () => { sameOwner(); assertCurrent(); if (c !== client) throw unavailable(); };

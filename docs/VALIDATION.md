@@ -9,7 +9,7 @@ entry-scoped return summaries and versioned organization Undo. The
 [interaction guide](NATURAL_COLLABORATION.md) states the exact operating limits.
 These are the same components and API used by the product demo.
 
-- **992/992 frontend Node tests passed**, without skips. TypeScript and the
+- **996/996 frontend Node tests passed**, without skips. TypeScript and the
   application, embed and product-demo production builds passed.
 - **91 related backend cases passed** across channel return summaries,
   document organization and public-demo boundaries. Summary inspection leaves
@@ -44,7 +44,10 @@ real-Matrix acceptance. CI independently tests its exact checked-out revision.
 Review also bounded background encrypted inspection to at most 200 loaded
 timeline events, four concurrent decryptions and 100 returned messages, with no
 automatic scrollback. Read-only encrypted-work inspection never flushes pending
-account writes. Ordinary chat history loading is unchanged. No schema migration
+account writes. Both new secure readers initialize the first legitimate crypto
+session before capturing its client/generation lease; regression tests reject
+owner, client and cancellation changes during that bootstrap. Ordinary chat
+history loading is unchanged. No schema migration
 or external AI/provider setup is needed for these six improvements. Encrypted
 tasks retain their source excerpt/references, but do not acquire the existing
 native persistent message/work relation.

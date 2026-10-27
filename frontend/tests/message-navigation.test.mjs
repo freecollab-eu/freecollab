@@ -90,15 +90,22 @@ function encryptedEvent(id, overrides = {}) {
     isEncrypted: () => value.encrypted, isRedacted: () => value.redacted, isDecryptionFailure: () => value.failed, getTs: () => value.timestamp,
     getContent: () => ({ body: value.body, ...value.content }), getOriginalContent: () => ({ 'm.relates_to': value.relation }) };
 }
-function encrypted({ reply = false } = {}) {
+function encrypted({ reply = false, cold = false } = {}) {
   const root = encryptedEvent('$root'), child = encryptedEvent('$message', reply ? { relation: { rel_type: 'm.thread', event_id: '$root' } } : {});
-  const state = { token: 'session', actor: 'actor', active: true, refreshes: 0, fetched: [], hook: async () => {}, child, root };
+  const activeClient = {};
+  const state = { token: 'session', actor: 'actor', ownerToken: cold ? null : 'session', active: true, refreshes: 0, fetched: [], hook: async () => {}, child, root };
   const context = {
-    exports: {}, generation: 0, client: {}, EventType: { RoomMessage: 'm.room.message' },
+    exports: {}, generation: 0, client: cold ? null : activeClient, EventType: { RoomMessage: 'm.room.message' },
     configuration: { getAccessToken: () => state.token, getUserId: () => state.actor },
     accountId: sender => sender.split(':')[0].slice(4), encryptedContentReferences: () => [],
     refreshBindings: async () => { state.refreshes++; await state.hook('bindings:' + state.refreshes); },
-    roomFor: async () => ({ c: context.client, roomId: '!room:test', assertCurrent: () => { if (!state.active) throw new Error('Binding revoked'); } }),
+    ensureSession: async () => {
+      if (state.ownerToken !== state.token) { context.generation++; state.ownerToken = state.token; }
+      await state.hook('bootstrap');
+      if (!context.client) context.client = activeClient;
+      return activeClient;
+    },
+    roomFor: async () => ({ c: await context.ensureSession(), roomId: '!room:test', assertCurrent: () => { if (!state.active) throw new Error('Binding revoked'); } }),
     secureMessaging: { getDecryptedEvent: async (_, id) => { state.fetched.push(id); await state.hook(id); const event = id === '$message' ? state.child : id === '$root' ? state.root : undefined; if (!event) throw new Error('Event missing'); return event; } },
   };
   vm.runInNewContext(ts.transpileModule(actualFunctions + '\nexports.getMessage = getMessage;', {
@@ -113,6 +120,22 @@ test('actual secure projection returns a decrypted root/reply and verifies the r
     assert.equal(result.id, '$message'); assert.equal(result.channel_id, 'room'); assert.equal(result.content, 'Actual encrypted source');
     assert.equal(result.encrypted, true); assert.equal(result.parent_id, reply ? '$root' : undefined);
     assert.deepEqual(fixture.state.fetched, reply ? ['$message', '$root'] : ['$message']); assert.equal(fixture.state.refreshes, 2);
+  }
+});
+
+test('single source reader accepts its first legitimate encryption bootstrap generation', async () => {
+  const fixture = encrypted({ reply: true, cold: true });
+  assert.equal(fixture.context.client, null);
+  const message = await fixture.resolve();
+  assert.equal(message.id, '$message'); assert.equal(message.parent_id, '$root');
+  assert.equal(fixture.context.generation, 1); assert.deepEqual(fixture.state.fetched, ['$message', '$root']);
+});
+
+test('single source bootstrap never adopts a switched owner or replacement client', async () => {
+  for (const change of ['token', 'actor', 'client']) {
+    const fixture = encrypted({ cold: true });
+    fixture.state.hook = async step => { if (step === 'bootstrap') { if (change === 'client') fixture.context.client = {}; else fixture.state[change] = 'replacement'; } };
+    await assert.rejects(fixture.resolve()); assert.deepEqual(fixture.state.fetched, []);
   }
 });
 

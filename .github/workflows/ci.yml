@@ -420,6 +420,8 @@ jobs:
       - name: Verify encrypted projects and concurrent shared documents
         run: python frontend/tests/shared-documents-browser.py --secure
       - name: Verify packed SDK and isolated embedded customer SSO with real encryption
+        env:
+          EMBED_PROOF_REPORT: ${{ runner.temp }}/freecollab-sdk-embed/report.json
         run: python packages/components/tests/embed-browser-proof.py --matrix
       - name: Verify encrypted shared channels across managed organizations
         # The preceding embed proof packs into its private fixture directory.
@@ -457,6 +459,16 @@ jobs:
           path: |
             ${{ runner.temp }}/freecollab-secure-message-navigation.json
             ${{ runner.temp }}/freecollab-secure-message-navigation*.png
+          if-no-files-found: warn
+          retention-days: 7
+      - name: Retain embedded SSO failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: embedded-sso-failure-proofs
+          path: |
+            ${{ runner.temp }}/freecollab-sdk-embed/*.json
+            ${{ runner.temp }}/freecollab-sdk-embed/*.png
           if-no-files-found: warn
           retention-days: 7
 

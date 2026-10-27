@@ -33,7 +33,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, urlsplit, urlencode
 from urllib.request import Request, urlopen
 
-from playwright.sync_api import expect, sync_playwright
+from playwright.sync_api import TimeoutError as PlaywrightTimeoutError, expect, sync_playwright
 from cryptography import x509
 from cryptography.hazmat.primitives import serialization
 
@@ -609,9 +609,21 @@ def main():
                     application_settings.get_by_role('button', name='Save application', exact=True).click()
                     expect(application_settings.get_by_text('Application disabled. Its embedding grants and sessions are no longer valid.', exact=True)).to_be_visible()
                     if frame.locator('[data-embed-state="ready"]').count():
-                        navigation.open_chat_tool(frame, 'Refresh messages')
+                        try:
+                            # Renewal or encrypted sync can revoke the iframe
+                            # between finding this optional control and clicking.
+                            navigation.reveal_chat_tool(frame, 'Refresh messages', timeout=3000).click(timeout=3000)
+                        except PlaywrightTimeoutError:
+                            if not frame.locator('[data-embed-state="signed-out"]').is_visible() or frame.locator('.fc-chat').count():
+                                raise
                     expect(frame.locator('[data-embed-state="signed-out"]')).to_be_visible(timeout=45000)
                     expect(frame.locator('.fc-chat')).to_have_count(0)
+                    try:
+                        http(api_base, '/auth/me', token=children[-1]['token'])
+                    except HTTPError as failure:
+                        assert failure.code == 401
+                    else:
+                        raise AssertionError('A disabled application retained its embedding child session')
                     assert http(api_base, '/auth/me', token=tokens['alpha']['access_token'])['id'] == tokens['alpha']['user_id']
                     checks['admin_ui_disable_revokes_live_embedding_and_clears_private_content'] = True
                     admin_context.close()
@@ -621,6 +633,32 @@ def main():
                     assert all(record['token'] not in url for record in children for url in urls)
                     assert not errors, 'Unexpected page error in actual embedded product'
                     checks['no_bearer_in_urls_and_zero_page_errors'] = True
+                except Exception:
+                    diagnostics = {'stage': stage, 'completed_checks': len(checks)}
+                    try:
+                        diagnostics['iframe'] = frame.locator('body').evaluate('''body=>({
+                          state:body.querySelector('[data-embed-state]')?.dataset.embedState||null,
+                          chatCount:body.querySelectorAll('.fc-chat').length})''', timeout=3000)
+                        diagnostics['signedOutVisible'] = frame.locator('[data-embed-state="signed-out"]').is_visible()
+                        diagnostics['hostStates'] = page.evaluate("(window.events||[]).map(event=>event.status).filter(value=>typeof value==='string').slice(-10)")
+                        frame.locator('body').screenshot(path=str(REPORT.with_name(REPORT.stem + '-failure.png')), timeout=3000)
+                        diagnostics['screenshotRetained'] = True
+                    except Exception:
+                        diagnostics['iframeMetadataOrScreenshotUnavailable'] = True
+                    for label, token in [('childAuthStatus', children[-1]['token'] if children else None), ('nativeParentAuthStatus', tokens['alpha']['access_token'])]:
+                        try:
+                            if token is None:
+                                diagnostics[label] = 'not-established'
+                            else:
+                                http(api_base, '/auth/me', token=token)
+                                diagnostics[label] = 200
+                        except HTTPError as failure:
+                            diagnostics[label] = failure.code
+                        except Exception:
+                            diagnostics[label] = 'unavailable'
+                    REPORT.with_name(REPORT.stem + '-failure.json').write_text(json.dumps(diagnostics, indent=2) + '\n')
+                    print('Embedded failure state: ' + json.dumps(diagnostics), file=sys.stderr)
+                    raise
                 finally:
                     context.close()
                     browser.close()

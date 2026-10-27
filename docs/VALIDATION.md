@@ -29,6 +29,11 @@ These are the same components and API used by the product demo.
   choices. Keyboard and pointer cases select the same intended stable person
   IDs while retaining exact text and reference spans; they also verify that
   the previously accepted person leads the later suggestion list.
+- The full universal collaboration proof passed **34 groups**, including all
+  **105 actual command dispatches** across document, task-description and
+  comment writers. Cross-surface checks require the same unique permitted IDs
+  while allowing their intended contextual order; retained source/no-write
+  checks, demo, modal writers and security transitions remain covered.
 - **6 native return-summary groups and 4 public-demo groups** cover real
   prior reading baselines, actual decision/document/attention sources, exact
   links including replies, receipt advancement without changing the baseline,
@@ -56,6 +61,11 @@ These are the same components and API used by the product demo.
   revocation, and zero native message/receipt/unread fallback. All eleven
   critical source hashes remained unchanged. Only the owned temporary fixtures
   were removed; proof records remain outside the repository.
+- Fresh packed SDK/App builds and an actual Matrix/HTTPS customer-SSO proof
+  passed **21 checks**, including registration disable, child-session 401 and
+  an unaffected native parent session. The optional post-revocation refresh
+  tolerates timeout only when signed-out UI and zero Chat are already verified.
+  Artifact binding and five bounded-refresh controls passed separately.
 
 The five browser scripts run in the required **Natural collaboration flows** CI
 job and retain scoped JSON/PNG evidence. The real Matrix proof repeats in
@@ -86,7 +96,9 @@ helper also rejects encrypted channels before constructing multipart content.
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu
 HTTPS archives on pinned Ubuntu24.04, after the former Azure HTTP mirror took
-26 minutes to transfer 62.8MB. Runner-global feeds are unchanged; the mirror
+26 minutes to transfer 62.8MB. The subsequent CI media installation passed in
+32 seconds with the expected official hosts/keyring and FFmpeg version.
+Runner-global feeds are unchanged; the mirror
 change does not skip the FFmpeg installation check or any browser assertion.
 
 ## Integrated feature completion — 2026-10-25

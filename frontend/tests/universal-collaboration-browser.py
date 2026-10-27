@@ -332,6 +332,13 @@ def inventory(field):
     return result
 
 
+def assert_same_inventory(field, expected, surface):
+    actual = inventory(field)
+    assert len(actual) == len(set(actual)), {'surface': surface, 'duplicateIds': actual}
+    assert set(actual) == set(expected), {'surface': surface, 'actual': actual, 'expected': expected}
+    evidence.append({'inventoryParity': surface, 'actualOrder': actual, 'expectedOrder': expected})
+
+
 def no_target_writes(writes, since, source_document=None):
     allowed = '/shared-documents/' + source_document + '/updates' if source_document else None
     forbidden = []
@@ -474,8 +481,7 @@ def run_native(browser):
             # Every permission-valid inventory action must execute from each
             # writing surface, rather than merely appearing in its list.
             available = exercise_inventory(page, draft_body, writes, 'native_document')
-            task_inventory = inventory(task_description)
-            assert task_inventory == available
+            assert_same_inventory(task_description, available, 'native_task_description')
             exercise_inventory(page, task_description, writes, 'native_task_description')
 
             set_stage('native six real explicit references in a document draft')
@@ -497,7 +503,7 @@ def run_native(browser):
             comment.fill('Discuss with ')
             choose_reference(comment, 'person', data['peer']['user_id'], 'Maja', keyboard=True)
             comment_value = comment.input_value()
-            assert inventory(comment) == available
+            assert_same_inventory(comment, available, 'native_document_comment')
             exercise_inventory(page, comment, writes, 'native_document_comment', source_document=document['id'])
             expect(comment).to_have_value(comment_value)
             comment.fill('/task "Comment-origin task"')

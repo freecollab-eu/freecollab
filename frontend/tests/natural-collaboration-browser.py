@@ -20,6 +20,7 @@ import tempfile
 import time
 
 from playwright.sync_api import expect, sync_playwright
+from browser_conditions import wait_for_awaited_condition
 from ui_navigation import choose_chat_channel, close_work_card, capture_work_card, work_surface
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -97,7 +98,7 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><LocalePro
                 if path.is_file(): source_hashes['frontend/src/' + str(path.relative_to(web / 'src'))] = hashlib.sha256(path.read_bytes()).hexdigest()
             for path in (ROOT / 'backend/app').rglob('*.py'):
                 source_hashes[str(path.relative_to(ROOT))] = hashlib.sha256(path.read_bytes()).hexdigest()
-            for name in ['frontend/package.json', 'frontend/tests/natural-collaboration-browser.py', 'frontend/tests/meetings-browser.py', 'frontend/tests/conversation-flow-browser.py', 'frontend/tests/ui_navigation.py']:
+            for name in ['frontend/package.json', 'frontend/tests/natural-collaboration-browser.py', 'frontend/tests/meetings-browser.py', 'frontend/tests/conversation-flow-browser.py', 'frontend/tests/ui_navigation.py', 'frontend/tests/browser_conditions.py']:
                 source_hashes[name] = hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
             environment = os.environ.copy()
             environment.update(ENVIRONMENT='test', DEMO_INSTANCE='false', DATABASE_URL='sqlite:///' + str(private / 'proof.db'), STORAGE_PATH=str(private / 'files'), JWT_SECRET=secrets.token_urlsafe(48), ACCOUNT_SECURITY_KEY=base64.b64encode(secrets.token_bytes(32)).decode(), MESSAGE_ENCRYPTION_KEYS=json.dumps({'proof': base64.b64encode(secrets.token_bytes(32)).decode()}), MESSAGE_ENCRYPTION_ACTIVE_KEY_ID='proof', MATRIX_ENABLED='false', MAIL_DELIVERY_MODE='disabled', OIDC_ENABLED='false', WEBHOOKS_ENABLED='false', OTRUST_ENABLED='false', SYNC_ENABLED='false', CLOUD_FILES_ENABLED='false', EXTERNAL_MEETINGS_ENABLED='false', COPILOT_ENABLED='false', PUSH_ENABLED='false', PUBLIC_APP_URL=origin, CORS_ORIGINS=json.dumps([origin]), PYTHONPATH=str(ROOT / 'backend'), NATURAL_PROOF_PRIVATE=str(private))
@@ -263,7 +264,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port=''' + str(api_port) + ''',lifespan=
                         (private / 'release').touch()
                     assert committed.value.ok, 'The real retained document update was not accepted'
                     document_probe = page.evaluate('''async id=>{const{readSharedDocumentForSearch}=await import('/src/lib/shared-documents-api.ts');const state=await readSharedDocumentForSearch('shared',id);return{text:state.text,sequence:state.sequence}}''', document['id'])
-                    page.wait_for_function('''async({id,expected})=>{const{readSharedDocumentForSearch}=await import('/src/lib/shared-documents-api.ts');const state=await readSharedDocumentForSearch('shared',id);return state.text===expected&&state.sequence>=2}''', arg={'id': document['id'], 'expected': document_text})
+                    wait_for_awaited_condition(page, '''async({id,expected})=>{const{readSharedDocumentForSearch}=await import('/src/lib/shared-documents-api.ts');const state=await readSharedDocumentForSearch('shared',id);return state.text===expected&&state.sequence>=2}''', arg={'id': document['id'], 'expected': document_text}, timeout=30000)
                     state = page.evaluate('''async id=>{const{readSharedDocumentForSearch}=await import('/src/lib/shared-documents-api.ts');return readSharedDocumentForSearch('shared',id)}''', document['id'])
                     assert state['text'] == document_text and state['sequence'] >= 2
                     checks['retained_real_yjs_update_reaches_native_api_and_reconstructs_exact_saved_text'] = True

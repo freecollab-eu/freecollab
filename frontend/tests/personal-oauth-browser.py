@@ -201,9 +201,8 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 try:
                     # Observe the completed mobile layout before asserting it.
                     # Persistent overflow still fails these exact bounds.
-                    page.wait_for_function('''async root=>{
-                      await document.fonts.ready;
-                      return root.isConnected&&innerWidth===320&&document.documentElement.scrollWidth<=innerWidth&&root.scrollWidth<=root.clientWidth+1;
+                    page.wait_for_function('''root=>{
+                      return document.fonts.status==='loaded'&&root.isConnected&&innerWidth===320&&document.documentElement.scrollWidth<=innerWidth&&root.scrollWidth<=root.clientWidth+1;
                     }''', arg=panel.element_handle(), timeout=3000)
                     assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
                     assert panel.evaluate('el=>el.scrollWidth<=el.clientWidth+1')

@@ -47,8 +47,8 @@ def wait_mobile_layout(page, guide, evidence, name, check_guide=False):
     try:
         # Resize and font loading are asynchronous; persistent overflow still fails
         # within three seconds, using the original exact one-pixel limits.
-        page.wait_for_function('''async ({root,checkGuide})=>{await document.fonts.ready;
-          return document.documentElement.scrollWidth<=innerWidth+1&&(!checkGuide||root.scrollWidth<=root.clientWidth+1);
+        page.wait_for_function('''({root,checkGuide})=>{
+          return document.fonts.status==='loaded'&&document.documentElement.scrollWidth<=innerWidth+1&&(!checkGuide||root.scrollWidth<=root.clientWidth+1);
         }''', arg={'root': guide.element_handle(), 'checkGuide': check_guide}, timeout=3000)
     finally:
         entry['settled'] = mobile_layout(guide)

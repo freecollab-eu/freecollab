@@ -247,6 +247,7 @@ jobs:
       - name: Verify collaboration and personalized client workflows
         run: |
           python backend/scripts/smoke_core.py
+          python frontend/tests/test_browser_conditions.py
           python frontend/tests/pilot-browser.py
           python frontend/tests/chat-browser.py
           python frontend/tests/widget-browser.py

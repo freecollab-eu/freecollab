@@ -13,6 +13,7 @@ from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
 from ui_navigation import reveal_message_actions
+from browser_conditions import wait_for_awaited_condition
 
 
 BASE = os.getenv('CHAT_BASE_URL', 'http://127.0.0.1:3000').rstrip('/')
@@ -96,12 +97,13 @@ def wait_bottom(page):
 
 
 def wait_read(page, channel, user, message):
-    page.wait_for_function("""async expected => {
+    wait_for_awaited_condition(page, """async expected => {
       const response = await fetch('/api/read-receipts/channels/' + expected.channel, {
         headers: {Authorization: 'Bearer ' + localStorage.getItem('freecollab_token')},
       });
       return (await response.json()).some(receipt => receipt.user_id === expected.user && receipt.last_read_message_id === expected.message);
-    }""", arg={'channel': channel['id'], 'user': user['user_id'], 'message': message['id']}, polling=100)
+    }""", arg={'channel': channel['id'], 'user': user['user_id'], 'message': message['id']}, timeout=30000, polling=100)
+    assert last_read(channel, user) == message['id'], 'The expected message was not recorded as read'
 
 
 def last_read(channel, user):
@@ -207,13 +209,7 @@ with sync_playwright() as p:
         timeline = page.get_by_label('Channel messages', exact=True)
         wait_bottom(page)
         latest_before = api('GET', '/messages/channels/' + studio['id'], alice)[0]
-        page.wait_for_function("""async expected => {
-          const response = await fetch('/api/read-receipts/channels/' + expected.channel, {
-            headers: {Authorization: 'Bearer ' + localStorage.getItem('freecollab_token')},
-          });
-          const receipts = await response.json();
-          return receipts.some(receipt => receipt.user_id === expected.user && receipt.last_read_message_id === expected.message);
-        }""", arg={'channel': studio['id'], 'user': alice['user_id'], 'message': latest_before['id']}, polling=100)
+        wait_read(page, studio, alice, latest_before)
         timeline.evaluate('element => { element.scrollTop = 450; }')
         next_paint(page)
         before_top = timeline.evaluate('element => element.scrollTop')
@@ -229,12 +225,7 @@ with sync_playwright() as p:
         jump.click()
         wait_bottom(page)
         expect(jump).to_have_count(0)
-        page.wait_for_function("""async expected => {
-          const response = await fetch('/api/read-receipts/channels/' + expected.channel, {
-            headers: {Authorization: 'Bearer ' + localStorage.getItem('freecollab_token')},
-          });
-          return (await response.json()).some(receipt => receipt.user_id === expected.user && receipt.last_read_message_id === expected.message);
-        }""", arg={'channel': studio['id'], 'user': alice['user_id'], 'message': incoming['id']}, polling=100)
+        wait_read(page, studio, alice, incoming)
         timeline.evaluate('element => { element.scrollTop = 450; }')
         next_paint(page)
         own_text = 'An intentional reply takes me to the latest ' + RUN

@@ -25,12 +25,13 @@ import time
 from urllib.parse import urlsplit
 
 from playwright.sync_api import expect, sync_playwright
+from browser_conditions import wait_for_awaited_condition
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('private_meetings_helpers', Path(__file__).with_name('remote-sync-browser.py'))
 helpers = importlib.util.module_from_spec(spec); spec.loader.exec_module(helpers)
 REPORT = Path(os.getenv('MEETINGS_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/meetings-browser.json')))
-SOURCE_FILES = ['backend/app/models/meetings.py','backend/app/models/chat_productivity.py','backend/app/models/message_references.py','backend/app/services/meetings.py','backend/app/api/meetings.py','backend/tests/test_meetings.py','frontend/src/lib/meetings-api.ts','frontend/src/components/MeetingsPanel.tsx','frontend/src/components/MeetingGuest.tsx','frontend/src/styles/meetings.css','frontend/tests/meetings-browser.py','docs/MEETINGS.md']
+SOURCE_FILES = ['backend/app/models/meetings.py','backend/app/models/chat_productivity.py','backend/app/models/message_references.py','backend/app/services/meetings.py','backend/app/api/meetings.py','backend/tests/test_meetings.py','frontend/src/lib/meetings-api.ts','frontend/src/components/MeetingsPanel.tsx','frontend/src/components/MeetingGuest.tsx','frontend/src/styles/meetings.css','frontend/tests/meetings-browser.py','frontend/tests/browser_conditions.py','docs/MEETINGS.md']
 
 
 def create_frontend(private, api_base, app_port):
@@ -112,7 +113,7 @@ def wait_media(page, peers=1):
         print('NativeRTC sanitized state: '+json.dumps(page.evaluate('''()=>({peers:window.__meetingPCs.map(p=>({connection:p.connectionState,ice:p.iceConnectionState,signalling:p.signalingState,local:!!p.localDescription,remote:!!p.remoteDescription,gathering:p.iceGatheringState,localMedia:p.localDescription?.sdp.split('\\r\\n').filter(l=>/^(m=|a=(send|recv|inactive|group))/.test(l)),remoteMedia:p.remoteDescription?.sdp.split('\\r\\n').filter(l=>/^(m=|a=(send|recv|inactive|group))/.test(l)),transceivers:p.getTransceivers().map(t=>({kind:t.receiver.track.kind,direction:t.direction,current:t.currentDirection,track:t.sender.track?.kind}))})),alerts:[...document.querySelectorAll('[role=alert]')].map(e=>e.textContent),media:window.__meetingStreams.map(s=>s.getTracks().map(t=>({kind:t.kind,state:t.readyState})))})''')),file=sys.stderr)
         raise
     page.wait_for_function('count=>[...document.querySelectorAll("video")].filter(v=>!v.muted&&v.videoWidth>0).length>=count', arg=peers, timeout=30000)
-    page.wait_for_function('''async count=>{let receiving=0;for(const pc of window.__meetingPCs){if(pc.connectionState!=='connected')continue;const report=await pc.getStats(),rows=[...report.values()].filter(r=>r.type==='inbound-rtp');if(rows.some(r=>(r.kind==='video'||r.mediaType==='video')&&r.bytesReceived>0&&r.framesDecoded>0)&&rows.some(r=>(r.kind==='audio'||r.mediaType==='audio')&&r.bytesReceived>0))receiving++}return receiving>=count}''',arg=peers,timeout=30000)
+    wait_for_awaited_condition(page, '''async count=>{let receiving=0;for(const pc of window.__meetingPCs){if(pc.connectionState!=='connected')continue;const report=await pc.getStats(),rows=[...report.values()].filter(r=>r.type==='inbound-rtp');if(rows.some(r=>(r.kind==='video'||r.mediaType==='video')&&r.bytesReceived>0&&r.framesDecoded>0)&&rows.some(r=>(r.kind==='audio'||r.mediaType==='audio')&&r.bytesReceived>0))receiving++}return receiving>=count}''',arg=peers,timeout=30000)
     stats = page.evaluate('''async()=>{let bytes=0,frames=0;for(const pc of window.__meetingPCs){const report=await pc.getStats();for(const row of report.values())if(row.type==='inbound-rtp'){bytes+=row.bytesReceived||0;frames+=row.framesDecoded||0}}return{bytes,frames}}''')
     assert stats['bytes'] > 0 and stats['frames'] > 0, 'Native inbound media counters did not advance'
 

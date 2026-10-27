@@ -20,13 +20,14 @@ import sys
 import tempfile
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, expect
+from browser_conditions import wait_for_awaited_condition
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('media_meeting_harness', Path(__file__).with_name('meetings-browser.py'))
 harness = importlib.util.module_from_spec(spec); spec.loader.exec_module(harness)
 helpers = harness.helpers
 REPORT = Path(os.getenv('MEDIA_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results' / ('media-sfu-browser.json' if os.getenv('LIVEKIT_TEST_BINARY') else 'media-browser.json'))))
-SOURCE_FILES = ['backend/tests/media_browser_api.py', 'frontend/tests/media-browser.py', 'frontend/tests/meetings-browser.py',
+SOURCE_FILES = ['backend/tests/media_browser_api.py', 'frontend/tests/media-browser.py', 'frontend/tests/meetings-browser.py', 'frontend/tests/browser_conditions.py',
     'frontend/src/lib/secure/index.ts', 'frontend/src/lib/secure-client.ts', 'frontend/src/lib/secure/files.ts',
     'frontend/src/lib/clips-api.ts', 'frontend/src/lib/files-api.ts', 'frontend/src/lib/meeting-recorder.ts',
     'frontend/src/components/ClipsPanel.tsx', 'frontend/src/components/MeetingsPanel.tsx',
@@ -131,7 +132,7 @@ def main():
                             page.wait_for_function('window.__meetingPCs.some(pc=>pc.connectionState==="connected")', timeout=45000)
                             peers.append(page)
                         host.wait_for_function('window.__meetingPCs.some(pc=>pc.connectionState==="connected")', timeout=45000)
-                        peers[0].wait_for_function('''async()=>{for(const pc of window.__meetingPCs){const stats=await pc.getStats();if([...stats.values()].some(row=>row.type==='inbound-rtp'&&row.kind==='video'&&row.framesDecoded>0&&row.bytesReceived>0))return true}return false}''', timeout=45000)
+                        wait_for_awaited_condition(peers[0], '''async()=>{for(const pc of window.__meetingPCs){const stats=await pc.getStats();if([...stats.values()].some(row=>row.type==='inbound-rtp'&&row.kind==='video'&&row.framesDecoded>0&&row.bytesReceived>0))return true}return false}''', timeout=45000)
                         with sqlite3.connect(private/'proof.db') as db: assert db.execute("SELECT count(*) FROM sfuparticipant WHERE state='admitted'").fetchone()[0] == 7
                         results['actual_livekit_seven_devices_scoped_tokens_real_inbound_video_rtp'] = True
                         stage = 'closing tools preserves active media and host leave preserves SFU room'

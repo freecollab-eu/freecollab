@@ -29,10 +29,19 @@ from tests.oidc_mock import tls_fixture
 PASSWORD='Private-copilot-browser!2026'
 KEY='synthetic-copilot-browser-provider-key'
 REPORT=Path(os.getenv('COPILOT_PROOF_REPORT',str(ROOT.parent/'.freecollab/proof-results/copilot-browser.json')))
-PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/contextual-actions.sv.ts','frontend/src/styles/shared-documents.css','frontend/tests/ui_navigation.py','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
+PROOF_SOURCES=('frontend/src/components/CopilotPanel.tsx','frontend/src/components/ContextualCopilot.tsx','frontend/src/components/Chat.tsx','frontend/src/components/SharedDocumentsPanel.tsx','frontend/src/components/SharedDocumentOrganization.tsx','frontend/src/lib/copilot-intents.ts','frontend/src/lib/copilot-api.ts','frontend/src/lib/socket.ts','frontend/src/lib/channel-metadata.ts','frontend/src/lib/connection-presets.ts','frontend/src/lib/document-organization-api.ts','frontend/src/styles/copilot.css','frontend/src/styles/contextual-copilot.css','frontend/src/styles/flow-first.css','frontend/src/styles/document-organization.css','frontend/src/i18n/copilot.sv.ts','frontend/src/i18n/contextual-copilot.sv.ts','frontend/src/i18n/contextual-actions.sv.ts','frontend/src/styles/shared-documents.css','frontend/tests/ui_navigation.py','frontend/src/i18n/connection-presets.sv.ts','frontend/src/i18n/document-organization.sv.ts','frontend/tests/copilot-browser.py','backend/app/api/copilot.py','backend/app/services/copilot.py','backend/app/api/shared_documents.py','backend/app/services/shared_documents.py','backend/app/models/shared_documents.py','backend/app/api/document_organization.py','backend/app/models/document_organization.py')
+
+def inline_review_layout(review):
+    return review.evaluate('''node=>{
+      const bounds=value=>{if(!value)return null;const box=value.getBoundingClientRect(),style=getComputedStyle(value);return {
+        top:box.top,bottom:box.bottom,height:box.height,clientHeight:value.clientHeight,scrollHeight:value.scrollHeight,overflowY:style.overflowY};};
+      return {viewport:{width:innerWidth,height:innerHeight},card:bounds(node),timeline:bounds(document.querySelector('.fc-chat-timeline-wrap')),
+        composer:bounds(document.querySelector('.fc-chat-composer-row')),introduction:bounds(document.querySelector('.fc-chat-channel-introduction')),
+        returnSummary:bounds(document.querySelector('.fc-channel-return'))};
+    }''')
 
 def main():
-    stage='private startup';results={};processes=[];streams=[];server=None
+    stage='private startup';results={};processes=[];streams=[];server=None;layout_evidence=[]
     with tempfile.TemporaryDirectory(prefix='freecollab-copilot-browser-') as directory:
         private=Path(directory);requests=[]
         source_hashes={name:hashlib.sha256((ROOT/name).read_bytes()).hexdigest() for name in PROOF_SOURCES}
@@ -331,8 +340,46 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
                 assert len(requests)==provider_calls
                 expect(composer).to_have_value(mobile_draft)
+                layout=inline_review_layout(mobile_review)
+                assert layout['timeline']['height']>=96 and layout['card']['clientHeight']>=44
+                assert layout['card']['scrollHeight']>layout['card']['clientHeight']
+                layout_evidence.append(layout)
                 page.screenshot(path=str(REPORT.parent/'copilot-contextual-mobile-sv-320.png'))
                 results['configured_Swedish320_draft_review_is_bounded_gated_and_preserves_the_draft']=True
+                stage='configured contextual draft review retains accessible controls at Swedish320x568'
+                consent_before=mobile_review.get_by_role('checkbox').evaluate_all('(nodes)=>nodes.map(node=>({checked:node.checked,disabled:node.disabled}))')
+                page.set_viewport_size({'width':320,'height':568})
+                layout=inline_review_layout(mobile_review)
+                layout_evidence.append({'phase':'immediate_short_viewport_resize',**layout})
+                page.wait_for_function('''node=>{
+                  const card=node.getBoundingClientRect(),timeline=document.querySelector('.fc-chat-timeline-wrap').getBoundingClientRect();
+                  return document.fonts.status==='loaded'&&innerWidth===320&&innerHeight===568&&card.top>=-1&&card.bottom<=innerHeight+1&&node.clientHeight>=44&&timeline.height>=96;
+                }''',arg=mobile_review.element_handle(),timeout=3000)
+                layout=inline_review_layout(mobile_review)
+                layout_evidence.append({'phase':'ready_short_viewport_layout',**layout})
+                assert layout['card']['top']>=-1 and layout['card']['bottom']<=569
+                assert layout['card']['clientHeight']>=44 and layout['card']['scrollHeight']>layout['card']['clientHeight']
+                assert layout['timeline']['height']>=96
+                assert layout['composer']['top']>=-1 and layout['composer']['bottom']<=569
+                for control in mobile_review.get_by_role('button').all()+mobile_review.get_by_role('checkbox').all():
+                    control.scroll_into_view_if_needed()
+                    box=control.bounding_box();card=mobile_review.bounding_box()
+                    assert box and card and box['y']>=card['y'] and box['y']+box['height']<=card['y']+card['height']
+                    if control.evaluate('node=>node.tagName==="BUTTON"'):assert box['height']>=44
+                for selector in ('.fc-chat-channel-introduction','.fc-channel-return'):
+                    context_region=page.locator(selector)
+                    if context_region.count():
+                        scroll=context_region.evaluate('node=>{const previous=node.scrollTop;node.scrollTop=node.scrollHeight;const reached=node.scrollTop;node.scrollTop=previous;return {height:node.clientHeight,total:node.scrollHeight,reached,overflow:getComputedStyle(node).overflowY}}')
+                        assert scroll['overflow']=='auto' and scroll['height']>0
+                        if scroll['total']>scroll['height']:assert scroll['reached']>0
+                expect(mobile_send).to_be_disabled()
+                assert mobile_review.get_by_role('checkbox').evaluate_all('(nodes)=>nodes.map(node=>({checked:node.checked,disabled:node.disabled}))')==consent_before
+                expect(composer).to_have_value(mobile_draft)
+                assert len(requests)==provider_calls
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth+1')
+                page.screenshot(path=str(REPORT.parent/'copilot-contextual-mobile-sv-320x568.png'))
+                results['Swedish320x568_review_scroll_keeps_timeline_composer_consent_and_44px_controls_accessible']=True
+                page.set_viewport_size({'width':320,'height':740})
                 stage='clearing a reviewed draft requires a fresh contextual AI activation'
                 composer.fill('');expect(mobile_review).to_have_count(0)
                 fresh_draft='Ett nytt utkast utan någon begärd AI-åtgärd.';composer.fill(fresh_draft)
@@ -352,8 +399,10 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                 assert not errors and not any(KEY in url or PASSWORD in url for url in urls);results['no_page_errors_or_auth_secrets_in_urls']=True
                 context.close();browser.close()
             assert all(hashlib.sha256((ROOT/name).read_bytes()).hexdigest()==digest for name,digest in source_hashes.items()), 'Copilot proof sources changed during this private run'
-            REPORT.write_text(json.dumps({'ok':True,'results':results,'source_hashes':source_hashes},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
+            REPORT.write_text(json.dumps({'ok':True,'results':results,'layout_evidence':layout_evidence,'source_hashes':source_hashes},indent=2)+'\n');print(json.dumps({'ok':True,'checks':list(results),'report':str(REPORT)}))
         except Exception as failure:
+            REPORT.parent.mkdir(parents=True,exist_ok=True)
+            REPORT.write_text(json.dumps({'ok':False,'stage':stage,'results':results,'layout_evidence':layout_evidence,'source_hashes':source_hashes,'error_type':type(failure).__name__},indent=2)+'\n')
             print(json.dumps({'failure_locations':[{'file':Path(frame.filename).name,'line':frame.lineno} for frame in traceback.extract_tb(failure.__traceback__)]}))
             print(json.dumps({'failure':str(failure).replace(KEY,'[redacted]').replace(PASSWORD,'[redacted]')[:5000]}))
             if 'page' in locals():

@@ -18,6 +18,7 @@ from urllib.error import HTTPError
 from urllib.parse import urlsplit
 
 from playwright.sync_api import expect, sync_playwright
+from browser_conditions import wait_for_awaited_condition
 from ui_navigation import (activate_chat_feature, choose_chat_channel, open_channels,
     close_channels, edit_saved_document, saved_document_reading,
     reveal_discussion_work, reveal_message_actions, show_channel_introduction)
@@ -227,7 +228,7 @@ def entry_network_races(browser):
                 choose_chat_channel(page, known['name'])
                 expect(page.locator('#message-' + history[-1]['id'])).to_be_in_viewport(ratio=.7)
                 at_latest(page)
-                page.wait_for_function("async()=>{const{getSocket}=await import('/src/lib/socket.ts');return getSocket().connected;}")
+                wait_for_awaited_condition(page, "async()=>{const{getSocket}=await import('/src/lib/socket.ts');return getSocket().connected;}", timeout=40000)
                 deadline = time.monotonic() + 15
                 while not older_receipt.routes:
                     assert time.monotonic() < deadline, 'The initial actual known-latest receipt write was not held'

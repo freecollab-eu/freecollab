@@ -24,6 +24,7 @@ from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 from playwright.sync_api import expect, sync_playwright
+from browser_conditions import wait_for_awaited_condition
 from ui_navigation import choose_chat_channel, reveal_message_actions, edit_saved_document, show_channel_introduction, capture_work_card, work_surface, work_resume_button, parked_work_close_button
 
 
@@ -69,7 +70,7 @@ def source_hashes(private):
     paths += [private / 'frontend' / name for name in (
         'package.json', 'package-lock.json', 'vite.config.ts', 'vite.demo.config.ts',
         'postcss.config.js', 'tailwind.config.js', 'index.html', 'demo/index.html',
-        'tests/workspace-modes-browser.py', 'tests/ui_navigation.py')]
+        'tests/workspace-modes-browser.py', 'tests/ui_navigation.py', 'tests/browser_conditions.py')]
     return {str(path.relative_to(private)): hashlib.sha256(path.read_bytes()).hexdigest()
             for path in paths if path.is_file()}
 
@@ -709,7 +710,7 @@ def native(browser):
                 member_page.goto(app, wait_until='domcontentloaded')
                 expect(member_page.locator('.fc-chat')).to_be_visible(timeout=90000)
                 choose_chat_channel(member_page, channel['name'])
-                member_page.wait_for_function("async()=>{const{getSocket}=await import('/src/lib/socket.ts');return getSocket().connected;}")
+                wait_for_awaited_condition(member_page, "async()=>{const{getSocket}=await import('/src/lib/socket.ts');return getSocket().connected;}", timeout=40000)
                 member_composer = member_page.locator('.fc-chat-composer textarea')
                 command(member_page, member_composer, '/task "Revoked draft ' + RUN + '"\nOnly this current channel may show it.')
                 member_pane = workspace_pane(member_page, 'split')

@@ -56,6 +56,12 @@ These are the same components and API used by the product demo.
   open. Native complete empty summaries stay quiet; other context panels remain
   scrollable. This fixes the measured zero-height timeline without removing
   message actions, intro contents or summary sources.
+- Inline AI review also shares the available height with the composer. The
+  former fixed-height composer clipped its review and collapsed the timeline at
+  320×740. The original full Copilot scenario plus a 320×568 regression passed
+  **18 groups**, keeping a 96px timeline, internally scrollable review, reachable
+  44px controls, unchanged consent and the original draft. Both CSS inputs are
+  bound in the proof; the full Node suite and app/embed/demo builds also passed.
 
 - **9 actual local Matrix groups passed** with the exact pinned CI Synapse
   image, real Rust crypto and verified devices. They cover cache-independent
@@ -122,6 +128,19 @@ A fresh CI-Chromium tail sweep passed **109 checks across ten existing scripts**
 covering native push/calling/offline, enterprise/sync/workflows/data controls and
 mobile/documents/meetings, plus the original **three version-proof groups**.
 These used disposable services with unchanged production-source bindings.
+Browser proofs now await the resolved boolean of their asynchronous conditions
+within the original deadlines. **Six actual Chromium controls** cover false
+results, eventual success, unresolved promises, evaluation errors, non-boolean
+values and structured arguments. Existing media, meeting, receipt, offline,
+document and socket predicates keep their original conditions and final checks.
+The lost-upload-acknowledgement fixture also waits for the actual failed request
+before removing its interceptor: the retry must preserve its key, one database
+receipt and exact downloadable bytes. The optional seven-device LiveKit branch
+requires its supplied binary; this local pass does not claim a new SFU test.
+The full-demo sender meters both browser and direct verification requests before
+transport, keeping the same visit and the real 300-request/120-mutation limits
+per 60 seconds. Its original zero-429 and functional assertions remain intact;
+neither the production limits nor sample data are reset to bypass the budget.
 
 The Product job keeps its codec tests and signed Ubuntu packages. Its media
 installation uses temporary isolated apt sources/lists for the official Ubuntu

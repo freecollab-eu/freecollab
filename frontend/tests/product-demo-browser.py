@@ -28,6 +28,13 @@ from ui_navigation import choose_chat_channel, close_channels, open_chat_tool, r
 ROOT = Path(__file__).resolve().parents[2]
 REPORT = Path(os.getenv('PRODUCT_DEMO_PROOF_REPORT', str(ROOT.parent / '.freecollab/proof-results/conversation-flow-20261023/product-demo-browser.json')))
 PRIVATE_API_REQUEST_TIMES = []
+PRIVATE_API_DISPATCHES = []
+PRIVATE_API_429 = []
+PRIVATE_NEXT_API_AT = 0.0
+PRIVATE_NEXT_WRITE_AT = 0.0
+PRIVATE_AUTOMATION_DEADLINE = 0.0
+PRIVATE_PACING_ACTIVE = False
+PRIVATE_MAX_SLEEP = 0.0
 
 SOURCES = [
     'frontend/src/demo-entry.tsx', 'frontend/demo/index.html', 'frontend/vite.demo.config.ts',
@@ -189,21 +196,87 @@ def port():
         return server.getsockname()[1]
 
 
+def pace_api(method, path, transport):
+    """Pace this disposable sender; the real server's limits stay unchanged."""
+    global PRIVATE_NEXT_API_AT, PRIVATE_NEXT_WRITE_AT, PRIVATE_MAX_SLEEP
+    if not PRIVATE_PACING_ACTIVE:
+        return time.monotonic()  # Imported helpers keep their original behavior.
+    mutation = method.upper() not in {'GET', 'HEAD', 'OPTIONS'}
+    target = max(PRIVATE_NEXT_API_AT, PRIVATE_NEXT_WRITE_AT if mutation else 0)
+    now = time.monotonic()
+    assert now < PRIVATE_AUTOMATION_DEADLINE, 'Private demo proof exceeded its 20-minute deadline'
+    assert target - now <= 1.001, 'Private sender gate exceeded its one-second wait bound'
+    while now < target:
+        duration = min(target - now, 1.0)
+        PRIVATE_MAX_SLEEP = max(PRIVATE_MAX_SLEEP, duration)
+        time.sleep(duration)
+        now = time.monotonic()
+        assert now < PRIVATE_AUTOMATION_DEADLINE, 'Private demo proof exceeded its 20-minute deadline'
+    PRIVATE_NEXT_API_AT = now + .25
+    if mutation:
+        PRIVATE_NEXT_WRITE_AT = now + 1.0
+    assert len(PRIVATE_API_DISPATCHES) < 6000, 'Private dispatch evidence exceeded its bound'
+    route = urlsplit(path).path
+    PRIVATE_API_DISPATCHES.append({'method': method.upper(), 'path': route[4:] if route.startswith('/api/') else route,
+                                  'transport': transport, 'at': now, 'mutation': mutation})
+    return now
+
+
+def record_429(method, path, headers, body):
+    safe_headers = {key.lower(): value for key, value in headers.items()
+                    if key.lower() in {'retry-after', 'cache-control', 'pragma', 'content-type'}}
+    try:
+        parsed = json.loads(body[:4096])
+        safe_body = {key: parsed[key][:512] for key in ('code', 'detail') if isinstance(parsed.get(key), str)}
+    except (ValueError, TypeError, AttributeError):
+        safe_body = {'unavailable': True}
+    PRIVATE_API_429.append({'method': method, 'path': urlsplit(path).path, 'status': 429,
+                            'headers': safe_headers, 'json': safe_body, 'at': time.monotonic()})
+
+
+def pacing_evidence():
+    def maximum_window(rows):
+        left, maximum = 0, 0
+        for right, row in enumerate(rows):
+            while rows[left]['at'] <= row['at'] - 60:
+                left += 1
+            maximum = max(maximum, right - left + 1)
+        return maximum
+    return {'api_interval_seconds': .25, 'mutation_interval_seconds': 1, 'deadline_seconds': 1200,
+            'maximum_single_sleep_seconds': PRIVATE_MAX_SLEEP,
+            'dispatch_count': len(PRIVATE_API_DISPATCHES),
+            'maximum_api_dispatches_in_60_seconds': maximum_window(PRIVATE_API_DISPATCHES),
+            'maximum_mutation_dispatches_in_60_seconds': maximum_window([row for row in PRIVATE_API_DISPATCHES if row['mutation']]),
+            'HTTP_429': PRIVATE_API_429, 'dispatches': PRIVATE_API_DISPATCHES}
+
+
+def private_deadline_exceeded(_signum, _frame):
+    raise AssertionError('Private demo proof exceeded its 20-minute deadline')
+
+
 def request(base, method, path, token=None, data=None):
     headers = {'Content-Type': 'application/json'}
     if token:
         headers['Authorization'] = 'Bearer ' + token
     body = json.dumps(data).encode() if data is not None else None
-    PRIVATE_API_REQUEST_TIMES.append(time.monotonic())
-    with urlopen(Request(base + path, method=method, headers=headers, data=body), timeout=45) as response:
-        value = response.read()
-        return json.loads(value) if value else None
+    PRIVATE_API_REQUEST_TIMES.append(pace_api(method, path, 'direct-verification'))
+    try:
+        with urlopen(Request(base + path, method=method, headers=headers, data=body), timeout=45) as response:
+            value = response.read()
+            return json.loads(value) if value else None
+    except HTTPError as failure:
+        if failure.code == 429: record_429(method, path, failure.headers, failure.read(4096))
+        raise
 
 
 def downloaded_bytes(base, path, token):
-    PRIVATE_API_REQUEST_TIMES.append(time.monotonic())
-    with urlopen(Request(base + path, headers={'Authorization':'Bearer ' + token}), timeout=45) as response:
-        return response.read()
+    PRIVATE_API_REQUEST_TIMES.append(pace_api('GET', path, 'direct-download'))
+    try:
+        with urlopen(Request(base + path, headers={'Authorization':'Bearer ' + token}), timeout=45) as response:
+            return response.read()
+    except HTTPError as failure:
+        if failure.code == 429: record_429('GET', path, failure.headers, failure.read(4096))
+        raise
 
 
 def rejected_bytes(base, path, token):
@@ -229,6 +302,7 @@ def ready(url, processes):
     while time.monotonic() < deadline:
         assert all(process.poll() is None for process in processes), 'Owned demo fixture exited'
         try:
+            pace_api('GET', url, 'readiness')
             with urlopen(url, timeout=2) as response:
                 if response.status == 200:
                     return
@@ -292,13 +366,20 @@ def storage_untouched(page):
 
 
 def main():
+    global PRIVATE_AUTOMATION_DEADLINE, PRIVATE_PACING_ACTIVE
     REPORT.parent.mkdir(parents=True,exist_ok=True)
     results, processes, streams, visual_geometry = {}, [], [], {}
     stage = 'owned source snapshot and isolated services'
     observed = []
     with tempfile.TemporaryDirectory(prefix='freecollab-product-demo-') as directory:
         private = Path(directory)
+        previous_alarm = signal.getsignal(signal.SIGALRM)
+        previous_pacing = PRIVATE_PACING_ACTIVE, PRIVATE_AUTOMATION_DEADLINE
         try:
+            PRIVATE_PACING_ACTIVE = True
+            PRIVATE_AUTOMATION_DEADLINE = time.monotonic() + 1200
+            signal.signal(signal.SIGALRM, private_deadline_exceeded)
+            signal.setitimer(signal.ITIMER_REAL, 1200)
             api_port, app_port = port(), port()
             base, app = 'http://127.0.0.1:' + str(api_port), 'http://127.0.0.1:' + str(app_port)
             frontend, backend, data = private / 'frontend', private / 'backend', private / 'public-demo'
@@ -348,17 +429,26 @@ def main():
                             unexpected.append(url.scheme + '://' + url.netloc + url.path); route.abort(); return
                         if 'retained-real-' in route.request.headers.get('authorization',''):
                             credentials.append('retained account credential used')
+                        if url.path.startswith('/api/'):
+                            pace_api(route.request.method, url.path, 'browser')
                         route.continue_()
                     value.route('**/*', network); contexts.append(value)
                     tab = value.new_page(); tab.set_default_timeout(30000)
                     tab.on('pageerror', lambda failure: errors.append(type(failure).__name__))
-                    tab.on('response', lambda response: observed.append({'method':response.request.method,'path':urlsplit(response.url).path,'status':response.status,'at':time.monotonic()}) if urlsplit(response.url).path.startswith('/api/') else None)
+                    def observe_response(response):
+                        if not urlsplit(response.url).path.startswith('/api/'): return
+                        observed.append({'method':response.request.method,'path':urlsplit(response.url).path,'status':response.status,'at':time.monotonic()})
+                        if response.status == 429:
+                            try: record_429(response.request.method, response.url, response.headers, response.body())
+                            except Exception: record_429(response.request.method, response.url, response.headers, b'')
+                    tab.on('response', observe_response)
                     tab.on('websocket', lambda socket: sockets.append(socket.url))
                     return tab
                 page = context()
                 pacing_waits = []
                 def passed(name):
                     assert not any(row['status'] == 429 for row in observed), 'The real public API budget was exceeded'
+                    assert not PRIVATE_API_429, 'The real public API budget was exceeded'
                     # Reserve room for the next ~100-request native flow and
                     # count direct HTTP verification as well as browser reads.
                     # Real production limits remain unchanged.
@@ -681,7 +771,8 @@ def main():
                     organization = '/channels/' + channel + '/shared-document-organization'
                     stack = next(row for row in request(base,'GET',organization,token)['stacks'] if row['title'] == 'Reviewed examples')
                     management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); region = management.get_by_role('region',name='Reviewed examples',exact=True); expect(region.get_by_role('button',name=re.compile('^Product demo verification page'))).to_be_visible()
-                    management.get_by_role('button',name='Undo move',exact=True).click(); expect(management.get_by_label('Move Product demo verification page to stack',exact=True)).to_have_value('')
+                    undo = panel.get_by_role('group',name='Undo organization change',exact=True); expect(undo).to_be_visible()
+                    undo.get_by_role('button',name='Undo move',exact=True).click(); expect(management.get_by_label('Move Product demo verification page to stack',exact=True)).to_have_value('')
                     management.get_by_label('Move Product demo verification page to stack',exact=True).select_option(stack['id']); expect(region.get_by_text('A comment on the actual shared page.',exact=True)).to_be_visible()
                     region.get_by_role('button',name='Comment in Product demo verification page',exact=True).click(); edit_saved_document(panel,title='Product demo verification page',text=simultaneous_body); expect(panel.get_by_label('Document text',exact=True)).to_have_value(simultaneous_body)
                     passed('normal_stack_placement_Undo_and_derived_discussion_source')
@@ -958,6 +1049,8 @@ def main():
                         value.close()
                     browser.close()
         except Exception as failure:
+            REPORT.parent.mkdir(parents=True,exist_ok=True)
+            REPORT.with_name('product-demo-pacing-failure.json').write_text(json.dumps(pacing_evidence(),indent=2)+'\n')
             detail = re.sub(r'eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_.-]+','[redacted]',str(failure))
             print('FAIL product demo at ' + stage + ': ' + type(failure).__name__ + ' ' + detail[:2200],file=sys.stderr,flush=True)
             if 'source_hashes' in locals(): print('Snapshot Chat SHA256: ' + source_hashes['frontend/src/components/Chat.tsx'],file=sys.stderr)
@@ -967,12 +1060,15 @@ def main():
                     print(name + ':\n' + (private/name).read_text()[-1700:],file=sys.stderr)
             raise SystemExit(1) from None
         finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, previous_alarm)
+            PRIVATE_PACING_ACTIVE, PRIVATE_AUTOMATION_DEADLINE = previous_pacing
             stop(processes)
             for stream in streams:
                 stream.close()
     REPORT.parent.mkdir(parents=True,exist_ok=True)
     REPORT.write_text(json.dumps({'scope':'Actual product Chat/providers/WorkHub and normal backend API with isolated temporary demo accounts/data; no mocked business responses',
-        'results':results,'private_automation_pacing':{'minimum_group_seconds':6,'rolling_window_seconds':60,'next_group_request_target':160,'extra_waits':pacing_waits,'direct_HTTP_requests_counted':True,'HTTP_429_responses':sum(row['status']==429 for row in observed)},'visual_geometry':visual_geometry,'source_hashes':source_hashes,'cleanup':'Own processes, temporary source snapshots, keys, SQLite/files and browser contexts removed',
+        'results':results,'private_automation_pacing':{'minimum_group_seconds':6,'rolling_window_seconds':60,'next_group_request_target':160,'extra_waits':pacing_waits,'direct_HTTP_requests_counted':True,'HTTP_429_responses':sum(row['status']==429 for row in observed),'pre_transport':pacing_evidence()},'visual_geometry':visual_geometry,'source_hashes':source_hashes,'cleanup':'Own processes, temporary source snapshots, keys, SQLite/files and browser contexts removed',
         'limits':['Native sample installation with explicitly unavailable external integrations; no live provider or Matrix service acceptance.',
                   'This private loopback proof does not attest Railway deployment, public TLS, scalability or physical device behavior.']},indent=2)+'\n')
     print('PASS product demo: ' + str(len(results)) + ' real product/browser groups',flush=True)

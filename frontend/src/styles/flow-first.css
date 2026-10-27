@@ -112,3 +112,16 @@
   .fc-flow-first .fc-channel-return details[open] { max-height: none; overflow: visible; }
   .fc-flow-first .fc-chat-timeline-wrap { min-height: min(6rem, 18dvh); }
 }
+
+/* Keep readable context beside the composer while its AI review is open. */
+@media (max-width: 700px) {
+  .fc-flow-first:has(> .fc-chat-main > .fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card) :is(.fc-chat-channel-introduction, .fc-channel-return) {
+    min-height: 0;
+    flex-shrink: 1;
+    overflow-y: auto;
+  }
+  .fc-flow-first:has(> .fc-chat-main > .fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card) .fc-chat-channel-introduction { max-height: 22dvh; }
+  .fc-flow-first:has(> .fc-chat-main > .fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card) .fc-channel-return { max-height: 25dvh; }
+  .fc-flow-first:has(> .fc-chat-main > .fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card) .fc-channel-return details[open] { max-height: none; overflow: visible; }
+  .fc-flow-first:has(> .fc-chat-main > .fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card) .fc-chat-timeline-wrap { min-height: min(6rem, 18dvh); }
+}

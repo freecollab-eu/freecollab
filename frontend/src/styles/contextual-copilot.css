@@ -41,6 +41,12 @@
 .fc-chat-main > .fc-contextual-copilot .fc-contextual-copilot-card,
 .fc-chat-composer-area > .fc-contextual-copilot .fc-contextual-copilot-card { max-height: min(60vh, 600px); overflow-y: auto; overscroll-behavior: contain; }
 
+/* Share the available conversation height with an open draft review. */
+.fc-chat-composer-area:has(> .fc-contextual-copilot > .fc-contextual-copilot-card) { display: flex; flex-direction: column; min-height: 0; flex-shrink: 1; }
+.fc-chat-composer-area:has(> .fc-contextual-copilot > .fc-contextual-copilot-card) > :not(.fc-contextual-copilot) { flex-shrink: 0; }
+.fc-chat-composer-area > .fc-contextual-copilot:has(> .fc-contextual-copilot-card) { display: flex; flex-direction: column; min-height: 0; flex-shrink: 1; }
+.fc-chat-composer-area > .fc-contextual-copilot > .fc-contextual-copilot-card { min-height: 0; flex-shrink: 1; }
+
 @media (max-width: 420px) {
   .fc-contextual-copilot-card { padding: .85rem; }
   .fc-contextual-copilot-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }

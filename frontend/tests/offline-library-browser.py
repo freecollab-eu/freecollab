@@ -6,6 +6,7 @@ only private API/static services with independent fixture accounts and keys.
 No existing service, browser profile or live push provider is used.
 """
 from ui_navigation import choose_chat_channel, open_chat_tool
+from browser_conditions import wait_for_awaited_condition
 import base64
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import importlib.util
@@ -172,7 +173,7 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     with page.expect_event('requestfailed',predicate=lambda request:request.url.endswith('/api/auth/me')):
                         open_chat_tool(page, 'Mobile and offline settings')
                     dialog=page.get_by_role('dialog',name='Mobile and offline',exact=True)
-                    page.wait_for_function("async()=>!(await navigator.locks.query()).held.some(lock=>lock.name==='freecollab-offline-library:alice')")
+                    wait_for_awaited_condition(page, "async()=>!(await navigator.locks.query()).held.some(lock=>lock.name==='freecollab-offline-library:alice')", timeout=25000)
                     assert failed['requests'] and page.evaluate('navigator.onLine')
                     expect(dialog.get_by_role('list',name='Saved offline channels',exact=True).get_by_role('button',name='Studio',exact=True)).to_have_count(0)
                     expect(dialog.get_by_role('region',name='Saved history for Studio',exact=True)).to_have_count(0)
@@ -207,20 +208,39 @@ uvicorn.run(socket_app,host='127.0.0.1',port='''+str(api_port)+''',proxy_headers
                     stage='lost upload acknowledgement retries stable receipt once'
                     def file_count():
                         with sqlite3.connect(private/'proof.db') as db:return db.execute('SELECT COUNT(*) FROM file').fetchone()[0]
-                    lost={'once':False}
+                    lost={'once':False,'aborted':False,'failed':False,'request':None,'file':None}
+                    upload_keys=[]
+                    def observe_upload(request):
+                        if request.method=='POST' and request.url==app+'/api/files/channels/shared':
+                            upload_keys.append(request.headers.get('idempotency-key'))
+                    def observe_lost_ack(request):
+                        if request is lost['request']:
+                            lost['failed']=request.failure=='net::ERR_FAILED'
                     def lose_ack(route):
-                        if not lost['once']:
-                            lost['once']=True;route.fetch();route.abort('failed')
+                        if route.request.method=='POST' and not lost['once']:
+                            lost['once']=True;lost['request']=route.request
+                            response=route.fetch();assert response.ok
+                            lost['file']=response.json();assert isinstance(lost['file'].get('id'),str)
+                            route.abort('failed');lost['aborted']=True
                         else:route.continue_()
+                    page.on('request',observe_upload);page.on('requestfailed',observe_lost_ack)
                     context.route('**/api/files/channels/shared',lose_ack)
                     set_offline(context,page,network,False)
                     deadline=time.monotonic()+30
-                    while file_count()!=2 and time.monotonic()<deadline:page.wait_for_timeout(100)
-                    assert file_count()==2 and lost['once']
+                    # A committed upload can precede route.fetch returning. Do
+                    # not remove its handler until the real abort was observed.
+                    while (file_count()!=2 or not lost['aborted'] or not lost['failed']) and time.monotonic()<deadline:page.wait_for_timeout(100)
+                    assert file_count()==2 and lost['once'] and lost['aborted'] and lost['failed']
                     context.unroute('**/api/files/channels/shared',lose_ack)
                     dialog.get_by_role('button',name='Send eligible attachments',exact=True).click()
                     expect(dialog.get_by_role('list',name='Queued attachments',exact=True)).to_have_count(0)
                     assert file_count()==2
+                    assert len(upload_keys)>=2 and upload_keys[0] and set(upload_keys)=={upload_keys[0]}
+                    with sqlite3.connect(private/'proof.db') as db:
+                        assert db.execute('SELECT COUNT(*) FROM fileuploadreceipt WHERE user_id=? AND request_id=? AND file_id=?',('alice',upload_keys[0],lost['file']['id'])).fetchone()[0]==1
+                    with urlopen(Request(api_base+'/files/'+lost['file']['id'],headers={'Authorization':'Bearer '+tokens['alice']}),timeout=20) as response:
+                        assert response.read()==b'Queued binary confidential A'
+                    page.remove_listener('request',observe_upload);page.remove_listener('requestfailed',observe_lost_ack)
                     results['actual_lost_ack_attachment_replay_uses_same_atomic_receipt_without_duplicate']=True
                     stage='removed membership erases known revoked cache and blocks attachment replay'
                     set_offline(context,page,network,True)

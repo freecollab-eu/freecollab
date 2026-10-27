@@ -193,10 +193,21 @@ def native(browser):
             choose_chat_channel(page, channel['name'])
             assert choices(slash(page, field))[0] == 'task'
             field.press('Escape')
-            page.evaluate('''async ({session,workspace})=>{const {api}=await import('/src/lib/api.ts');localStorage.setItem('freecollab.workspace:'+session.user_id,workspace);api.applySession(session);}''', {'session': first, 'workspace': workspace['id']})
-            expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
-            choose_chat_channel(page, channel['name'])
+            catalogue_path = '/api/workspaces/' + workspace['id'] + '/channels/' + channel['id'] + '/apps/commands'
+            # Chat mounts before its separate installed-command read finishes.
+            # Verify this actor's real authority response before testing its full UI inventory.
+            with page.expect_response(lambda response: response.request.method == 'GET'
+                    and urlsplit(response.url).path == catalogue_path
+                    and response.request.headers.get('authorization') == 'Bearer ' + first['access_token']) as catalogue_response:
+                page.evaluate('''async ({session,workspace})=>{const {api}=await import('/src/lib/api.ts');localStorage.setItem('freecollab.workspace:'+session.user_id,workspace);api.applySession(session);}''', {'session': first, 'workspace': workspace['id']})
+                expect(page.locator('.fc-chat')).to_be_visible(timeout=90000)
+                choose_chat_channel(page, channel['name'])
+            assert catalogue_response.value.ok, 'The current member could not read its installed-command authority'
+            member_commands = catalogue_response.value.json()['commands']
+            member_command = next((row for row in member_commands if row['key'] == installation['id'] + ':review'), None)
+            assert member_command and member_command['installation_id'] == installation['id'] and member_command['generation'] == installation['generation'], 'The actual member catalogue did not authorize the expected installation and generation'
             panel = slash(page, field)
+            expect(panel.locator('[role="option"][id$=' + json.dumps('-' + app_id) + ']')).to_have_count(1)
             member_inventory = choices(panel)
             assert member_inventory[0] == 'document'
             assert not {'admin', 'data', 'get-started'} & set(member_inventory)
@@ -219,7 +230,8 @@ def native(browser):
             capture(page, 'swedish-320')
             assert not errors and not external, [errors, external]
             assert not any('/apps/' in row['path'] and row['path'].endswith('/commands') for row in writes if row['method'] == 'POST')
-            observations.append({'ownerFeatureCount': len(inventory), 'memberFeatureCount': len(member_inventory), 'referenceKinds': sorted(kinds)})
+            observations.append({'ownerFeatureCount': len(inventory), 'memberFeatureCount': len(member_inventory), 'referenceKinds': sorted(kinds),
+                                 'memberCatalogueStatus': catalogue_response.value.status, 'memberCatalogueCommandCount': len(member_commands), 'memberCommandIdentityVerified': True})
             mark('swedish_320px_ranked_catalogue_keeps_the_last_feature_keyboard_reachable')
         except Exception:
             capture(page, 'native-failure')

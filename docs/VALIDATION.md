@@ -33,6 +33,11 @@ These are the same components and API used by the product demo.
 - **17 organization browser groups** cover current native persistence,
   local proposals, explicit acceptance/dismissal, visible Undo outside collapsed
   controls, peer edits, stack generations and original source navigation.
+- The existing **17 workspace-mode browser groups** also passed across native
+  and demo fixtures. Its expanded-document source selector now targets the
+  actual ribbon; editor identity, contents, focus and discard guards remain
+  checked. Ranking inventory snapshots wait for the actual member-authorized
+  installed-command response and matching visible option after account changes.
 
 The five browser scripts run in the required **Natural collaboration flows** CI
 job and retain scoped JSON/PNG evidence. The real Matrix root/reply source proof
